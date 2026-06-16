@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/engine/agent"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 )
@@ -17,6 +18,7 @@ type Engine struct {
 	stopChan          chan struct{}
 	resourceProcessor *resource.Processor
 	starvationEngine  *starvation.Engine
+	agentProcessor    *agent.Processor
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -26,6 +28,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		stopChan:          make(chan struct{}),
 		resourceProcessor: resource.NewProcessor(db),
 		starvationEngine:  starvation.NewEngine(db),
+		agentProcessor:    agent.NewProcessor(db),
 	}
 }
 
@@ -64,31 +67,37 @@ func (e *Engine) ProcessTick() {
 	}
 	defer tx.Rollback()
 
-	// Pass 1: Resource updates
+	// Pass 1: Resource production/consumption
 	if err := e.resourceProcessor.RunResourcePass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Resource Pass execution: %v", err)
 		return
 	}
 
-	// Pass 2: Starvation check
+	// Pass 2: Starvation processing
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
 	}
 
-	// Pass 3: Construction upgrades
+	// Pass 3: Construction timers checks
 	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
 		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
 		return
 	}
 
-	// Pass 4: DETERMINISTIC 6-PHASE COMBAT ENGINE PASS
+	// Pass 4: AGENT AUTOMATION PASS
+	if err := e.agentProcessor.RunAgentPass(ctx, tx); err != nil {
+		log.Printf("Error during Agent Automation Pass execution: %v", err)
+		return
+	}
+
+	// Pass 5: Tactical combat marches checks
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
 	}
 
-	// Pass 5: Clean up expired world events
+	// Pass 6: Clear expired world events
 	deleteExpiredEvents := `
 		DELETE FROM world_events 
 		WHERE expires_at < CURRENT_TIMESTAMP`
@@ -169,7 +178,6 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	// Scan for active marching raids that have reached target resolve time
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
@@ -205,21 +213,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, r := range raids {
-		// --- 6-PHASE COMBAT RESOLUTION ENGINE ---
-
-		// Phase 1: Aggregation (Fetch forces)
 		var attackForce int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", r.attackerID).Scan(&attackForce)
 
 		var defenseForce int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", r.defenderID).Scan(&defenseForce)
 
-		// Ensure defaults
 		if attackForce == 0 {
-			attackForce = 1 // Safety minimum
+			attackForce = 1
 		}
 
-		// Phase 2: Mitigation (Apply protection)
 		var defLevel int
 		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID).Scan(&defLevel)
 		if defLevel == 0 {
@@ -227,7 +230,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
 
-		// Phase 3: Distribution (Tactical clash computation)
 		attackerOffenseRating := float64(attackForce) * 15.0
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseShieldMultiplier
 
@@ -235,30 +237,25 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		defenderCasualties := 0
 
 		if attackerOffenseRating > defenderDefenseRating {
-			// Attacker wins. Defender takes high casualties
 			defenderCasualties = defenseForce
 			attackerCasualties = attackForce / 2
 		} else {
-			// Defender wins. Attacker is repelled with high losses
 			attackerCasualties = attackForce
 			defenderCasualties = defenseForce / 3
 		}
 
-		// Phase 4: Survival (Apply losses)
 		if attackerCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
 		}
 		if defenderCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
 		}
-		// Clean up dead units
 		_, _ = tx.ExecContext(ctx, "DELETE FROM units WHERE quantity <= 0")
 
-		// Phase 5: Loot computation (Strap theft up to 50% from target resources)
 		var defenderScrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
 
-		stolenScrap := defenderScrap * 0.40 // Attacker loots 40%
+		stolenScrap := defenderScrap * 0.40
 		if stolenScrap < 0 {
 			stolenScrap = 0
 		}
@@ -266,11 +263,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, r.attackerID)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
 
-		// Phase 6: Persistence & Alerts
-		// Update Raid to completed state
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
-		// Queue Push notifications for both participants
 		attackerAlert := fmt.Sprintf(
 			"⚔️ RAID REPORT: VICTORY!\n\n"+
 				"Target: %s\n"+

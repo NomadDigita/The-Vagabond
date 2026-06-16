@@ -82,11 +82,13 @@ func main() {
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db)
 	combat := handlers.NewCombatHandler(db)
+	agentH := handlers.NewAgentHandler(db)
 
 	// Define standard backslash command mappings
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
+	bot.Handle("/agent", agentH.HandleAgent)
 
 	// Register high-end Persistent Reply Navigation Text Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
@@ -96,6 +98,8 @@ func main() {
 	// Register Inline Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
+	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
+	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
 
 	// 7. Support Graceful Shutdown Intercepts
 	go func() {
