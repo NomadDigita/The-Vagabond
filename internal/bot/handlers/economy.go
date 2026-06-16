@@ -58,7 +58,9 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 			"⚙️ Available Scrap: %.1f\n"+
 			"🏦 Vault Savings: %.1f Scrap\n"+
 			"💳 Credit Debt: %.1f Scrap\n\n"+
-			"MARKET CONTRACTS AVAILABILITY:\n"+
+			"LOAN SYSTEM (BANK COMMITTEE):\n"+
+			"⚡ Loans incur a 15%% tax on your passive resources until repaid.\n\n"+
+			"MARKET CONTRACTS:\n"+
 			"📦 [Rations Supply Case] — Cost: 50 Scrap (+100 Rations)\n"+
 			"👥 [Elite Enforcer Contract] — Cost: 200 Scrap (+5 Enforcers)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
@@ -67,8 +69,8 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 
-	btnDeposit := selector.Data("🏦 Deposit 100 Scrap", "bank_action", "deposit", campID)
-	btnBorrow := selector.Data("💳 Borrow 100 Scrap", "bank_action", "borrow", campID)
+	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit", campID)
+	btnBorrow := selector.Data("💳 Borrow 100 (Loan)", "bank_action", "borrow", campID)
 	btnBuyRations := selector.Data("📦 Buy Rations Case", "market_buy", "rations", campID)
 	btnBuyTroops := selector.Data("👥 Hire Enforcers", "market_buy", "enforcers", campID)
 
@@ -111,12 +113,12 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🏦 Deposited 100 Scrap into savings."})
 
 	case "borrow":
-		if loan >= 300.0 {
+		if loan >= 500.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing debt first."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = loan_amount + 100.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap. Debt accumulated."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap. 15% automatic tax applied to ticks."})
 	}
 
 	_ = tx.Commit()
@@ -153,7 +155,6 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 200.0 WHERE encampment_id = $1", campID)
 
-		// Spawn or Increment Enforcers
 		var exists bool
 		_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM units WHERE encampment_id = $1 AND type = 'enforcer')", campID).Scan(&exists)
 

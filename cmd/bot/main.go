@@ -93,6 +93,7 @@ func main() {
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
+	bot.Handle("/scout", combat.HandleScout) // Added
 	bot.Handle("/hero", hero.HandleHeroPanel)
 	bot.Handle("/world", world.HandleWorldFeed)
 	bot.Handle("/econ", econ.HandleEconPanel)

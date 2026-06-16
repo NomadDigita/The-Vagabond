@@ -44,6 +44,10 @@ type Resources struct {
 	Rations      float64   `json:"rations"`
 	Energy       float64   `json:"energy"`
 	NeuroCores   float64   `json:"neuro_cores"`
+	Steel        float64   `json:"steel"`
+	Uranium      float64   `json:"uranium"`
+	Hydrogen     float64   `json:"hydrogen"`
+	Dollars      float64   `json:"dollars"`
 	LastTickedAt time.Time `json:"last_ticked_at"`
 }
 
