@@ -37,7 +37,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// 1. Enforce level requirement
 	if campLvl < 5 {
 		return c.Send("❌ Alliance Access Locked: Reach Outpost Core Level 5 to access Clan Networks.", keyboards.MainNavigation())
 	}
@@ -58,7 +57,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 
 	if errors.Is(err, sql.ErrNoRows) || !clanID.Valid {
-		// Player has no clan: show recruitment panels
 		panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
 			"🛡️ SECTOR ALLIANCE NETWORK\n" +
 			"━━━━━━━━━━━━━━━━━━━━━━\n" +
@@ -69,10 +67,9 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		btnCreate := selector.Data("🛡️ Establish New Clan", "create_clan", campID)
 		selector.Inline(selector.Row(btnCreate))
 
-		return c.Send(panelText, selector, keyboards.CombatNavigation())
+		return c.Send(panelText, selector)
 	}
 
-	// Player is in a clan: query total members
 	var members int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_clans WHERE clan_id = $1", clanID.String).Scan(&members)
 
@@ -83,12 +80,11 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 			"Commanders Enlisted: %d / 15 members\n"+
 			"Your Rank: %s\n\n"+
 			"CLAN WAR MATRIX:\n"+
-			"Matchmaking detects equivalent level alliances. Declarations cannot be rejected.\n"+
+			"Matchmaking detects equivalent level alliances. Declarations cannot be avoided.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		clanName.String, members, role.String,
 	)
 
-	// Admin options: Declare War
 	var buttons []telebot.Row
 	if role.String == "Leader" {
 		btnDeclare := selector.Data("⚔️ Declare Alliance War", "declare_clan_war", clanID.String)
@@ -98,7 +94,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnLeave))
 
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	return c.Send(panelText, selector)
 }
 
 // HandleCreateClanCallback establishes an alliance with the player as Leader
@@ -112,7 +108,6 @@ func (h *ClanHandler) HandleCreateClanCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Verify player is not already in a clan
 	var exists bool
 	_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", sender.ID).Scan(&exists)
 	if exists {
@@ -121,7 +116,6 @@ func (h *ClanHandler) HandleCreateClanCallback(c telebot.Context) error {
 
 	clanName := fmt.Sprintf("Clan-%d", sender.ID%100)
 
-	// Create Clan
 	var clanID string
 	err = tx.QueryRowContext(ctx, "INSERT INTO clans (name, leader_id) VALUES ($1, $2) RETURNING id", clanName, sender.ID).Scan(&clanID)
 	if err != nil {
@@ -129,7 +123,6 @@ func (h *ClanHandler) HandleCreateClanCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing clan registry."})
 	}
 
-	// Insert Leader membership
 	_, err = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Leader')", sender.ID, clanID)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing alliance membership."})
@@ -156,7 +149,6 @@ func (h *ClanHandler) HandleLeaveClanCallback(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1 AND clan_id = $2", sender.ID, clanID).Scan(&role)
 
 	if role == "Leader" {
-		// Dissolve the clan
 		_, _ = tx.ExecContext(ctx, "DELETE FROM clans WHERE id = $1", clanID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💥 Alliance dissolved!"})
 	} else {
@@ -173,7 +165,6 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
 
-	// Query an equivalent rival clan
 	var enemyClanID string
 	var enemyClanName string
 	queryEnemy := `
@@ -195,6 +186,5 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	)
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚔️ War metrics loaded on %s!", enemyClanName)})
 
-	// Send alerts to both leaders asynchronously
-	return c.Send(alert, keyboards.CombatNavigation())
+	return c.Send(alert)
 }

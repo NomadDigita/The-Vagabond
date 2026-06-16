@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
@@ -64,6 +65,98 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered and resolved.")
 }
 
+// HandleAdminGiftPremium grants premium access to a username (Syntax: /admin_gift_premium [username] [days])
+func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	payload := c.Message().Payload
+	args := strings.Split(payload, " ")
+	if len(args) < 2 {
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_premium [username] [days]`")
+	}
+
+	targetUser := args[0]
+	days, err := strconv.Atoi(args[1])
+	if err != nil {
+		return c.Send("⚠️ Days parameter must be a valid integer.")
+	}
+
+	ctx := context.Background()
+
+	// Find user ID by username
+	var targetID int64
+	err = h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", targetUser).Scan(&targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c.Send("❌ User Not Found: Target Telegram username is not registered.")
+	}
+
+	targetTime := time.Now().AddDate(0, 0, days)
+	_, err = h.DB.ExecContext(ctx, "UPDATE users SET premium_until = $1 WHERE telegram_id = $2", targetTime, targetID)
+	if err != nil {
+		return c.Send("⚠️ Database error writing premium alignment.")
+	}
+
+	// Queue success alert
+	alertMsg := fmt.Sprintf(
+		"💎 PREMIUM STATUS GRANTED!\n\n"+
+			"An Administrator has gifted you a Premium License for %d days.\n"+
+			"Your Automation Agent and advanced HUD structures are now fully unlocked!",
+		days,
+	)
+	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
+
+	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Granted %d days of Premium License to @%s.", days, targetUser))
+}
+
+// HandleAdminGiftResources grants Scrap permanently to a username (Syntax: /admin_gift_resources [username] [scrap_amount])
+func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	payload := c.Message().Payload
+	args := strings.Split(payload, " ")
+	if len(args) < 2 {
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [scrap_amount]`")
+	}
+
+	targetUser := args[0]
+	amount, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		return c.Send("⚠️ Amount must be a valid float value.")
+	}
+
+	ctx := context.Background()
+
+	var targetID int64
+	err = h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", targetUser).Scan(&targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c.Send("❌ User Not Found.")
+	}
+
+	_, err = h.DB.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", amount, targetID)
+	if err != nil {
+		return c.Send("⚠️ Database write error.")
+	}
+
+	alertMsg := fmt.Sprintf("⚡ GIFT RECEIVED: An Administrator has permanently added +%.1f Scrap directly to your outpost warehouse.", amount)
+	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
+
+	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Gifted %.1f Scrap permanently to @%s.", amount, targetUser))
+}
+
 // HandleAdminGive injects resources instantly into the admin's outpost
 func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	sender := c.Sender()
@@ -83,10 +176,9 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
-	// Inject resources
 	query := `
 		UPDATE resources 
-		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00 
+		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00
 		WHERE encampment_id = $1`
 
 	_, err = h.DB.ExecContext(ctx, query, campID)
@@ -95,7 +187,7 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 		return c.Send("⚠️ Error executing resource injection.")
 	}
 
-	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 Scrap, Rations, and Energy Cells into your camp.")
+	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 Scrap, Rations, Energy, and Dollars into your camp.")
 }
 
 // HandleAdminFaction force-swaps the admin's faction alignment
@@ -116,14 +208,12 @@ func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// Update faction profile
 	_, err := h.DB.ExecContext(ctx, "UPDATE users SET faction = $1 WHERE telegram_id = $2", targetFaction, sender.ID)
 	if err != nil {
 		log.Printf("Admin faction force-swap failed: %v", err)
 		return c.Send("⚠️ Error updating faction in database.")
 	}
 
-	// Delete existing hero so the next load spawns the new faction hero commander
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	_, _ = h.DB.ExecContext(ctx, "DELETE FROM heroes WHERE encampment_id = $1", campID)

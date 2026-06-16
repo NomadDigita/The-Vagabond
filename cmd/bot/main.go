@@ -82,7 +82,7 @@ func main() {
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db)
 	combat := handlers.NewCombatHandler(db)
-	agentH := handlers.NewAgentHandler(db)
+	agentH := handlers.NewAgentHandler(db, adminIDs)
 	admin := handlers.NewAdminHandler(db, tickEngine, adminIDs)
 	hero := handlers.NewHeroHandler(db)
 	world := handlers.NewWorldHandler(db)
@@ -99,24 +99,28 @@ func main() {
 	bot.Handle("/clan", clan.HandleClanPanel)
 	bot.Handle("/scout", combat.HandleScout)
 
+	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
 	bot.Handle("/admin_give", admin.HandleAdminGive)
 	bot.Handle("/admin_faction", admin.HandleAdminFaction)
+	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)     // Added
+	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources) // Added
 
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
-	bot.Handle("⚔️ Raid Board", combat.HandleRaidBoard)
-	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
+	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
+	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
 
 	// Submenu Layer Handlers
 	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
+	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
-	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
+	bot.Handle("🪙 Financial Vault", econ.HandleEconPanel)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 

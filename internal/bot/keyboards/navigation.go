@@ -10,12 +10,12 @@ func MainNavigation() *telebot.ReplyMarkup {
 
 	btnHQ := menu.Text("📡 Terminal HQ")
 	btnCamp := menu.Text("⛺ Outpost Camp")
-	btnRaid := menu.Text("⚔️ Raid Board")
-	btnAgent := menu.Text("🧠 Automation Agent")
+	btnCombat := menu.Text("⚔️ Tactical Combat")
+	btnEcon := menu.Text("🏦 System Economy")
 
 	menu.Reply(
 		menu.Row(btnHQ, btnCamp),
-		menu.Row(btnRaid, btnAgent),
+		menu.Row(btnCombat, btnEcon),
 	)
 
 	return menu
@@ -27,11 +27,12 @@ func CampNavigation() *telebot.ReplyMarkup {
 
 	btnUpgrade := menu.Text("🔨 Structural Upgrades")
 	btnHero := menu.Text("👥 Hero Commander")
+	btnAgent := menu.Text("🧠 Automation Agent")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnUpgrade, btnHero),
-		menu.Row(btnBack),
+		menu.Row(btnAgent, btnBack),
 	)
 
 	return menu
@@ -43,13 +44,26 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnEcon := menu.Text("🏦 System Economy")
-	btnClan := menu.Text("🛡️ Clan Alliances")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnEcon, btnClan),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
+// EconomyNavigation builds the custom submenu for vault and clan alliances.
+func EconomyNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnVault := menu.Text("🪙 Financial Vault")
+	btnClan := menu.Text("🛡️ Clan Alliances")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnVault, btnClan),
 		menu.Row(btnBack),
 	)
 

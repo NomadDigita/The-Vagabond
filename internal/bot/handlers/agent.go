@@ -7,33 +7,56 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
 
 type AgentHandler struct {
-	DB *sql.DB
+	DB       *sql.DB
+	AdminIDs []int64
 }
 
-func NewAgentHandler(db *sql.DB) *AgentHandler {
-	return &AgentHandler{DB: db}
+func NewAgentHandler(db *sql.DB, adminIDStrs string) *AgentHandler {
+	var ids []int64
+	for _, s := range stringSlice(adminIDStrs, ",") {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil {
+			ids = append(ids, val)
+		}
+	}
+	return &AgentHandler{DB: db, AdminIDs: ids}
 }
 
-// HandleAgent renders the high-end automation manager control panel
+func (h *AgentHandler) IsAdmin(id int64) bool {
+	for _, a := range h.AdminIDs {
+		if a == id {
+			return true
+		}
+	}
+	return false
+}
+
+// HandleAgent renders the high-end automation manager control panel with Premium checks
 func (h *AgentHandler) HandleAgent(c telebot.Context) error {
-	// Trigger standard typing indicator
 	_ = c.Notify(telebot.Typing)
 
 	sender := c.Sender()
-	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}
 
 	ctx := context.Background()
 
-	// Fetch current agent task record or initialize default
+	// Check if user has premium status or is Admin
+	var premiumUntil sql.NullTime
+	_ = h.DB.QueryRowContext(ctx, "SELECT premium_until FROM users WHERE telegram_id = $1", sender.ID).Scan(&premiumUntil)
+
+	isPremium := h.IsAdmin(sender.ID)
+	if premiumUntil.Valid && premiumUntil.Time.After(time.Now()) {
+		isPremium = true
+	}
+
 	var isInstalled bool
 	var isActive bool
 	var mode string
@@ -50,12 +73,10 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	}
 
 	if !isInstalled {
-		// Initialize starting record
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO agent_tasks (user_id, mode, is_active) VALUES ($1, 'collector', FALSE) ON CONFLICT DO NOTHING", sender.ID)
 		mode = "collector"
 	}
 
-	// Fetch current energy cells to show fuel levels
 	var energy float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.energy, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", sender.ID).Scan(&energy)
 
@@ -64,13 +85,22 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		statusLabel = "🟢 ACTIVE (RUNNING...)"
 	}
 
+	licenseText := "⚠️ NO LICENSE (LOCKED)"
+	if isPremium {
+		licenseText = "💎 PREMIUM GRANTED"
+		if premiumUntil.Valid {
+			licenseText = fmt.Sprintf("💎 PREMIUM (Expires: %s)", premiumUntil.Time.UTC().Format("2006-01-02"))
+		}
+	}
+
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🧠 COGNITIVE AGENT MODULE\n"+
+			"🧠 COGNITIVE AGENT MODULE [PRO]\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Your tactical agent handles offline outpost automation.\n\n"+
 			"SYSTEM STATE:\n"+
 			"🤖 Agent Status: %s\n"+
+			"🏷️ License: %s\n"+
 			"⚙️ Operational Mode: %s\n"+
 			"🔋 Fuel Reserve: %.1f Energy Cells\n\n"+
 			"UPKEEP REQUIREMENTS:\n"+
@@ -80,15 +110,12 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"🛠️ [Collector]: Auto-scavenges +2.0 Scrap, +1.0 Rations per tick.\n"+
 			"🏗️ [Builder]: Auto-upgrades camp modules if Scrap permits.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		statusLabel, mode, energy,
+		statusLabel, licenseText, mode, energy,
 	)
 
 	selector := &telebot.ReplyMarkup{}
-
-	// Convert int64 Sender ID to string to resolve compiler type requirements
 	senderIDStr := strconv.FormatInt(sender.ID, 10)
 
-	// Create control buttons
 	toggleLabel := "⚡ Boot Agent"
 	if isActive {
 		toggleLabel = "🔌 Shutdown Agent"
@@ -103,32 +130,42 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		selector.Row(btnModeCollector, btnModeBuilder),
 	)
 
-	return c.Send(panelText, selector, keyboards.MainNavigation())
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
-// HandleToggleAgentCallback handles switching the active state of the offline automation agent
+// HandleToggleAgentCallback handles switching the active state with premium checks
 func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {
 	ctx := context.Background()
-	userID := c.Args()[0]
+	userIDStr := c.Args()[0]
+
+	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+
+	var premiumUntil sql.NullTime
+	_ = h.DB.QueryRowContext(ctx, "SELECT premium_until FROM users WHERE telegram_id = $1", userID).Scan(&premiumUntil)
+
+	isPremium := h.IsAdmin(userID)
+	if premiumUntil.Valid && premiumUntil.Time.After(time.Now()) {
+		isPremium = true
+	}
+
+	if !isPremium {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Premium Required: This module is restricted to premium survivors."})
+	}
 
 	var currentActive bool
-	err := h.DB.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", userID).Scan(&currentActive)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error accessing agent settings."})
-	}
+	_ = h.DB.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", userID).Scan(&currentActive)
 
 	newActive := !currentActive
 
-	// If booting, verify they have enough starting energy
 	if newActive {
 		var energy float64
 		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.energy, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", userID).Scan(&energy)
 		if energy < 2.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Boot Failed: Insufficient Energy. Need at least 2.0 cells."})
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Boot Failed: Insufficient Energy."})
 		}
 	}
 
-	_, err = h.DB.ExecContext(ctx, "UPDATE agent_tasks SET is_active = $1 WHERE user_id = $2", newActive, userID)
+	_, err := h.DB.ExecContext(ctx, "UPDATE agent_tasks SET is_active = $1 WHERE user_id = $2", newActive, userID)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed updating configuration state."})
 	}
@@ -155,4 +192,41 @@ func (h *AgentHandler) HandleSetModeCallback(c telebot.Context) error {
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚙️ Mode switched to: %s", targetMode)})
 	return h.HandleAgent(c)
+}
+
+func stringSlice(s, sep string) []string {
+	var out []string
+	for _, val := range stringSliceRaw(s, sep) {
+		trimmed := trimSpace(val)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func stringSliceRaw(s, sep string) []string {
+	var res []string
+	start := 0
+	for i := 0; i+len(sep) <= len(s); i++ {
+		if s[i:i+len(sep)] == sep {
+			res = append(res, s[start:i])
+			start = i + len(sep)
+			i += len(sep) - 1
+		}
+	}
+	res = append(res, s[start:])
+	return res
+}
+
+func trimSpace(s string) string {
+	start := 0
+	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	end := len(s)
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }

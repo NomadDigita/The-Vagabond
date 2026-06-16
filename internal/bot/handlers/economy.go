@@ -35,7 +35,6 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Fetch or Initialize Bank Account
 	var bankBalance float64
 	var loanAmount float64
 	queryBank := `SELECT balance, loan_amount FROM bank_accounts WHERE encampment_id = $1`
@@ -88,7 +87,8 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		selector.Row(btnBuySteel, btnBuyUranium, btnBuyHydrogen),
 	)
 
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
+	return c.Send(panelText, selector)
 }
 
 // HandleBankCallback processes transactional actions in the Bank
