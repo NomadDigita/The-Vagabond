@@ -46,38 +46,46 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		loanAmount = 0.0
 	}
 
-	var scrap float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap)
+	var scrap, energy, steel, uranium, hydrogen, dollars float64
+	queryRes := `SELECT scrap, energy, steel, uranium, hydrogen, dollars FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&scrap, &energy, &steel, &uranium, &hydrogen, &dollars)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🏦 IRONCLAD VAULT & MARKETPLACE\n"+
+			"🏦 SYSTEM ECONOMY & FINANCIAL CENTER\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Manage your savings, borrow survival credit, or trade for tactical assets.\n\n"+
-			"LEDGER BALANCES:\n"+
-			"⚙️ Available Scrap: %.1f\n"+
+			"Manage vault reserves or buy heavy war components.\n\n"+
+			"FINANCIAL LEDGERS:\n"+
+			"💵 Available Funds: $%.1f\n"+
+			"⚙️ Scrap Reserves: %.1f\n"+
 			"🏦 Vault Savings: %.1f Scrap\n"+
 			"💳 Credit Debt: %.1f Scrap\n\n"+
-			"LOAN SYSTEM (BANK COMMITTEE):\n"+
-			"⚡ Loans incur a 15%% tax on your passive resources until repaid.\n\n"+
-			"MARKET CONTRACTS:\n"+
-			"📦 [Rations Supply Case] — Cost: 50 Scrap (+100 Rations)\n"+
-			"👥 [Elite Enforcer Contract] — Cost: 200 Scrap (+5 Enforcers)\n"+
+			"HEAVY WAR RESOURCES STOCK:\n"+
+			"🧱 Steel Stock: %.1f tons\n"+
+			"☢️ Uranium Stock: %.1f kg\n"+
+			"🎈 Hydrogen Stock: %.1f L\n\n"+
+			"MARKET VALUES:\n"+
+			"💵 Convert: Sell 100 Scrap -> Get $50.0\n"+
+			"🧱 Buy Steel Case: Cost $100 -> Get +50 Steel\n"+
+			"☢️ Buy Uranium Core: Cost $200 -> Get +20 Uranium\n"+
+			"🎈 Buy Hydrogen Fuel: Cost $150 -> Get +40 Hydrogen\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		scrap, bankBalance, loanAmount,
+		dollars, scrap, bankBalance, loanAmount, steel, uranium, hydrogen,
 	)
 
 	selector := &telebot.ReplyMarkup{}
 
 	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit", campID)
 	btnBorrow := selector.Data("💳 Borrow 100 (Loan)", "bank_action", "borrow", campID)
-	btnBuyRations := selector.Data("📦 Buy Rations Case", "market_buy", "rations", campID)
-	btnBuyTroops := selector.Data("👥 Hire Enforcers", "market_buy", "enforcers", campID)
+	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap", campID)
+	btnBuySteel := selector.Data("🧱 Buy Steel", "market_buy", "buy_steel", campID)
+	btnBuyUranium := selector.Data("☢️ Buy Uranium", "market_buy", "buy_uranium", campID)
+	btnBuyHydrogen := selector.Data("🎈 Buy Hydrogen", "market_buy", "buy_hydrogen", campID)
 
 	selector.Inline(
 		selector.Row(btnDeposit, btnBorrow),
-		selector.Row(btnBuyRations),
-		selector.Row(btnBuyTroops),
+		selector.Row(btnSellScrap),
+		selector.Row(btnBuySteel, btnBuyUranium, btnBuyHydrogen),
 	)
 
 	return c.Send(panelText, selector, keyboards.CombatNavigation())
@@ -138,32 +146,37 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	var scrap float64
-	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
+	var scrap, dollars float64
+	_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &dollars)
 
 	switch item {
-	case "rations":
-		if scrap < 50.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap. Cost is 50."})
+	case "sell_scrap":
+		if scrap < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap to convert."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 50.0, rations = rations + 100.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "📦 Rations supply acquired! +100 food."})
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = dollars + 50.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Scrap for $50.0 Cash!"})
 
-	case "enforcers":
-		if scrap < 200.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap. Cost is 200."})
+	case "buy_steel":
+		if dollars < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 200.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, steel = steel + 50.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🧱 Purchased 50 tons of Steel!"})
 
-		var exists bool
-		_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM units WHERE encampment_id = $1 AND type = 'enforcer')", campID).Scan(&exists)
-
-		if exists {
-			_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = quantity + 5 WHERE encampment_id = $1 AND type = 'enforcer'", campID)
-		} else {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO units (encampment_id, type, quantity) VALUES ($1, 'enforcer', 5)", campID)
+	case "buy_uranium":
+		if dollars < 200.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
 		}
-		_ = c.Respond(&telebot.CallbackResponse{Text: "👥 Hired 5 Enforcers! Barracks updated."})
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, uranium = uranium + 20.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "☢️ Purchased 20 kg of Uranium!"})
+
+	case "buy_hydrogen":
+		if dollars < 150.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $150."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 150.0, hydrogen = hydrogen + 40.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🎈 Purchased 40 L of Hydrogen Fuel!"})
 	}
 
 	_ = tx.Commit()

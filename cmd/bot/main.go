@@ -93,18 +93,17 @@ func main() {
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
-	bot.Handle("/scout", combat.HandleScout) // Added
 	bot.Handle("/hero", hero.HandleHeroPanel)
 	bot.Handle("/world", world.HandleWorldFeed)
 	bot.Handle("/econ", econ.HandleEconPanel)
 	bot.Handle("/clan", clan.HandleClanPanel)
+	bot.Handle("/scout", combat.HandleScout)
 
-	// Register Admin Console Handlers
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
-	bot.Handle("/admin_give", admin.HandleAdminGive)       // Added
-	bot.Handle("/admin_faction", admin.HandleAdminFaction) // Added
+	bot.Handle("/admin_give", admin.HandleAdminGive)
+	bot.Handle("/admin_faction", admin.HandleAdminFaction)
 
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
@@ -113,7 +112,7 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 
 	// Submenu Layer Handlers
-	bot.Handle("🔨 Structural Upgrades", camp.HandleCamp)
+	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
@@ -132,6 +131,7 @@ func main() {
 	bot.Handle("\fcreate_clan", clan.HandleCreateClanCallback)
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
+	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 
 	go func() {
 		log.Println("Active long-polling loop engaged. System operational.")
