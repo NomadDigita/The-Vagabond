@@ -23,7 +23,6 @@ type AdminHandler struct {
 
 func NewAdminHandler(db *sql.DB, tickEngine *tick.Engine, adminIDStrs string) *AdminHandler {
 	var ids []int64
-	// Parse comma-separated Admin IDs from environment
 	for _, s := range strings.Split(adminIDStrs, ",") {
 		trimmed := strings.TrimSpace(s)
 		if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
@@ -60,11 +59,76 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	}
 
 	_ = c.Notify(telebot.Typing)
-
-	// Invoke the tick engine directly
 	h.TickEngine.ProcessTick()
 
 	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered and resolved.")
+}
+
+// HandleAdminGive injects resources instantly into the admin's outpost
+func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	ctx := context.Background()
+
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	// Inject resources
+	query := `
+		UPDATE resources 
+		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00 
+		WHERE encampment_id = $1`
+
+	_, err = h.DB.ExecContext(ctx, query, campID)
+	if err != nil {
+		log.Printf("Admin resource injection failed: %v", err)
+		return c.Send("⚠️ Error executing resource injection.")
+	}
+
+	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 Scrap, Rations, and Energy Cells into your camp.")
+}
+
+// HandleAdminFaction force-swaps the admin's faction alignment
+func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	targetFaction := c.Message().Payload
+	if targetFaction != "steel_vanguard" && targetFaction != "rust_nomads" {
+		return c.Send("⚠️ Syntax Error: Use `/admin_faction steel_vanguard` or `/admin_faction rust_nomads`")
+	}
+
+	ctx := context.Background()
+
+	// Update faction profile
+	_, err := h.DB.ExecContext(ctx, "UPDATE users SET faction = $1 WHERE telegram_id = $2", targetFaction, sender.ID)
+	if err != nil {
+		log.Printf("Admin faction force-swap failed: %v", err)
+		return c.Send("⚠️ Error updating faction in database.")
+	}
+
+	// Delete existing hero so the next load spawns the new faction hero commander
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	_, _ = h.DB.ExecContext(ctx, "DELETE FROM heroes WHERE encampment_id = $1", campID)
+
+	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Faction realigned to [%s]. Existing commander retired; check /hero to view your new commander.", targetFaction))
 }
 
 // HandleAdminBroadcast pushes a global alert to all registered users instantly
@@ -85,7 +149,6 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// Select all registered Telegram users
 	rows, err := h.DB.QueryContext(ctx, "SELECT telegram_id FROM users")
 	if err != nil {
 		log.Printf("Admin broadcast query failed: %v", err)
@@ -102,7 +165,6 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 	}
 	rows.Close()
 
-	// Insert announcements into notifications
 	formattedBroadcast := fmt.Sprintf(
 		"🛰️ SYSTEM BROADCAST (DEVELOPER MSG):\n\n%s",
 		broadcastMsg,
@@ -149,15 +211,12 @@ func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// Query total user counts
 	var totalUsers int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
 
-	// Query total encampments
 	var totalCamps int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
 
-	// Fetch standard Go memory metrics
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 

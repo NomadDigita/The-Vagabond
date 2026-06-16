@@ -9,7 +9,8 @@ type User struct {
 	TelegramID   int64     `json:"telegram_id"`
 	Username     string    `json:"username"`
 	FirstName    string    `json:"first_name"`
-	State        string    `json:"state"` // "onboarding", "active", "dead"
+	State        string    `json:"state"`   // "onboarding", "active", "dead"
+	Faction      string    `json:"faction"` // "steel_vanguard", "rust_nomads"
 	RegisteredAt time.Time `json:"registered_at"`
 	LastActive   time.Time `json:"last_active"`
 }
@@ -54,4 +55,5 @@ type Hero struct {
 	Trait           string `json:"trait"`    // e.g. "Never Retreat", "Resource Finder"
 	Injuries        string `json:"injuries"` // e.g. "Cybernetic Leg", "Scarred Eye"
 	BattlesSurvived int    `json:"battles_survived"`
+	Superpower      string `json:"superpower"` // e.g. "Energy Shielding", "Scrap Recovery"
 }

@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -19,15 +18,6 @@ import (
 )
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("🔥 CRITICAL RUNTIME PANIC RECOVERED!")
-			log.Printf("Panic Details: %v", r)
-			log.Printf("Stack Trace:\n%s", string(debug.Stack()))
-			log.Println("Panic contained successfully. Engine online.")
-		}
-	}()
-
 	log.Println("Starting The Vagabond server initialization sequence...")
 
 	if err := godotenv.Load(); err != nil {
@@ -96,6 +86,8 @@ func main() {
 	admin := handlers.NewAdminHandler(db, tickEngine, adminIDs)
 	hero := handlers.NewHeroHandler(db)
 	world := handlers.NewWorldHandler(db)
+	econ := handlers.NewEconomyHandler(db)
+	clan := handlers.NewClanHandler(db)
 
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -103,10 +95,15 @@ func main() {
 	bot.Handle("/agent", agentH.HandleAgent)
 	bot.Handle("/hero", hero.HandleHeroPanel)
 	bot.Handle("/world", world.HandleWorldFeed)
+	bot.Handle("/econ", econ.HandleEconPanel)
+	bot.Handle("/clan", clan.HandleClanPanel)
 
+	// Register Admin Console Handlers
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
+	bot.Handle("/admin_give", admin.HandleAdminGive)       // Added
+	bot.Handle("/admin_faction", admin.HandleAdminFaction) // Added
 
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
@@ -119,6 +116,8 @@ func main() {
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
+	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
+	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Button Callbacks
@@ -126,6 +125,12 @@ func main() {
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
+	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
+	bot.Handle("\fbank_action", econ.HandleBankCallback)
+	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
+	bot.Handle("\fcreate_clan", clan.HandleCreateClanCallback)
+	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
+	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 
 	go func() {
 		log.Println("Active long-polling loop engaged. System operational.")

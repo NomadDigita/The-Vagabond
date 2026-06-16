@@ -20,24 +20,23 @@ func NewCampHandler(db *sql.DB) *CampHandler {
 	return &CampHandler{DB: db}
 }
 
-// HandleCamp renders the detailed building console
+// HandleCamp renders the detailed building and leveling console
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
-	// Trigger the typing status indicator
 	_ = c.Notify(telebot.Typing)
 
 	sender := c.Sender()
-	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}
 
 	ctx := context.Background()
 
-	// Query current levels of modules or default to 1 if not exists
+	// Query current levels of encampment
 	var campID string
 	var campName string
-	queryCamp := `SELECT id, name FROM encampments WHERE user_id = $1`
-	err := h.DB.QueryRowContext(ctx, queryCamp, sender.ID).Scan(&campID, &campName)
+	var campLvl int
+	queryCamp := `SELECT id, name, level FROM encampments WHERE user_id = $1`
+	err := h.DB.QueryRowContext(ctx, queryCamp, sender.ID).Scan(&campID, &campName, &campLvl)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.Send("⚠️ Access Denied: Establish your camp first using /start.")
@@ -57,25 +56,28 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	var scrap float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap)
 
-	// Build costs (Level * 150 scrap)
+	// Build costs
 	tentCost := tentLvl * 150
 	heapCost := heapLvl * 150
 	genCost := genLvl * 150
+	campUpgradeCost := campLvl * 500
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"⛺ OUTPOST CONTROL MODULES\n"+
+			"⛺ OUTPOST SECTOR SYSTEMS [LEVEL %d / 30]\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Camp Name: %s\n"+
+			"Outpost Name: %s\n"+
 			"Available Scrap: %.1f\n\n"+
-			"CURRENT UPGRADES:\n"+
+			"MODULE DETAILS:\n"+
 			"⛺ [Tent] — Level %d\n"+
 			"   Provides Storage. Next Upgrade: %d Scrap\n\n"+
 			"⚙️ [Scrap Heap] — Level %d\n"+
 			"   Produces Scrap. Next Upgrade: %d Scrap\n\n"+
 			"⚡ [Generator] — Level %d\n"+
-			"   Produces Energy. Next Upgrade: %d Scrap\n",
-		campName, scrap, tentLvl, tentCost, heapLvl, heapCost, genLvl, genCost,
+			"   Produces Energy. Next Upgrade: %d Scrap\n\n"+
+			"🏛️ [Core Outpost Upgrade] — Lvl %d -> Lvl %d\n"+
+			"   Increases Barracks limits. Cost: %d Scrap\n",
+		campLvl, campName, scrap, tentLvl, tentCost, heapLvl, heapCost, genLvl, genCost, campLvl, campLvl+1, campUpgradeCost,
 	)
 
 	if upgradingModule != "" {
@@ -83,20 +85,18 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	}
 	panelText += "━━━━━━━━━━━━━━━━━━━━━━"
 
-	// Create physical inline control interface
 	selector := &telebot.ReplyMarkup{}
 
 	btnUpgradeTent := selector.Data(fmt.Sprintf("🔨 Tent (Lvl %d)", tentLvl+1), "upgrade_mod", "tent", campID)
 	btnUpgradeHeap := selector.Data(fmt.Sprintf("🔨 Scrap Heap (Lvl %d)", heapLvl+1), "upgrade_mod", "scrap_heap", campID)
 	btnUpgradeGen := selector.Data(fmt.Sprintf("🔨 Generator (Lvl %d)", genLvl+1), "upgrade_mod", "generator", campID)
+	btnUpgradeCamp := selector.Data(fmt.Sprintf("🏛️ Core Lvl %d", campLvl+1), "upgrade_mod", "camp_core", campID)
 
 	selector.Inline(
-		selector.Row(btnUpgradeTent),
-		selector.Row(btnUpgradeHeap),
-		selector.Row(btnUpgradeGen),
+		selector.Row(btnUpgradeTent, btnUpgradeHeap),
+		selector.Row(btnUpgradeGen, btnUpgradeCamp),
 	)
 
-	// Return the specialized Camp Context keyboard
 	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
@@ -104,13 +104,8 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 
-	// Parse button data
 	moduleType := c.Args()[0]
 	campID := c.Args()[1]
-
-	// 1. Get current level
-	currentLvl := h.getModuleLevel(ctx, campID, moduleType)
-	cost := currentLvl * 150
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -118,31 +113,82 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 2. Check if another building is currently upgrading
+	var campLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT level FROM encampments WHERE id = $1 FOR UPDATE", campID).Scan(&campLvl)
+
+	var scrap float64
+	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
+
+	// 1. Handle Core Outpost Upgrade up to Level 30
+	if moduleType == "camp_core" {
+		if campLvl >= 30 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level: Your Outpost Core is already max level (Level 30)."})
+		}
+
+		cost := campLvl * 500
+		if scrap < float64(cost) {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap! Need %d.", cost)})
+		}
+
+		// Deduct and increment level instantly for outpost cores
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE encampments SET level = level + 1 WHERE id = $1", campID)
+
+		_ = tx.Commit()
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🏆 Outpost upgraded to Level %d!", campLvl+1)})
+		return h.HandleCamp(c)
+	}
+
+	// 2. Standard modules upgrades
+	currentLvl := h.getModuleLevel(ctx, campID, moduleType)
+	cost := currentLvl * 150
+
+	// ADMIN ULTIMATE POWER OVERRIDE: Instant & Free Upgrades
+	isAdmin := false
+	var userID int64
+	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", campID).Scan(&userID)
+
+	// Read admin IDs directly
+	adminHandler := NewAdminHandler(h.DB, nil, "6582793388") // Adjust to your ID
+	if adminHandler.IsAdmin(userID) {
+		isAdmin = true
+		cost = 0 // Cost becomes free
+	}
+
+	if currentLvl >= campLvl && moduleType != "camp_core" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Prerequisite Block: Module levels cannot exceed your Outpost Core level."})
+	}
+
+	if isAdmin {
+		// Admin Bypass: Write level-up instantly
+		_, err = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level, is_upgrading) VALUES ($1, $2, $3, FALSE) ON CONFLICT (encampment_id, type) DO UPDATE SET level = $3, is_upgrading = FALSE", campID, moduleType, currentLvl+1)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Admin Override write failure."})
+		}
+		_ = tx.Commit()
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚡ ADMIN OVERRIDE: %s instantly upgraded to Level %d for free!", moduleType, currentLvl+1)})
+		return h.HandleCamp(c)
+	}
+
+	// Normal Player Flow: Check queue and resources... (remainder of normal player code stays unchanged)
+
+	if currentLvl >= campLvl {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Prerequisite Block: Module levels cannot exceed your Outpost Core level."})
+	}
+
 	var exists bool
 	_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE)", campID).Scan(&exists)
 	if exists {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Construction Queue Full: Wait for current build to finish."})
 	}
 
-	// 3. Verify Scrap cost balance
-	var scrap float64
-	err = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error querying resource databases."})
-	}
-
 	if scrap < float64(cost) {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap! Need %d.", cost)})
 	}
 
-	// 4. Deduct Scrap from resources
-	_, err = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing ledger updates."})
-	}
+	// Deduct and Queue Upgrade
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
 
-	// 5. Insert or Update target module to initiate timer
 	readyAt := time.Now().Add(20 * time.Second)
 	upsertModule := `
 		INSERT INTO modules (encampment_id, type, level, is_upgrading, upgrade_ready_at)
@@ -161,8 +207,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🏗️ Construction of %s Level %d started!", moduleType, currentLvl+1)})
-
-	// Refresh the control screen
 	return h.HandleCamp(c)
 }
 
@@ -170,7 +214,6 @@ func (h *CampHandler) getModuleLevel(ctx context.Context, campID string, modType
 	var lvl int
 	err := h.DB.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = $2", campID, modType).Scan(&lvl)
 	if err != nil {
-		// Initialize records to level 1 if missing
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, $2, 1) ON CONFLICT DO NOTHING", campID, modType)
 		return 1
 	}
