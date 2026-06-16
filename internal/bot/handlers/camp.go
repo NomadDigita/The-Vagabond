@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
 
@@ -91,7 +92,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 		selector.Row(btnUpgradeGen),
 	)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.MainNavigation())
 }
 
 // HandleUpgradeCallback manages the inline upgrade action verification and queuing
@@ -137,7 +138,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	}
 
 	// 5. Insert or Update target module to initiate timer
-	// Upgrades complete in 20 seconds for fast development testing
 	readyAt := time.Now().Add(20 * time.Second)
 	upsertModule := `
 		INSERT INTO modules (encampment_id, type, level, is_upgrading, upgrade_ready_at)

@@ -7,21 +7,19 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/models"
 	"gopkg.in/telebot.v3"
 )
 
-// OnboardingHandler manages player registration flows.
 type OnboardingHandler struct {
 	DB *sql.DB
 }
 
-// NewOnboardingHandler builds a clean registration handler.
 func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
-// HandleStart catches the telegram /start command.
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -32,7 +30,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Failed to initialize database transaction: %v", err)
-		return c.Send("⚠️ Terminal error: Failed to access system database.")
+		return c.Send("⚠️ Terminal error: Failed to access system database.", keyboards.MainNavigation())
 	}
 	defer tx.Rollback()
 
@@ -50,16 +48,15 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			FROM encampments e
 			JOIN resources r ON r.encampment_id = e.id
 			WHERE e.user_id = $1`
-		
+
 		err = tx.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.Name, &res.Scrap, &res.Rations, &res.Energy)
 		if err != nil {
 			log.Printf("Failed to query existing player details: %v", err)
-			return c.Send("⚠️ System error reclaiming session database.")
+			return c.Send("⚠️ System error reclaiming session database.", keyboards.MainNavigation())
 		}
 
 		_ = tx.Commit()
 
-		// Return Terminal HQ Dashboard to existing user
 		dashboard := fmt.Sprintf(
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"📡 VAGABOND SYSTEM TERMINAL\n"+
@@ -75,12 +72,12 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"All modules online. Use physical inputs to execute commands.",
 			user.FirstName, camp.Name, res.Scrap, res.Rations, res.Energy,
 		)
-		return c.Send(dashboard)
+		return c.Send(dashboard, keyboards.MainNavigation())
 	}
 
 	if !errors.Is(err, sql.ErrNoRows) {
 		log.Printf("Database check execution failure: %v", err)
-		return c.Send("⚠️ Database reading failure.")
+		return c.Send("⚠️ Database reading failure.", keyboards.MainNavigation())
 	}
 
 	// 2. Register New User
@@ -90,7 +87,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_, err = tx.ExecContext(ctx, insertUser, sender.ID, sender.Username, sender.FirstName)
 	if err != nil {
 		log.Printf("Failed inserting player registration: %v", err)
-		return c.Send("⚠️ Failed to write profile database registration.")
+		return c.Send("⚠️ Failed to write profile database registration.", keyboards.MainNavigation())
 	}
 
 	// 3. Ensure base map coordinates exist (Default starting coordinate at x=0, y=0)
@@ -105,11 +102,11 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 		err = tx.QueryRowContext(ctx, insertCoord).Scan(&coordID)
 		if err != nil {
 			log.Printf("Failed writing map coordinate default entry: %v", err)
-			return c.Send("⚠️ Failed to generate spatial coordinate structures.")
+			return c.Send("⚠️ Failed to generate spatial coordinate structures.", keyboards.MainNavigation())
 		}
 	} else if err != nil {
 		log.Printf("Coordinate query execution failure: %v", err)
-		return c.Send("⚠️ Coordinate mapping reading error.")
+		return c.Send("⚠️ Coordinate mapping reading error.", keyboards.MainNavigation())
 	}
 
 	// 4. Create Player Encampment
@@ -122,7 +119,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	err = tx.QueryRowContext(ctx, insertCamp, sender.ID, campName, coordID).Scan(&campID)
 	if err != nil {
 		log.Printf("Failed executing camp registration entry: %v", err)
-		return c.Send("⚠️ Failed to register structural camp databases.")
+		return c.Send("⚠️ Failed to register structural camp databases.", keyboards.MainNavigation())
 	}
 
 	// 5. Allocate Starting Resources (100 Scrap, 50 Rations, 25 Energy)
@@ -132,16 +129,15 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_, err = tx.ExecContext(ctx, insertRes, campID)
 	if err != nil {
 		log.Printf("Failed allocating user onboarding resources: %v", err)
-		return c.Send("⚠️ Resource provisioning allocation error.")
+		return c.Send("⚠️ Resource provisioning allocation error.", keyboards.MainNavigation())
 	}
 
 	// Commit complete transaction atomically
 	if err = tx.Commit(); err != nil {
 		log.Printf("Onboarding transaction commit failure: %v", err)
-		return c.Send("⚠️ Transaction persistence deployment failure.")
+		return c.Send("⚠️ Transaction persistence deployment failure.", keyboards.MainNavigation())
 	}
 
-	// Send Cinematic Onboarding Console Message
 	welcome := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"💀 SYSTEM INTRUSION DETECTED\n"+
@@ -159,5 +155,5 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			"The world continues, with or without you.",
 		sender.ID, campName,
 	)
-	return c.Send(welcome)
+	return c.Send(welcome, keyboards.MainNavigation())
 }

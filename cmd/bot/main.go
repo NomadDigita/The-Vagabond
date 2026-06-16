@@ -81,13 +81,21 @@ func main() {
 	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db)
+	combat := handlers.NewCombatHandler(db)
 
-	// Define command mappings
+	// Define standard backslash command mappings
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
+	bot.Handle("/raid", combat.HandleRaidBoard)
+
+	// Register high-end Persistent Reply Navigation Text Handlers
+	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
+	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
+	bot.Handle("⚔️ Raid Missions", combat.HandleRaidBoard)
 
 	// Register Inline Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
+	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 
 	// 7. Support Graceful Shutdown Intercepts
 	go func() {
