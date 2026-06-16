@@ -80,9 +80,14 @@ func main() {
 
 	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
+	camp := handlers.NewCampHandler(db)
 
 	// Define command mappings
 	bot.Handle("/start", onboarding.HandleStart)
+	bot.Handle("/camp", camp.HandleCamp)
+
+	// Register Inline Button Callbacks
+	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 
 	// 7. Support Graceful Shutdown Intercepts
 	go func() {
