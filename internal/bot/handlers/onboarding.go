@@ -21,7 +21,11 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 }
 
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
+	// Trigger typing indicator immediately
+	_ = c.Notify(telebot.Typing)
+
 	sender := c.Sender()
+	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("sender details missing from context")
 	}

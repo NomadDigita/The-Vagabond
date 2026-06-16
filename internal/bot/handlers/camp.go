@@ -92,7 +92,8 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 		selector.Row(btnUpgradeGen),
 	)
 
-	return c.Send(panelText, selector, keyboards.MainNavigation())
+	// Return the specialized Camp Context keyboard
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
 // HandleUpgradeCallback manages the inline upgrade action verification and queuing

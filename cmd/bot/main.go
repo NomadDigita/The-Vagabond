@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -24,7 +25,7 @@ func main() {
 		log.Println("Note: .env file not detected. Loading configuration from system environment variables.")
 	}
 
-	// 2. Fetch required environment values
+	// 2. Fetch required environment variables
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("Fatal: DATABASE_URL environment parameter not set.")
@@ -51,12 +52,10 @@ func main() {
 	}
 	defer db.Close()
 
-	// Configure pool parameters for performance and scaling safety
 	db.SetMaxOpenConns(15)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	// Verify live connectivity immediately
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Fatal: Database network connection check failed: %v", err)
 	}
@@ -74,9 +73,12 @@ func main() {
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
-	// 5. Initialize and Boot Tick Engine background routine
+	// 5. Initialize and Boot background system engines
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
 	tickEngine.Start()
+
+	notificationDispatcher := notifications.NewDispatcher(db, bot)
+	notificationDispatcher.Start()
 
 	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
@@ -84,7 +86,7 @@ func main() {
 	combat := handlers.NewCombatHandler(db)
 	agentH := handlers.NewAgentHandler(db)
 
-	// Define standard backslash command mappings
+	// Define standard slash command mappings
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
@@ -93,7 +95,12 @@ func main() {
 	// Register high-end Persistent Reply Navigation Text Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
-	bot.Handle("⚔️ Raid Missions", combat.HandleRaidBoard)
+	bot.Handle("⚔️ Raid Board", combat.HandleRaidBoard)
+	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
+
+	// Register Sub-navigation Contextual Keyboards
+	bot.Handle("🔨 Structural Upgrades", camp.HandleCamp)
+	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Register Inline Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
@@ -116,6 +123,7 @@ func main() {
 
 	// Stop background services gracefully
 	tickEngine.Stop()
+	notificationDispatcher.Stop()
 	bot.Stop()
 
 	log.Println("System components cleanly dismantled. Server offline.")
