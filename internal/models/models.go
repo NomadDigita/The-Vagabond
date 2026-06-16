@@ -38,10 +38,20 @@ type Encampment struct {
 
 // Resources represent the running currency balances of an Encampment.
 type Resources struct {
-	EncampmentID  string    `json:"encampment_id"`
-	Scrap         float64   `json:"scrap"`
-	Rations       float64   `json:"rations"`
-	Energy        float64   `json:"energy"`
-	NeuroCores    float64   `json:"neuro_cores"`
-	LastTickedAt  time.Time `json:"last_ticked_at"`
+	EncampmentID string    `json:"encampment_id"`
+	Scrap        float64   `json:"scrap"`
+	Rations      float64   `json:"rations"`
+	Energy       float64   `json:"energy"`
+	NeuroCores   float64   `json:"neuro_cores"`
+	LastTickedAt time.Time `json:"last_ticked_at"`
+}
+
+// Hero represents a legendary commander tracking survived encounters, traits, and scars.
+type Hero struct {
+	ID              string `json:"id"`
+	EncampmentID    string `json:"encampment_id"`
+	Name            string `json:"name"`
+	Trait           string `json:"trait"`    // e.g. "Never Retreat", "Resource Finder"
+	Injuries        string `json:"injuries"` // e.g. "Cybernetic Leg", "Scarred Eye"
+	BattlesSurvived int    `json:"battles_survived"`
 }

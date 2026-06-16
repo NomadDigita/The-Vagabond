@@ -26,10 +26,27 @@ func CampNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnUpgrade := menu.Text("🔨 Structural Upgrades")
+	btnHero := menu.Text("👥 Hero Commander")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
-		menu.Row(btnUpgrade),
+		menu.Row(btnUpgrade, btnHero),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
+// CombatNavigation builds the custom submenu for raids and wasteland feeds.
+func CombatNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnScan := menu.Text("🛰️ Scan Targets")
+	btnNews := menu.Text("📻 Wasteland Radio")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnScan, btnNews),
 		menu.Row(btnBack),
 	)
 

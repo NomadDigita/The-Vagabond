@@ -22,11 +22,9 @@ func NewCombatHandler(db *sql.DB) *CombatHandler {
 
 // HandleRaidBoard displays other player bases available for attack
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
-	// Trigger custom finding location action indicator
 	_ = c.Notify(telebot.FindingLocation)
 
 	sender := c.Sender()
-	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}
@@ -53,7 +51,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	rows, err := h.DB.QueryContext(ctx, query, myCampID)
 	if err != nil {
 		log.Printf("Failed scanning target outposts: %v", err)
-		return c.Send("⚠️ Failed to load target database matrix.")
+		return c.Send("⚠️ Failed to load target database matrix.", keyboards.CombatNavigation())
 	}
 	defer rows.Close()
 
@@ -75,8 +73,8 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard := "━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"⚔️ TACTICAL TARGET MATRIX\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Select an active player outpost to launch a raiding mission. " +
-		"March and resolution take exactly 15 seconds for testing.\n\n"
+		"Select an active player outpost to launch a raiding mission.\n" +
+		"Live battle simulation plays in place.\n\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
@@ -93,10 +91,10 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
-	return c.Send(dashboard, selector, keyboards.MainNavigation())
+	return c.Send(dashboard, selector, keyboards.CombatNavigation())
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database
+// HandleLaunchRaidCallback registers a marching raid inside the database and plays the battle cinematic in-place
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 
@@ -109,32 +107,150 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Check if attacker has at least one troop to fight
-	var troopCount int
-	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
+	// 1. Check forces
+	var attackForce int
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&attackForce)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error querying troop configurations."})
 	}
 
-	if troopCount <= 0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: You must have at least 1 Drifter unit in your barracks to launch a raid."})
+	if attackForce <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: You need at least 1 unit to launch a raid."})
 	}
 
-	// 2. Set marching timer (15 seconds)
-	resolveTime := time.Now().Add(15 * time.Second)
+	// Fetch target names
+	var attackerName string
+	var attackerUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName, &attackerUserID)
 
-	insertRaid := `
-		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-		VALUES ($1, $2, 'marching', $3)`
-	_, err = tx.ExecContext(ctx, insertRaid, attackerCampID, defenderCampID, resolveTime)
+	var defenderName string
+	var defenderUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", defenderCampID).Scan(&defenderName, &defenderUserID)
+
+	// Commit setup transaction
+	_ = tx.Commit()
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Raid launched! Tactical telemetry online."})
+
+	// --- BATTLE CINEMATIC ENGINE: PLAYBACK LOOP ---
+	frames := []string{
+		"🛰️ SENSORS ACTIVE: Calibrating targeting matrix...\n[██░░░░░░░░] 20%",
+		"🚀 MARCHING: Raiders deployed on target vector...\n[████░░░░░░] 40%",
+		"⚡ GRID CONTACT: Breaching outpost defense perimeter...\n[██████░░░] 60%",
+		"💥 INTENSE CLASH: Trading micro-laser fire and scrap shrapnel...\n[████████░░] 80%",
+		"📊 CONCLUDING: persistance matrices settling...\n[██████████] 100%",
+	}
+
+	for _, frame := range frames {
+		formattedFrame := fmt.Sprintf(
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"🚨 LIVE CLASH STREAM: %s\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━\n\n"+
+				"%s\n\n"+
+				"Please do not close this transmission panel.",
+			attackerName, frame,
+		)
+		_ = c.Edit(formattedFrame)
+		time.Sleep(1 * time.Second)
+	}
+
+	// 2. Perform Combat calculations instantly to resolve the cinematic
+	resolveTx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("Failed executing raid insert: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register raid marching database entries."})
+		return c.Send("⚠️ Combat calculation transaction failed.")
+	}
+	defer resolveTx.Rollback()
+
+	var defenseForce int
+	_ = resolveTx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", defenderCampID).Scan(&defenseForce)
+
+	var defLevel int
+	_ = resolveTx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", defenderCampID).Scan(&defLevel)
+	if defLevel == 0 {
+		defLevel = 1
+	}
+	defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
+
+	attackerOffenseRating := float64(attackForce) * 15.0
+	defenderDefenseRating := float64(defenseForce) * 10.0 * defenseShieldMultiplier
+
+	attackerCasualties := 0
+	defenderCasualties := 0
+	stolenScrap := 0.0
+
+	var victory bool
+	if attackerOffenseRating > defenderDefenseRating {
+		victory = true
+		defenderCasualties = defenseForce
+		attackerCasualties = attackForce / 2
+
+		// Loot calculations
+		var defenderScrap float64
+		_ = resolveTx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", defenderCampID).Scan(&defenderScrap)
+		stolenScrap = defenderScrap * 0.40
+		if stolenScrap < 0 {
+			stolenScrap = 0
+		}
+
+		_, _ = resolveTx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, attackerCampID)
+		_, _ = resolveTx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, defenderCampID)
+	} else {
+		attackerCasualties = attackForce
+		defenderCasualties = defenseForce / 3
 	}
 
-	if err := tx.Commit(); err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction commit failure."})
+	// Apply troop changes
+	if attackerCasualties > 0 {
+		_, _ = resolveTx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", attackerCasualties, attackerCampID)
+	}
+	if defenderCasualties > 0 {
+		_, _ = resolveTx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", defenderCasualties, defenderCampID)
+	}
+	_, _ = resolveTx.ExecContext(ctx, "DELETE FROM units WHERE quantity <= 0")
+
+	// Increment Hero Experience on victory
+	if victory {
+		_, _ = resolveTx.ExecContext(ctx, "UPDATE heroes SET battles_survived = battles_survived + 1 WHERE encampment_id = $1", attackerCampID)
 	}
 
-	return c.Respond(&telebot.CallbackResponse{Text: "🚀 Raiders deployed! Marching towards target... (15s remaining)"})
+	// Commit the combat state changes
+	_ = resolveTx.Commit()
+
+	// 3. Render final Cinematic Summary Frame
+	outcomeTitle := "🏆 VICTORY!"
+	outcomeBody := fmt.Sprintf(
+		"⚙️ Loot Recovered: +%.1f Scrap\n💀 Attack Losses: -%d drifters",
+		stolenScrap, attackerCasualties,
+	)
+	if !victory {
+		outcomeTitle = "☠️ MISSION FAILED"
+		outcomeBody = fmt.Sprintf(
+			"❌ Your attackers were completely wiped out.\n💀 Losses: -%d drifters",
+			attackerCasualties,
+		)
+	}
+
+	finalReport := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"%s — CONCLUDING TRANSMISSION\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Target: %s\n\n"+
+			"OUTCOME REPORT:\n"+
+			"%s\n\n"+
+			"Wasteland metrics updated. Commander telemetry logged.",
+		outcomeTitle, defenderName, outcomeBody,
+	)
+
+	// Send defender alert push asynchronously
+	defenderAlert := fmt.Sprintf(
+		"🚨 OUTPOST UNDER ATTACK!\n\n"+
+			"Attacker Outpost: %s\n"+
+			"Intruders breached your perimeter wall.\n"+
+			"⚙️ Scrap Lost: %.1f\n"+
+			"💀 Defense Casualties: %d units lost.",
+		attackerName, stolenScrap, defenderCasualties,
+	)
+	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+
+	return c.Send(finalReport, keyboards.CombatNavigation())
 }
