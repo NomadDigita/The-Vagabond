@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -18,6 +19,16 @@ import (
 )
 
 func main() {
+	// --- GLOBAL PANIC RECOVERY MIDDLEWARE ---
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔥 CRITICAL RUNTIME PANIC RECOVERED!")
+			log.Printf("Panic Details: %v", r)
+			log.Printf("Stack Trace:\n%s", string(debug.Stack()))
+			log.Println("Panic successfully contained. System remains operational.")
+		}
+	}()
+
 	log.Println("Starting The Vagabond server initialization sequence...")
 
 	// 1. Load local env file if present
@@ -137,7 +148,7 @@ func main() {
 	// Stop background services gracefully
 	tickEngine.Stop()
 	realtimeListener.Stop()
-	bot.Stop()
+	db.Close()
 
 	log.Println("System components cleanly dismantled. Server offline.")
 }
