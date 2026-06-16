@@ -5,21 +5,28 @@ import (
 	"database/sql"
 	"log"
 	"time"
+
+	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 )
 
 // Engine orchestrates asynchronous tick cycles across the database structures.
 type Engine struct {
-	DB           *sql.DB
-	TickInterval time.Duration
-	stopChan     chan struct{}
+	DB                *sql.DB
+	TickInterval      time.Duration
+	stopChan          chan struct{}
+	resourceProcessor *resource.Processor
+	starvationEngine  *starvation.Engine
 }
 
-// NewEngine builds a configured instance of the tick processor.
+// NewEngine builds a configured instance of the tick processor with injected dependencies.
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 	return &Engine{
-		DB:           db,
-		TickInterval: interval,
-		stopChan:     make(chan struct{}),
+		DB:                db,
+		TickInterval:      interval,
+		stopChan:          make(chan struct{}),
+		resourceProcessor: resource.NewProcessor(db),
+		starvationEngine:  starvation.NewEngine(db),
 	}
 }
 
@@ -50,11 +57,11 @@ func (e *Engine) Stop() {
 // ProcessTick runs the sequentially ordered logic passes.
 func (e *Engine) ProcessTick() {
 	start := time.Now()
-	log.Println("⌛ Processing game tick pass...")
+	log.Println("⌛ Processing master game tick pass...")
 
 	ctx := context.Background()
 
-	// Execute resource calculations inside an atomic transaction
+	// Initialize the database transaction
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Tick Engine failed to initiate database transaction: %v", err)
@@ -62,62 +69,19 @@ func (e *Engine) ProcessTick() {
 	}
 	defer tx.Rollback()
 
-	// 1. RESOURCE PASS: Generate passive hourly rates converted to tick increments
-	// Base Tick Rates (Assuming 60s ticks):
-	// Scrap: +0.25, Rations: +0.10, Energy: +0.05
-	queryResources := `
-		SELECT r.encampment_id, r.scrap, r.rations, r.energy, r.neuro_cores 
-		FROM resources r`
-
-	rows, err := tx.QueryContext(ctx, queryResources)
-	if err != nil {
-		log.Printf("Tick Engine Resource Pass select query failed: %v", err)
+	// Pass 1: Run resource production, consumption, and caps processor
+	if err := e.resourceProcessor.RunResourcePass(ctx, tx); err != nil {
+		log.Printf("Error during Tick Resource Pass execution: %v", err)
 		return
 	}
-	defer rows.Close()
 
-	type resourceUpdate struct {
-		encampmentID string
-		scrap        float64
-		rations      float64
-		energy       float64
+	// Pass 2: Run starvation, morale decay, and desertion checks
+	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
+		log.Printf("Error during Tick Starvation Pass execution: %v", err)
+		return
 	}
 
-	var updates []resourceUpdate
-
-	for rows.Next() {
-		var u resourceUpdate
-		var neuro float64 // Placeholder reading
-		err := rows.Scan(&u.encampmentID, &u.scrap, &u.rations, &u.energy, &neuro)
-		if err != nil {
-			log.Printf("Failed scanning resource row: %v", err)
-			continue
-		}
-
-		// Calculate passive generation rates
-		// This can eventually scale relative to facility module levels
-		u.scrap += 0.25
-		u.rations += 0.10
-		u.energy += 0.05
-
-		updates = append(updates, u)
-	}
-
-	// Batch update the modified calculations back to the database
-	updateStmt := `
-		UPDATE resources 
-		SET scrap = $1, rations = $2, energy = $3, last_ticked_at = CURRENT_TIMESTAMP 
-		WHERE encampment_id = $4`
-
-	for _, update := range updates {
-		_, err := tx.ExecContext(ctx, updateStmt, update.scrap, update.rations, update.energy, update.encampmentID)
-		if err != nil {
-			log.Printf("Failed writing batch resource tick updates for %s: %v", update.encampmentID, err)
-			return
-		}
-	}
-
-	// 2. WORLD EVENT PASS: Clean up expired events and run updates
+	// Pass 3: Clean up expired world events
 	deleteExpiredEvents := `
 		DELETE FROM world_events 
 		WHERE expires_at < CURRENT_TIMESTAMP`
