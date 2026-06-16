@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
-	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -77,8 +77,9 @@ func main() {
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
 	tickEngine.Start()
 
-	notificationDispatcher := notifications.NewDispatcher(db, bot)
-	notificationDispatcher.Start()
+	// Boot sub-millisecond PostgreSQL Realtime Listener
+	realtimeListener := realtime.NewListener(dbURL, db, bot)
+	realtimeListener.Start()
 
 	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
@@ -123,7 +124,7 @@ func main() {
 
 	// Stop background services gracefully
 	tickEngine.Stop()
-	notificationDispatcher.Stop()
+	realtimeListener.Stop()
 	bot.Stop()
 
 	log.Println("System components cleanly dismantled. Server offline.")

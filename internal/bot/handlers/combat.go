@@ -22,7 +22,11 @@ func NewCombatHandler(db *sql.DB) *CombatHandler {
 
 // HandleRaidBoard displays other player bases available for attack
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
+	// Trigger custom finding location action indicator
+	_ = c.Notify(telebot.FindingLocation)
+
 	sender := c.Sender()
+	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}

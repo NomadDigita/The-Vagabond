@@ -22,7 +22,11 @@ func NewAgentHandler(db *sql.DB) *AgentHandler {
 
 // HandleAgent renders the high-end automation manager control panel
 func (h *AgentHandler) HandleAgent(c telebot.Context) error {
+	// Trigger standard typing indicator
+	_ = c.Notify(telebot.Typing)
+
 	sender := c.Sender()
+	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}

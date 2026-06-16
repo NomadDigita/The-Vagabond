@@ -22,7 +22,11 @@ func NewCampHandler(db *sql.DB) *CampHandler {
 
 // HandleCamp renders the detailed building console
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
+	// Trigger the typing status indicator
+	_ = c.Notify(telebot.Typing)
+
 	sender := c.Sender()
+	// ... remainder of file unchanged ...
 	if sender == nil {
 		return errors.New("invalid context sender")
 	}
