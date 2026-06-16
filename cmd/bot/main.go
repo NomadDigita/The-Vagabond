@@ -5,10 +5,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"gopkg.in/telebot.v3"
@@ -17,7 +19,7 @@ import (
 func main() {
 	log.Println("Starting The Vagabond server initialization sequence...")
 
-	// 1. Load local env file if present (falls back to OS system env if missing)
+	// 1. Load local env file if present
 	if err := godotenv.Load(); err != nil {
 		log.Println("Note: .env file not detected. Loading configuration from system environment variables.")
 	}
@@ -31,6 +33,14 @@ func main() {
 	botToken := os.Getenv("TELEGRAM_TOKEN")
 	if botToken == "" {
 		log.Fatal("Fatal: TELEGRAM_TOKEN environment parameter not set.")
+	}
+
+	// Parse tick interval with fallback of 60 seconds
+	tickSeconds := 60
+	if intervalStr := os.Getenv("GAME_TICK_SECONDS"); intervalStr != "" {
+		if val, err := strconv.Atoi(intervalStr); err == nil {
+			tickSeconds = val
+		}
 	}
 
 	// 3. Connect to Supabase PostgreSQL using connection pool limits
@@ -64,13 +74,17 @@ func main() {
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
-	// 5. Dependency Injection & Handler Routines Setup
+	// 5. Initialize and Boot Tick Engine background routine
+	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
+	tickEngine.Start()
+
+	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
 
 	// Define command mappings
 	bot.Handle("/start", onboarding.HandleStart)
 
-	// 6. Support Graceful Shutdown Intercepts
+	// 7. Support Graceful Shutdown Intercepts
 	go func() {
 		log.Println("Active long-polling loop engaged. System operational.")
 		bot.Start()
@@ -82,6 +96,10 @@ func main() {
 	<-quit
 
 	log.Println("Termination request received. Initiating graceful shutdown protocol...")
+
+	// Stop background services gracefully
+	tickEngine.Stop()
 	bot.Stop()
+
 	log.Println("System components cleanly dismantled. Server offline.")
 }
