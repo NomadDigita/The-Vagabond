@@ -1,0 +1,19 @@
+# Local Environment Overrides
+.env
+.env.local
+
+# Windows System Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Compiled Binaries / Build Artefacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go Workspace files
+go.work
