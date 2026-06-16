@@ -36,6 +36,12 @@ func main() {
 		log.Fatal("Fatal: TELEGRAM_TOKEN environment parameter not set.")
 	}
 
+	// Fetch comma-separated list of authorized Admin Telegram IDs
+	adminIDs := os.Getenv("ADMIN_IDS")
+	if adminIDs == "" {
+		log.Println("Warning: ADMIN_IDS is empty. Admin overrides will be inaccessible.")
+	}
+
 	// Parse tick interval with fallback of 60 seconds
 	tickSeconds := 60
 	if intervalStr := os.Getenv("GAME_TICK_SECONDS"); intervalStr != "" {
@@ -86,12 +92,18 @@ func main() {
 	camp := handlers.NewCampHandler(db)
 	combat := handlers.NewCombatHandler(db)
 	agentH := handlers.NewAgentHandler(db)
+	admin := handlers.NewAdminHandler(db, tickEngine, adminIDs)
 
 	// Define standard slash command mappings
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
+
+	// Register Admin Console Handlers
+	bot.Handle("/admin_tick", admin.HandleAdminTick)
+	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
+	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
 
 	// Register high-end Persistent Reply Navigation Text Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
