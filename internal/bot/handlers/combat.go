@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -14,11 +16,32 @@ import (
 )
 
 type CombatHandler struct {
-	DB *sql.DB
+	DB       *sql.DB
+	AdminIDs []int64
 }
 
-func NewCombatHandler(db *sql.DB) *CombatHandler {
-	return &CombatHandler{DB: db}
+func NewCombatHandler(db *sql.DB, adminIDStrs string) *CombatHandler {
+	var ids []int64
+	for _, s := range strings.Split(adminIDStrs, ",") {
+		trimmed := strings.TrimSpace(s)
+		if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			ids = append(ids, val)
+		}
+	}
+	return &CombatHandler{
+		DB:       db,
+		AdminIDs: ids,
+	}
+}
+
+// IsAdmin checks if the sender is an authorized developer
+func (h *CombatHandler) IsAdmin(senderID int64) bool {
+	for _, id := range h.AdminIDs {
+		if id == senderID {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleRaidBoard displays player targets and offline AI training skirmishes
@@ -228,6 +251,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	defenderCampID := c.Args()[0]
 
+	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
 	var attackerCampID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
 	if err != nil {
@@ -240,6 +264,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// Normal Player Flow Checks
 	var troopCount int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
 	if err != nil {
@@ -253,9 +278,19 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
 
-	marchDuration := 15 * time.Second
+	// Real-Time Journey Marching Scaling (5 minutes per map coordinate step)
+	// For testing, let's use a 5-step mock distance fallback
+	steps := 5.0
+	marchDuration := time.Duration(steps*5) * time.Minute
+
+	// Admin Ultimate Override: If launcher is Admin, travel completes instantly (0s)
+	if h.IsAdmin(sender.ID) {
+		marchDuration = 1 * time.Second
+	}
+
 	resolveTime := time.Now().Add(marchDuration)
 
+	// If AI Target selection
 	if defenderCampID == "ai_drone_nest" {
 		insertRaid := `
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
@@ -271,6 +306,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
 	}
 
+	// Normal PvP Flow
 	var defenderName string
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", defenderCampID).Scan(&defenderName, &defenderUserID)

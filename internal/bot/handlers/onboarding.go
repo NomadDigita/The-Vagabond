@@ -195,12 +195,13 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		startingScrap := 100.0
-		startingEnergy := 25.0
+		// 4. Calculate starting bonuses (10x Provisioning Boost for Day 1 Upgrades)
+		startingScrap := 1000.0
+		startingEnergy := 250.0
 		if faction == "steel_vanguard" {
-			startingEnergy += 50.0
+			startingEnergy += 500.0 // Vanguard starts with 750.0 Energy
 		} else {
-			startingScrap += 150.0
+			startingScrap += 1500.0 // Nomads starts with 2,500.0 Scrap
 		}
 
 		insertRes := `

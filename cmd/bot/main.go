@@ -81,10 +81,10 @@ func main() {
 	realtimeListener := realtime.NewListener(dbURL, db, bot)
 	realtimeListener.Start()
 
-	// 6. Dependency Injection & Handler Routines Setup
+	// 6. Dependency Injection & Handler Routines Setup with Dynamic Admin IDs forwarding
 	onboarding := handlers.NewOnboardingHandler(db)
-	camp := handlers.NewCampHandler(db)
-	combat := handlers.NewCombatHandler(db)
+	camp := handlers.NewCampHandler(db, adminIDs)
+	combat := handlers.NewCombatHandler(db, adminIDs)
 	agentH := handlers.NewAgentHandler(db, adminIDs)
 	admin := handlers.NewAdminHandler(db, tickEngine, adminIDs)
 	hero := handlers.NewHeroHandler(db)
@@ -105,8 +105,9 @@ func main() {
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
-	bot.Handle("/help", onboarding.HandleHelp)             // Mapped Help tutorial
-	bot.Handle("/inventory", econ.HandleWarehouseReserves) // Mapped Inventory view
+	bot.Handle("/help", onboarding.HandleHelp)
+	bot.Handle("/inventory", econ.HandleWarehouseReserves)
+	bot.Handle("/admin", admin.HandleAdminPanel)
 
 	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
@@ -117,11 +118,17 @@ func main() {
 	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)
 	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources)
 
-	// Bottom-Dock Multi-layered Navigation Handlers
+	// Bottom-Dock Multi-layered Navigation Handlers (Checks Admin status dynamically)
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
 	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
 	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
+
+	// Admin sub-navigation panel routing
+	bot.Handle("🏛️ Admin Terminal", admin.HandleAdminPanel)
+	bot.Handle("⚡ Force Master Tick", admin.HandleAdminTick)
+	bot.Handle("🪙 Inject Resources", admin.HandleAdminGive)
+	bot.Handle("🛰️ Server Metrics", admin.HandleAdminMetrics)
 
 	// Submenu Layer Handlers
 	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)

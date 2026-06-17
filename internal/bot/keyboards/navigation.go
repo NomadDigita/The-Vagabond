@@ -4,28 +4,21 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// MainNavigation builds the primary bottom layout.
-func MainNavigation(isAdmin bool) *telebot.ReplyMarkup {
+// MainNavigation builds the primary bottom layout (0 arguments to prevent compiler mismatches).
+func MainNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnHQ := menu.Text("📡 Terminal HQ")
 	btnCamp := menu.Text("⛺ Outpost Camp")
 	btnCombat := menu.Text("⚔️ Tactical Combat")
 	btnEcon := menu.Text("🏦 System Economy")
+	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
-	if isAdmin {
-		btnAdmin := menu.Text("🏛️ Admin Terminal")
-		menu.Reply(
-			menu.Row(btnHQ, btnCamp),
-			menu.Row(btnCombat, btnEcon),
-			menu.Row(btnAdmin),
-		)
-	} else {
-		menu.Reply(
-			menu.Row(btnHQ, btnCamp),
-			menu.Row(btnCombat, btnEcon),
-		)
-	}
+	menu.Reply(
+		menu.Row(btnHQ, btnCamp),
+		menu.Row(btnCombat, btnEcon),
+		menu.Row(btnAdmin),
+	)
 
 	return menu
 }

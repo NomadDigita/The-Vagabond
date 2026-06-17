@@ -37,7 +37,7 @@ func (h *AgentHandler) IsAdmin(id int64) bool {
 	return false
 }
 
-// HandleAgent renders the high-end automation manager control panel with Premium checks
+// HandleAgent renders the high-end automation manager control panel
 func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -57,24 +57,18 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		isPremium = true
 	}
 
-	var isInstalled bool
+	// Resolved Query: Simplified SQL loading completely prevents database parsing errors
 	var isActive bool
 	var mode string
-	query := `
-		SELECT EXISTS(SELECT 1 FROM agent_tasks WHERE user_id = $1),
-		       COALESCE((SELECT is_active FROM agent_tasks WHERE user_id = $1), FALSE),
-		       COALESCE((SELECT mode FROM agent_tasks WHERE user_id = $1), 'collector')
-		FROM (SELECT 1) as dummy`
-
-	err := h.DB.QueryRowContext(ctx, query, sender.ID).Scan(&isInstalled, &isActive, &mode)
-	if err != nil {
-		log.Printf("Failed querying agent status: %v", err)
-		return c.Send("⚠️ System connection error reading agent configuration.", keyboards.MainNavigation())
-	}
-
-	if !isInstalled {
+	err := h.DB.QueryRowContext(ctx, "SELECT is_active, mode FROM agent_tasks WHERE user_id = $1", sender.ID).Scan(&isActive, &mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Initialize the configuration safely
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO agent_tasks (user_id, mode, is_active) VALUES ($1, 'collector', FALSE) ON CONFLICT DO NOTHING", sender.ID)
+		isActive = false
 		mode = "collector"
+	} else if err != nil {
+		log.Printf("Failed scanning agent config for %d: %v", sender.ID, err)
+		return c.Send("⚠️ System connection error reading agent configuration.", keyboards.CampNavigation())
 	}
 
 	var energy float64
@@ -130,7 +124,6 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		selector.Row(btnModeCollector, btnModeBuilder),
 	)
 
-	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 
@@ -161,7 +154,7 @@ func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {
 	if newActive {
 		var energy float64
 		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.energy, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", userID).Scan(&energy)
-		if energy < 2.0 {
+		if energy < 0.2 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Boot Failed: Insufficient Energy."})
 		}
 	}

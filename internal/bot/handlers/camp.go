@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -13,14 +15,35 @@ import (
 )
 
 type CampHandler struct {
-	DB *sql.DB
+	DB       *sql.DB
+	AdminIDs []int64
 }
 
-func NewCampHandler(db *sql.DB) *CampHandler {
-	return &CampHandler{DB: db}
+func NewCampHandler(db *sql.DB, adminIDStrs string) *CampHandler {
+	var ids []int64
+	for _, s := range strings.Split(adminIDStrs, ",") {
+		trimmed := strings.TrimSpace(s)
+		if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			ids = append(ids, val)
+		}
+	}
+	return &CampHandler{
+		DB:       db,
+		AdminIDs: ids,
+	}
 }
 
-// HandleCamp renders the main outpost summary HUD (Changes bottom menu to Camp Submenu)
+// IsAdmin checks if the sender is an authorized developer
+func (h *CampHandler) IsAdmin(senderID int64) bool {
+	for _, id := range h.AdminIDs {
+		if id == senderID {
+			return true
+		}
+	}
+	return false
+}
+
+// HandleCamp renders the main outpost summary HUD
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -64,7 +87,6 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 		campLvl, campName, scrap, tentLvl, heapLvl, genLvl,
 	)
 
-	// Changes Reply Keyboard context to Camp Submenu cleanly
 	return c.Send(panelText, keyboards.CampNavigation())
 }
 
@@ -116,7 +138,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleUpgradeCallback manages the inline upgrade actions (Dynamic campID lookup)
+// HandleUpgradeCallback manages the inline upgrade actions (Dynamic campID & Admin lookup)
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -141,12 +163,19 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
+	// ADMIN ULTIMATE OVERRIDE: Instant & Free Upgrades based on dynamic environment list
+	isAdmin := h.IsAdmin(sender.ID)
+
 	if moduleType == "camp_core" {
 		if campLvl >= 30 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level reached (Level 30)."})
 		}
 
 		cost := campLvl * 500
+		if isAdmin {
+			cost = 0
+		}
+
 		if scrap < float64(cost) {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap! Need %d.", cost)})
 		}
@@ -164,6 +193,17 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 
 	if currentLvl >= campLvl {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Prerequisite Block: Module levels cannot exceed your Outpost Core level."})
+	}
+
+	if isAdmin {
+		// Admin Bypass: Write level-up instantly
+		_, err = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level, is_upgrading) VALUES ($1, $2, $3, FALSE) ON CONFLICT (encampment_id, type) DO UPDATE SET level = $3, is_upgrading = FALSE", campID, moduleType, currentLvl+1)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Admin Override write failure."})
+		}
+		_ = tx.Commit()
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚡ ADMIN OVERRIDE: %s instantly upgraded to Level %d for free!", moduleType, currentLvl+1)})
+		return h.HandleStructuralUpgrades(c)
 	}
 
 	var exists bool

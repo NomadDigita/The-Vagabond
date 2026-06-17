@@ -48,6 +48,20 @@ func (h *AdminHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
+// HandleAdminPanel renders the Admin control board
+func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.MainNavigation())
+	}
+
+	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the submenu buttons below.", keyboards.AdminNavigation())
+}
+
 // HandleAdminTick manually triggers an instantaneous master loop iteration
 func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	sender := c.Sender()
@@ -62,10 +76,10 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	h.TickEngine.ProcessTick()
 
-	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered and resolved.")
+	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered.")
 }
 
-// HandleAdminGiftPremium grants premium access to a username (Syntax: /admin_gift_premium [username] [days])
+// HandleAdminGiftPremium grants premium access to a username
 func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -90,20 +104,18 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// Find user ID by username
 	var targetID int64
 	err = h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", targetUser).Scan(&targetID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return c.Send("❌ User Not Found: Target Telegram username is not registered.")
+		return c.Send("❌ User Not Found.")
 	}
 
 	targetTime := time.Now().AddDate(0, 0, days)
 	_, err = h.DB.ExecContext(ctx, "UPDATE users SET premium_until = $1 WHERE telegram_id = $2", targetTime, targetID)
 	if err != nil {
-		return c.Send("⚠️ Database error writing premium alignment.")
+		return c.Send("⚠️ Database error.")
 	}
 
-	// Queue success alert
 	alertMsg := fmt.Sprintf(
 		"💎 PREMIUM STATUS GRANTED!\n\n"+
 			"An Administrator has gifted you a Premium License for %d days.\n"+
@@ -115,7 +127,7 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Granted %d days of Premium License to @%s.", days, targetUser))
 }
 
-// HandleAdminGiftResources grants Scrap permanently to a username (Syntax: /admin_gift_resources [username] [scrap_amount])
+// HandleAdminGiftResources grants Scrap permanently to a username
 func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
