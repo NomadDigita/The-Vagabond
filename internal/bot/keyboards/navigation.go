@@ -5,7 +5,7 @@ import (
 )
 
 // MainNavigation builds the primary bottom layout.
-func MainNavigation() *telebot.ReplyMarkup {
+func MainNavigation(isAdmin bool) *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnHQ := menu.Text("📡 Terminal HQ")
@@ -13,10 +13,19 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnCombat := menu.Text("⚔️ Tactical Combat")
 	btnEcon := menu.Text("🏦 System Economy")
 
-	menu.Reply(
-		menu.Row(btnHQ, btnCamp),
-		menu.Row(btnCombat, btnEcon),
-	)
+	if isAdmin {
+		btnAdmin := menu.Text("🏛️ Admin Terminal")
+		menu.Reply(
+			menu.Row(btnHQ, btnCamp),
+			menu.Row(btnCombat, btnEcon),
+			menu.Row(btnAdmin),
+		)
+	} else {
+		menu.Reply(
+			menu.Row(btnHQ, btnCamp),
+			menu.Row(btnCombat, btnEcon),
+		)
+	}
 
 	return menu
 }
@@ -61,12 +70,28 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
-	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnFactory, btnBack),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
+// AdminNavigation builds the restricted console submenu for developers.
+func AdminNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnTick := menu.Text("⚡ Force Master Tick")
+	btnGive := menu.Text("🪙 Inject Resources")
+	btnMetrics := menu.Text("🛰️ Server Metrics")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnTick, btnGive),
+		menu.Row(btnMetrics, btnBack),
 	)
 
 	return menu
