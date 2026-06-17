@@ -52,3 +52,53 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 
 	return c.Send(dashboard, keyboards.CombatNavigation())
 }
+
+// HandleSectorMap displays close coordinates sector maps
+func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
+	_ = c.Notify(telebot.FindingLocation)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var myX, myY int
+	err := h.DB.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&myX, &myY)
+	if err != nil {
+		return c.Send("⚠️ Access Denied: Establish your camp first using /start.")
+	}
+
+	mapHUD := "━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"🧭 SPATIAL CARTOGRAPHY SECTOR MAP\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"Your outpost radar scans the coordinates nearby:\n\n"
+
+	// Sweep surrounding 3x3 grid coordinates
+	for y := myY + 1; y >= myY-1; y-- {
+		rowText := "  "
+		for x := myX - 1; x <= myX+1; x++ {
+			var biome string
+			var danger int
+			err := h.DB.QueryRowContext(ctx, "SELECT biome, danger_level FROM coordinates WHERE x = $1 AND y = $2", x, y).Scan(&biome, &danger)
+			if err != nil {
+				// Undiscovered fog coordinate symbol
+				rowText += "░░ "
+			} else {
+				// Render different symbols depending on biomes
+				switch biome {
+				case "ruins":
+					rowText += "🏢 "
+				case "wasteland":
+					rowText += "💀 "
+				default:
+					rowText += "⛺ "
+				}
+			}
+		}
+		mapHUD += rowText + "\n"
+	}
+
+	mapHUD += fmt.Sprintf("\nCURRENT LOCATION: Sector [%d, %d]\n", myX, myY)
+	mapHUD += "LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\n"
+	mapHUD += "━━━━━━━━━━━━━━━━━━━━━━"
+
+	return c.Send(mapHUD, keyboards.CombatNavigation())
+}

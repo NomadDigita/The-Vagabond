@@ -92,6 +92,7 @@ func main() {
 	econ := handlers.NewEconomyHandler(db)
 	clan := handlers.NewClanHandler(db)
 	factory := handlers.NewFactoryHandler(db)
+	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan)
 
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -103,6 +104,7 @@ func main() {
 	bot.Handle("/clan", clan.HandleClanPanel)
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
+	bot.Handle("/map", world.HandleSectorMap)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
@@ -115,7 +117,7 @@ func main() {
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
-	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard) // Aligned Listener to "Tactical Combat"
+	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
 	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
 
 	// Submenu Layer Handlers
@@ -124,12 +126,16 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
-	bot.Handle("📦 Warehouse Reserves", econ.HandleEconPanel) // Maps Warehouse directly to the resources HUD
+	bot.Handle("📦 Warehouse Reserves", econ.HandleEconPanel)
 	bot.Handle("🪙 Financial Vault", econ.HandleEconPanel)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
+	// Map all plain text inputs to our Natural Language intent router
+	bot.Handle(telebot.OnText, nlp.HandleTextMessage)
+
+	// Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
