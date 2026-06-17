@@ -2,7 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -73,12 +75,14 @@ func main() {
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
+	// 5. Initialize and Boot background system engines
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
 	tickEngine.Start()
 
 	realtimeListener := realtime.NewListener(dbURL, db, bot)
 	realtimeListener.Start()
 
+	// 6. Dependency Injection & Handler Routines Setup
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db)
 	combat := handlers.NewCombatHandler(db)
@@ -109,7 +113,7 @@ func main() {
 	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)
 	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources)
 
-	// Bottom-Dock Multi-layered Navigation Handlers
+	// Bottom-Dock Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
 	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
@@ -127,7 +131,6 @@ func main() {
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
-	// Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
@@ -140,6 +143,45 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
+
+	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Fallback local testing port
+	}
+
+	// Register /health route for Render system checks
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("SYSTEM OPERATIONAL"))
+	})
+
+	go func() {
+		log.Printf("Inbound HTTP listener bound to port :%s for health telemetry checks.", port)
+		if err := http.ListenAndServe(":"+port, nil); err != nil {
+			log.Printf("Warning: HTTP Server closed: %v", err)
+		}
+	}()
+
+	// --- 8. AUTONOMOUS KEEP-ALIVE SELF-PINGER ---
+	selfPingURL := os.Getenv("SELF_PING_URL")
+	if selfPingURL != "" {
+		go func() {
+			log.Printf("Autonomous Keep-Alive Pinger active. target: %s", selfPingURL)
+			ticker := time.NewTicker(10 * time.Minute) // Ping self every 10 minutes
+			for range ticker.C {
+				resp, err := http.Get(selfPingURL)
+				if err != nil {
+					log.Printf("Keep-Alive Pinger connection warning: %v", err)
+					continue
+				}
+				_ = resp.Body.Close()
+				log.Println("⚡ Keep-Alive Pinger succeeded. Instance held awake.")
+			}
+		}()
+	} else {
+		log.Println("Note: SELF_PING_URL parameters not set. Keep-Alive pinger is idle.")
+	}
 
 	go func() {
 		log.Println("Active long-polling loop engaged. System operational.")
