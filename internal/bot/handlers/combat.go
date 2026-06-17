@@ -64,7 +64,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.user_id = $1`
-
+	
 	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myCampName, &myX, &myY)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
