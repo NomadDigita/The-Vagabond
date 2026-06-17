@@ -18,7 +18,7 @@ func NewEconomyHandler(db *sql.DB) *EconomyHandler {
 	return &EconomyHandler{DB: db}
 }
 
-// HandleEconPanel renders the banking and trade hub (Changes bottom menu to Economy Submenu)
+// HandleEconPanel renders the main economy summary HUD (Changes bottom menu to Economy Submenu)
 func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -45,21 +45,20 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		loanAmount = 0.0
 	}
 
-	var scrap, energy, steel, uranium, hydrogen, dollars float64
-	queryRes := `SELECT scrap, energy, steel, uranium, hydrogen, dollars FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&scrap, &energy, &steel, &uranium, &hydrogen, &dollars)
+	var scrap float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🏦 SYSTEM ECONOMY & FINANCIAL CENTER\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Outpost Name: Encampment Ledger\n"+
-			"Available Funds: $%.1f\n\n"+
-			"ACCOUNT BALANCES:\n"+
+			"Outpost Name: Encampment Ledger\n\n"+
+			"LEDGER SUMMARIES:\n"+
+			"⚙️ Scrap Reserves: %.1f\n"+
 			"🏦 Vault Savings: %.1f Scrap\n"+
 			"💳 Credit Debt: %.1f Scrap\n\n"+
 			"Select options on your bottom menu deck to access the Vault, Alliances, or Heavy Workshop.",
-		dollars, bankBalance, loanAmount,
+		scrap, bankBalance, loanAmount,
 	)
 
 	// Changes Reply Keyboard context to Economy Submenu cleanly
@@ -87,12 +86,13 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🪙 VAULT & CREDIT OVERRIDE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Scrap Reserves: %.1f\n"+
-			"Vault Savings: %.1f Scrap\n"+
-			"Credit Debt: %.1f Scrap\n\n"+
+			"💵 Available Cash: $%.1f\n"+
+			"⚙️ Scrap Reserves: %.1f\n"+
+			"🏦 Vault Savings: %.1f Scrap\n"+
+			"💳 Credit Debt: %.1f Scrap\n\n"+
 			"Convert rate: Sell 100 Scrap -> Get $50.0\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		scrap, bankBalance, loanAmount,
+		dollars, scrap, bankBalance, loanAmount,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -151,7 +151,7 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 		dollars, scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond,
 	)
 
-	return c.Send(inventoryText, keyboards.CombatNavigation())
+	return c.Send(inventoryText)
 }
 
 // HandleBankCallback processes transactional actions in the Bank (Dynamic campID lookup)

@@ -251,7 +251,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	defenderCampID := c.Args()[0]
 
-	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
 	var attackerCampID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
 	if err != nil {
@@ -264,7 +263,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Normal Player Flow Checks
 	var troopCount int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
 	if err != nil {
@@ -278,12 +276,16 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
 
-	// Real-Time Journey Marching Scaling (5 minutes per map coordinate step)
-	// For testing, let's use a 5-step mock distance fallback
-	steps := 5.0
-	marchDuration := time.Duration(steps*5) * time.Minute
+	// Fetch heavy weapons to calculate travel weight marching time
+	var tanks, mechs int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", attackerCampID).Scan(&tanks, &mechs)
 
-	// Admin Ultimate Override: If launcher is Admin, travel completes instantly (0s)
+	// Real-Time Journey Marching Scaling (Base 5m per map step + 3m per tank + 5m per mech)
+	steps := 5.0
+	marchingMinutes := (steps * 5.0) + (float64(tanks) * 3.0) + (float64(mechs) * 5.0)
+	marchDuration := time.Duration(marchingMinutes) * time.Minute
+
+	// Admin Ultimate Override: If launcher is Admin, travel completes instantly (1s)
 	if h.IsAdmin(sender.ID) {
 		marchDuration = 1 * time.Second
 	}

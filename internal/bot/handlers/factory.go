@@ -46,9 +46,9 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1)", campID)
 	}
 
-	var steel, uranium, hydrogen, iron, oil, gold, diamond float64
-	queryRes := `SELECT steel, uranium, hydrogen, iron, oil, gold, diamond FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&steel, &uranium, &hydrogen, &iron, &oil, &gold, &diamond)
+	var steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
+	queryRes := `SELECT steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
@@ -58,14 +58,16 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 			"🪖 Soldiers: %d | 🛰️ Drones: %d | ✈️ Jets: %d\n"+
 			"🤖 Mechs: %d | ☢️ Nuclear Devices: %d\n"+
 			"🚜 Fusion Tanks: %d | 🛡️ Nuclear Shields: %d\n\n"+
+			"WORKSHOP MATERIALS:\n"+
+			"🧱 Steel Stock: %.1f | ☢️ Uranium: %.1f | 🪙 Gold: %.1f\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🪖 [Soldier] - Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
 			"🛰️ [Spy Drone] - Cost: 100 Iron, 10 Silver (+25 Offense)\n"+
 			"✈️ [Fighter Jet] - Cost: 400 Iron, 50 Oil, 50 Hydrogen (+120 Offense)\n"+
-			"🤖 [Colossus Mech] - Cost: 1000 Iron, 50 Uranium, 20 Gold (+350 Offense)\n"+
-			"☢️ [Nuclear Device] - Cost: 2500 Iron, 500 Uranium, 100 Gold, 10 Diamonds (+1500 Offense)\n"+
+			"🤖 [Colossus Mech] - Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
+			"☢️ [Nuclear Device] - Cost: 2500 Steel, 500 Uranium, 100 Gold, 10 Diamonds (+1500 Offense)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		soldiers, drones, jets, mechs, nukes, tanks, shields,
+		soldiers, drones, jets, mechs, nukes, tanks, shields, steel, uranium, gold,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -88,7 +90,7 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 // HandleCraftCallback processes blueprints execution
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	ctx := context.Background()
-	sender := c.Sender()
+	sender := gopkg.Context(c).Sender()
 
 	item := c.Args()[0]
 
@@ -101,9 +103,9 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	}
 	defer tx.Rollback()
 
-	var rations, scrap, steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
-	queryRes := `SELECT rations, scrap, steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1 FOR UPDATE`
-	_ = tx.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &scrap, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond)
+	var rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
+	queryRes := `SELECT rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1 FOR UPDATE`
+	_ = tx.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond)
 
 	switch item {
 	case "soldier":
@@ -123,12 +125,28 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛰️ Spy Drone constructed!"})
 
 	case "jet":
-		if steel < 200.0 || hydrogen < 80.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 200 Steel, 80 Hydrogen."})
+		if steel < 400.0 || oil < 50.0 || hydrogen < 50.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 400 Steel, 50 Oil, 50 Hydrogen."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 200.0, hydrogen = hydrogen - 80.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET fusion_tanks = fusion_tanks + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🚜 Fusion armor deployed!"})
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 400.0, oil = oil - 50.0, hydrogen = hydrogen - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET jets = jets + 1 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "✈️ Fighter Jet constructed!"})
+
+	case "mech":
+		if steel < 1000.0 || uranium < 50.0 || gold < 20.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 1,000 Steel, 50 Uranium, 20 Gold."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1000.0, uranium = uranium - 50.0, gold = gold - 20.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET mechs = mechs + 1 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🤖 Colossus Mech forged successfully!"})
+
+	case "nuke":
+		if steel < 2500.0 || uranium < 500.0 || gold < 100.0 || diamond < 10.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials!"})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 2500.0, uranium = uranium - 500.0, gold = gold - 100.0, diamond = diamond - 10.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes + 1 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "☢️ Nuclear strike weapon assembled!"})
 	}
 
 	if err := tx.Commit(); err != nil {
