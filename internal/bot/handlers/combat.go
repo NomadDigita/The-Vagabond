@@ -21,7 +21,7 @@ func NewCombatHandler(db *sql.DB) *CombatHandler {
 	return &CombatHandler{DB: db}
 }
 
-// HandleRaidBoard displays player targets and offline AI training skirmishes (64-byte safe)
+// HandleRaidBoard displays player targets and offline AI training skirmishes
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -88,7 +88,6 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
 
-	// Print players target listings
 	if len(targets) > 0 {
 		for i, t := range targets {
 			steps := math.Abs(float64(t.x-myX)) + math.Abs(float64(t.y-myY))
@@ -98,13 +97,12 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 			marchTime := int(steps * 15)
 
 			dashboard += fmt.Sprintf("[%d] Outpost: %s (Sector %d,%d)\n    Commander: %s\n    Travel Steps: %.0f | March Time: %ds\n    Estimated Loot: %.1f Scrap\n\n", i+1, t.name, t.x, t.y, t.owner, steps, marchTime, t.lootable)
-			// Only passed the target defender ID to be 64-byte safe (attacker lookup dynamically resolved)
-			btn := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", t.id)
-			buttons = append(buttons, selector.Row(btn))
+			btnRaid := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", t.id)
+			btnSpy := selector.Data(fmt.Sprintf("🛰️ Spy [%d]", i+1), "spy_action", t.id)
+			buttons = append(buttons, selector.Row(btnRaid, btnSpy))
 		}
 	}
 
-	// Add Offline AI Skirmish Mode target
 	dashboard += "🤖 AI TRAINING SKIRMISH TARGETS:\n" +
 		"[AI] Rogue Drone Nest (Sector 1,1)\n" +
 		"    Loot Yield: +50 Scrap | March Time: 15s\n\n"
@@ -165,10 +163,62 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 	btnRaid := selector.Data("⚔️ Launch Staged Expedition", "launch_raid", tID)
+	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
-	selector.Inline(selector.Row(btnRaid))
+	selector.Inline(selector.Row(btnRaid, btnSpy))
 
 	return c.Send(report, selector)
+}
+
+// HandleSpyCallback intercepts target telemetry by consuming 20 Energy Cells
+func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	targetCampID := c.Args()[0]
+
+	var myCampID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Spying initialization error."})
+	}
+	defer tx.Rollback()
+
+	var energy float64
+	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+
+	if energy < 20.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Spying requires 20.0 Energy Cells."})
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 20.0 WHERE encampment_id = $1", myCampID)
+
+	var targetName string
+	var rations float64
+	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", targetCampID).Scan(&targetName)
+	_ = tx.QueryRowContext(ctx, "SELECT rations FROM resources WHERE encampment_id = $1", targetCampID).Scan(&rations)
+
+	var soldiers int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT soldiers FROM workshop_inventory WHERE encampment_id = $1), 0)", targetCampID).Scan(&soldiers)
+
+	_ = tx.Commit()
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "📡 Signals Intercepted! Decoding telemetry..."})
+
+	spyReport := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🛰️ DECODED SIGNAL TELEMETRY\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Target Outpost: %s\n\n"+
+			"INTERCEPTED METRICS:\n"+
+			"🥫 Food Stocks: %.1f Rations\n"+
+			"🪖 Infantry Power: %d Soldiers\n\n"+
+			"Sensors suggest defenses are active.",
+		targetName, rations, soldiers,
+	)
+
+	return c.Send(spyReport, keyboards.CombatNavigation())
 }
 
 // HandleLaunchRaidCallback registers a marching raid inside the database and alerts the defender
@@ -178,7 +228,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	defenderCampID := c.Args()[0]
 
-	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
 	var attackerCampID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
 	if err != nil {
@@ -191,7 +240,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Normal Player Flow Checks
 	var troopCount int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
 	if err != nil {
@@ -208,7 +256,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	marchDuration := 15 * time.Second
 	resolveTime := time.Now().Add(marchDuration)
 
-	// If AI Target selection
 	if defenderCampID == "ai_drone_nest" {
 		insertRaid := `
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
@@ -224,7 +271,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
 	}
 
-	// Normal PvP Flow
 	var defenderName string
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", defenderCampID).Scan(&defenderName, &defenderUserID)

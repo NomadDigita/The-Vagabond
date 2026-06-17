@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -18,7 +19,7 @@ func NewWorldHandler(db *sql.DB) *WorldHandler {
 	return &WorldHandler{DB: db}
 }
 
-// HandleWorldFeed displays world news, coordinates biome multipliers, and weather telemetry
+// HandleWorldFeed displays real-time database world news, coordinates biome multipliers, and weather telemetry
 func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -31,6 +32,32 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	// Fetch dynamic clock variables
 	currentTime := time.Now().UTC().Format("15:04:05")
 
+	// Query most recent 5 world news headlines
+	queryNews := `
+		SELECT headline, logged_at 
+		FROM world_news 
+		ORDER BY logged_at DESC 
+		LIMIT 5`
+
+	rows, err := h.DB.QueryContext(ctx, queryNews)
+	var newsLogText string
+	if err != nil {
+		log.Printf("Failed querying world news: %v", err)
+		newsLogText = "📡 Static Interference: News feed currently offline."
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var headline string
+			var loggedAt time.Time
+			if err := rows.Scan(&headline, &loggedAt); err == nil {
+				newsLogText += fmt.Sprintf("[%s] %s\n", loggedAt.UTC().Format("15:04"), headline)
+			}
+		}
+		if newsLogText == "" {
+			newsLogText = "📡 Sensors Clean: No major sector events recorded yet."
+		}
+	}
+
 	dashboard := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"📻 WASTELAND BROADCAST RADIO\n"+
@@ -41,13 +68,11 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 			"☣️ Core Zone: [Acid Dust Storms]\n"+
 			"🌡️ Ambient Temperature: 38°C\n"+
 			"📡 System Interference: Low\n\n"+
-			"REGIONAL WORLD LOGS:\n"+
-			"☠️ Sector West-14: Scavenger lines collapsed.\n"+
-			"🛰️ Unknown frequency signals intercepted near grid [1,1].\n"+
-			"⚙️ Scrap value spikes recorded in central markets.\n"+
+			"LIVE BROADCAST NEWS FEED:\n"+
+			"%s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Listen to the static. The wastes are breathing.",
-		currentTime, activeCamps,
+		currentTime, activeCamps, newsLogText,
 	)
 
 	return c.Send(dashboard, keyboards.CombatNavigation())
@@ -71,18 +96,14 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"Your outpost radar scans the coordinates nearby:\n\n"
 
-	// Sweep surrounding 3x3 grid coordinates
 	for y := myY + 1; y >= myY-1; y-- {
 		rowText := "  "
 		for x := myX - 1; x <= myX+1; x++ {
 			var biome string
-			var danger int
-			err := h.DB.QueryRowContext(ctx, "SELECT biome, danger_level FROM coordinates WHERE x = $1 AND y = $2", x, y).Scan(&biome, &danger)
+			err := h.DB.QueryRowContext(ctx, "SELECT biome FROM coordinates WHERE x = $1 AND y = $2", x, y).Scan(&biome)
 			if err != nil {
-				// Undiscovered fog coordinate symbol
 				rowText += "░░ "
 			} else {
-				// Render different symbols depending on biomes
 				switch biome {
 				case "ruins":
 					rowText += "🏢 "

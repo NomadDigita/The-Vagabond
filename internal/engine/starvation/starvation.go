@@ -8,19 +8,16 @@ import (
 	"math/rand"
 )
 
-// Engine handles penalties, unit desertion, and alert notifications.
 type Engine struct {
 	DB *sql.DB
 }
 
-// NewEngine builds a configured starvation systems module.
 func NewEngine(db *sql.DB) *Engine {
 	return &Engine{DB: db}
 }
 
-// RunStarvationPass runs starvation checks inside the active transaction.
+// RunStarvationPass runs starvation checks and Ghost Mode ruin conversions
 func (e *Engine) RunStarvationPass(ctx context.Context, tx *sql.Tx) error {
-	// Find all outposts that have run out of rations
 	query := `
 		SELECT e.id, e.user_id, e.name
 		FROM encampments e
@@ -42,33 +39,43 @@ func (e *Engine) RunStarvationPass(ctx context.Context, tx *sql.Tx) error {
 	var camps []starvingCamp
 	for rows.Next() {
 		var c starvingCamp
-		if err := rows.Scan(&c.id, &c.userID, &c.name); err != nil {
-			log.Printf("Error scanning starving camp row: %v", err)
-			continue
+		if err := rows.Scan(&c.id, &c.userID, &c.name); err == nil {
+			camps = append(camps, c)
 		}
-		camps = append(camps, c)
 	}
+	rows.Close()
 
 	for _, c := range camps {
-		// 1. Decay morale of all units in this encampment by 5 points
-		decayMoraleQuery := `
-			UPDATE units 
-			SET morale = GREATEST(morale - 5, 0) 
-			WHERE encampment_id = $1`
-		_, err := tx.ExecContext(ctx, decayMoraleQuery, c.id)
+		// 1. Check if the camp is completely empty (0 military population) - GHOST MODE TRIGGER
+		var troopCount int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", c.id).Scan(&troopCount)
+
+		if troopCount <= 0 && c.name != "Ruined Outpost" {
+			// Outpost has fully collapsed into ruins!
+			_, _ = tx.ExecContext(ctx, "UPDATE encampments SET name = 'Ruined Outpost' WHERE id = $1", c.id)
+
+			// Record sector news headline
+			headline := fmt.Sprintf("☠️ GHOST MODE: Encampment [%s] has collapsed due to starvation. Location reduced to scavengable ruins.", c.name)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline)
+
+			log.Printf("Ghost Mode: Encampment %s collapsed into ruins.", c.name)
+			continue
+		}
+
+		// 2. Normal starvation morale decay
+		_, err := tx.ExecContext(ctx, "UPDATE units SET morale = GREATEST(morale - 5, 0) WHERE encampment_id = $1", c.id)
 		if err != nil {
 			return fmt.Errorf("failed applying starvation morale decay: %w", err)
 		}
 
-		// 2. Fetch units with low morale (< 30) to calculate desertion chance
 		queryLowMorale := `
-			SELECT id, type, quantity, morale 
+			SELECT id, type, quantity 
 			FROM units 
 			WHERE encampment_id = $1 AND morale < 30 AND quantity > 0`
 
 		unitRows, err := tx.QueryContext(ctx, queryLowMorale, c.id)
 		if err != nil {
-			log.Printf("Failed scanning unit rows for desertion checks: %v", err)
+			log.Printf("Failed scanning units for desertion checks: %v", err)
 			continue
 		}
 
@@ -81,32 +88,17 @@ func (e *Engine) RunStarvationPass(ctx context.Context, tx *sql.Tx) error {
 		var candidates []unitDesertion
 		for unitRows.Next() {
 			var d unitDesertion
-			var m int
-			if err := unitRows.Scan(&d.id, &d.unitType, &d.quantity, &m); err == nil {
+			if err := unitRows.Scan(&d.id, &d.unitType, &d.quantity); err == nil {
 				candidates = append(candidates, d)
 			}
 		}
 		unitRows.Close()
 
-		// 3. Process 20% random chance of unit desertion
 		for _, u := range candidates {
 			if rand.Float64() < 0.20 {
-				// Reduce unit quantity count by 1
-				desertionQuery := `
-					UPDATE units 
-					SET quantity = quantity - 1 
-					WHERE id = $1`
-				_, err := tx.ExecContext(ctx, desertionQuery, u.id)
-				if err != nil {
-					log.Printf("Failed writing unit desertion update: %v", err)
-					continue
-				}
+				_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = quantity - 1 WHERE id = $1", u.id)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM units WHERE id = $1 AND quantity <= 0", u.id)
 
-				// Clean up empty units
-				deleteEmptyUnits := `DELETE FROM units WHERE id = $1 AND quantity <= 0`
-				_, _ = tx.ExecContext(ctx, deleteEmptyUnits, u.id)
-
-				// Queue alert notification for Telegram
 				alertMsg := fmt.Sprintf(
 					"⚠️ STARVATION DESERTION\n\n"+
 						"Outpost: %s\n"+
@@ -116,14 +108,7 @@ func (e *Engine) RunStarvationPass(ctx context.Context, tx *sql.Tx) error {
 					c.name, u.unitType,
 				)
 
-				insertNotification := `
-					INSERT INTO notifications (user_id, message, is_sent) 
-					VALUES ($1, $2, FALSE)`
-				_, err = tx.ExecContext(ctx, insertNotification, c.userID, alertMsg)
-				if err != nil {
-					log.Printf("Failed queuing starvation alert notification: %v", err)
-				}
-				log.Printf("Starvation desertion triggered for camp %s. One %s deserted.", c.name, u.unitType)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID, alertMsg)
 			}
 		}
 	}

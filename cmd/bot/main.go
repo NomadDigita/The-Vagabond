@@ -148,6 +148,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
+	bot.Handle("\fspy_action", combat.HandleSpyCallback) // Added
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")
