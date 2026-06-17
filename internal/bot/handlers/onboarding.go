@@ -21,7 +21,6 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
-// HandleStart intercepts /start and routes players depending on registration state
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -38,7 +37,6 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	err := h.DB.QueryRowContext(ctx, queryUser, sender.ID).Scan(&user.TelegramID, &user.Username, &user.FirstName, &user.State, &user.Faction)
 
 	if err == nil {
-		// If legacy admin or user has empty faction, render faction setup selection
 		if user.Faction == "" {
 			return h.renderFactionChoice(c, sender.ID)
 		}
@@ -73,7 +71,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"🥫 Rations: %.1f\n"+
 				"🔋 Energy Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"All modules online. Use physical inputs to execute commands.",
+				"Use /help to view command walkthroughs.",
 			user.FirstName, formatFactionLabel(user.Faction), camp.Name, res.Scrap, res.Rations, res.Energy,
 		)
 		return c.Send(dashboard, keyboards.MainNavigation())
@@ -112,6 +110,30 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 	return c.Send(welcomeText, selector)
 }
 
+// HandleHelp renders the complete interactive system tutorial walkthrough
+func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	helpManual := "━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"📖 SURVIVAL TRAINING MANUAL & TUTORIAL\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"Welcome, survivor. This guide explains the core operational loops:\n\n" +
+		"⛺ [⛺ Outpost Camp Menu]\n" +
+		"• Structural Upgrades: Spend Scrap to level up Tent, Scrap Heap, and Generator.\n" +
+		"• Automation Agent: Gated module. Automatically builds facilities and gathers Scrap.\n\n" +
+		"⚔️ [⚔️ Tactical Combat Menu]\n" +
+		"• Scan Targets: Locate neighboring outposts. Launch raids using your Soldiers/Enforcers.\n" +
+		"• Wasteland Radio: Real-time broadcast news detailing sector collapses, storms, and wars.\n\n" +
+		"🏦 [🏦 System Economy Menu]\n" +
+		"• Financial Vault: Deposit Scrap to earn interest or secure emergency credit lines.\n" +
+		"• Clan Alliances: Establish or join forces (capped at 15 members). Trigger alliance wars.\n" +
+		"• Heavy Workshop: Spend heavy resources (Steel, Uranium, Hydrogen) to assemble Fusion Tanks.\n\n" +
+		"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━"
+
+	return c.Send(helpManual, keyboards.MainNavigation())
+}
+
 // HandleFactionCallback writes registration details depending on faction selection
 func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	ctx := context.Background()
@@ -132,7 +154,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Insert or Update User Profile Faction
 	insertUser := `
 		INSERT INTO users (telegram_id, username, first_name, state, faction) 
 		VALUES ($1, $2, $3, 'active', $4)
@@ -144,7 +165,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database writing registration error."})
 	}
 
-	// Setup starting coordinates (0,0) if missing
 	var coordID string
 	queryCoord := `SELECT id FROM coordinates WHERE x = 0 AND y = 0`
 	err = tx.QueryRowContext(ctx, queryCoord).Scan(&coordID)
@@ -160,7 +180,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		}
 	}
 
-	// Create Encampment if missing
 	var campID string
 	queryCampExists := `SELECT id FROM encampments WHERE user_id = $1`
 	err = tx.QueryRowContext(ctx, queryCampExists, telegramID).Scan(&campID)
@@ -176,7 +195,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		// Calculate starting bonuses
 		startingScrap := 100.0
 		startingEnergy := 25.0
 		if faction == "steel_vanguard" {
@@ -185,7 +203,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			startingScrap += 150.0
 		}
 
-		// Insert starting resources
 		insertRes := `
 			INSERT INTO resources (encampment_id, scrap, rations, energy, neuro_cores) 
 			VALUES ($1, $2, 50.00, $3, 0.00)`

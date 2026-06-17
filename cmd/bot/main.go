@@ -105,7 +105,10 @@ func main() {
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
+	bot.Handle("/help", onboarding.HandleHelp)             // Mapped Help tutorial
+	bot.Handle("/inventory", econ.HandleWarehouseReserves) // Mapped Inventory view
 
+	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
@@ -126,8 +129,8 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
-	bot.Handle("📦 Warehouse Reserves", econ.HandleEconPanel)
-	bot.Handle("🪙 Financial Vault", econ.HandleEconPanel)
+	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
+	bot.Handle("🪙 Financial Vault", econ.HandleFinancialVault)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
@@ -148,7 +151,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
-	bot.Handle("\fspy_action", combat.HandleSpyCallback) // Added
+	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

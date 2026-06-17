@@ -20,7 +20,7 @@ func NewCampHandler(db *sql.DB) *CampHandler {
 	return &CampHandler{DB: db}
 }
 
-// HandleCamp renders the main outpost summary HUD
+// HandleCamp renders the main outpost summary HUD (Changes bottom menu to Camp Submenu)
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -60,14 +60,15 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 			"⛺ [Tent] — Level %d\n"+
 			"⚙️ [Scrap Heap] — Level %d\n"+
 			"⚡ [Generator] — Level %d\n\n"+
-			"Use the structural menu below to trigger upgrades.",
+			"Select options on your bottom menu deck to trigger upgrades, check automation, or view heroes.",
 		campLvl, campName, scrap, tentLvl, heapLvl, genLvl,
 	)
 
+	// Changes Reply Keyboard context to Camp Submenu cleanly
 	return c.Send(panelText, keyboards.CampNavigation())
 }
 
-// HandleStructuralUpgrades renders ONLY the inline buttons. Removed campID from buttons (64-byte safe).
+// HandleStructuralUpgrades renders ONLY the inline buttons
 func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -102,7 +103,6 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 
-	// Passed only moduleType parameter to remain 64-byte safe
 	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent")
 	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap")
 	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator")
@@ -123,7 +123,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 
 	moduleType := c.Args()[0]
 
-	// Dynamically resolve campID inside handler to prevent 64-byte callback errors
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {

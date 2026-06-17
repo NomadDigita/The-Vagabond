@@ -24,30 +24,33 @@ func NewNLPHandler(onb *OnboardingHandler, camp *CampHandler, comb *CombatHandle
 	}
 }
 
-// HandleTextMessage parses raw player text and routes it contextually
+// HandleTextMessage parses raw player text and routes it contextually using dynamic tokens
 func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	text := strings.ToLower(c.Text())
 
-	// Exact matches for bottom menu routing blocks
-	if text == "📡 terminal hq" {
+	// Exact mother-route commands checks
+	if text == "📡 terminal hq" || text == "/start" || text == "start" {
 		return h.Onboarding.HandleStart(c)
 	}
-	if text == "⛺ outpost camp" {
+	if text == "⛺ outpost camp" || text == "camp" {
 		return h.Camp.HandleCamp(c)
 	}
-	if text == "⚔️ tactical combat" {
+	if text == "⚔️ tactical combat" || text == "combat" || text == "raid" {
 		return h.Combat.HandleRaidBoard(c)
 	}
-	if text == "🏦 system economy" {
+	if text == "🏦 system economy" || text == "economy" || text == "bank" {
 		return h.Econ.HandleEconPanel(c)
 	}
 
-	// Lexical intents matching
+	// Lexical intents token matching
 	if strings.Contains(text, "upgrade") || strings.Contains(text, "build") {
 		return h.Camp.HandleStructuralUpgrades(c)
 	}
-	if strings.Contains(text, "warehouse") || strings.Contains(text, "stock") || strings.Contains(text, "resources") {
-		return h.Econ.HandleEconPanel(c)
+	if strings.Contains(text, "warehouse") || strings.Contains(text, "stock") || strings.Contains(text, "resources") || strings.Contains(text, "inventory") {
+		return h.Econ.HandleWarehouseReserves(c)
+	}
+	if strings.Contains(text, "vault") || strings.Contains(text, "loan") || strings.Contains(text, "deposit") {
+		return h.Econ.HandleFinancialVault(c)
 	}
 	if strings.Contains(text, "scout") || strings.Contains(text, "find") {
 		return h.Combat.HandleRaidBoard(c)
@@ -55,7 +58,9 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if strings.Contains(text, "alliance") || strings.Contains(text, "clan") {
 		return h.Clan.HandleClanPanel(c)
 	}
+	if strings.Contains(text, "help") || strings.Contains(text, "guide") || strings.Contains(text, "tutorial") {
+		return h.Onboarding.HandleHelp(c)
+	}
 
-	// Default fallback response
 	return c.Send("🤖 SECURE SHELL: Intent not recognized. Please utilize the persistent interface options below.")
 }

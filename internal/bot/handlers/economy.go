@@ -18,7 +18,7 @@ func NewEconomyHandler(db *sql.DB) *EconomyHandler {
 	return &EconomyHandler{DB: db}
 }
 
-// HandleEconPanel renders the banking and trade hub
+// HandleEconPanel renders the banking and trade hub (Changes bottom menu to Economy Submenu)
 func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -53,42 +53,105 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🏦 SYSTEM ECONOMY & FINANCIAL CENTER\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Manage vault reserves or buy heavy war components.\n\n"+
-			"FINANCIAL LEDGERS:\n"+
-			"💵 Available Funds: $%.1f\n"+
-			"⚙️ Scrap Reserves: %.1f\n"+
+			"Outpost Name: Encampment Ledger\n"+
+			"Available Funds: $%.1f\n\n"+
+			"ACCOUNT BALANCES:\n"+
 			"🏦 Vault Savings: %.1f Scrap\n"+
 			"💳 Credit Debt: %.1f Scrap\n\n"+
-			"HEAVY WAR RESOURCES STOCK:\n"+
-			"🧱 Steel Stock: %.1f tons\n"+
-			"☢️ Uranium Stock: %.1f kg\n"+
-			"🎈 Hydrogen Stock: %.1f L\n\n"+
-			"MARKET VALUES:\n"+
-			"💵 Convert: Sell 100 Scrap -> Get $50.0\n"+
-			"🧱 Buy Steel Case: Cost $100 -> Get +50 Steel\n"+
-			"☢️ Buy Uranium Core: Cost $200 -> Get +20 Uranium\n"+
-			"🎈 Buy Hydrogen Fuel: Cost $150 -> Get +40 Hydrogen\n"+
+			"Select options on your bottom menu deck to access the Vault, Alliances, or Heavy Workshop.",
+		dollars, bankBalance, loanAmount,
+	)
+
+	// Changes Reply Keyboard context to Economy Submenu cleanly
+	return c.Send(panelText, keyboards.EconomyNavigation())
+}
+
+// HandleFinancialVault renders only the transaction inline buttons
+func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	var bankBalance float64
+	var loanAmount float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT balance, loan_amount FROM bank_accounts WHERE encampment_id = $1", campID).Scan(&bankBalance, &loanAmount)
+
+	var scrap, dollars float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🪙 VAULT & CREDIT OVERRIDE\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Scrap Reserves: %.1f\n"+
+			"Vault Savings: %.1f Scrap\n"+
+			"Credit Debt: %.1f Scrap\n\n"+
+			"Convert rate: Sell 100 Scrap -> Get $50.0\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		dollars, scrap, bankBalance, loanAmount, steel, uranium, hydrogen,
+		scrap, bankBalance, loanAmount,
 	)
 
 	selector := &telebot.ReplyMarkup{}
 
-	// Removed campID parameter completely to remain 64-byte safe (dynamic lookup used in callbacks)
 	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit")
-	btnBorrow := selector.Data("💳 Borrow 100 (Loan)", "bank_action", "borrow")
+	btnBorrow := selector.Data("💳 Borrow 100", "bank_action", "borrow")
 	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap")
-	btnBuySteel := selector.Data("🧱 Buy Steel", "market_buy", "buy_steel")
-	btnBuyUranium := selector.Data("☢️ Buy Uranium", "market_buy", "buy_uranium")
-	btnBuyHydrogen := selector.Data("🎈 Buy Hydrogen", "market_buy", "buy_hydrogen")
 
 	selector.Inline(
 		selector.Row(btnDeposit, btnBorrow),
 		selector.Row(btnSellScrap),
-		selector.Row(btnBuySteel, btnBuyUranium, btnBuyHydrogen),
 	)
 
 	return c.Send(panelText, selector)
+}
+
+// HandleWarehouseReserves renders the complete inventory grid of all 11 resources
+func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	var scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars float64
+	query := `
+		SELECT scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars 
+		FROM resources 
+		WHERE encampment_id = $1`
+
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &energy, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond, &dollars)
+
+	inventoryText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"📦 WAREHOUSE RESERVES GRID\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"FINANCIAL STOCK:\n"+
+			"💵 Available Cash: $%.1f\n\n"+
+			"SURVIVAL MATERIALS:\n"+
+			"⚙️ Scrap Metal: %.1f\n"+
+			"🥫 Food Rations: %.1f\n"+
+			"🔋 Energy Cells: %.1f\n\n"+
+			"HEAVY WAR METALS:\n"+
+			"🧱 Steel Stock: %.1f tons\n"+
+			"☢️ Uranium Stock: %.1f kg\n"+
+			"🎈 Hydrogen Stock: %.1f L\n\n"+
+			"HIGH-TECH PRECIOUS METALS:\n"+
+			"🪨 Iron Stock: %.1f\n"+
+			"🛢️ Oil Reserves: %.1f\n"+
+			"🪙 Gold Stock: %.1f\n"+
+			"🥈 Silver Stock: %.1f\n"+
+			"💎 Diamonds Stock: %.1f\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		dollars, scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond,
+	)
+
+	return c.Send(inventoryText, keyboards.CombatNavigation())
 }
 
 // HandleBankCallback processes transactional actions in the Bank (Dynamic campID lookup)
@@ -98,7 +161,6 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 
 	action := c.Args()[0]
 
-	// Resolve campID dynamically from Sender ID
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
@@ -137,7 +199,7 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	return h.HandleEconPanel(c)
+	return h.HandleFinancialVault(c)
 }
 
 // HandleMarketCallback processes item acquisitions (Dynamic campID lookup)
@@ -147,7 +209,6 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 
 	item := c.Args()[0]
 
-	// Resolve campID dynamically from Sender ID
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
@@ -194,5 +255,5 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	return h.HandleEconPanel(c)
+	return h.HandleFinancialVault(c)
 }
