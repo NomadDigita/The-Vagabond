@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -113,7 +112,7 @@ func main() {
 	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)
 	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources)
 
-	// Bottom-Dock Navigation Handlers
+	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
 	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
@@ -147,10 +146,9 @@ func main() {
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // Fallback local testing port
+		port = "8080"
 	}
 
-	// Register /health route for Render system checks
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("SYSTEM OPERATIONAL"))
@@ -168,7 +166,7 @@ func main() {
 	if selfPingURL != "" {
 		go func() {
 			log.Printf("Autonomous Keep-Alive Pinger active. target: %s", selfPingURL)
-			ticker := time.NewTicker(10 * time.Minute) // Ping self every 10 minutes
+			ticker := time.NewTicker(10 * time.Minute)
 			for range ticker.C {
 				resp, err := http.Get(selfPingURL)
 				if err != nil {
