@@ -115,7 +115,7 @@ func main() {
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
-	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
+	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard) // Aligned Listener to "Tactical Combat"
 	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
 
 	// Submenu Layer Handlers
@@ -124,7 +124,7 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
-	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
+	bot.Handle("📦 Warehouse Reserves", econ.HandleEconPanel) // Maps Warehouse directly to the resources HUD
 	bot.Handle("🪙 Financial Vault", econ.HandleEconPanel)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
@@ -191,10 +191,10 @@ func main() {
 	<-quit
 
 	log.Println("Termination request received. Initiating graceful shutdown protocol...")
-	
+
 	tickEngine.Stop()
 	realtimeListener.Stop()
 	db.Close()
-	
+
 	log.Println("System components cleanly dismantled. Server offline.")
 }

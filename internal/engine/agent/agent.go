@@ -51,8 +51,8 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, a := range agents {
-		// 1. Consume 2.0 energy cells as operation fuel
-		if a.Energy < 2.0 {
+		// 1. Consume 0.2 energy cells as operation fuel (Balanced Energy Upkeep)
+		if a.Energy < 0.2 {
 			// Energy depleted: Force shutdown agent task
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)
 
@@ -69,7 +69,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		// Deduct energy
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 2.0 WHERE encampment_id = $1", a.CampID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 0.2 WHERE encampment_id = $1", a.CampID)
 
 		// 2. Process action modes
 		switch a.Mode {

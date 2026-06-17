@@ -44,12 +44,12 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnFactory := menu.Text("🏭 Heavy Workshop")
+	btnStock := menu.Text("📦 Warehouse Reserves")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnFactory, btnBack),
+		menu.Row(btnStock, btnBack),
 	)
 
 	return menu
@@ -61,11 +61,12 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
+	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnBack),
+		menu.Row(btnFactory, btnBack),
 	)
 
 	return menu

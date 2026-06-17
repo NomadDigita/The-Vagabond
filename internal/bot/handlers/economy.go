@@ -74,12 +74,13 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 
-	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit", campID)
-	btnBorrow := selector.Data("💳 Borrow 100 (Loan)", "bank_action", "borrow", campID)
-	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap", campID)
-	btnBuySteel := selector.Data("🧱 Buy Steel", "market_buy", "buy_steel", campID)
-	btnBuyUranium := selector.Data("☢️ Buy Uranium", "market_buy", "buy_uranium", campID)
-	btnBuyHydrogen := selector.Data("🎈 Buy Hydrogen", "market_buy", "buy_hydrogen", campID)
+	// Removed campID parameter completely to remain 64-byte safe (dynamic lookup used in callbacks)
+	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit")
+	btnBorrow := selector.Data("💳 Borrow 100 (Loan)", "bank_action", "borrow")
+	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap")
+	btnBuySteel := selector.Data("🧱 Buy Steel", "market_buy", "buy_steel")
+	btnBuyUranium := selector.Data("☢️ Buy Uranium", "market_buy", "buy_uranium")
+	btnBuyHydrogen := selector.Data("🎈 Buy Hydrogen", "market_buy", "buy_hydrogen")
 
 	selector.Inline(
 		selector.Row(btnDeposit, btnBorrow),
@@ -87,16 +88,22 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		selector.Row(btnBuySteel, btnBuyUranium, btnBuyHydrogen),
 	)
 
-	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 
-// HandleBankCallback processes transactional actions in the Bank
+// HandleBankCallback processes transactional actions in the Bank (Dynamic campID lookup)
 func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	ctx := context.Background()
+	sender := c.Sender()
 
 	action := c.Args()[0]
-	campID := c.Args()[1]
+
+	// Resolve campID dynamically from Sender ID
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -133,12 +140,19 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	return h.HandleEconPanel(c)
 }
 
-// HandleMarketCallback processes item acquisitions
+// HandleMarketCallback processes item acquisitions (Dynamic campID lookup)
 func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 	ctx := context.Background()
+	sender := c.Sender()
 
 	item := c.Args()[0]
-	campID := c.Args()[1]
+
+	// Resolve campID dynamically from Sender ID
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {

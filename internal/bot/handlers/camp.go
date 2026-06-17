@@ -67,7 +67,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	return c.Send(panelText, keyboards.CampNavigation())
 }
 
-// HandleStructuralUpgrades renders ONLY the inline buttons to prevent Reply Keyboard conflicts
+// HandleStructuralUpgrades renders ONLY the inline buttons. Removed campID from buttons (64-byte safe).
 func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -102,10 +102,11 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 
-	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent", campID)
-	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap", campID)
-	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator", campID)
-	btnUpgradeCamp := selector.Data(fmt.Sprintf("🏛️ Core (%d)", campLvl+1), "upgrade_mod", "camp_core", campID)
+	// Passed only moduleType parameter to remain 64-byte safe
+	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent")
+	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap")
+	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator")
+	btnUpgradeCamp := selector.Data(fmt.Sprintf("🏛️ Core (%d)", campLvl+1), "upgrade_mod", "camp_core")
 
 	selector.Inline(
 		selector.Row(btnUpgradeTent, btnUpgradeHeap),
@@ -115,12 +116,19 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleUpgradeCallback manages the inline upgrade actions
+// HandleUpgradeCallback manages the inline upgrade actions (Dynamic campID lookup)
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
+	sender := c.Sender()
 
 	moduleType := c.Args()[0]
-	campID := c.Args()[1]
+
+	// Dynamically resolve campID inside handler to prevent 64-byte callback errors
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {

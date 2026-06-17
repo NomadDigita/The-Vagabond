@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -22,7 +21,7 @@ func NewCombatHandler(db *sql.DB) *CombatHandler {
 	return &CombatHandler{DB: db}
 }
 
-// HandleRaidBoard displays other player bases available for attack
+// HandleRaidBoard displays player targets and offline AI training skirmishes (64-byte safe)
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -89,9 +88,8 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
 
-	if len(targets) == 0 {
-		dashboard += "⚠️ SENSORS CLEAN: No other active outposts detected in range."
-	} else {
+	// Print players target listings
+	if len(targets) > 0 {
 		for i, t := range targets {
 			steps := math.Abs(float64(t.x-myX)) + math.Abs(float64(t.y-myY))
 			if steps == 0 {
@@ -100,10 +98,20 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 			marchTime := int(steps * 15)
 
 			dashboard += fmt.Sprintf("[%d] Outpost: %s (Sector %d,%d)\n    Commander: %s\n    Travel Steps: %.0f | March Time: %ds\n    Estimated Loot: %.1f Scrap\n\n", i+1, t.name, t.x, t.y, t.owner, steps, marchTime, t.lootable)
-			btn := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", myCampID, t.id, fmt.Sprintf("%.0f", steps))
+			// Only passed the target defender ID to be 64-byte safe (attacker lookup dynamically resolved)
+			btn := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", t.id)
 			buttons = append(buttons, selector.Row(btn))
 		}
 	}
+
+	// Add Offline AI Skirmish Mode target
+	dashboard += "🤖 AI TRAINING SKIRMISH TARGETS:\n" +
+		"[AI] Rogue Drone Nest (Sector 1,1)\n" +
+		"    Loot Yield: +50 Scrap | March Time: 15s\n\n"
+
+	btnAI := selector.Data("🤖 Skirmish Rogue Drones", "launch_raid", "ai_drone_nest")
+	buttons = append(buttons, selector.Row(btnAI))
+
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
@@ -156,7 +164,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	btnRaid := selector.Data("⚔️ Launch Staged Expedition", "launch_raid", "dummy", tID, "5")
+	btnRaid := selector.Data("⚔️ Launch Staged Expedition", "launch_raid", tID)
 
 	selector.Inline(selector.Row(btnRaid))
 
@@ -166,18 +174,16 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 // HandleLaunchRaidCallback registers a marching raid inside the database and alerts the defender
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
+	sender := c.Sender()
 
-	attackerCampID := c.Args()[0]
-	defenderCampID := c.Args()[1]
-	stepsStr := c.Args()[2]
+	defenderCampID := c.Args()[0]
 
-	if attackerCampID == "dummy" {
-		sender := c.Sender()
-		_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
+	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
+	var attackerCampID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
 	}
-
-	steps, _ := strconv.ParseFloat(stepsStr, 64)
-	marchDuration := time.Duration(steps*15) * time.Second
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -185,14 +191,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	requiredRations := steps * 10.0
-	var rations float64
-	_ = tx.QueryRowContext(ctx, "SELECT rations FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerCampID).Scan(&rations)
-
-	if rations < requiredRations {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Rations! Need %.0f food.", requiredRations)})
-	}
-
+	// Normal Player Flow Checks
 	var troopCount int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
 	if err != nil {
@@ -206,13 +205,30 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
 
+	marchDuration := 15 * time.Second
+	resolveTime := time.Now().Add(marchDuration)
+
+	// If AI Target selection
+	if defenderCampID == "ai_drone_nest" {
+		insertRaid := `
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
+			VALUES ($1, '00000000-0000-0000-0000-000000000000', 'marching', $2)
+			RETURNING id`
+		var raidID string
+		err = tx.QueryRowContext(ctx, insertRaid, attackerCampID, resolveTime).Scan(&raidID)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register skirmish."})
+		}
+		_ = tx.Commit()
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🤖 Skirmish launched! Marching on Drone Nest..."})
+		return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
+	}
+
+	// Normal PvP Flow
 	var defenderName string
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", defenderCampID).Scan(&defenderName, &defenderUserID)
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - $1 WHERE encampment_id = $2", requiredRations, attackerCampID)
-
-	resolveTime := time.Now().Add(marchDuration)
 	var raidID string
 	insertRaid := `
 		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
@@ -302,17 +318,15 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap. Speed Up costs 100."})
 		}
 
-		// Deduct scrap and advance arrival time by 30 seconds
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0 WHERE encampment_id = $1", attackerID)
 		newResolve := resolveTime.Add(-30 * time.Second)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 seconds."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced."})
 		resolveTime = newResolve
 
 	case "abort":
-		// Cancel the raid instantly
 		_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted! Troops recalled to barracks."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted!"})
 		_ = tx.Commit()
 		return c.Send("↩️ Expedition aborted. Forces returned safely to barracks.", keyboards.MainNavigation())
 	}
