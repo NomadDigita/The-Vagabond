@@ -130,7 +130,8 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		selector.Row(btnModeCollector, btnModeBuilder),
 	)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
+	return c.Send(panelText, selector)
 }
 
 // HandleToggleAgentCallback handles switching the active state with premium checks

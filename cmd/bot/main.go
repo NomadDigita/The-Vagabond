@@ -88,6 +88,7 @@ func main() {
 	world := handlers.NewWorldHandler(db)
 	econ := handlers.NewEconomyHandler(db)
 	clan := handlers.NewClanHandler(db)
+	factory := handlers.NewFactoryHandler(db)
 
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -98,15 +99,15 @@ func main() {
 	bot.Handle("/econ", econ.HandleEconPanel)
 	bot.Handle("/clan", clan.HandleClanPanel)
 	bot.Handle("/scout", combat.HandleScout)
+	bot.Handle("/factory", factory.HandleFactoryPanel)
 
-	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
 	bot.Handle("/admin_give", admin.HandleAdminGive)
 	bot.Handle("/admin_faction", admin.HandleAdminFaction)
-	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)     // Added
-	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources) // Added
+	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)
+	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources)
 
 	// Bottom-Dock Multi-layered Navigation Handlers
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
@@ -120,8 +121,10 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
+	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
 	bot.Handle("🪙 Financial Vault", econ.HandleEconPanel)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
+	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Button Callbacks
@@ -136,6 +139,7 @@ func main() {
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
+	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 
 	go func() {
 		log.Println("Active long-polling loop engaged. System operational.")
@@ -147,10 +151,10 @@ func main() {
 	<-quit
 
 	log.Println("Termination request received. Initiating graceful shutdown protocol...")
-
+	
 	tickEngine.Stop()
 	realtimeListener.Stop()
 	db.Close()
-
+	
 	log.Println("System components cleanly dismantled. Server offline.")
 }

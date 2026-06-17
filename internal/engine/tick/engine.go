@@ -228,9 +228,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if defLevel == 0 {
 			defLevel = 1
 		}
-		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
+		
+		// 1. Calculate heavy weapon modifiers
+		var attackerTanks int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT fusion_tanks FROM workshop_inventory WHERE encampment_id = $1), 0)", r.attackerID).Scan(&attackerTanks)
+		
+		var defenderShields int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID).Scan(&defenderShields)
 
-		attackerOffenseRating := float64(attackForce) * 15.0
+		// 2. Check if defender has an active autopilot Agent for 3.0x defense multiplier
+		var defenderAgentActive bool
+		_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
+
+		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
+		if defenderAgentActive {
+			defenseShieldMultiplier += 3.0 // 3.0x Automated Agent Autopilot defense boost
+		}
+
+		attackerOffenseRating := (float64(attackForce) * 15.0) * (1.0 + (float64(attackerTanks) * 0.50)) // Fusion Tanks: +50% Offense
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseShieldMultiplier
 
 		attackerCasualties := 0
@@ -255,7 +270,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var defenderScrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
 
-		stolenScrap := defenderScrap * 0.40
+		lootPercentage := 0.40
+		if defenderShields > 0 {
+			lootPercentage = 0.20 // Nuclear Shielding reduces loot loss by 50%
+		}
+
+		stolenScrap := defenderScrap * lootPercentage
 		if stolenScrap < 0 {
 			stolenScrap = 0
 		}

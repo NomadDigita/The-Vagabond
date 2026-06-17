@@ -74,10 +74,10 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		// 2. Process action modes
 		switch a.Mode {
 		case "collector":
-			// Generate +2.0 Scrap and +1.0 Rations
+			// Generate +20.0 Scrap and +10.0 Rations (10x Automated Agent Boost)
 			updateCollector := `
 				UPDATE resources 
-				SET scrap = scrap + 2.00, rations = rations + 1.00 
+				SET scrap = scrap + 20.00, rations = rations + 10.00 
 				WHERE encampment_id = $1`
 			_, err = tx.ExecContext(ctx, updateCollector, a.CampID)
 			if err != nil {

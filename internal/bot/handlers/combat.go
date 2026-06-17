@@ -107,7 +107,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
-	return c.Send(dashboard, selector, keyboards.CombatNavigation())
+	return c.Send(dashboard, selector)
 }
 
 // HandleScout performs a username-based target search
@@ -160,7 +160,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 
 	selector.Inline(selector.Row(btnRaid))
 
-	return c.Send(report, selector, keyboards.CombatNavigation())
+	return c.Send(report, selector)
 }
 
 // HandleLaunchRaidCallback registers a marching raid inside the database and alerts the defender
