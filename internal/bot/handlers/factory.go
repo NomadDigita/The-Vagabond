@@ -19,7 +19,7 @@ func NewFactoryHandler(db *sql.DB) *FactoryHandler {
 	return &FactoryHandler{DB: db}
 }
 
-// HandleFactoryPanel renders the complete military assembly and logistics hangar HUD
+// HandleFactoryPanel renders the maternal heavy workshop intro and updates bottom menu context
 func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -36,59 +36,103 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Fetch Workshop Inventory
-	var tanks, shields, soldiers, drones, jets, mechs, nukes, buggies, ships int
-	queryInv := `
-		SELECT fusion_tanks, nuclear_shields, soldiers, drones, jets, mechs, nukes, COALESCE(buggies, 0), COALESCE(ships, 0) 
-		FROM workshop_inventory WHERE encampment_id = $1`
-	err = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&tanks, &shields, &soldiers, &drones, &jets, &mechs, &nukes, &buggies, &ships)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1)", campID)
-	}
+	panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"🏭 HEAVY WORKSHOP SECTOR SYSTEMS\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"Outpost Name: Military Engineering\n\n" +
+		"Select options on your bottom menu deck to recruit troops or craft logistics vehicles."
 
-	var steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
-	queryRes := `SELECT steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond)
+	return c.Send(panelText, keyboards.WorkshopNavigation())
+}
+
+// HandleRecruitPanel renders barracks forge options with inline buttons
+func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
+	_ = c.Notify(gopkg.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	var soldiers, drones, mechs, nukes int
+	queryInv := `SELECT soldiers, drones, mechs, nukes FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes)
+
+	var rations, iron, steel, uranium, gold, diamond float64
+	queryRes := `SELECT rations, iron, steel, uranium, gold, diamond FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &iron, &steel, &uranium, &gold, &diamond)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🏭 MILITARY ASSEMBLY & WORKSHOP FORGE\n"+
+			"🪖 BARRACKS RECRUITMENT FORGE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"BARRACKS STOCKS:\n"+
-			"🪖 Soldiers: %d | 🛰️ Drones: %d | 🤖 Mechs: %d\n"+
-			"🚜 Fusion Tanks: %d | 🛡️ Nuclear Shields: %d | ☢️ Nukes: %d\n\n"+
-			"LOGISTICS HANGAR STOCKS:\n"+
-			"🚗 Scrap Buggies: %d | ⛵ Clipper Ships: %d | ✈️ Cargo Jets: %d\n\n"+
+			"🪖 Soldiers: %d | 🛰️ Drones: %d\n"+
+			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🪖 [Soldier] — Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
 			"🛰️ [Spy Drone] — Cost: 100 Iron, 10 Silver (+25 Offense)\n"+
-			"✈️ [Fighter Jet] — Cost: 400 Iron, 50 Oil, 50 Hydrogen (+120 Offense)\n"+
 			"🤖 [Colossus Mech] — Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
 			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 100 Gold, 10 Diamonds (+1500 Offense)\n"+
-			"🚗 [Scrap Buggy] — Cost: 100 Steel, 20 Oil (Land travel +25%% speed)\n"+
-			"⛵ [Clipper Ship] — Cost: 300 Steel, 50 Wood (Required to cross oceans)\n"+
-			"✈️ [Cargo Jet] — Cost: 1000 Steel, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		soldiers, drones, mechs, tanks, shields, nukes, buggies, ships, jets,
+		soldiers, drones, mechs, nukes,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
 
 	btnCraftSoldier := selector.Data("🪖 Recruit Soldier", "craft_item", "soldier")
 	btnCraftDrone := selector.Data("🛰️ Assemble Drone", "craft_item", "drone")
-	btnCraftJet := selector.Data("✈️ Build Jet", "craft_item", "jet")
 	btnCraftMech := selector.Data("🤖 Forge Mech", "craft_item", "mech")
 	btnCraftNuke := selector.Data("☢️ Forge Nuke", "craft_item", "nuke")
-	btnCraftBuggy := selector.Data("🚗 Craft Buggy", "craft_item", "buggy")
-	btnCraftShip := selector.Data("⛵ Craft Ship", "craft_item", "ship")
-	btnCraftCargoJet := selector.Data("✈️ Craft Cargo Jet", "craft_item", "cargo_jet")
 
 	selector.Inline(
 		selector.Row(btnCraftSoldier, btnCraftDrone),
-		selector.Row(btnCraftJet, btnCraftMech),
-		selector.Row(btnCraftNuke),
+		selector.Row(btnCraftMech, btnCraftNuke),
+	)
+
+	return c.Send(panelText, selector)
+}
+
+// HandleVehiclesPanel renders logistics hangar options with inline buttons
+func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
+	_ = c.Notify(gopkg.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	var buggies, ships, jets int
+	queryInv := `SELECT COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&buggies, &ships, &jets)
+
+	var steel, oil, hydrogen float64
+	queryRes := `SELECT steel, oil, hydrogen FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&steel, &oil, &hydrogen)
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🚗 LOGISTICS HANGAR FORGE\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🚗 Scrap Buggies: %d | ⛵ Clipper Ships: %d | ✈️ Cargo Jets: %d\n\n"+
+			"MANUFACTURING BLUEPRINTS:\n"+
+			"🚗 [Scrap Buggy] — Cost: 100 Steel, 20 Oil (Land travel +25%% speed)\n"+
+			"⛵ [Clipper Ship] — Cost: 300 Steel (Required to cross oceans)\n"+
+			"✈️ [Cargo Jet] — Cost: 1000 Steel, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		buggies, ships, jets,
+	)
+
+	selector := &gopkg.ReplyMarkup{}
+
+	btnCraftBuggy := selector.Data("🚗 Craft Scrap Buggy", "craft_item", "buggy")
+	btnCraftShip := selector.Data("⛵ Craft Clipper Ship", "craft_item", "ship")
+	btnCraftJet := selector.Data("✈️ Craft Cargo Jet", "craft_item", "cargo_jet")
+
+	selector.Inline(
 		selector.Row(btnCraftBuggy, btnCraftShip),
-		selector.Row(btnCraftCargoJet),
+		selector.Row(btnCraftJet),
 	)
 
 	return c.Send(panelText, selector)
@@ -185,5 +229,9 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	return h.HandleFactoryPanel(c)
+	// Refreshes panel context cleanly depending on what was bought
+	if item == "buggy" || item == "ship" || item == "cargo_jet" {
+		return h.HandleVehiclesPanel(c)
+	}
+	return h.HandleRecruitPanel(c)
 }

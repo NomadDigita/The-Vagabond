@@ -300,20 +300,28 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	var troopCount int
-	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
+	// Resolved Combat Gate: Read military quantities directly from workshop_inventory
+	var soldiers, drones, jets, mechs, nukes, tanks int
+	queryForces := `
+		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
+		FROM workshop_inventory 
+		WHERE encampment_id = $1`
+	
+	err = tx.QueryRowContext(ctx, queryForces, attackerCampID).Scan(&soldiers, &drones, &jets, &mechs, &nukes, &tanks)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error querying troop configurations."})
+		log.Printf("Failed querying barracks stocks for %s: %v", attackerCampID, err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error reading military arrays."})
 	}
 
+	troopCount := soldiers + drones + jets + mechs + nukes + tanks
 	if troopCount <= 0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: You must have at least 1 unit to raid."})
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: You must have at least 1 Soldier, Drone, Jet, or Mech in your barracks to launch a raid."})
 	}
 
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
 
-	var tanks, mechs, ships, jets int
+	var ships int // Removed redeclarations of tanks, mechs, and jets
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0), COALESCE(ships, 0), COALESCE(jets, 0) FROM workshop_inventory WHERE encampment_id = $1", attackerCampID).Scan(&tanks, &mechs, &ships, &jets)
 
 	// If AI Target selection

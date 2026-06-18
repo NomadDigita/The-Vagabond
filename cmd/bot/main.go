@@ -130,6 +130,7 @@ func main() {
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
 	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
 	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
+	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 
 	// Admin sub-navigation panel routing
 	bot.Handle("🏛️ Admin Terminal", admin.HandleAdminPanel)
@@ -143,7 +144,7 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🧪 Research Lab", camp.HandleCamp)
 	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel)
-	bot.Handle("⛏️ Active Mining", camp.HandleActiveMining) // Mapped manual mining keyboard trigger
+	bot.Handle("⛏️ Active Mining", camp.HandleActiveMining)
 	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
@@ -152,6 +153,9 @@ func main() {
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("🏟️ Combat Arena", arena.HandleArenaPanel)
 	bot.Handle("☢️ Strategic Silo", silo.HandleSiloPanel)
+	bot.Handle("💱 Market Exchange", econ.HandleEconPanel)
+	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)   // Mapped Recruit submenu keyboard
+	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel) // Mapped Vehicles submenu keyboard
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Map all plain text inputs to our Natural Language intent router
@@ -178,7 +182,7 @@ func main() {
 	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
 	bot.Handle("\flaunch_icbm", silo.HandleLaunchICBMCallback)
 	bot.Handle("\fmine_action", camp.HandleMineCallback)
-	bot.Handle("\fhero_action", hero.HandleHeroCallback) // Mapped Hero training & healing callback
+	bot.Handle("\fhero_action", hero.HandleHeroCallback)
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

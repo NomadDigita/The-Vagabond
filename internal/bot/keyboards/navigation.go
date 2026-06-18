@@ -12,12 +12,13 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnCamp := menu.Text("⛺ Outpost Camp")
 	btnCombat := menu.Text("⚔️ Tactical Combat")
 	btnEcon := menu.Text("🏦 System Economy")
+	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
 	menu.Reply(
 		menu.Row(btnHQ, btnCamp),
 		menu.Row(btnCombat, btnEcon),
-		menu.Row(btnAdmin),
+		menu.Row(btnFactory, btnAdmin),
 	)
 
 	return menu
@@ -49,12 +50,11 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnStock := menu.Text("📦 Warehouse Reserves")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnStock, btnBack),
+		menu.Row(btnBack),
 	)
 
 	return menu
@@ -66,30 +66,44 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
-	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnExchange := menu.Text("💱 Market Exchange")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnFactory, btnExchange),
+		menu.Row(btnExchange, btnBack),
+	)
+
+	return menu
+}
+
+// WorkshopNavigation builds the custom submenu for vehicles and troop forging.
+func WorkshopNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnRecruit := menu.Text("🪖 Recruit Troops")
+	btnVehicles := menu.Text("🚗 Logistics Vehicles")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnRecruit, btnVehicles),
 		menu.Row(btnBack),
 	)
 
 	return menu
 }
 
-// AdminNavigation builds the restricted console submenu for developers.
+// AdminNavigation builds the custom submenu for administrator actions.
 func AdminNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnTick := menu.Text("⚡ Force Master Tick")
-	btnGive := menu.Text("🪙 Inject Resources")
+	btnResources := menu.Text("🪙 Inject Resources")
 	btnMetrics := menu.Text("🛰️ Server Metrics")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
-		menu.Row(btnTick, btnGive),
+		menu.Row(btnTick, btnResources),
 		menu.Row(btnMetrics, btnBack),
 	)
 

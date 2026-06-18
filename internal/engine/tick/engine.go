@@ -213,22 +213,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, r := range raids {
-		var attackForce int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", r.attackerID).Scan(&attackForce)
+		var soldiersAttacker, dronesAttacker, jetsAttacker, mechsAttacker int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&soldiersAttacker, &dronesAttacker, &jetsAttacker, &mechsAttacker)
 
-		var defenseForce int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", r.defenderID).Scan(&defenseForce)
+		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
 
-		if attackForce == 0 {
-			attackForce = 1
-		}
+		attackForce := soldiersAttacker + dronesAttacker + jetsAttacker + mechsAttacker
+		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
 		var defLevel int
 		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID).Scan(&defLevel)
 		if defLevel == 0 {
 			defLevel = 1
 		}
-		
+
 		var attackerTanks, attackerMechs int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks, &attackerMechs)
 		
@@ -258,12 +257,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if attackerCasualties > 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
 		}
 		if defenderCasualties > 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
 		}
-		_, _ = tx.ExecContext(ctx, "DELETE FROM units WHERE quantity <= 0")
 
 		var defenderScrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
