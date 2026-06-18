@@ -48,7 +48,10 @@ The-Vagabond/
     ├── 001_initial_schema.sql      # Core Relational DB Tables
     └── 002_realtime_triggers.sql   # Postgres Realtime Push Notify Triggers
 
-    ⚙️ Environment Configuration
+```
+
+## ⚙️ Environment Configuration
+
 Create a .env file at the root level of your project directory using the parameters below:
 # Runtime Environment
 APP_ENV=development
