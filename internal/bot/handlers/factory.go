@@ -78,6 +78,7 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 		selector.Row(btnCraftJet),
 	)
 
+	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 

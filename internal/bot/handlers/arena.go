@@ -18,7 +18,7 @@ func NewArenaHandler(db *sql.DB) *ArenaHandler {
 	return &ArenaHandler{DB: db}
 }
 
-// HandleArenaPanel renders the matchmaking queue status panel
+// HandleArenaPanel renders the matchmaking queue status panel (No markup conflict)
 func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -35,7 +35,6 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Query active queue sizes
 	var q1, q2, q3 int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM arena_queue WHERE bracket = '1v1'").Scan(&q1)
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM arena_queue WHERE bracket = '2v2'").Scan(&q2)
@@ -70,6 +69,7 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 		selector.Row(btnJoin3),
 	)
 
+	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 
@@ -86,14 +86,12 @@ func (h *ArenaHandler) HandleJoinQueueCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Verify player is not already in the queue
 	var exists bool
 	_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM arena_queue WHERE user_id = $1)", sender.ID).Scan(&exists)
 	if exists {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already queued: Wait for a match."})
 	}
 
-	// 2. Deduct entry fee
 	var dollars float64
 	_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1) FOR UPDATE", sender.ID).Scan(&dollars)
 
@@ -113,7 +111,6 @@ func (h *ArenaHandler) HandleJoinQueueCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", entryFee, sender.ID)
 
-	// 3. Insert into queue
 	_, err = tx.ExecContext(ctx, "INSERT INTO arena_queue (user_id, bracket) VALUES ($1, $2)", sender.ID, bracket)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing queue record."})

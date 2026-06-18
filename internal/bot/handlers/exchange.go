@@ -90,6 +90,7 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
 
+	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 
@@ -133,7 +134,6 @@ func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 		price = 300.0
 	}
 
-	// Insert into exchange table
 	query := `
 		INSERT INTO market_exchange (seller_id, item_type, quantity, price_dollars, is_sold) 
 		VALUES ($1, $2, $3, $4, FALSE)`
@@ -183,7 +183,6 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already sold."})
 	}
 
-	// Verify buyer has enough Dollars
 	var dollars float64
 	_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&dollars)
 
@@ -191,11 +190,9 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Cash! Need $%.0f.", price)})
 	}
 
-	// Perform currency exchanges
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", price, myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", price, sellerID)
 
-	// Transfer resource to buyer
 	columnName := "steel"
 	if itemType == "uranium" {
 		columnName = "uranium"
@@ -203,10 +200,8 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	queryTransfer := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", columnName, columnName)
 	_, _ = tx.ExecContext(ctx, queryTransfer, qty, myCampID)
 
-	// Mark listing as sold
 	_, _ = tx.ExecContext(ctx, "UPDATE market_exchange SET is_sold = TRUE WHERE id = $1", listingID)
 
-	// Queue notification to seller
 	var sellerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", sellerID).Scan(&sellerUserID)
 	alertMsg := fmt.Sprintf("💱 MARKET SALE: Another player has purchased your public listing for %d %s. +$%.0f transferred instantly to reserves.", qty, itemType, price)

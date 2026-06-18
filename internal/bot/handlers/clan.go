@@ -19,7 +19,7 @@ func NewClanHandler(db *sql.DB) *ClanHandler {
 	return &ClanHandler{DB: db}
 }
 
-// HandleClanPanel renders alliance alignments, active wars, and target declarations
+// HandleClanPanel renders alliance alignments, active wars, and target declarations (Clean split HUD)
 func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -51,7 +51,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		FROM user_clans uc
 		JOIN clans c ON c.id = uc.clan_id
 		WHERE uc.user_id = $1`
-
+	
 	err = h.DB.QueryRowContext(ctx, queryUserClan, sender.ID).Scan(&clanID, &clanName, &role)
 
 	selector := &telebot.ReplyMarkup{}
@@ -67,6 +67,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		btnCreate := selector.Data("🛡️ Establish New Clan", "create_clan", campID)
 		selector.Inline(selector.Row(btnCreate))
 
+		// Removed reply markup parameter so that inline buttons display successfully
 		return c.Send(panelText, selector)
 	}
 
@@ -160,7 +161,7 @@ func (h *ClanHandler) HandleLeaveClanCallback(c telebot.Context) error {
 	return h.HandleClanPanel(c)
 }
 
-// HandleDeclareClanWarCallback triggers instant clan matches declarations
+// HandleDeclareClanWarCallback triggers clan war declarations
 func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
@@ -173,10 +174,10 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 		WHERE id != $1 
 		ORDER BY RANDOM() 
 		LIMIT 1`
-
+	
 	err := h.DB.QueryRowContext(ctx, queryEnemy, clanID).Scan(&enemyClanID, &enemyClanName)
 	if errors.Is(err, sql.ErrNoRows) {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Scanning: No equivalent rivals detected in local zones."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Scanning: No equivalent rivals detected."})
 	}
 
 	alert := fmt.Sprintf(
