@@ -124,7 +124,7 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 		SELECT scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars 
 		FROM resources 
 		WHERE encampment_id = $1`
-
+	
 	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &energy, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond, &dollars)
 
 	inventoryText := fmt.Sprintf(
