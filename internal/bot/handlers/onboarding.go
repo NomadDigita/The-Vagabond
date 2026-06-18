@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -31,7 +32,6 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// 1. Check if user already exists (COALESCE converts NULL database fields to empty strings to prevent compiler scan crashes)
 	var user models.User
 	queryUser := `SELECT telegram_id, username, first_name, state, COALESCE(faction, '') FROM users WHERE telegram_id = $1`
 	err := h.DB.QueryRowContext(ctx, queryUser, sender.ID).Scan(&user.TelegramID, &user.Username, &user.FirstName, &user.State, &user.Faction)
@@ -41,16 +41,17 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			return h.renderFactionChoice(c, sender.ID)
 		}
 
-		// Existing Player Found: Render Home Terminal HQ
 		var camp models.Encampment
 		var res models.Resources
+		var region string
 		queryCamp := `
-			SELECT e.name, r.scrap, r.rations, r.energy 
+			SELECT e.name, r.scrap, r.rations, r.energy, c.region 
 			FROM encampments e
 			JOIN resources r ON r.encampment_id = e.id
+			JOIN coordinates c ON c.id = e.coordinate_id
 			WHERE e.user_id = $1`
-
-		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.Name, &res.Scrap, &res.Rations, &res.Energy)
+		
+		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.Name, &res.Scrap, &res.Rations, &res.Energy, &region)
 		if err != nil {
 			log.Printf("Failed to query existing player details: %v", err)
 			return c.Send("⚠️ System error reclaiming session database.", keyboards.MainNavigation())
@@ -64,6 +65,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Welcome back, Commander %s.\n\n"+
 				"Faction: %s\n"+
+				"🌍 Territory: Encampment located in [%s]\n"+
 				"⛺ Encampment: %s\n"+
 				"📍 Location: [X: 0, Y: 0] (Secure Core Zone)\n\n"+
 				"CURRENT RESOURCE BALANCES:\n"+
@@ -72,7 +74,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"🔋 Energy Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Use /help to view command walkthroughs.",
-			user.FirstName, formatFactionLabel(user.Faction), camp.Name, res.Scrap, res.Rations, res.Energy,
+			user.FirstName, formatFactionLabel(user.Faction), region, camp.Name, res.Scrap, res.Rations, res.Energy,
 		)
 		return c.Send(dashboard, keyboards.MainNavigation())
 	}
@@ -110,7 +112,6 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 	return c.Send(welcomeText, selector)
 }
 
-// HandleHelp renders the complete interactive system tutorial walkthrough
 func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -134,7 +135,7 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	return c.Send(helpManual, keyboards.MainNavigation())
 }
 
-// HandleFactionCallback writes registration details depending on faction selection
+// HandleFactionCallback writes registration details and assigns a random global continent region
 func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	ctx := context.Background()
 
@@ -165,15 +166,19 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database writing registration error."})
 	}
 
+	// Dynamic Global Continent Spawning
+	continents := []string{"Africa", "Europe", "Asia", "Americas"}
+	spawnedContinent := continents[rand.Intn(len(continents))]
+
 	var coordID string
-	queryCoord := `SELECT id FROM coordinates WHERE x = 0 AND y = 0`
-	err = tx.QueryRowContext(ctx, queryCoord).Scan(&coordID)
+	queryCoord := `SELECT id FROM coordinates WHERE x = 0 AND y = 0 AND region = $1`
+	err = tx.QueryRowContext(ctx, queryCoord, spawnedContinent).Scan(&coordID)
 	if errors.Is(err, sql.ErrNoRows) {
 		insertCoord := `
-			INSERT INTO coordinates (x, y, biome, danger_level) 
-			VALUES (0, 0, 'wasteland', 1) 
+			INSERT INTO coordinates (x, y, biome, danger_level, region, terrain) 
+			VALUES (0, 0, 'wasteland', 1, $1, 'wasteland') 
 			RETURNING id`
-		err = tx.QueryRowContext(ctx, insertCoord).Scan(&coordID)
+		err = tx.QueryRowContext(ctx, insertCoord, spawnedContinent).Scan(&coordID)
 		if err != nil {
 			log.Printf("Failed creating coordinates: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mapping allocation error."})
@@ -195,13 +200,12 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		// 4. Calculate starting bonuses (10x Provisioning Boost for Day 1 Upgrades)
 		startingScrap := 1000.0
 		startingEnergy := 250.0
 		if faction == "steel_vanguard" {
-			startingEnergy += 500.0 // Vanguard starts with 750.0 Energy
+			startingEnergy += 500.0
 		} else {
-			startingScrap += 1500.0 // Nomads starts with 2,500.0 Scrap
+			startingScrap += 1500.0
 		}
 
 		insertRes := `
@@ -225,9 +229,10 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			"🛰️ COGNITIVE CORE BOOTED\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Welcome to the wastes, Commander %s.\n"+
-			"Your terminal is now integrated into [%s].\n\n"+
+			"Your terminal is now integrated into [%s].\n"+
+			"Your base has successfully spawned in territory: [%s]\n\n"+
 			"Ready to check your commander statistics or modules.",
-		sender.FirstName, formatFactionLabel(faction),
+		sender.FirstName, formatFactionLabel(faction), spawnedContinent,
 	)
 
 	return c.Send(welcome, keyboards.MainNavigation())
