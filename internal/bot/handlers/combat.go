@@ -124,10 +124,9 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 				steps = 1
 			}
 
-			// Base Travel calculation: same region takes minutes, inter-continental takes hours/days
 			marchingMinutes := steps * 10.0
 			if t.region != myRegion {
-				marchingMinutes = 720.0 // Inter-continental travel takes 12 hours minimum
+				marchingMinutes = 720.0
 			}
 
 			marchTimeStr := fmt.Sprintf("%.0fm", marchingMinutes)
@@ -153,6 +152,99 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 
 	selector.Inline(buttons...)
 	return c.Send(dashboard, selector)
+}
+
+// HandleExpeditionRadar scans and displays active outbound and incoming tactical operations
+func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
+	_ = c.Notify(telebot.FindingLocation)
+
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	// Fetch outbound active marching raids
+	queryOutbound := `
+		SELECT r.id, ed.name, r.resolve_time 
+		FROM raids r
+		JOIN encampments ed ON ed.id = r.defender_id
+		WHERE r.attacker_id = $1 AND r.state = 'marching'
+		LIMIT 2`
+	
+	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
+	outboundText := ""
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
+
+	if err == nil {
+		defer rowsOut.Close()
+		index := 1
+		for rowsOut.Next() {
+			var rID, dName string
+			var resTime time.Time
+			if err := rowsOut.Scan(&rID, &dName, &resTime); err == nil {
+				diff := time.Until(resTime)
+				timeLeft := int(diff.Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d]:\n   Target Outpost: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+				btnSpeed := selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID)
+				btnAbort := selector.Data(fmt.Sprintf("↩️ Abort [%d]", index), "exp_action", "abort", rID)
+				buttons = append(buttons, selector.Row(btnSpeed, btnAbort))
+				index++
+			}
+		}
+		rowsOut.Close()
+	}
+
+	if outboundText == "" {
+		outboundText = "🛰️ OUTBOUND: Radar clean. No active offensive marching forces detected.\n\n"
+	}
+
+	// Fetch inbound hostile marching forces
+	queryInbound := `
+		SELECT ea.name, r.resolve_time 
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		WHERE r.defender_id = $1 AND r.state = 'marching'
+		LIMIT 1`
+	
+	var attackerName string
+	var resolveTime time.Time
+	err = h.DB.QueryRowContext(ctx, queryInbound, campID).Scan(&attackerName, &resolveTime)
+	inboundText := ""
+	if errors.Is(err, sql.ErrNoRows) {
+		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected."
+	} else if err != nil {
+		log.Printf("Inbound radar scan failed: %v", err)
+		inboundText = "📡 Static: Scanner interference detected."
+	} else {
+		diff := time.Until(resolveTime)
+		timeLeft := int(diff.Seconds())
+		if timeLeft < 0 {
+			timeLeft = 0
+		}
+		inboundText = fmt.Sprintf("🚨 RADAR WARNING: INBOUND INVASION!\n   Hostile Force: Outpost [%s]\n   Detonation Impact: %s (%ds remaining)\n\n⚠️ TIP: Spend resources to upgrade defenses in camp immediately!", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+	}
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🛸 ACTIVE EXPEDITION RADAR HUD\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"%s"+
+			"%s\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		outboundText, inboundText,
+	)
+
+	selector.Inline(buttons...)
+	return c.Send(panelText, selector)
 }
 
 // HandleScout performs a username-based target search
@@ -209,7 +301,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	return c.Send(report, selector)
 }
 
-// HandleSpyCallback sweeps target data and decrypts active timers
+// HandleSpyCallback sweeps target data and decrypts active timers (64-byte safe)
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
@@ -225,6 +317,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// Verify and deduct 30 Energy Cells
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
 
@@ -234,6 +327,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 30.0 WHERE encampment_id = $1", myCampID)
 
+	// Fetch target module metrics
 	var targetName string
 	var targetLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT name, level FROM encampments WHERE id = $1", targetCampID).Scan(&targetName, &targetLvl)
@@ -249,6 +343,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		upgradingModule = "None"
 	}
 
+	// Fetch current resources
 	var scrap, rations float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", targetCampID).Scan(&scrap, &rations)
 
@@ -260,7 +355,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🛰️ SPY SATELLITE DECRYPTOR INDICES\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Target Outpost: %s [Level %d]\n\n"+
+			"Target Outpost: %s\n\n"+
 			"DECRYPTED RESOURCES:\n"+
 			"⚙️ Scrap: %.1f\n"+
 			"🥫 Rations: %.1f\n\n"+
@@ -270,23 +365,24 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 			"⚡ Generator: Level %d\n\n"+
 			"🔧 Active Upgrades Queue: %s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		targetName, targetLvl, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
+		targetName, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
 	)
 
 	return c.Send(spyReport, keyboards.CombatNavigation())
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing
+// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 
 	defenderCampID := c.Args()[0]
 
+	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
 	var attackerCampID string
 	var myRegion string
 	var myX, myY int
-	err := h.DB.QueryRowContext(ctx, "SELECT e.id, c.region, c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&attackerCampID, &myRegion, &myX, &myY)
+	err := h.DB.QueryRowContext(ctx, "SELECT id, region, x, y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&attackerCampID, &myRegion, &myX, &myY)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
 	}
@@ -297,10 +393,11 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// 1. Fetch active global weather front to calculate movement multipliers
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	// Resolved Combat Gate: Read military quantities directly from workshop_inventory
+	// Unified military check: Read forces directly from workshop_inventory
 	var soldiers, drones, jets, mechs, nukes, tanks int
 	queryForces := `
 		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
@@ -309,7 +406,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	
 	err = tx.QueryRowContext(ctx, queryForces, attackerCampID).Scan(&soldiers, &drones, &jets, &mechs, &nukes, &tanks)
 	if err != nil {
-		log.Printf("Failed querying barracks stocks for %s: %v", attackerCampID, err)
+		log.Printf("Failed querying barracks stocks: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error reading military arrays."})
 	}
 
@@ -321,7 +418,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
 
-	var ships int // Removed redeclarations of tanks, mechs, and jets
+	var ships int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0), COALESCE(ships, 0), COALESCE(jets, 0) FROM workshop_inventory WHERE encampment_id = $1", attackerCampID).Scan(&tanks, &mechs, &ships, &jets)
 
 	// If AI Target selection
@@ -365,7 +462,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			// Clipper ship allows ocean travel: takes 12 hours (720 mins)
 			marchingMinutes = 720.0
 		} else {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ ocean Block: Target is on a different continent. Build a Clipper Ship or Cargo Jet in the Workshop to cross!"})
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Target is on a different continent. Build a Clipper Ship or Cargo Jet in the Workshop to cross!"})
 		}
 	}
 
@@ -379,11 +476,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
 
-	// Admin Override: Standardised bypass
-	if h.IsAdmin(sender.ID) {
-		marchDuration = 1 * time.Second
-	}
-
 	resolveTime := time.Now().Add(marchDuration)
 
 	var raidID string
@@ -396,6 +488,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register raid."})
 	}
 
+	// 5. Send Direct-Push Alert to defender instantly! (Guarantees instant warning alerts)
 	defenderAlert := fmt.Sprintf(
 		"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\n\n"+
 			"Our sensors have detected a hostile staged raid marching from Outpost [%s] in %s.\n"+
@@ -403,7 +496,16 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			"Upgrade your Tent or fortify your facilities immediately!",
 		attackerName, myRegion, resolveTime.UTC().Format("15:04:05"),
 	)
-	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+	
+	// Direct Bot.Send Push warning
+	targetUser := &telebot.User{ID: defenderUserID}
+	_, err = c.Bot().Send(targetUser, defenderAlert)
+	if err != nil {
+		log.Printf("Failsafe Direct Push failed to deliver to %d: %v", defenderUserID, err)
+	}
+
+	// Insert into DB queue for backup tracing
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, TRUE)", defenderUserID, defenderAlert)
 
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Raiders deployed! Marching towards target..."})

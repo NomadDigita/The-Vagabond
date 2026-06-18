@@ -165,8 +165,8 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron)\n"+
 			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil)\n"+
 			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold)\n"+
-			"☢️ [Extract Uranium] — Costs: 20.0 Energy (+5.0 Uranium)\n"+
-			"🧠 [Mine Cores] — Costs: 50.0 Energy (+1.0 Neuro Core)\n"+
+			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver)\n"+
+			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		energy, iron, oil, uranium, gold, silver, diamond, neuro,
 	)
@@ -175,19 +175,19 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	btnIron := selector.Data("🪨 Extract Iron", "mine_action", "iron")
 	btnOil := selector.Data("🛢️ Pump Oil", "mine_action", "oil")
 	btnGold := selector.Data("🪙 Mine Gold", "mine_action", "gold")
-	btnUranium := selector.Data("☢️ Extract Uranium", "mine_action", "uranium")
-	btnCores := selector.Data("🧠 Mine Cores", "mine_action", "neuro")
+	btnSilver := selector.Data("🥈 Mine Silver", "mine_action", "silver")
+	btnDiamond := selector.Data("💎 Mine Diamond", "mine_action", "diamond")
 
 	selector.Inline(
 		selector.Row(btnIron, btnOil),
-		selector.Row(btnGold, btnUranium),
-		selector.Row(btnCores),
+		selector.Row(btnGold, btnSilver),
+		selector.Row(btnDiamond),
 	)
 
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles spending energy cells to add raw materials
+// HandleMineCallback handles spending energy cells with 2-minute cooling safety sentinel checks
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -201,6 +201,18 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mining failed."})
 	}
 	defer tx.Rollback()
+
+	// 1. Verify 2-minute cooling laser check
+	var lastMined sql.NullTime
+	_ = tx.QueryRowContext(ctx, "SELECT last_mined_at FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&lastMined)
+
+	if lastMined.Valid {
+		diff := time.Since(lastMined.Time)
+		if diff < 2*time.Minute {
+			secondsLeft := int((2 * time.Minute - diff).Seconds())
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚠️ Lasers Overheating: Cooling down. Wait %ds before mining again.", secondsLeft)})
+		}
+	}
 
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
@@ -236,7 +248,8 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy! Need %.1f Cells.", cost)})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", cost, campID)
+	// Update energy, resource and timestamp
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1, last_mined_at = CURRENT_TIMESTAMP WHERE encampment_id = $2", cost, campID)
 	queryUpdate := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, gain, campID)
 
