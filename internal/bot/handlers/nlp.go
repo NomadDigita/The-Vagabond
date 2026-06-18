@@ -61,6 +61,9 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if strings.Contains(text, "help") || strings.Contains(text, "guide") || strings.Contains(text, "tutorial") {
 		return h.Onboarding.HandleHelp(c)
 	}
+	if strings.Contains(text, "mutate") || strings.Contains(text, "mutation") || strings.Contains(text, "cell") {
+		return h.Camp.HandleMutationsPanel(c)
+	}
 
 	return c.Send("🤖 SECURE SHELL: Intent not recognized. Please utilize the persistent interface options below.")
 }

@@ -69,7 +69,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.user_id = $1`
-	
+
 	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myCampName, &myX, &myY)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
@@ -269,13 +269,14 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	return c.Send(spyReport, keyboards.CombatNavigation())
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database and alerts the defender
+// HandleLaunchRaidCallback registers a marching raid inside the database with weather routing parameters
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 
 	defenderCampID := c.Args()[0]
 
+	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
 	var attackerCampID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
 	if err != nil {
@@ -288,6 +289,11 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// 1. Fetch active global weather front to calculate movement multipliers
+	var activeWeather string
+	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+
+	// Normal Player Flow Checks
 	var troopCount int
 	err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = $1", attackerCampID).Scan(&troopCount)
 	if err != nil {
@@ -305,9 +311,17 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var tanks, mechs int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", attackerCampID).Scan(&tanks, &mechs)
 
-	// Real-Time Journey Marching Scaling (Base 5m per map step + 3m per tank + 5m per mech)
+	// 2. Real-Time Journey Marching Scaling (Base 5m per map step + 3m per tank + 5m per mech)
 	steps := 5.0
 	marchingMinutes := (steps * 5.0) + (float64(tanks) * 3.0) + (float64(mechs) * 5.0)
+
+	// Apply Weather travel multipliers
+	if activeWeather == "radiation_storm" {
+		marchingMinutes *= 1.5 // 50% slower due to fallout
+	} else if activeWeather == "solar_flare" {
+		marchingMinutes *= 0.7 // 30% faster due to electromagnetic tailwinds
+	}
+
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
 
 	// Admin Ultimate Override: If launcher is Admin, travel completes instantly (1s)

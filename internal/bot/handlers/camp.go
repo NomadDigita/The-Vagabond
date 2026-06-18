@@ -53,7 +53,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	}
 
 	ctx := context.Background()
-
+	
 	var campID string
 	var campName string
 	var campLvl int
@@ -124,7 +124,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-
+	
 	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent")
 	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap")
 	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator")
@@ -138,11 +138,123 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
+// HandleMutationsPanel renders biological modification workstations
+func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	// Fetch or Initialize Mutation State
+	var synaptic, salvage, bio int
+	query := `SELECT synaptic_lvl, salvage_lvl, bio_lvl FROM mutation_states WHERE encampment_id = $1`
+	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&synaptic, &salvage, &bio)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, _ = h.DB.ExecContext(ctx, "INSERT INTO mutation_states (encampment_id) VALUES ($1)", campID)
+		synaptic = 1
+		salvage = 1
+		bio = 1
+	}
+
+	var uranium, neuro float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT uranium, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&uranium, &neuro)
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🧬 GENETIC MUTATION CORE\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Spend radioactive Uranium and Neuro Cores to mutate cellular properties:\n\n"+
+			"RADIOACTIVE STOCKS:\n"+
+			"☢️ Uranium Stock: %.1f kg | 🧠 Neuro Cores: %.0f\n\n"+
+			"MUTATION INDEXES:\n"+
+			"🧠 [Synaptic Accel Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
+			"   Reduces Automated Agent energy use by 10%% per level.\n\n"+
+			"🦾 [Cybernetic Salvage Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
+			"   Boosts passive Scrap mining yield by 15%% per level.\n\n"+
+			"🧬 [Biospheric Adaptation Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
+			"   Reduces battle casualties by 10%% per level.\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		uranium, neuro, synaptic, salvage, bio,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	btnMutateSynaptic := selector.Data(fmt.Sprintf("🧠 Synaptic (%d)", synaptic+1), "mutate_mod", "synaptic")
+	btnMutateSalvage := selector.Data(fmt.Sprintf("🦾 Salvage (%d)", salvage+1), "mutate_mod", "salvage")
+	btnMutateBio := selector.Data(fmt.Sprintf("🧬 Bio (%d)", bio+1), "mutate_mod", "bio")
+
+	selector.Inline(
+		selector.Row(btnMutateSynaptic),
+		selector.Row(btnMutateSalvage, btnMutateBio),
+	)
+
+	return c.Send(panelText, selector)
+}
+
+// HandleMutationCallback processes biological mutations
+func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	modType := c.Args()[0]
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mutation failed."})
+	}
+	defer tx.Rollback()
+
+	var synaptic, salvage, bio int
+	_ = tx.QueryRowContext(ctx, "SELECT synaptic_lvl, salvage_lvl, bio_lvl FROM mutation_states WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&synaptic, &salvage, &bio)
+
+	var uranium, neuro float64
+	_ = tx.QueryRowContext(ctx, "SELECT uranium, neuro_cores FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&uranium, &neuro)
+
+	var currentLvl int
+	var dbColumn string
+	switch modType {
+	case "synaptic":
+		currentLvl = synaptic
+		dbColumn = "synaptic_lvl"
+	case "salvage":
+		currentLvl = salvage
+		dbColumn = "salvage_lvl"
+	case "bio":
+		currentLvl = bio
+		dbColumn = "bio_lvl"
+	}
+
+	if currentLvl >= 5 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Mutation: Cellular adaptions are fully optimized."})
+	}
+
+	if uranium < 20.0 || neuro < 5.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets! Need 20 Uranium, 5 Neuro Cores."})
+	}
+
+	// Deduct and increment level
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET uranium = uranium - 20.0, neuro_cores = neuro_cores - 5.0 WHERE encampment_id = $1", campID)
+	queryUpdate := fmt.Sprintf("UPDATE mutation_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
+	_, _ = tx.ExecContext(ctx, queryUpdate, campID)
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed committing mutations: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mutations state."})
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🧬 Genetic cellular property mutated successfully!"})
+	return h.HandleMutationsPanel(c)
+}
+
 // HandleUpgradeCallback manages the inline upgrade actions (Dynamic campID & Admin lookup)
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-
+	
 	moduleType := c.Args()[0]
 
 	var campID string
@@ -163,9 +275,8 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
-	// ADMIN ULTIMATE OVERRIDE: Instant & Free Upgrades based on dynamic environment list
 	isAdmin := h.IsAdmin(sender.ID)
-
+	
 	if moduleType == "camp_core" {
 		if campLvl >= 30 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level reached (Level 30)."})
@@ -196,7 +307,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	}
 
 	if isAdmin {
-		// Admin Bypass: Write level-up instantly
 		_, err = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level, is_upgrading) VALUES ($1, $2, $3, FALSE) ON CONFLICT (encampment_id, type) DO UPDATE SET level = $3, is_upgrading = FALSE", campID, moduleType, currentLvl+1)
 		if err != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Admin Override write failure."})
@@ -224,7 +334,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		VALUES ($1, $2, $3, TRUE, $4)
 		ON CONFLICT (encampment_id, type)
 		DO UPDATE SET is_upgrading = TRUE, upgrade_ready_at = $4`
-
+	
 	_, err = tx.ExecContext(ctx, upsertModule, campID, moduleType, currentLvl, readyAt)
 	if err != nil {
 		log.Printf("Failed executing module upgrade: %v", err)

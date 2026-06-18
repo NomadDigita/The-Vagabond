@@ -110,7 +110,8 @@ func main() {
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
 	bot.Handle("/admin", admin.HandleAdminPanel)
 	bot.Handle("/arena", arena.HandleArenaPanel)
-	bot.Handle("/broadcast", world.HandleSectorBroadcast) // Mapped Broadcast
+	bot.Handle("/broadcast", world.HandleSectorBroadcast)
+	bot.Handle("/mutations", camp.HandleMutationsPanel) // Mapped Mutations command
 
 	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
@@ -137,7 +138,8 @@ func main() {
 	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
-	bot.Handle("🧪 Research Lab", camp.HandleCamp) // Routing research lab back contextually
+	bot.Handle("🧪 Research Lab", camp.HandleCamp)
+	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel) // Mapped Mutation keyboard trigger
 	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
@@ -164,7 +166,10 @@ func main() {
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
-	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
+	bot.Handle("\fupgrade_tech", camp.HandleUpgradeCallback)
+	bot.Handle("\fpost_listing", econ.HandleMarketCallback)
+	bot.Handle("\fbuy_listing", econ.HandleMarketCallback)
+	bot.Handle("\fmutate_mod", camp.HandleMutationCallback) // Mapped Mutation trigger callback
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")
