@@ -65,9 +65,10 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		energyGenerated := 0.05 * float64(s.GeneratorLvl)
 
 		// Apply Dynamic Weather Multipliers
-		if activeWeather == "solar_flare" {
+		switch activeWeather {
+		case "solar_flare":
 			energyGenerated *= 2.0 // Solar panels get 2x power
-		} else if activeWeather == "radiation_storm" {
+		case "radiation_storm":
 			energyGenerated *= 0.5 // Cloud cover drops solar efficiency by 50%
 		}
 
