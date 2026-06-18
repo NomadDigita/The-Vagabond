@@ -93,6 +93,7 @@ func main() {
 	clan := handlers.NewClanHandler(db)
 	factory := handlers.NewFactoryHandler(db)
 	arena := handlers.NewArenaHandler(db)
+	silo := handlers.NewSiloHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -111,7 +112,8 @@ func main() {
 	bot.Handle("/admin", admin.HandleAdminPanel)
 	bot.Handle("/arena", arena.HandleArenaPanel)
 	bot.Handle("/broadcast", world.HandleSectorBroadcast)
-	bot.Handle("/mutations", camp.HandleMutationsPanel) // Mapped Mutations command
+	bot.Handle("/mutations", camp.HandleMutationsPanel)
+	bot.Handle("/silo", silo.HandleSiloPanel)
 
 	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
@@ -139,7 +141,7 @@ func main() {
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🧪 Research Lab", camp.HandleCamp)
-	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel) // Mapped Mutation keyboard trigger
+	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel)
 	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
@@ -147,6 +149,7 @@ func main() {
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("🏟️ Combat Arena", arena.HandleArenaPanel)
+	bot.Handle("☢️ Strategic Silo", silo.HandleSiloPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Map all plain text inputs to our Natural Language intent router
@@ -169,7 +172,9 @@ func main() {
 	bot.Handle("\fupgrade_tech", camp.HandleUpgradeCallback)
 	bot.Handle("\fpost_listing", econ.HandleMarketCallback)
 	bot.Handle("\fbuy_listing", econ.HandleMarketCallback)
-	bot.Handle("\fmutate_mod", camp.HandleMutationCallback) // Mapped Mutation trigger callback
+	bot.Handle("\fmutate_mod", camp.HandleMutationCallback)
+	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
+	bot.Handle("\flaunch_icbm", silo.HandleLaunchICBMCallback)
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")
