@@ -28,7 +28,10 @@ type EncampmentState struct {
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
-	// Gather encampments, module levels, troop count, and outstanding loans
+	// Query active global weather front
+	var activeWeather string
+	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+
 	query := `
 		SELECT 
 			e.id, r.scrap, r.rations, r.energy,
@@ -61,7 +64,13 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		rationsGenerated := 0.10
 		energyGenerated := 0.05 * float64(s.GeneratorLvl)
 
-		// Apply Bank Committee loan repayment tax (15% deduction on raw scrap yield)
+		// Apply Dynamic Weather Multipliers
+		if activeWeather == "solar_flare" {
+			energyGenerated *= 2.0 // Solar panels get 2x power
+		} else if activeWeather == "radiation_storm" {
+			energyGenerated *= 0.5 // Cloud cover drops solar efficiency by 50%
+		}
+
 		var taxDeducted float64
 		if s.LoanAmount > 0 {
 			taxDeducted = scrapGenerated * 0.15
@@ -70,7 +79,6 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			}
 			scrapGenerated -= taxDeducted
 
-			// Pay down loan
 			_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = GREATEST(loan_amount - $1, 0) WHERE encampment_id = $2", taxDeducted, s.ID)
 		}
 
@@ -102,8 +110,8 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			UPDATE resources 
 			SET scrap = $1, rations = $2, energy = $3, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
-
-		_, err := tx.ExecContext(ctx, updateQuery, newScrap, newRations, newEnergy, s.ID)
+		
+		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newEnergy, s.ID)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
 		}

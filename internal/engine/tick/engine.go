@@ -9,6 +9,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 )
 
 type Engine struct {
@@ -17,6 +18,7 @@ type Engine struct {
 	stopChan           chan struct{}
 	resourceProcessor  *resource.Processor
 	starvationEngine   *starvation.Engine
+	weatherEngine      *world.WeatherEngine
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -26,6 +28,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		stopChan:           make(chan struct{}),
 		resourceProcessor:  resource.NewProcessor(db),
 		starvationEngine:   starvation.NewEngine(db),
+		weatherEngine:      world.NewWeatherEngine(db),
 	}
 }
 
@@ -64,33 +67,33 @@ func (e *Engine) ProcessTick() {
 	}
 	defer tx.Rollback()
 
-	// Pass 1: Resource production/consumption
+	// Pass 1: Global Weather progression check
+	if err := e.weatherEngine.RunWeatherPass(ctx, tx); err != nil {
+		log.Printf("Error during Tick Weather Pass: %v", err)
+		return
+	}
+
+	// Pass 2: Resource production/consumption
 	if err := e.resourceProcessor.RunResourcePass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Resource Pass execution: %v", err)
 		return
 	}
 
-	// Pass 2: Starvation check
+	// Pass 3: Starvation check
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
 	}
 
-	// Pass 3: Construction upgrades
+	// Pass 4: Construction upgrades
 	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
 		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
 		return
 	}
 
-	// Pass 4: PvP target combat marches
+	// Pass 5: PvP target combat marches
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
-		return
-	}
-
-	// Pass 5: ARENA AUTOMATED MATCHMAKING QUEUE BROKER PASS
-	if err := e.resolveArenaSkirmishes(ctx, tx); err != nil {
-		log.Printf("Error during Arena Matchmaking Pass: %v", err)
 		return
 	}
 
@@ -308,52 +311,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
 
 		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacked Casualties: %d, Defender Casualties: %d, Stolen Scrap: %.1f", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties, stolenScrap)
-	}
-
-	return nil
-}
-
-func (e *Engine) resolveArenaSkirmishes(ctx context.Context, tx *sql.Tx) error {
-	// Find pairs of matched players in the 1v1 Arena queue
-	queryPairs := `
-		SELECT q1.user_id, q2.user_id 
-		FROM arena_queue q1
-		JOIN arena_queue q2 ON q2.bracket = q1.bracket AND q2.user_id < q1.user_id
-		WHERE q1.bracket = '1v1'
-		LIMIT 1`
-
-	var p1, p2 int64
-	err := tx.QueryRowContext(ctx, queryPairs).Scan(&p1, &p2)
-	if err == nil {
-		// Match Found! Resolve 1v1 Skirmish instantly
-		// Attacker metrics logic comparison
-		var aForce, dForce int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", p1).Scan(&aForce)
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", p2).Scan(&dForce)
-
-		var winner, loser int64
-		if aForce >= dForce {
-			winner = p1
-			loser = p2
-		} else {
-			winner = p2
-			loser = p1
-		}
-
-		// Reward the Winner: +20 Gold, +10 Silver
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET gold = gold + 20.00, silver = silver + 10.00 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", winner)
-
-		// Delete matched players from the queue
-		_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue WHERE user_id IN ($1, $2)", p1, p2)
-
-		// Queue alerts
-		winnerAlert := "🏟️ ARENA DUEL: VICTORY!\n\nYour forces outperformed the rival outpost inside the Duel Arena.\n🎁 Rewards: +20 Gold, +10 Silver transferred safely to reserves."
-		loserAlert := "🏟️ ARENA DUEL: DEFEAT\n\nYour deployment lost the duel clash. Upgrade your units inside the Forge to boost tactical ratings."
-
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", winner, winnerAlert)
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", loser, loserAlert)
-
-		log.Printf("Arena Matchmaker resolved 1v1 skirmish: Winner: %d, Loser: %d", winner, loser)
 	}
 
 	return nil

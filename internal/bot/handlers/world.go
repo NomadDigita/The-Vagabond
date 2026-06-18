@@ -19,31 +19,47 @@ func NewWorldHandler(db *sql.DB) *WorldHandler {
 	return &WorldHandler{DB: db}
 }
 
-// HandleWorldFeed displays real-time database world news, coordinates biome multipliers, and weather telemetry
+// HandleWorldFeed displays real-time weather alerts and news headlines
 func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
 	ctx := context.Background()
 
-	// Query player count
 	var activeCamps int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&activeCamps)
 
-	// Fetch dynamic clock variables
+	// Fetch active weather front
+	var activeWeather string
+	_ = h.DB.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+
+	// Format weather descriptions
+	weatherLabel := "☀️ NOMINAL"
+	weatherDebuff := "All systems are operating within baseline limits."
+	switch activeWeather {
+	case "solar_flare":
+		weatherLabel = "⚡ SOLAR FLARE (ACTIVE)"
+		weatherDebuff = "🔋 Solar panels generate 2.0x Energy. 🤖 Agents disabled."
+	case "radiation_storm":
+		weatherLabel = "☢️ RADIATION STORM (FALLOUT)"
+		weatherDebuff = "💀 Morale decay doubled. 🔋 Solar panels output 50% power."
+	case "acid_rain":
+		weatherLabel = "🌧️ ACID RAIN (CORROSIVE)"
+		weatherDebuff = "🏗️ Structural construction takes 2.0x longer."
+	}
+
 	currentTime := time.Now().UTC().Format("15:04:05")
 
-	// Query most recent 5 world news headlines
 	queryNews := `
 		SELECT headline, logged_at 
 		FROM world_news 
 		ORDER BY logged_at DESC 
 		LIMIT 5`
-
+	
 	rows, err := h.DB.QueryContext(ctx, queryNews)
 	var newsLogText string
 	if err != nil {
 		log.Printf("Failed querying world news: %v", err)
-		newsLogText = "📡 Static Interference: News feed currently offline."
+		newsLogText = "📡 Static Interference: News feed offline."
 	} else {
 		defer rows.Close()
 		for rows.Next() {
@@ -54,7 +70,7 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 			}
 		}
 		if newsLogText == "" {
-			newsLogText = "📡 Sensors Clean: No major sector events recorded yet."
+			newsLogText = "📡 Sensors Clean: No major events recorded."
 		}
 	}
 
@@ -63,16 +79,15 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 			"📻 WASTELAND BROADCAST RADIO\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Universal Coordinate Time: [%s]\n"+
-			"Sensors tracking: %d active encampment lines\n\n"+
-			"DYNAMIC WEATHER FEED:\n"+
-			"☣️ Core Zone: [Acid Dust Storms]\n"+
-			"🌡️ Ambient Temperature: 38°C\n"+
-			"📡 System Interference: Low\n\n"+
+			"Active Survivors: %d lines\n\n"+
+			"TACTICAL WEATHER FORECAST:\n"+
+			"🌍 Current Front: %s\n"+
+			"⚠️ Modifiers: %s\n\n"+
 			"LIVE BROADCAST NEWS FEED:\n"+
 			"%s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Listen to the static. The wastes are breathing.",
-		currentTime, activeCamps, newsLogText,
+		currentTime, activeCamps, weatherLabel, weatherDebuff, newsLogText,
 	)
 
 	return c.Send(dashboard, keyboards.CombatNavigation())
