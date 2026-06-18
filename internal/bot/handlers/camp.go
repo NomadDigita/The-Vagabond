@@ -43,7 +43,7 @@ func (h *CampHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// HandleCamp renders the main outpost summary HUD
+// HandleCamp renders the main outpost summary HUD and updates the bottom keyboard to CampNavigation
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -83,7 +83,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 			"⛺ [Tent] — Level %d\n"+
 			"⚙️ [Scrap Heap] — Level %d\n"+
 			"⚡ [Generator] — Level %d\n\n"+
-			"Select options on your bottom menu deck to trigger upgrades, check automation, or view heroes.",
+			"Select options on your bottom menu deck to trigger upgrades, check automation, view heroes, or actively mine.",
 		campLvl, campName, scrap, tentLvl, heapLvl, genLvl,
 	)
 
@@ -138,6 +138,118 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
+// HandleActiveMining renders the manual extraction workstation HUD
+func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	var energy, iron, oil, gold, silver, diamond float64
+	query := `SELECT energy, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond)
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"⛏️ ACTIVE EXTRACTION WORKSTATION\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Spend Energy Cells to manually extract raw resources needed for barracks forging:\n\n"+
+			"🔋 Energy Cells: %.1f cells\n\n"+
+			"CURRENT HEAVY RESERVES:\n"+
+			"🪨 Iron: %.1f | 🛢️ Oil: %.1f\n"+
+			"🪙 Gold: %.1f | 🥈 Silver: %.1f | 💎 Diamonds: %.1f\n\n"+
+			"EXTRACTION blue prints:\n"+
+			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron)\n"+
+			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil)\n"+
+			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold)\n"+
+			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver)\n"+
+			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond)\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		energy, iron, oil, gold, silver, diamond,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	btnIron := selector.Data("🪨 Extract Iron", "mine_action", "iron")
+	btnOil := selector.Data("🛢️ Pump Oil", "mine_action", "oil")
+	btnGold := selector.Data("🪙 Mine Gold", "mine_action", "gold")
+	btnSilver := selector.Data("🥈 Mine Silver", "mine_action", "silver")
+	btnDiamond := selector.Data("💎 Mine Diamond", "mine_action", "diamond")
+
+	selector.Inline(
+		selector.Row(btnIron, btnOil),
+		selector.Row(btnGold, btnSilver),
+		selector.Row(btnDiamond),
+	)
+
+	return c.Send(panelText, selector)
+}
+
+// HandleMineCallback handles spending energy cells to add raw materials
+func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	mineType := c.Args()[0]
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mining failed."})
+	}
+	defer tx.Rollback()
+
+	var energy float64
+	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+
+	var cost float64
+	var gain float64
+	var dbColumn string
+
+	switch mineType {
+	case "iron":
+		cost = 5.0
+		gain = 20.0
+		dbColumn = "iron"
+	case "oil":
+		cost = 5.0
+		gain = 10.0
+		dbColumn = "oil"
+	case "gold":
+		cost = 10.0
+		gain = 5.0
+		dbColumn = "gold"
+	case "silver":
+		cost = 5.0
+		gain = 10.0
+		dbColumn = "silver"
+	case "diamond":
+		cost = 15.0
+		gain = 1.0
+		dbColumn = "diamond"
+	}
+
+	if energy < cost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy! Need %.1f Cells.", cost)})
+	}
+
+	// Deduct and add resource
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", cost, campID)
+	queryUpdate := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", dbColumn, dbColumn)
+	_, _ = tx.ExecContext(ctx, queryUpdate, gain, campID)
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed committing mining action: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing resources."})
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⛏️ Extracted +%.1f %s!", gain, mineType)})
+	return h.HandleActiveMining(c)
+}
+
 // HandleMutationsPanel renders biological modification workstations
 func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
@@ -148,7 +260,6 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Fetch or Initialize Mutation State
 	var synaptic, salvage, bio int
 	query := `SELECT synaptic_lvl, salvage_lvl, bio_lvl FROM mutation_states WHERE encampment_id = $1`
 	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&synaptic, &salvage, &bio)

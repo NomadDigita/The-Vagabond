@@ -114,6 +114,7 @@ func main() {
 	bot.Handle("/broadcast", world.HandleSectorBroadcast)
 	bot.Handle("/mutations", camp.HandleMutationsPanel)
 	bot.Handle("/silo", silo.HandleSiloPanel)
+	bot.Handle("/mine", camp.HandleActiveMining) // Mapped manual mining command
 
 	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
@@ -142,6 +143,7 @@ func main() {
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
 	bot.Handle("🧪 Research Lab", camp.HandleCamp)
 	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel)
+	bot.Handle("⛏️ Active Mining", camp.HandleActiveMining) // Mapped manual mining keyboard trigger
 	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
@@ -175,6 +177,7 @@ func main() {
 	bot.Handle("\fmutate_mod", camp.HandleMutationCallback)
 	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
 	bot.Handle("\flaunch_icbm", silo.HandleLaunchICBMCallback)
+	bot.Handle("\fmine_action", camp.HandleMineCallback) // Mapped manual mining callback
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

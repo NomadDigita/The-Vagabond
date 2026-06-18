@@ -42,6 +42,32 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 		return h.Econ.HandleEconPanel(c)
 	}
 
+	// Lexical sub-menu shortcuts checks
+	if text == "🔨 structural upgrades" {
+		return h.Camp.HandleStructuralUpgrades(c)
+	}
+	if text == "👥 hero commander" {
+		return h.Onboarding.HandleStart(c) // Redirect or handle hero
+	}
+	if text == "🧠 automation agent" {
+		return h.Camp.HandleCamp(c) // Redirect or handle agent
+	}
+	if text == "🧬 mutation core" {
+		return h.Camp.HandleMutationsPanel(c)
+	}
+	if text == "⛏️ active mining" {
+		return h.Camp.HandleActiveMining(c)
+	}
+	if text == "🪙 financial vault" {
+		return h.Econ.HandleFinancialVault(c)
+	}
+	if text == "🛡️ clan alliances" {
+		return h.Clan.HandleClanPanel(c)
+	}
+	if text == "💱 market exchange" {
+		return h.Econ.HandleEconPanel(c) // Redirect or handle exchange
+	}
+
 	// Lexical intents token matching
 	if strings.Contains(text, "upgrade") || strings.Contains(text, "build") {
 		return h.Camp.HandleStructuralUpgrades(c)
@@ -61,8 +87,8 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if strings.Contains(text, "help") || strings.Contains(text, "guide") || strings.Contains(text, "tutorial") {
 		return h.Onboarding.HandleHelp(c)
 	}
-	if strings.Contains(text, "mutate") || strings.Contains(text, "mutation") || strings.Contains(text, "cell") {
-		return h.Camp.HandleMutationsPanel(c)
+	if strings.Contains(text, "mine") || strings.Contains(text, "extract") || strings.Contains(text, "dig") {
+		return h.Camp.HandleActiveMining(c)
 	}
 
 	return c.Send("🤖 SECURE SHELL: Intent not recognized. Please utilize the persistent interface options below.")

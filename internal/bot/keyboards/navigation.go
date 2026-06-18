@@ -31,12 +31,13 @@ func CampNavigation() *telebot.ReplyMarkup {
 	btnHero := menu.Text("👥 Hero Commander")
 	btnAgent := menu.Text("🧠 Automation Agent")
 	btnMutation := menu.Text("🧬 Mutation Core")
+	btnMine := menu.Text("⛏️ Active Mining")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnUpgrade, btnHero),
 		menu.Row(btnAgent, btnMutation),
-		menu.Row(btnBack),
+		menu.Row(btnMine, btnBack),
 	)
 
 	return menu
@@ -48,12 +49,12 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnSilo := menu.Text("☢️ Strategic Silo")
+	btnStock := menu.Text("📦 Warehouse Reserves")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnSilo, btnBack),
+		menu.Row(btnStock, btnBack),
 	)
 
 	return menu
