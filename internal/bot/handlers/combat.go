@@ -198,8 +198,9 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	return c.Send(report, selector)
 }
 
-// HandleSpyCallback intercepts target telemetry by consuming 20 Energy Cells
+// HandleSpyCallback sweeps target data and decrypts active timers (64-byte safe)
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
+	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
 	sender := c.Sender()
 	targetCampID := c.Args()[0]
@@ -209,41 +210,60 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Spying initialization error."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Decryption failed."})
 	}
 	defer tx.Rollback()
 
+	// 1. Verify and deduct 30 Energy Cells
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
 
-	if energy < 20.0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Spying requires 20.0 Energy Cells."})
+	if energy < 30.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Satellite scans require 30.0 Energy Cells."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 20.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 30.0 WHERE encampment_id = $1", myCampID)
 
+	// 2. Fetch target module metrics
 	var targetName string
-	var rations float64
-	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", targetCampID).Scan(&targetName)
-	_ = tx.QueryRowContext(ctx, "SELECT rations FROM resources WHERE encampment_id = $1", targetCampID).Scan(&rations)
+	var targetLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT name, level FROM encampments WHERE id = $1", targetCampID).Scan(&targetName, &targetLvl)
 
-	var soldiers int
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT soldiers FROM workshop_inventory WHERE encampment_id = $1), 0)", targetCampID).Scan(&soldiers)
+	var tentLvl, heapLvl, genLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", targetCampID).Scan(&tentLvl)
+	_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'scrap_heap'", targetCampID).Scan(&heapLvl)
+	_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'generator'", targetCampID).Scan(&genLvl)
+
+	// Check if any modules are currently upgrading
+	var upgradingModule string
+	_ = tx.QueryRowContext(ctx, "SELECT type FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE LIMIT 1", targetCampID).Scan(&upgradingModule)
+	if upgradingModule == "" {
+		upgradingModule = "None"
+	}
+
+	// Fetch current resources
+	var scrap, rations float64
+	_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", targetCampID).Scan(&scrap, &rations)
 
 	_ = tx.Commit()
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: "📡 Signals Intercepted! Decoding telemetry..."})
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Satellite Sweep Success! Decrypting telemetry..."})
 
 	spyReport := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🛰️ DECODED SIGNAL TELEMETRY\n"+
+			"🛰️ SPY SATELLITE DECRYPTOR INDICES\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Target Outpost: %s\n\n"+
-			"INTERCEPTED METRICS:\n"+
-			"🥫 Food Stocks: %.1f Rations\n"+
-			"🪖 Infantry Power: %d Soldiers\n\n"+
-			"Sensors suggest defenses are active.",
-		targetName, rations, soldiers,
+			"Target Outpost: %s [Level %d]\n\n"+
+			"DECRYPTED RESOUCES:\n"+
+			"⚙️ Scrap: %.1f\n"+
+			"🥫 Rations: %.1f\n\n"+
+			"MODULE STATUS GRID:\n"+
+			"⛺ Tent: Level %d\n"+
+			"⚙️ Scrap Heap: Level %d\n"+
+			"⚡ Generator: Level %d\n\n"+
+			"🔧 Active Upgrades Queue: %s\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		targetName, targetLvl, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
 	)
 
 	return c.Send(spyReport, keyboards.CombatNavigation())

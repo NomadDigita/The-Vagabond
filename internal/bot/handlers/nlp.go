@@ -52,7 +52,7 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if strings.Contains(text, "vault") || strings.Contains(text, "loan") || strings.Contains(text, "deposit") {
 		return h.Econ.HandleFinancialVault(c)
 	}
-	if strings.Contains(text, "scout") || strings.Contains(text, "find") {
+	if strings.Contains(text, "scout") || strings.Contains(text, "find") || strings.Contains(text, "spy") {
 		return h.Combat.HandleRaidBoard(c)
 	}
 	if strings.Contains(text, "alliance") || strings.Contains(text, "clan") {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -28,11 +29,9 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	var activeCamps int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&activeCamps)
 
-	// Fetch active weather front
 	var activeWeather string
 	_ = h.DB.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	// Format weather descriptions
 	weatherLabel := "☀️ NOMINAL"
 	weatherDebuff := "All systems are operating within baseline limits."
 	switch activeWeather {
@@ -137,4 +136,86 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 	mapHUD += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	return c.Send(mapHUD, keyboards.CombatNavigation())
+}
+
+// HandleSectorBroadcast modulates a high-power wireless signal across neighboring coordinates
+func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	broadcastMsg := c.Message().Payload
+	if broadcastMsg == "" {
+		return c.Send("⚠️ Broadcast Failed: Payload empty. Syntax: `/broadcast [message]`")
+	}
+
+	ctx := context.Background()
+
+	var campID string
+	var campLvl int
+	var myX, myY int
+	err := h.DB.QueryRowContext(ctx, "SELECT e.id, e.level, c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&campID, &campLvl, &myX, &myY)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	// 1. Enforce level requirement (Core level 10+)
+	if campLvl < 10 {
+		return c.Send("❌ Frequency Jammed: You must reach Outpost Core Level 10 to modulate long-range broadcasts.")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Send("⚠️ Broadcast transaction error.")
+	}
+	defer tx.Rollback()
+
+	// 2. Spend 50 Energy Cells as fuel
+	var energy float64
+	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+
+	if energy < 50.0 {
+		return c.Send("❌ Insufficient Energy: Sector broadcasts require 50.0 Energy Cells.")
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 50.0 WHERE encampment_id = $1", campID)
+
+	// 3. Find target users within immediate coordinate sectors (3x3 grid)
+	queryTargets := `
+		SELECT e.user_id 
+		FROM encampments e
+		JOIN coordinates c ON c.id = e.coordinate_id
+		WHERE c.x BETWEEN $1 AND $2 AND c.y BETWEEN $3 AND $4`
+	
+	rows, err := tx.QueryContext(ctx, queryTargets, myX-1, myX+1, myY-1, myY+1)
+	if err != nil {
+		log.Printf("Failed querying sector targets: %v", err)
+		return c.Send("⚠️ Error reading coordinate database.")
+	}
+	defer rows.Close()
+
+	var targets []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			targets = append(targets, id)
+		}
+	}
+	rows.Close()
+
+	// 4. Queue real-time alerts
+	formattedMsg := fmt.Sprintf(
+		"📡 SECTOR BROADCAST (CO-ORDINATOR %s):\n\n\"%s\"",
+		sender.FirstName, broadcastMsg,
+	)
+
+	for _, targetID := range targets {
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, formattedMsg)
+	}
+
+	_ = tx.Commit()
+	return c.Send(fmt.Sprintf("📡 Broadcast successfully modulated over sector [%d, %d]. Dispatched to %d active lines.", myX, myY, len(targets)), keyboards.MainNavigation())
 }
