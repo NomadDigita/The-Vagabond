@@ -44,6 +44,11 @@ func (h *CombatHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
+// HandleTargetMatrix maps the scan targets button to the raid board dashboard
+func (h *CombatHandler) HandleTargetMatrix(c telebot.Context) error {
+	return h.HandleRaidBoard(c)
+}
+
 // HandleRaidBoard displays player targets and offline AI training skirmishes
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)

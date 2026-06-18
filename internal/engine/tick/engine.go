@@ -7,28 +7,25 @@ import (
 	"log"
 	"time"
 
-	"github.com/NomadDigita/The-Vagabond/internal/engine/agent"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 )
 
 type Engine struct {
-	DB                *sql.DB
-	TickInterval      time.Duration
-	stopChan          chan struct{}
-	resourceProcessor *resource.Processor
-	starvationEngine  *starvation.Engine
-	agentProcessor    *agent.Processor
+	DB                 *sql.DB
+	TickInterval       time.Duration
+	stopChan           chan struct{}
+	resourceProcessor  *resource.Processor
+	starvationEngine   *starvation.Engine
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 	return &Engine{
-		DB:                db,
-		TickInterval:      interval,
-		stopChan:          make(chan struct{}),
-		resourceProcessor: resource.NewProcessor(db),
-		starvationEngine:  starvation.NewEngine(db),
-		agentProcessor:    agent.NewProcessor(db),
+		DB:                 db,
+		TickInterval:       interval,
+		stopChan:           make(chan struct{}),
+		resourceProcessor:  resource.NewProcessor(db),
+		starvationEngine:   starvation.NewEngine(db),
 	}
 }
 
@@ -73,27 +70,27 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Pass 2: Starvation processing
+	// Pass 2: Starvation check
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
 	}
 
-	// Pass 3: Construction timers checks
+	// Pass 3: Construction upgrades
 	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
 		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
 		return
 	}
 
-	// Pass 4: AGENT AUTOMATION PASS
-	if err := e.agentProcessor.RunAgentPass(ctx, tx); err != nil {
-		log.Printf("Error during Agent Automation Pass execution: %v", err)
+	// Pass 4: PvP target combat marches
+	if err := e.resolveRaidCombats(ctx, tx); err != nil {
+		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
 	}
 
-	// Pass 5: Tactical combat marches checks
-	if err := e.resolveRaidCombats(ctx, tx); err != nil {
-		log.Printf("Error during Combat Resolution Pass: %v", err)
+	// Pass 5: ARENA AUTOMATED MATCHMAKING QUEUE BROKER PASS
+	if err := e.resolveArenaSkirmishes(ctx, tx); err != nil {
+		log.Printf("Error during Arena Matchmaking Pass: %v", err)
 		return
 	}
 
@@ -229,23 +226,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defLevel = 1
 		}
 		
-		// 1. Calculate heavy weapon modifiers
-		var attackerTanks int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT fusion_tanks FROM workshop_inventory WHERE encampment_id = $1), 0)", r.attackerID).Scan(&attackerTanks)
+		var attackerTanks, attackerMechs int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks, &attackerMechs)
 		
 		var defenderShields int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID).Scan(&defenderShields)
 
-		// 2. Check if defender has an active autopilot Agent for 3.0x defense multiplier
 		var defenderAgentActive bool
 		_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
 
 		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
 		if defenderAgentActive {
-			defenseShieldMultiplier += 3.0 // 3.0x Automated Agent Autopilot defense boost
+			defenseShieldMultiplier += 3.0
 		}
 
-		attackerOffenseRating := (float64(attackForce) * 15.0) * (1.0 + (float64(attackerTanks) * 0.50)) // Fusion Tanks: +50% Offense
+		attackerOffenseRating := (float64(attackForce) * 15.0) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attackerMechs) * 1.50))
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseShieldMultiplier
 
 		attackerCasualties := 0
@@ -272,13 +267,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		lootPercentage := 0.40
 		if defenderShields > 0 {
-			lootPercentage = 0.20 // Nuclear Shielding reduces loot loss by 50%
+			lootPercentage = 0.20
 		}
 
 		stolenScrap := defenderScrap * lootPercentage
-		if stolenScrap < 0 {
-			stolenScrap = 0
-		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, r.attackerID)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
@@ -316,6 +308,52 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
 
 		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacked Casualties: %d, Defender Casualties: %d, Stolen Scrap: %.1f", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties, stolenScrap)
+	}
+
+	return nil
+}
+
+func (e *Engine) resolveArenaSkirmishes(ctx context.Context, tx *sql.Tx) error {
+	// Find pairs of matched players in the 1v1 Arena queue
+	queryPairs := `
+		SELECT q1.user_id, q2.user_id 
+		FROM arena_queue q1
+		JOIN arena_queue q2 ON q2.bracket = q1.bracket AND q2.user_id < q1.user_id
+		WHERE q1.bracket = '1v1'
+		LIMIT 1`
+
+	var p1, p2 int64
+	err := tx.QueryRowContext(ctx, queryPairs).Scan(&p1, &p2)
+	if err == nil {
+		// Match Found! Resolve 1v1 Skirmish instantly
+		// Attacker metrics logic comparison
+		var aForce, dForce int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", p1).Scan(&aForce)
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM units WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", p2).Scan(&dForce)
+
+		var winner, loser int64
+		if aForce >= dForce {
+			winner = p1
+			loser = p2
+		} else {
+			winner = p2
+			loser = p1
+		}
+
+		// Reward the Winner: +20 Gold, +10 Silver
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET gold = gold + 20.00, silver = silver + 10.00 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $1)", winner)
+
+		// Delete matched players from the queue
+		_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue WHERE user_id IN ($1, $2)", p1, p2)
+
+		// Queue alerts
+		winnerAlert := "🏟️ ARENA DUEL: VICTORY!\n\nYour forces outperformed the rival outpost inside the Duel Arena.\n🎁 Rewards: +20 Gold, +10 Silver transferred safely to reserves."
+		loserAlert := "🏟️ ARENA DUEL: DEFEAT\n\nYour deployment lost the duel clash. Upgrade your units inside the Forge to boost tactical ratings."
+
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", winner, winnerAlert)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", loser, loserAlert)
+
+		log.Printf("Arena Matchmaker resolved 1v1 skirmish: Winner: %d, Loser: %d", winner, loser)
 	}
 
 	return nil

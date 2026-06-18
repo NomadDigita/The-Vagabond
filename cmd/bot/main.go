@@ -92,6 +92,7 @@ func main() {
 	econ := handlers.NewEconomyHandler(db)
 	clan := handlers.NewClanHandler(db)
 	factory := handlers.NewFactoryHandler(db)
+	arena := handlers.NewArenaHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -108,6 +109,7 @@ func main() {
 	bot.Handle("/help", onboarding.HandleHelp)
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
 	bot.Handle("/admin", admin.HandleAdminPanel)
+	bot.Handle("/arena", arena.HandleArenaPanel)
 
 	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
@@ -134,12 +136,13 @@ func main() {
 	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
-	bot.Handle("🛰️ Scan Targets", combat.HandleRaidBoard)
+	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix) // Mapped directly to scan targets listings HUD
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
 	bot.Handle("🪙 Financial Vault", econ.HandleFinancialVault)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
+	bot.Handle("🏟️ Combat Arena", arena.HandleArenaPanel) // Mapped directly to Arena HUD
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Map all plain text inputs to our Natural Language intent router
@@ -159,6 +162,7 @@ func main() {
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
+	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

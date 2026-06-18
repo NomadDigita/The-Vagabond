@@ -4,7 +4,7 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// MainNavigation builds the primary bottom layout (0 arguments to prevent compiler mismatches).
+// MainNavigation builds the primary bottom layout.
 func MainNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
@@ -46,12 +46,12 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnStock := menu.Text("📦 Warehouse Reserves")
+	btnArena := menu.Text("🏟️ Combat Arena")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnStock, btnBack),
+		menu.Row(btnArena, btnBack),
 	)
 
 	return menu
@@ -63,11 +63,12 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
+	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnBack),
+		menu.Row(btnFactory, btnBack),
 	)
 
 	return menu
