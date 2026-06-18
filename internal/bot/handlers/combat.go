@@ -151,6 +151,9 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
+	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
+
 	return c.Send(dashboard, selector)
 }
 
@@ -244,6 +247,9 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
+	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
+
 	return c.Send(panelText, selector)
 }
 
@@ -297,11 +303,13 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
+	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
 
 	return c.Send(report, selector)
 }
 
-// HandleSpyCallback sweeps target data and decrypts active timers (64-byte safe)
+// HandleSpyCallback sweeps target data and decrypts active timers (Phase 24 Staged Interception Engine)
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
@@ -313,7 +321,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Decryption failed."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Decryption setup failure."})
 	}
 	defer tx.Rollback()
 
@@ -327,7 +335,73 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 30.0 WHERE encampment_id = $1", myCampID)
 
-	// Fetch target module metrics
+	// Fetch participant details
+	var attackerName string
+	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", myCampID).Scan(&attackerName)
+
+	var defenderUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderUserID)
+
+	// Register Spy Mission in Database as 'not intercepted' initially
+	var spyID string
+	queryInsertSpy := `
+		INSERT INTO spy_missions (spy_id, target_id, is_intercepted) 
+		VALUES ($1, $2, FALSE) 
+		RETURNING id`
+	err = tx.QueryRowContext(ctx, queryInsertSpy, myCampID, targetCampID).Scan(&spyID)
+	if err != nil {
+		log.Printf("Failed registering spy mission: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing espionage index."})
+	}
+
+	_ = tx.Commit()
+
+	// Dispatch direct alert warning to defender with Launch Interceptor inline button
+	defenderAlert := fmt.Sprintf(
+		"🛰️ ESPIONAGE INTRUSION DETECTED!\n\n"+
+			"A hostile Spy Satellite launched by Outpost [%s] has breached your wireless perimeter and is transmitting warehouse telemetry!\n\n"+
+			"⚠️ Intercept Window: 30 seconds. Spend 10.0 Energy Cells to vaporize the uplink.",
+		attackerName,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	btnIntercept := selector.Data("🛡️ Launch Interceptor Drone", "launch_interceptor", spyID)
+	selector.Inline(selector.Row(btnIntercept))
+
+	defenderUser := &telebot.User{ID: defenderUserID}
+	_, err = c.Bot().Send(defenderUser, defenderAlert, selector)
+	if err != nil {
+		log.Printf("Failsafe satellite alerts failed: %v", err)
+	}
+
+	// Update Attacker of wait window
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Satellite positioned! Syncing telemetry stream..."})
+	_ = c.Send("🛰️ Downlink established. Initiating 30-second security sweep over target coordinate databases...")
+
+	// Trigger Staged Interception Scheduler
+	time.AfterFunc(30*time.Second, func() {
+		h.finalizeSpySatelliteTransmission(c.Bot(), spyID, sender.ID, targetCampID)
+	})
+
+	return nil
+}
+
+// finalizeSpySatelliteTransmission delivers the decryption results if the scan is not intercepted
+func (h *CombatHandler) finalizeSpySatelliteTransmission(bot *telebot.Bot, spyID string, attackerUserID int64, targetCampID string) {
+	ctx := context.Background()
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	var isIntercepted bool
+	err = tx.QueryRowContext(ctx, "SELECT is_intercepted FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted)
+	if err != nil || isIntercepted {
+		return // Intercepted or already processed
+	}
+
+	// Fetch Decryption results
 	var targetName string
 	var targetLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT name, level FROM encampments WHERE id = $1", targetCampID).Scan(&targetName, &targetLvl)
@@ -343,13 +417,10 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		upgradingModule = "None"
 	}
 
-	// Fetch current resources
 	var scrap, rations float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", targetCampID).Scan(&scrap, &rations)
 
 	_ = tx.Commit()
-
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Satellite Sweep Success! Decrypting telemetry..."})
 
 	spyReport := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
@@ -368,7 +439,66 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		targetName, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
 	)
 
-	return c.Send(spyReport, keyboards.CombatNavigation())
+	attackerUser := &telebot.User{ID: attackerUserID}
+	_, _ = bot.Send(attackerUser, spyReport, keyboards.CombatNavigation())
+}
+
+// HandleLaunchInterceptor handles intercepting a running spy scan
+func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	spyID := c.Args()[0]
+
+	var myCampID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Connection error."})
+	}
+	defer tx.Rollback()
+
+	var isIntercepted bool
+	var attackerCampID string
+	var createdAt time.Time
+	err = tx.QueryRowContext(ctx, "SELECT is_intercepted, spy_id, created_at FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted, &attackerCampID, &createdAt)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Connection Closed: This satellite has already returned to orbit."})
+	}
+
+	// 1. Verify Interception Window has not expired (30 seconds)
+	if time.Since(createdAt) > 30*time.Second {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Transmission Complete: Intel was already transmitted."})
+	}
+
+	if isIntercepted {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already Neutralized."})
+	}
+
+	// Verify energy
+	var energy float64
+	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+
+	if energy < 10.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Drones require 10.0 Energy Cells."})
+	}
+
+	// Deduct and update status
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 10.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE WHERE id = $1", spyID)
+
+	var attackerUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
+
+	_ = tx.Commit()
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone launched! Tracking satellite..."})
+
+	// Notify Attacker of failure
+	attackerUser := &telebot.User{ID: attackerUserID}
+	_, _ = c.Bot().Send(attackerUser, "💥 SPY INTERCEPTED: Your returning Spy Satellite was intercepted and destroyed by hostile air defense systems! Telemetry lost.")
+
+	return c.Send("🛡️ INTERCEPT SUCCESS: Your Interceptor Drone destroyed the spy satellite! Telemetry was vaporized.")
 }
 
 // HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes
@@ -397,7 +527,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	// Unified military check: Read forces directly from workshop_inventory
+	// Unified military check: Read forces directly from unified workshop_inventory
 	var soldiers, drones, jets, mechs, nukes, tanks int
 	queryForces := `
 		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
@@ -412,7 +542,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	troopCount := soldiers + drones + jets + mechs + nukes + tanks
 	if troopCount <= 0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: You must have at least 1 Soldier, Drone, Jet, or Mech in your barracks to launch a raid."})
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: Recruit Soldiers or construct mechs/tanks in your Heavy Workshop first!"})
 	}
 
 	var attackerName string
@@ -456,10 +586,8 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	// Inter-continental logistics block
 	if defRegion != myRegion {
 		if jets > 0 {
-			// Cargo Jet reduces inter-continental travel to flat 2 hours (120 mins)
 			marchingMinutes = 120.0
 		} else if ships > 0 {
-			// Clipper ship allows ocean travel: takes 12 hours (720 mins)
 			marchingMinutes = 720.0
 		} else {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Target is on a different continent. Build a Clipper Ship or Cargo Jet in the Workshop to cross!"})
@@ -468,7 +596,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	// Apply Weather travel multipliers
 	switch activeWeather {
-	case "radiation_storm":
+case "radiation_storm":
 		marchingMinutes *= 1.5
 	case "solar_flare":
 		marchingMinutes *= 0.7
@@ -476,6 +604,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
 
+	// ADMIN SUPERPOWERS REVISED: Admins march and cross oceans at the exact same speed as normal players to preserve game design balance.
 	resolveTime := time.Now().Add(marchDuration)
 
 	var raidID string

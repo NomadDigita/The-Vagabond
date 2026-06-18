@@ -134,6 +134,8 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 		selector.Row(btnUpgradeTent, btnUpgradeHeap),
 		selector.Row(btnUpgradeGen, btnUpgradeCamp),
 	)
+	selector.ReplyKeyboard = keyboards.CampNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
 
 	return c.Send(panelText, selector)
 }
@@ -183,6 +185,8 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 		selector.Row(btnGold, btnSilver),
 		selector.Row(btnDiamond),
 	)
+	selector.ReplyKeyboard = keyboards.CampNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
 
 	return c.Send(panelText, selector)
 }
@@ -312,6 +316,8 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 		selector.Row(btnMutateSynaptic),
 		selector.Row(btnMutateSalvage, btnMutateBio),
 	)
+	selector.ReplyKeyboard = keyboards.CampNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
 
 	return c.Send(panelText, selector)
 }

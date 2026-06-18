@@ -12,12 +12,13 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnCamp := menu.Text("⛺ Outpost Camp")
 	btnCombat := menu.Text("⚔️ Tactical Combat")
 	btnEcon := menu.Text("🏦 System Economy")
+	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
 	menu.Reply(
 		menu.Row(btnHQ, btnCamp),
 		menu.Row(btnCombat, btnEcon),
-		menu.Row(btnAdmin),
+		menu.Row(btnFactory, btnAdmin),
 	)
 
 	return menu
@@ -48,13 +49,13 @@ func CombatNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnScan := menu.Text("🛰️ Scan Targets")
+	btnRadar := menu.Text("🛸 Expedition Radar")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnRadar := menu.Text("🛸 Expedition Radar") // Integrated Radar HUD
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
-		menu.Row(btnScan, btnNews),
-		menu.Row(btnRadar, btnBack),
+		menu.Row(btnScan, btnRadar),
+		menu.Row(btnNews, btnBack),
 	)
 
 	return menu
@@ -93,17 +94,17 @@ func WorkshopNavigation() *telebot.ReplyMarkup {
 	return menu
 }
 
-// AdminNavigation builds the restricted console submenu for developers.
+// AdminNavigation builds the custom submenu for administrator actions.
 func AdminNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnTick := menu.Text("⚡ Force Master Tick")
-	btnGive := menu.Text("🪙 Inject Resources")
+	btnResources := menu.Text("🪙 Inject Resources")
 	btnMetrics := menu.Text("🛰️ Server Metrics")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
-		menu.Row(btnTick, btnGive),
+		menu.Row(btnTick, btnResources),
 		menu.Row(btnMetrics, btnBack),
 	)
 

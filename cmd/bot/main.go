@@ -146,16 +146,16 @@ func main() {
 	bot.Handle("🧬 Mutation Core", camp.HandleMutationsPanel)
 	bot.Handle("⛏️ Active Mining", camp.HandleActiveMining)
 	bot.Handle("🛰️ Scan Targets", combat.HandleTargetMatrix)
+	bot.Handle("🛸 Expedition Radar", combat.HandleExpeditionRadar)
 	bot.Handle("📻 Wasteland Radio", world.HandleWorldFeed)
 	bot.Handle("📦 Warehouse Reserves", econ.HandleWarehouseReserves)
 	bot.Handle("🪙 Financial Vault", econ.HandleFinancialVault)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
-	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 	bot.Handle("🏟️ Combat Arena", arena.HandleArenaPanel)
 	bot.Handle("☢️ Strategic Silo", silo.HandleSiloPanel)
 	bot.Handle("💱 Market Exchange", econ.HandleEconPanel)
-	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)   // Mapped Recruit submenu keyboard
-	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel) // Mapped Vehicles submenu keyboard
+	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)
+	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	// Map all plain text inputs to our Natural Language intent router
@@ -183,6 +183,8 @@ func main() {
 	bot.Handle("\flaunch_icbm", silo.HandleLaunchICBMCallback)
 	bot.Handle("\fmine_action", camp.HandleMineCallback)
 	bot.Handle("\fhero_action", hero.HandleHeroCallback)
+	bot.Handle("\flaunch_interceptor", combat.HandleLaunchInterceptor)
+	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

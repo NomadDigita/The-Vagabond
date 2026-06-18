@@ -48,7 +48,7 @@ func (h *AdminHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// HandleAdminPanel renders the Admin control board
+// HandleAdminPanel renders the Admin control board with Secure Developer inline controls
 func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -59,7 +59,70 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.MainNavigation())
 	}
 
-	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the submenu buttons below.", keyboards.AdminNavigation())
+	selector := &telebot.ReplyMarkup{}
+	btnTick := selector.Data("⚡ Force Tick", "admin_action", "tick")
+	btnInject := selector.Data("🪙 Inject 5000 Resources", "admin_action", "inject")
+	btnGift := selector.Data("💎 Gift Premium", "admin_action", "gift")
+	btnMetrics := selector.Data("🛰️ Check Metrics", "admin_action", "metrics")
+
+	selector.Inline(
+		selector.Row(btnTick, btnInject),
+		selector.Row(btnGift, btnMetrics),
+	)
+	selector.ReplyKeyboard = keyboards.AdminNavigation().ReplyKeyboard
+	selector.ResizeKeyboard = true
+
+	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the secure inline controls or bottom submenu deck.", selector)
+}
+
+// HandleAdminActionCallback routes secure inline developer clicks instantly
+func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil || !h.IsAdmin(sender.ID) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Authorized administrators only."})
+	}
+
+	action := c.Args()[0]
+	switch action {
+	case "tick":
+		_ = c.Notify(telebot.Typing)
+		h.TickEngine.ProcessTick()
+		return c.Respond(&telebot.CallbackResponse{Text: "⚡ Master game tick successfully triggered!"})
+	case "inject":
+		ctx := context.Background()
+		var campID string
+		_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+		if campID == "" {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error: Establish outpost first."})
+		}
+		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00 WHERE encampment_id = $1", campID)
+		return c.Respond(&telebot.CallbackResponse{Text: "🪙 5,000 resources permanently injected!"})
+	case "gift":
+		return c.Respond(&telebot.CallbackResponse{Text: "💡 Tip: Use `/admin_gift_premium [username] [days]` in chat."})
+	case "metrics":
+		var totalUsers, totalCamps int
+		ctx := context.Background()
+		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
+		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		metricsReport := fmt.Sprintf(
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"💻 ADMINISTRATIVE METRICS PANEL\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"👥 Total Survivors: %d\n"+
+				"⛺ Total Encampments: %d\n\n"+
+				"⚙️ Active Goroutines: %d\n"+
+				"🧠 Allocated Memory: %.2f MB\n"+
+				"🧩 GC Cycles Executed: %d\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━",
+			totalUsers, totalCamps, runtime.NumGoroutine(),
+			float64(memStats.Alloc)/1024.0/1024.0, memStats.NumGC,
+		)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Memory telemetry fetched!"})
+		return c.Send(metricsReport, keyboards.AdminNavigation())
+	}
+	return nil
 }
 
 // HandleAdminTick manually triggers an instantaneous master loop iteration
