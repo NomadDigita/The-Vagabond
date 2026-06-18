@@ -48,7 +48,6 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	// Check if user has premium status or is Admin
 	var premiumUntil sql.NullTime
 	_ = h.DB.QueryRowContext(ctx, "SELECT premium_until FROM users WHERE telegram_id = $1", sender.ID).Scan(&premiumUntil)
 
@@ -57,12 +56,10 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		isPremium = true
 	}
 
-	// Resolved Query: Simplified SQL loading completely prevents database parsing errors
 	var isActive bool
 	var mode string
 	err := h.DB.QueryRowContext(ctx, "SELECT is_active, mode FROM agent_tasks WHERE user_id = $1", sender.ID).Scan(&isActive, &mode)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Initialize the configuration safely
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO agent_tasks (user_id, mode, is_active) VALUES ($1, 'collector', FALSE) ON CONFLICT DO NOTHING", sender.ID)
 		isActive = false
 		mode = "collector"
@@ -102,7 +99,9 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"⚠️ Agent auto-shuts down if reserves hit 0.\n\n"+
 			"BEHAVIOR MODES:\n"+
 			"🛠️ [Collector]: Auto-scavenges +2.0 Scrap, +1.0 Rations per tick.\n"+
+			"💱 [Collector Ω]: Auto-mines heavy ores +5.0 Iron, +1.0 Gold, +0.2 Diamonds per tick.\n"+
 			"🏗️ [Builder]: Auto-upgrades camp modules if Scrap permits.\n"+
+			"🪖 [Military]: Auto-recruits Soldiers in your barracks if Rations permit.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		statusLabel, licenseText, mode, energy,
 	)
@@ -116,12 +115,15 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	}
 
 	btnToggle := selector.Data(toggleLabel, "toggle_agent", senderIDStr)
-	btnModeCollector := selector.Data("🛠️ Collector Mode", "set_agent_mode", "collector", senderIDStr)
-	btnModeBuilder := selector.Data("🏗️ Builder Mode", "set_agent_mode", "builder", senderIDStr)
+	btnModeCollector := selector.Data("🛠️ Collector", "set_agent_mode", "collector", senderIDStr)
+	btnModeCollectorOmega := selector.Data("💱 Collector Ω", "set_agent_mode", "collector_omega", senderIDStr)
+	btnModeBuilder := selector.Data("🏗️ Builder", "set_agent_mode", "builder", senderIDStr)
+	btnModeMilitary := selector.Data("🪖 Military", "set_agent_mode", "military", senderIDStr)
 
 	selector.Inline(
 		selector.Row(btnToggle),
-		selector.Row(btnModeCollector, btnModeBuilder),
+		selector.Row(btnModeCollector, btnModeCollectorOmega),
+		selector.Row(btnModeBuilder, btnModeMilitary),
 	)
 
 	return c.Send(panelText, selector)

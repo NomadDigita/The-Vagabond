@@ -8,7 +8,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time" // Added missing time package
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
@@ -148,9 +148,9 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	var energy, iron, oil, gold, silver, diamond float64
-	query := `SELECT energy, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond)
+	var energy, iron, oil, gold, silver, diamond, uranium, neuro float64
+	query := `SELECT energy, iron, oil, gold, silver, diamond, uranium, neuro_cores FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond, &uranium, &neuro)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
@@ -159,29 +159,29 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"Spend Energy Cells to manually extract raw resources needed for barracks forging:\n\n"+
 			"🔋 Energy Cells: %.1f cells\n\n"+
 			"CURRENT HEAVY RESERVES:\n"+
-			"🪨 Iron: %.1f | 🛢️ Oil: %.1f\n"+
-			"🪙 Gold: %.1f | 🥈 Silver: %.1f | 💎 Diamonds: %.1f\n\n"+
+			"🪨 Iron: %.1f | 🛢️ Oil: %.1f | ☢️ Uranium: %.1f\n"+
+			"🪙 Gold: %.1f | 🥈 Silver: %.1f | 💎 Diamonds: %.1f | 🧠 Cores: %.0f\n\n"+
 			"EXTRACTION BLUEPRINTS:\n"+
 			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron)\n"+
 			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil)\n"+
 			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold)\n"+
-			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver)\n"+
-			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond)\n"+
+			"☢️ [Extract Uranium] — Costs: 20.0 Energy (+5.0 Uranium)\n"+
+			"🧠 [Mine Cores] — Costs: 50.0 Energy (+1.0 Neuro Core)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		energy, iron, oil, gold, silver, diamond,
+		energy, iron, oil, uranium, gold, silver, diamond, neuro,
 	)
 
 	selector := &telebot.ReplyMarkup{}
 	btnIron := selector.Data("🪨 Extract Iron", "mine_action", "iron")
 	btnOil := selector.Data("🛢️ Pump Oil", "mine_action", "oil")
 	btnGold := selector.Data("🪙 Mine Gold", "mine_action", "gold")
-	btnSilver := selector.Data("🥈 Mine Silver", "mine_action", "silver")
-	btnDiamond := selector.Data("💎 Mine Diamond", "mine_action", "diamond")
+	btnUranium := selector.Data("☢️ Extract Uranium", "mine_action", "uranium")
+	btnCores := selector.Data("🧠 Mine Cores", "mine_action", "neuro")
 
 	selector.Inline(
 		selector.Row(btnIron, btnOil),
-		selector.Row(btnGold, btnSilver),
-		selector.Row(btnDiamond),
+		selector.Row(btnGold, btnUranium),
+		selector.Row(btnCores),
 	)
 
 	return c.Send(panelText, selector)
@@ -222,14 +222,14 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		cost = 10.0
 		gain = 5.0
 		dbColumn = "gold"
-	case "silver":
-		cost = 5.0
-		gain = 10.0
-		dbColumn = "silver"
-	case "diamond":
-		cost = 15.0
+	case "uranium":
+		cost = 20.0
+		gain = 5.0
+		dbColumn = "uranium"
+	case "neuro":
+		cost = 50.0
 		gain = 1.0
-		dbColumn = "diamond"
+		dbColumn = "neuro_cores"
 	}
 
 	if energy < cost {

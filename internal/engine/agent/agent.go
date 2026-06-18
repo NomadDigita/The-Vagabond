@@ -74,16 +74,28 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		// 2. Process action modes
 		switch a.Mode {
 		case "collector":
-			// Generate +20.0 Scrap and +10.0 Rations (10x Automated Agent Boost)
+			// Generate +2.0 Scrap and +1.0 Rations
 			updateCollector := `
 				UPDATE resources 
-				SET scrap = scrap + 20.00, rations = rations + 10.00 
+				SET scrap = scrap + 2.00, rations = rations + 1.00 
 				WHERE encampment_id = $1`
 			_, err = tx.ExecContext(ctx, updateCollector, a.CampID)
 			if err != nil {
 				log.Printf("Agent failed executing collector pass: %v", err)
 			}
 			log.Printf("Agent [Collector] executed action for outpost: %s (+2.0 Scrap, +1.0 Rations)", a.CampName)
+
+		case "collector_omega":
+			// Generate +20.0 Scrap and heavy war resources (10x Collector Ω Autopilot Boost!)
+			updateCollectorOmega := `
+				UPDATE resources 
+				SET scrap = scrap + 20.00, iron = iron + 5.00, gold = gold + 1.00, silver = silver + 1.00, diamond = diamond + 0.2, dollars = dollars + 2.00
+				WHERE encampment_id = $1`
+			_, err = tx.ExecContext(ctx, updateCollectorOmega, a.CampID)
+			if err != nil {
+				log.Printf("Agent failed executing collector_omega pass: %v", err)
+			}
+			log.Printf("Agent [Collector Ω] executed 10x resource extraction pass for outpost: %s", a.CampName)
 
 		case "builder":
 			// Check if any module is currently upgrading in this camp
@@ -95,19 +107,17 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			}
 
 			// Find modules eligible for upgrade (Tent, Scrap Heap, or Generator)
-			// Choose the lowest level module that we can afford (Cost: Level * 150 Scrap)
 			queryEligible := `
 				SELECT type, level 
 				FROM modules 
 				WHERE encampment_id = $1 
 				ORDER BY level ASC 
 				LIMIT 1`
-
+			
 			var modType string
 			var lvl int
 			err = tx.QueryRowContext(ctx, queryEligible, a.CampID).Scan(&modType, &lvl)
 			if err != nil {
-				// Initialize modules if missing
 				_, _ = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, 'tent', 1) ON CONFLICT DO NOTHING", a.CampID)
 				continue
 			}
@@ -128,7 +138,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 					continue
 				}
 
-				// Notify player of agent construction start
 				alertMsg := fmt.Sprintf(
 					"🤖 AGENT AUTOMATED CONSTRUCTION\n\n"+
 						"Outpost: %s\n"+
@@ -138,6 +147,18 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
 				log.Printf("Agent [Builder] auto-triggered upgrade for module %s level %d on camp %s", modType, lvl+1, a.CampName)
+			}
+
+		case "military":
+			// Autopilot barracks recruitment: spends rations to build soldiers automatically
+			var rations, iron float64
+			_ = tx.QueryRowContext(ctx, "SELECT rations, iron FROM resources WHERE encampment_id = $1", a.CampID).Scan(&rations, &iron)
+
+			if rations >= 50.0 && iron >= 10.0 {
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - 50.0, iron = iron - 10.0 WHERE encampment_id = $1", a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", a.CampID)
+				
+				log.Printf("Agent [Military] auto-recruited 1 Soldier for outpost: %s", a.CampName)
 			}
 		}
 	}
