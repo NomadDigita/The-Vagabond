@@ -30,11 +30,13 @@ func CampNavigation() *telebot.ReplyMarkup {
 	btnUpgrade := menu.Text("🔨 Structural Upgrades")
 	btnHero := menu.Text("👥 Hero Commander")
 	btnAgent := menu.Text("🧠 Automation Agent")
+	btnResearch := menu.Text("🧪 Research Lab")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnUpgrade, btnHero),
-		menu.Row(btnAgent, btnBack),
+		menu.Row(btnAgent, btnResearch),
+		menu.Row(btnBack),
 	)
 
 	return menu
@@ -46,12 +48,12 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnNews := menu.Text("📻 Wasteland Radio")
-	btnArena := menu.Text("🏟️ Combat Arena")
+	btnStock := menu.Text("📦 Warehouse Reserves")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnNews),
-		menu.Row(btnArena, btnBack),
+		menu.Row(btnStock, btnBack),
 	)
 
 	return menu
@@ -64,11 +66,13 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
 	btnFactory := menu.Text("🏭 Heavy Workshop")
+	btnExchange := menu.Text("💱 Market Exchange")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnFactory, btnBack),
+		menu.Row(btnFactory, btnExchange),
+		menu.Row(btnBack),
 	)
 
 	return menu
