@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"strconv"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -22,6 +21,7 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
+// HandleStart renders the main terminal dashboard and binds inline controls (HQ HUD)
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -32,6 +32,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 
 	ctx := context.Background()
 
+	// Check if user exists
 	var user models.User
 	queryUser := `SELECT telegram_id, username, first_name, state, COALESCE(faction, '') FROM users WHERE telegram_id = $1`
 	err := h.DB.QueryRowContext(ctx, queryUser, sender.ID).Scan(&user.TelegramID, &user.Username, &user.FirstName, &user.State, &user.Faction)
@@ -73,10 +74,19 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"🥫 Rations: %.1f\n"+
 				"🔋 Energy Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"Use /help to view command walkthroughs.",
+				"Use the command manual below to learn terminal shortcuts.",
 			user.FirstName, formatFactionLabel(user.Faction), region, camp.Name, res.Scrap, res.Rations, res.Energy,
 		)
-		return c.Send(dashboard, keyboards.MainNavigation())
+
+		selector := &telebot.ReplyMarkup{}
+		btnWarehouse := selector.Data("📦 Warehouse Stocks", "view_warehouse")
+		btnManual := selector.Data("📖 Survival Manual", "view_manual")
+
+		selector.Inline(
+			selector.Row(btnWarehouse, btnManual),
+		)
+
+		return c.Send(dashboard, selector, keyboards.MainNavigation())
 	}
 
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -112,6 +122,7 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 	return c.Send(welcomeText, selector)
 }
 
+// HandleHelp renders the complete interactive system tutorial walkthrough
 func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -135,7 +146,7 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	return c.Send(helpManual, keyboards.MainNavigation())
 }
 
-// HandleFactionCallback writes registration details and assigns a random global continent region
+// HandleFactionCallback writes registration details depending on faction selection
 func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	ctx := context.Background()
 
@@ -166,9 +177,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database writing registration error."})
 	}
 
-	// Dynamic Global Continent Spawning
 	continents := []string{"Africa", "Europe", "Asia", "Americas"}
-	spawnedContinent := continents[rand.Intn(len(continents))]
+	spawnedContinent := continents[sender.ID%4]
 
 	var coordID string
 	queryCoord := `SELECT id FROM coordinates WHERE x = 0 AND y = 0 AND region = $1`

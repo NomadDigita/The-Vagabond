@@ -8,7 +8,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
@@ -161,7 +160,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"CURRENT HEAVY RESERVES:\n"+
 			"🪨 Iron: %.1f | 🛢️ Oil: %.1f\n"+
 			"🪙 Gold: %.1f | 🥈 Silver: %.1f | 💎 Diamonds: %.1f\n\n"+
-			"EXTRACTION blue prints:\n"+
+			"EXTRACTION BLUEPRINTS:\n"+
 			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron)\n"+
 			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil)\n"+
 			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold)\n"+
@@ -236,7 +235,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy! Need %.1f Cells.", cost)})
 	}
 
-	// Deduct and add resource
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", cost, campID)
 	queryUpdate := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, gain, campID)
@@ -347,7 +345,6 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets! Need 20 Uranium, 5 Neuro Cores."})
 	}
 
-	// Deduct and increment level
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET uranium = uranium - 20.0, neuro_cores = neuro_cores - 5.0 WHERE encampment_id = $1", campID)
 	queryUpdate := fmt.Sprintf("UPDATE mutation_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, campID)

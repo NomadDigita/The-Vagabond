@@ -20,7 +20,7 @@ func NewHeroHandler(db *sql.DB) *HeroHandler {
 	return &HeroHandler{DB: db}
 }
 
-// HandleHeroPanel displays the commander statistics, trait bonuses, and injuries
+// HandleHeroPanel displays the commander statistics, trait bonuses, and injuries with interactive buttons
 func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -37,7 +37,6 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 		return c.Send("⚠️ Setup your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Fetch player faction
 	var faction string
 	_ = h.DB.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
 
@@ -46,7 +45,6 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	err = h.DB.QueryRowContext(ctx, queryHero, campID).Scan(&hero.ID, &hero.Name, &hero.Trait, &hero.Injuries, &hero.BattlesSurvived, &hero.Superpower)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		// Define empty variable fields first to prevent compiler shadowing issues
 		var heroName string
 		var heroTrait string
 		var heroInjury string
@@ -56,7 +54,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			heroName = "Iron Warden"
 			heroTrait = "Fortress Tactician"
 			heroInjury = "Scarred Eye"
-			heroSuperpower = "🛡️ Kinetic Barrier (Reduces incoming troop damage by 15%)"
+			heroSuperpower = "🛡️ Kinetic Barrier (Reduces incoming damage by 15%)"
 		} else {
 			heroName = "Waste Phantom"
 			heroTrait = "Salvage Specialist"
@@ -68,7 +66,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			INSERT INTO heroes (encampment_id, name, trait, injuries, battles_survived, superpower) 
 			VALUES ($1, $2, $3, $4, 0, $5) 
 			RETURNING id, name, trait, injuries, battles_survived, superpower`
-
+		
 		err = h.DB.QueryRowContext(ctx, insertHero, campID, heroName, heroTrait, heroInjury, heroSuperpower).Scan(&hero.ID, &hero.Name, &hero.Trait, &hero.Injuries, &hero.BattlesSurvived, &hero.Superpower)
 		if err != nil {
 			log.Printf("Failed creating elite hero: %v", err)
@@ -90,11 +88,60 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			"🩺 Injuries Sustained: %s\n"+
 			"⚡ Faction Superpower: %s\n"+
 			"🎖️ Survived Conflicts: %d battles\n\n"+
-			"COMMANDER OVERVIEWS:\n"+
-			"The commander influences dynamic combat resolutions depending on their unlocked superpowers.\n"+
+			"COMMANDER TRAINING MODULES:\n"+
+			"🏋️ [Train Commander] — Cost: 50 Scrap (+1 Battle Survival XP)\n"+
+			"💊 [Heal Injury] — Cost: 50 Rations (Heals sustained scars)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		hero.Name, hero.Trait, hero.Injuries, hero.Superpower, hero.BattlesSurvived,
 	)
 
-	return c.Send(dashboard, keyboards.CampNavigation())
+	selector := &telebot.ReplyMarkup{}
+	btnTrain := selector.Data("🏋️ Train Commander", "hero_action", "train")
+	btnHeal := selector.Data("💊 Heal Injury", "hero_action", "heal")
+
+	selector.Inline(
+		selector.Row(btnTrain, btnHeal),
+	)
+
+	return c.Send(dashboard, selector)
+}
+
+// HandleHeroCallback processes commander training and medical healing
+func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	action := c.Args()[0]
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Action failed."})
+	}
+	defer tx.Rollback()
+
+	var scrap, rations float64
+	_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &rations)
+
+	switch action {
+	case "train":
+		if scrap < 50.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap! Need 50."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE heroes SET battles_survived = battles_survived + 1 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🏋️ Commander training completed successfully! +1 XP."})
+
+	case "heal":
+		if rations < 50.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Rations! Need 50."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE heroes SET injuries = 'Perfect Health' WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💊 Injuries fully cured! Commander is in perfect health."})
+	}
+
+	_ = tx.Commit()
+	return h.HandleHeroPanel(c)
 }
