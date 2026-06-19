@@ -138,7 +138,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleActiveMining renders the manual extraction workstation HUD
+// HandleActiveMining renders the Miner Management & Active Extraction queues (Phase 2 Additions)
 func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -146,119 +146,166 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	ctx := context.Background()
 
 	var campID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	var campLvl int
+	_ = h.DB.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 
-	var energy, iron, oil, gold, silver, diamond, uranium, neuro float64
-	query := `SELECT energy, iron, oil, gold, silver, diamond, uranium, neuro_cores FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond, &uranium, &neuro)
+	var energy, iron, oil, gold, silver, diamond, uranium, steel float64
+	query := `SELECT energy, iron, oil, gold, silver, diamond, uranium, steel FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond, &uranium, &steel)
+
+	// Fetch Miner metrics
+	var ownedMiners int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&ownedMiners)
+
+	var activeMiners int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", campID).Scan(&activeMiners)
+
+	idleMiners := ownedMiners - activeMiners
+	maxMiners := (campLvl / 5) + 1
+	if maxMiners > 7 {
+		maxMiners = 7
+	}
+
+	minerCost := ownedMiners * 500
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"⛏️ ACTIVE EXTRACTION WORKSTATION\n"+
+			"⛏️ HEAVY EXTRACTION WORKSTATION [PRO]\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Spend Energy Cells to manually extract raw resources needed for barracks forging:\n\n"+
-			"🔋 Energy Cells: %.1f cells\n\n"+
-			"CURRENT HEAVY RESERVES:\n"+
-			"🪨 Iron: %.1f | 🛢️ Oil: %.1f | ☢️ Uranium: %.1f\n"+
-			"🪙 Gold: %.1f | 🥈 Silver: %.1f | 💎 Diamonds: %.1f | 🧠 Cores: %.0f\n\n"+
-			"EXTRACTION BLUEPRINTS:\n"+
-			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron)\n"+
-			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil)\n"+
-			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold)\n"+
-			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver)\n"+
-			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond)\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		energy, iron, oil, uranium, gold, silver, diamond, neuro,
+			"Assign available miners to start time-locked resource sweeps:\n\n"+
+			"🔋 Energy Cells: %.1f cells\n"+
+			"👥 Miners Stationed: %d / %d active | Idle: %d miners\n"+
+			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n\n"+
+			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
+			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron / miner)\n"+
+			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil / miner)\n"+
+			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold / miner)\n"+
+			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver / miner)\n"+
+			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond / miner)\n"+
+			"☢️ [Mine Uranium] — Costs: 20.0 Energy (+5.0 Uranium / miner)\n"+
+			"🎈 [Pump Hydrogen] — Costs: 15.0 Energy (+10.0 Hydrogen / miner)\n"+
+			"🧱 [Forging Steel] — Costs: 10.0 Energy (+20.0 Steel / miner)\n\n"+
+			"🛒 MINER SHOP DECK:\n"+
+			"👥 Recruit Miner -> Cost: %d Scrap",
+		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, minerCost,
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	btnIron := selector.Data("🪨 Extract Iron", "mine_action", "iron")
-	btnOil := selector.Data("🛢️ Pump Oil", "mine_action", "oil")
-	btnGold := selector.Data("🪙 Mine Gold", "mine_action", "gold")
-	btnSilver := selector.Data("🥈 Mine Silver", "mine_action", "silver")
-	btnDiamond := selector.Data("💎 Mine Diamond", "mine_action", "diamond")
+	btnIron := selector.Data("🪨 Iron", "mine_action", "iron")
+	btnOil := selector.Data("🛢️ Oil", "mine_action", "oil")
+	btnGold := selector.Data("🪙 Gold", "mine_action", "gold")
+	btnSilver := selector.Data("🥈 Silver", "mine_action", "silver")
+	btnDiamond := selector.Data("💎 Diamond", "mine_action", "diamond")
+	btnUranium := selector.Data("☢️ Uranium", "mine_action", "uranium")
+	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
+	btnSteel := selector.Data("🧱 Steel", "mine_action", "steel")
+	
+	btnBuyMiner := selector.Data(fmt.Sprintf("🛒 Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")
 
 	selector.Inline(
 		selector.Row(btnIron, btnOil),
 		selector.Row(btnGold, btnSilver),
-		selector.Row(btnDiamond),
+		selector.Row(btnDiamond, btnUranium),
+		selector.Row(btnHydrogen, btnSteel),
+		selector.Row(btnBuyMiner),
 	)
 
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles spending energy cells with 2-minute cooling safety sentinel checks
+// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 	mineType := c.Args()[0]
 
 	var campID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	var campLvl int
+	_ = h.DB.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mining failed."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mining transaction failed."})
 	}
 	defer tx.Rollback()
 
-	// 1. Verify 2-minute cooling laser check
-	var lastMined sql.NullTime
-	_ = tx.QueryRowContext(ctx, "SELECT last_mined_at FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&lastMined)
+	var ownedMiners int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&ownedMiners)
 
-	if lastMined.Valid {
-		diff := time.Since(lastMined.Time)
-		if diff < 2*time.Minute {
-			secondsLeft := int((2 * time.Minute - diff).Seconds())
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚠️ Lasers Overheating: Cooling down. Wait %ds before mining again.", secondsLeft)})
+	var activeMiners int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE FOR UPDATE", campID).Scan(&activeMiners)
+
+	idleMiners := ownedMiners - activeMiners
+
+	if mineType == "buy_miner" {
+		maxMiners := (campLvl / 5) + 1
+		if maxMiners > 7 {
+			maxMiners = 7
 		}
+
+		if ownedMiners >= maxMiners {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Miner Cap Reached: Core level %d limits you to %d miners.", campLvl, maxMiners)})
+		}
+
+		cost := ownedMiners * 500
+		var scrap float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
+
+		if scrap < float64(cost) {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap: Need %d.", cost)})
+		}
+
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET miners = miners + 1 WHERE encampment_id = $1", campID)
+
+		_ = tx.Commit()
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🛒 Miner successfully recruited!"})
+		return h.HandleActiveMining(c)
+	}
+
+	// Dynamic Mining Action Queue Execution
+	if idleMiners <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: All miners are currently engaged in active queues!"})
 	}
 
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
 
 	var cost float64
-	var gain float64
-	var dbColumn string
-
 	switch mineType {
-	case "iron":
+	case "iron", "oil", "silver":
 		cost = 5.0
-		gain = 20.0
-		dbColumn = "iron"
-	case "oil":
-		cost = 5.0
-		gain = 10.0
-		dbColumn = "oil"
-	case "gold":
+	case "gold", "steel":
 		cost = 10.0
-		gain = 5.0
-		dbColumn = "gold"
+	case "diamond":
+		cost = 15.0
+	case "hydrogen":
+		cost = 15.0
 	case "uranium":
 		cost = 20.0
-		gain = 5.0
-		dbColumn = "uranium"
-	case "neuro":
-		cost = 50.0
-		gain = 1.0
-		dbColumn = "neuro_cores"
 	}
 
 	if energy < cost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy! Need %.1f Cells.", cost)})
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", cost)})
 	}
 
-	// Update energy, resource and timestamp
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1, last_mined_at = CURRENT_TIMESTAMP WHERE encampment_id = $2", cost, campID)
-	queryUpdate := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", dbColumn, dbColumn)
-	_, _ = tx.ExecContext(ctx, queryUpdate, gain, campID)
+	// Deduct energy cost
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", cost, campID)
 
-	if err := tx.Commit(); err != nil {
-		log.Printf("Failed committing mining action: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing resources."})
+	// Register 5-minute time-locked active mining task inside database queue
+	readyAt := time.Now().Add(5 * time.Minute)
+	queryInsertQueue := `
+		INSERT INTO active_mining_queues (encampment_id, resource_type, miners_assigned, ready_at, is_completed)
+		VALUES ($1, $2, 1, $3, FALSE)`
+	
+	_, err = tx.ExecContext(ctx, queryInsertQueue, campID, mineType, readyAt)
+	if err != nil {
+		log.Printf("Failed registering mining queue task: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mining task queue."})
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⛏️ Extracted +%.1f %s!", gain, mineType)})
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⛏️ Miner deployed! %s extraction in progress (5m)...", mineType)})
 	return h.HandleActiveMining(c)
 }
 

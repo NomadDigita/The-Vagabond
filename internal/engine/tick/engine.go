@@ -98,19 +98,25 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Pass 6: Starvation decay calculations
+	// Pass 6: Resolve pending time-based mining queues (Phase 2 Addition)
+	if err := e.resolveCompletedMiningQueues(ctx, tx); err != nil {
+		log.Printf("Error during Active Mining Resolution: %v", err)
+		return
+	}
+
+	// Pass 7: Starvation decay calculations
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
 	}
 
-	// Pass 7: Construction upgrades
+	// Pass 8: Construction upgrades
 	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
 		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
 		return
 	}
 
-	// Pass 8: PvP target and AI Skirmish combat resolutions (Tick-safe NULL scans)
+	// Pass 9: PvP target and AI Skirmish combat resolutions
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
@@ -131,6 +137,83 @@ func (e *Engine) ProcessTick() {
 	}
 
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+}
+
+// resolveCompletedMiningQueues finalizes active extraction tasks (Phase 2 Addition)
+func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) error {
+	queryCompleted := `
+		SELECT q.id, q.encampment_id, q.resource_type, q.miners_assigned, e.user_id
+		FROM active_mining_queues q
+		JOIN encampments e ON e.id = q.encampment_id
+		WHERE q.is_completed = FALSE AND q.ready_at <= CURRENT_TIMESTAMP`
+
+	rows, err := tx.QueryContext(ctx, queryCompleted)
+	if err != nil {
+		return fmt.Errorf("failed scanning finished mining queues: %w", err)
+	}
+	defer rows.Close()
+
+	type completedMine struct {
+		id           string
+		encampmentID string
+		resType      string
+		miners       int
+		userID       int64
+	}
+
+	var completed []completedMine
+	for rows.Next() {
+		var m completedMine
+		if err := rows.Scan(&m.id, &m.encampmentID, &m.resType, &m.miners, &m.userID); err == nil {
+			completed = append(completed, m)
+		}
+	}
+	rows.Close()
+
+	for _, m := range completed {
+		var gain float64
+		var column string
+
+		switch m.resType {
+		case "iron":
+			gain = float64(m.miners * 20)
+			column = "iron"
+		case "oil":
+			gain = float64(m.miners * 10)
+			column = "oil"
+		case "gold":
+			gain = float64(m.miners * 5)
+			column = "gold"
+		case "silver":
+			gain = float64(m.miners * 10)
+			column = "silver"
+		case "diamond":
+			gain = float64(m.miners * 1)
+			column = "diamond"
+		case "uranium":
+			gain = float64(m.miners * 5)
+			column = "uranium"
+		case "hydrogen":
+			gain = float64(m.miners * 10)
+			column = "hydrogen"
+		case "steel":
+			gain = float64(m.miners * 20)
+			column = "steel"
+		}
+
+		// Update database reserves dynamically inside transaction
+		queryUpdateRes := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", column, column)
+		_, _ = tx.ExecContext(ctx, queryUpdateRes, gain, m.encampmentID)
+
+		// Set queue to complete
+		_, _ = tx.ExecContext(ctx, "UPDATE active_mining_queues SET is_completed = TRUE WHERE id = $1", m.id)
+
+		alertMsg := fmt.Sprintf("⛏️ EXTRACTION COMPLETE: Your miners successfully returned with +%.1f %s!", gain, m.resType)
+		queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
+		_, _ = tx.ExecContext(ctx, queryNotif, m.userID, alertMsg)
+	}
+
+	return nil
 }
 
 // resolvePendingEspionageMissions checks and finalizes satellites after the 30-second window expires (Phase 3 Persisted Espionage)

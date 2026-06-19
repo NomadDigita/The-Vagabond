@@ -100,6 +100,18 @@ func executeStartupMigrations(db *sql.DB) {
 			rigs INT DEFAULT 0
 		);`,
 
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS miners INT DEFAULT 1;`,
+
+		`CREATE TABLE IF NOT EXISTS active_mining_queues (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			resource_type VARCHAR(50) NOT NULL,
+			miners_assigned INT DEFAULT 1,
+			started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			ready_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			is_completed BOOLEAN DEFAULT FALSE
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS raids (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			attacker_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
