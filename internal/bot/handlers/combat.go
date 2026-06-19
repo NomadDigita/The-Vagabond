@@ -538,12 +538,18 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	defenderCampID := c.Args()[0]
 
-	// Resolve Attacker Camp ID dynamically to stay 64-byte safe
+	// --- RESOLVED AMBIGUOUS ID DEFECT: Selected e.id and prefixed coordinates table fields ---
 	var attackerCampID string
 	var myRegion string
 	var myX, myY int
-	err := h.DB.QueryRowContext(ctx, "SELECT id, region, x, y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&attackerCampID, &myRegion, &myX, &myY)
+	queryAttacker := `
+		SELECT e.id, c.region, c.x, c.y 
+		FROM encampments e 
+		JOIN coordinates c ON c.id = e.coordinate_id 
+		WHERE e.user_id = $1`
+	err := h.DB.QueryRowContext(ctx, queryAttacker, sender.ID).Scan(&attackerCampID, &myRegion, &myX, &myY)
 	if err != nil {
+		log.Printf("Failed querying attacker Outpost details: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
 	}
 
