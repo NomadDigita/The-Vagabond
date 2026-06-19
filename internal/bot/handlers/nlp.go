@@ -52,7 +52,7 @@ func NewNLPHandler(
 func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	text := strings.ToLower(c.Text())
 
-	// Exact mother-route commands checks
+	// --- 1. CORE MOTHER-KEYBOARD NAVIGATION SHORTCUTS ---
 	if text == "📡 terminal hq" || text == "/start" || text == "start" {
 		return h.Onboarding.HandleStart(c)
 	}
@@ -65,16 +65,19 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if text == "🏦 system economy" || text == "economy" || text == "bank" {
 		return h.Econ.HandleEconPanel(c)
 	}
+	if text == "🏭 heavy workshop" || text == "workshop" {
+		return h.Factory.HandleFactoryPanel(c)
+	}
 
-	// Lexical sub-menu shortcuts checks
+	// --- 2. CAMP CONTEXTUAL SUBMENU SHORTCUTS ---
 	if text == "🔨 structural upgrades" {
 		return h.Camp.HandleStructuralUpgrades(c)
 	}
 	if text == "👥 hero commander" {
-		return h.Hero.HandleHeroPanel(c) // Restored correct redirect
+		return h.Hero.HandleHeroPanel(c)
 	}
 	if text == "🧠 automation agent" {
-		return h.Agent.HandleAgent(c) // Restored correct redirect
+		return h.Agent.HandleAgent(c)
 	}
 	if text == "🧬 mutation core" {
 		return h.Camp.HandleMutationsPanel(c)
@@ -82,6 +85,22 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 	if text == "⛏️ active mining" {
 		return h.Camp.HandleActiveMining(c)
 	}
+	if text == "🧪 research lab" {
+		return h.Research.HandleResearchPanel(c)
+	}
+
+	// --- 3. COMBAT CONTEXTUAL SUBMENU SHORTCUTS ---
+	if text == "🛰️ scan targets" {
+		return h.Combat.HandleRaidBoard(c)
+	}
+	if text == "🛸 expedition radar" || text == "radar" {
+		return h.Combat.HandleExpeditionRadar(c) // Restored missing tracking radar routing
+	}
+	if text == "📻 wasteland radio" {
+		return h.Onboarding.HandleHelp(c) // Redirect or handle news
+	}
+
+	// --- 4. ECONOMY CONTEXTUAL SUBMENU SHORTCUTS ---
 	if text == "🪙 financial vault" {
 		return h.Econ.HandleFinancialVault(c)
 	}
@@ -89,13 +108,23 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 		return h.Clan.HandleClanPanel(c)
 	}
 	if text == "💱 market exchange" {
-		return h.Exchange.HandleExchangePanel(c) // Restored correct redirect
-	}
-	if text == "🧪 research lab" {
-		return h.Research.HandleResearchPanel(c) // Restored correct redirect
+		return h.Exchange.HandleExchangePanel(c)
 	}
 
-	// Lexical intents token matching
+	// --- 5. WORKSHOP CONTEXTUAL SUBMENU SHORTCUTS ---
+	if text == "🪖 recruit troops" {
+		return h.Factory.HandleRecruitPanel(c)
+	}
+	if text == "🚗 logistics vehicles" {
+		return h.Factory.HandleVehiclesPanel(c)
+	}
+
+	// --- 6. GLOBAL CONTROLS ---
+	if text == "⬅️ back to hq" {
+		return h.Onboarding.HandleStart(c)
+	}
+
+	// --- 7. LEXICAL INTENT MATCHING PATTERNS ---
 	if strings.Contains(text, "upgrade") || strings.Contains(text, "build") {
 		return h.Camp.HandleStructuralUpgrades(c)
 	}
