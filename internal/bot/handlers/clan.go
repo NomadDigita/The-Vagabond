@@ -41,7 +41,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		return c.Send("❌ Alliance Access Locked: Reach Outpost Core Level 5 to access Clan Networks.", keyboards.MainNavigation())
 	}
 
-	// Fetch current clan status
 	var clanID sql.NullString
 	var clanName sql.NullString
 	var role sql.NullString
@@ -87,7 +86,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 
 	var buttons []telebot.Row
 	
-	// --- CLAN MANAGEMENT MODULES (Phase 3 Additions) ---
 	btnManage := selector.Data("👥 Manage Members", "clan_manage", clanID.String)
 	btnStats := selector.Data("📊 Alliance Stats", "clan_stats", clanID.String)
 	buttons = append(buttons, selector.Row(btnManage, btnStats))
@@ -101,6 +99,79 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 
 	selector.Inline(buttons...)
 	return c.Send(panelText, selector)
+}
+
+// HandleManageMembersCallback renders the roster management page (Phase 3 Addition)
+func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
+	ctx := context.Background()
+	clanID := c.Args()[0]
+
+	queryMembers := `
+		SELECT u.first_name, u.username, uc.role 
+		FROM user_clans uc
+		JOIN users u ON u.telegram_id = uc.user_id
+		WHERE uc.clan_id = $1`
+
+	rows, err := h.DB.QueryContext(ctx, queryMembers, clanID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to fetch roster."})
+	}
+	defer rows.Close()
+
+	rosterText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"👥 ALLIANCE ROSTER LISTING\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+	index := 1
+	for rows.Next() {
+		var fName, username, role string
+		if err := rows.Scan(&fName, &username, &role); err == nil {
+			rosterText += fmt.Sprintf("[%d] %s (@%s)\n    Role: %s\n\n", index, fName, username, role)
+			index++
+		}
+	}
+
+	rosterText += "━━━━━━━━━━━━━━━━━━━━━━"
+	return c.Send(rosterText, keyboards.EconomyNavigation())
+}
+
+// HandleAllianceStatsCallback calculates the accumulated strength metrics (Phase 3 Addition)
+func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
+	ctx := context.Background()
+	clanID := c.Args()[0]
+
+	var totalLevel int
+	var totalSoldiers int
+	var totalMechs int
+
+	queryStats := `
+		SELECT COALESCE(SUM(e.level), 0), COALESCE(SUM(w.soldiers), 0), COALESCE(SUM(w.mechs), 0)
+		FROM user_clans uc
+		JOIN encampments e ON e.user_id = uc.user_id
+		JOIN workshop_inventory w ON w.encampment_id = e.id
+		WHERE uc.clan_id = $1`
+
+	err := h.DB.QueryRowContext(ctx, queryStats, clanID).Scan(&totalLevel, &totalSoldiers, &totalMechs)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error loading statistics."})
+	}
+
+	alliancePower := (totalSoldiers * 10) + (totalMechs * 150)
+
+	report := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"📊 ALLIANCE STRENGTH SUMMARY\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n\n"+
+			"🏆 Collective Outpost Level: Level %d\n"+
+			"⚔️ Accumulated Military Power: %d Power Rating\n\n"+
+			"MILITARY ASSET STOCKPILES:\n"+
+			"🪖 Combined Infantry: %d Soldiers\n"+
+			"🤖 Combined Armored Core: %d Mechs\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		totalLevel, alliancePower, totalSoldiers, totalMechs,
+	)
+
+	return c.Send(report, keyboards.EconomyNavigation())
 }
 
 // HandleCreateClanCallback establishes an alliance with the player as Leader

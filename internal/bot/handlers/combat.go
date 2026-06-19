@@ -542,7 +542,7 @@ func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
 	return c.Respond(&telebot.CallbackResponse{Text: "🤝 Co-Op lobby staged! Aligned alliance players can join your force."})
 }
 
-// HandleJoinCoopCallback aggregates allied forces proportionally into the staged coop lobby (Phase 2)
+// HandleJoinCoopCallback aggregates allied forces proportionally into the staged coop lobby
 func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -593,7 +593,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	return h.HandleExpeditionRadar(c)
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes (Secure Lock)
+// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing (Secure Lock)
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -779,7 +779,7 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID string, 
 	return c.Send(panelText, selector)
 }
 
-// HandleExpeditionActions processes inline tactical movements
+// HandleExpeditionActions processes inline tactical movements (Highly costly 30m speedup limits)
 func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	ctx := context.Background()
 	action := c.Args()[0]
@@ -805,23 +805,40 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 
 	switch action {
 	case "speed":
-		var scrap float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
-		if scrap < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap. Speed Up costs 100."})
+		// Speed up is now highly costly: Costs 500 Scrap + 100 Dollars and reduces up to 30 mins
+		var scrap, dollars float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
+		if scrap < 500.0 || dollars < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
 		}
 
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0 WHERE encampment_id = $1", attackerID)
-		newResolve := resolveTime.Add(-30 * time.Second)
+		// Enforce minimum remaining time to prevent immediate past-resolution speedups
+		if time.Until(resolveTime) <= 30*time.Second {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
+		}
+
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
+		newResolve := resolveTime.Add(-30 * time.Minute)
+		if time.Until(newResolve) < 0 {
+			newResolve = time.Now().Add(5 * time.Second) // Dynamic soft landing
+		}
+
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 minutes."})
 		resolveTime = newResolve
 
 	case "abort":
+		// Aborting a mission now costs a resource penalty (20% of scrap)
+		var scrap float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
+
+		penalty := scrap * 0.20
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", penalty, attackerID)
 		_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted!"})
+
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted! 20% Scrap penalty applied."})
 		_ = tx.Commit()
-		return c.Send("↩️ Expedition aborted. Forces returned safely to barracks.", keyboards.MainNavigation())
+		return c.Send("↩️ Expedition aborted. Remaining forces returned safely to hangar.", keyboards.MainNavigation())
 	}
 
 	_ = tx.Commit()

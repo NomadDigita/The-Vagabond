@@ -125,6 +125,15 @@ func executeStartupMigrations(db *sql.DB) {
 			defender_losses INT DEFAULT 0
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS raid_forces (
+			raid_id UUID PRIMARY KEY REFERENCES raids(id) ON DELETE CASCADE,
+			hero_id UUID,
+			soldiers_mobilized INT DEFAULT 0,
+			mechs_mobilized INT DEFAULT 0,
+			buggies_mobilized INT DEFAULT 0,
+			route_type VARCHAR(50) DEFAULT 'direct'
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
@@ -427,6 +436,10 @@ func main() {
 	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
 	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)
 	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)
+	
+	// Responsive Alliance callbacks mapped (Phase 3)
+	bot.Handle("\fclan_manage", clan.HandleManageMembersCallback)
+	bot.Handle("\fclan_stats", clan.HandleAllianceStatsCallback)
 
 	port := os.Getenv("PORT")
 	if port == "" {
