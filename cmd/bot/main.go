@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards" // Keyboard registry imports
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
@@ -63,7 +64,7 @@ func main() {
 	}
 	log.Println("Database connection pool established successfully.")
 
-	// --- PHASE 4 DATABASE SCHEMA AUTO-MIGRATIONS ---
+	// Execute Phase 4 Database Migrations
 	_, err = db.Exec(`
 		ALTER TABLE raids ADD COLUMN IF NOT EXISTS round_number INT DEFAULT 0;
 		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_rations DOUBLE PRECISION DEFAULT 100.0;
@@ -85,6 +86,9 @@ func main() {
 		log.Fatalf("Fatal: Telegram API initialization failure: %v", err)
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
+
+	// --- PHASE 5: EXECUTE STARTUP DIAGNOSTICS & CENTRAL REGISTRY VALIDATION ---
+	keyboards.ValidateRegistry(bot)
 
 	// 5. Initialize and Boot background system engines
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
