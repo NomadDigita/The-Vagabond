@@ -108,8 +108,8 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap")
 
 	selector.Inline(
-		selector.Row(btnDepositScrap, btnBorrowScrap),
-		selector.Row(btnDeposit, btnBorrow), // Backwards compatibility bindings
+		selector.Row(btnDepositScrap, btnDepositCash),
+		selector.Row(btnBorrowScrap, btnBorrowCash),
 		selector.Row(btnSellScrap),
 	)
 
@@ -131,7 +131,7 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 		SELECT scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars 
 		FROM resources 
 		WHERE encampment_id = $1`
-	
+
 	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &energy, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond, &dollars)
 
 	inventoryText := fmt.Sprintf(
