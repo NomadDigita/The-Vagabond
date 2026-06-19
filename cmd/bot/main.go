@@ -125,6 +125,8 @@ func executeStartupMigrations(db *sql.DB) {
 			defender_losses INT DEFAULT 0
 		);`,
 
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_scrap DOUBLE PRECISION DEFAULT 0.00;`,
+
 		`CREATE TABLE IF NOT EXISTS raid_forces (
 			raid_id UUID PRIMARY KEY REFERENCES raids(id) ON DELETE CASCADE,
 			hero_id UUID,
@@ -436,8 +438,7 @@ func main() {
 	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
 	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)
 	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)
-	
-	// Responsive Alliance callbacks mapped (Phase 3)
+
 	bot.Handle("\fclan_manage", clan.HandleManageMembersCallback)
 	bot.Handle("\fclan_stats", clan.HandleAllianceStatsCallback)
 

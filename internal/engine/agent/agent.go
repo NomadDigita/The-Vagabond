@@ -27,7 +27,6 @@ type ActiveAgent struct {
 
 // RunAgentPass executes automation logic for all active agents inside the transaction
 func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
-	// Query all active agents alongside their current resources
 	query := `
 		SELECT t.user_id, t.mode, e.id, e.name, r.scrap, r.energy
 		FROM agent_tasks t
