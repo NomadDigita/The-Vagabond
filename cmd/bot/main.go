@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
-	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards" // Keyboard registry imports
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
@@ -88,7 +87,6 @@ func main() {
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
 	// --- PHASE 5: EXECUTE STARTUP DIAGNOSTICS & CENTRAL REGISTRY VALIDATION ---
-	keyboards.ValidateRegistry(bot)
 
 	// 5. Initialize and Boot background system engines
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
@@ -253,10 +251,10 @@ func main() {
 	<-quit
 
 	log.Println("Termination request received. Initiating graceful shutdown protocol...")
-	
+
 	tickEngine.Stop()
 	realtimeListener.Stop()
 	db.Close()
-	
+
 	log.Println("System components cleanly dismantled. Server offline.")
 }
