@@ -178,7 +178,6 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	// LEFT JOIN allows us to resolve attacks even when defender is the AI Drone Nest (id '00000000-0000-0000-0000-000000000000')
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
@@ -227,6 +226,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
+		var targetBiome string = "wasteland"
 
 		if r.defenderID == "00000000-0000-0000-0000-000000000000" {
 			// --- PROCEDURAL AI STRATEGIC DIFFICULTY SCALING ---
@@ -236,9 +236,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				attackerCoreLvl = 1
 			}
 
-			// AI forces scale up exponentially based on attacker core levels
+			// AI forces scale up based on core level
 			defenseForce = attackerCoreLvl * 18 
 			defLevel = attackerCoreLvl
+			targetBiome = "wasteland"
 		} else {
 			// Normal PvP path
 			var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
@@ -252,15 +253,46 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID).Scan(&defenderShields)
 			_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
+			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID).Scan(&targetBiome)
 		}
 
-		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
+		// Apply global weather variables from world state
+		var activeWeather string
+		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+
+		// Base offensive/defensive values
+		offenseRatingModifier := 1.0
+		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15)
+
+		// --- GEOGRAPHIC TERRAIN COMBAT MULTIPLIERS (Phase 2 & 3) ---
+		switch targetBiome {
+		case "forest":
+			offenseRatingModifier *= 0.85 // Forest cover reduces incoming accuracy
+			defenseRatingModifier *= 1.15
+		case "ruins":
+			offenseRatingModifier *= 0.75 // Heavy urban blockades reduce troop mobility
+			defenseRatingModifier *= 1.30
+		}
+
+		// --- CLIMATIC WEATHER COMBAT MULTIPLIERS (Phase 2 & 3) ---
+		switch activeWeather {
+		case "radiation_storm":
+			offenseRatingModifier *= 0.75 // Radioactive cloud cover reduces combat performance
+		case "acid_rain":
+			attackerMechs = int(float64(attackerMechs) * 0.50) // Corrosive rain reduces mech shielding multipliers
+		}
+
 		if defenderAgentActive {
-			defenseShieldMultiplier += 3.0
+			// Solar flares dampen agent defense sweeps
+			if activeWeather == "solar_flare" {
+				defenseRatingModifier += 1.5
+			} else {
+				defenseRatingModifier += 3.0
+			}
 		}
 
-		attackerOffenseRating := (float64(attackForce) * 15.0) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attackerMechs) * 1.50))
-		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseShieldMultiplier
+		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attackerMechs) * 1.50))
+		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attackerCasualties := 0
 		defenderCasualties := 0
@@ -283,7 +315,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		var defenderScrap float64
 		if r.defenderID == "00000000-0000-0000-0000-000000000000" {
-			defenderScrap = 125.0 // Static AI scrap reserve
+			defenderScrap = 125.0
 		} else {
 			_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
 		}

@@ -25,6 +25,9 @@ type EncampmentState struct {
 	GeneratorLvl int
 	TroopCount   int
 	LoanAmount   float64
+	BuggyCount   int
+	ShipCount    int
+	JetCount     int
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
@@ -32,6 +35,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
+	// --- EXPANDED LOGISTICS FLEET STATE QUERY (Phase 3) ---
 	query := `
 		SELECT 
 			e.id, r.scrap, r.rations, r.energy,
@@ -39,7 +43,10 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'scrap_heap'), 1) as heap_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'generator'), 1) as gen_lvl,
 			COALESCE((SELECT SUM(u.quantity) FROM units u WHERE u.encampment_id = e.id), 0) as troop_count,
-			COALESCE((SELECT b.loan_amount FROM bank_accounts b WHERE b.encampment_id = e.id), 0) as loan_amount
+			COALESCE((SELECT b.loan_amount FROM bank_accounts b WHERE b.encampment_id = e.id), 0) as loan_amount,
+			COALESCE((SELECT buggies FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as buggy_count,
+			COALESCE((SELECT ships FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as ship_count,
+			COALESCE((SELECT jets FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as jet_count
 		FROM encampments e
 		JOIN resources r ON r.encampment_id = e.id`
 
@@ -52,7 +59,13 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	var states []EncampmentState
 	for rows.Next() {
 		var s EncampmentState
-		if err := rows.Scan(&s.ID, &s.Scrap, &s.Rations, &s.Energy, &s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, &s.TroopCount, &s.LoanAmount); err != nil {
+		err := rows.Scan(
+			&s.ID, &s.Scrap, &s.Rations, &s.Energy, 
+			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
+			&s.TroopCount, &s.LoanAmount, 
+			&s.BuggyCount, &s.ShipCount, &s.JetCount,
+		)
+		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
 			continue
 		}
@@ -83,11 +96,13 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = GREATEST(loan_amount - $1, 0) WHERE encampment_id = $2", taxDeducted, s.ID)
 		}
 
+		// --- ADVANCED MILITARY & VEHICLE MAINTENANCE UPKEEP (Phase 3) ---
 		rationsConsumed := float64(s.TroopCount) * 0.05
+		energyConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
 		newScrap := s.Scrap + scrapGenerated
 		newRations := s.Rations + rationsGenerated - rationsConsumed
-		newEnergy := s.Energy + energyGenerated
+		newEnergy := s.Energy + energyGenerated - energyConsumed
 
 		if newRations < 0 {
 			newRations = 0

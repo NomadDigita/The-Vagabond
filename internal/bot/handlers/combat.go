@@ -70,7 +70,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.user_id = $1`
-	
+
 	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myCampName, &myX, &myY, &myRegion)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
@@ -144,14 +144,14 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		}
 	}
 
-	// 1. Fetch any open Co-Op recruitment lobbies in your geographical region
+	// Fetch any open Co-Op recruitment lobbies in your geographical region
 	queryCoops := `
 		SELECT r.id, ea.name, ed.name, r.resolve_time 
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.state = 'staged' AND r.attacker_id != $1`
-	
+
 	rowsCoop, err := h.DB.QueryContext(ctx, queryCoops, myCampID)
 	if err == nil {
 		defer rowsCoop.Close()
@@ -184,7 +184,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	return c.Send(dashboard, selector)
 }
 
-// HandleExpeditionRadar scans and displays active outbound and incoming tactical operations
+// HandleExpeditionRadar scans and displays active outbound/incoming campaigns and spy devices
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -198,14 +198,14 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Fetch outbound active marching raids
+	// 1. Outbound March Tracker
 	queryOutbound := `
 		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time 
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.attacker_id = $1 AND r.state = 'marching'
 		LIMIT 2`
-	
+
 	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
 	outboundText := ""
 	selector := &telebot.ReplyMarkup{}
@@ -223,7 +223,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
-				outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d]:\n   Target Outpost: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+				outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d]:\n   Target: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
 				btnSpeed := selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID)
 				btnAbort := selector.Data(fmt.Sprintf("↩️ Abort [%d]", index), "exp_action", "abort", rID)
 				buttons = append(buttons, selector.Row(btnSpeed, btnAbort))
@@ -237,30 +237,67 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		outboundText = "🛰️ OUTBOUND: Radar clean. No active offensive marching forces detected.\n\n"
 	}
 
-	// Fetch inbound hostile marching forces
+	// 2. Inbound Warning Radar
 	queryInbound := `
 		SELECT ea.name, r.resolve_time 
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		WHERE r.defender_id = $1 AND r.state = 'marching'
 		LIMIT 1`
-	
+
 	var attackerName string
 	var resolveTime time.Time
 	err = h.DB.QueryRowContext(ctx, queryInbound, campID).Scan(&attackerName, &resolveTime)
 	inboundText := ""
 	if errors.Is(err, sql.ErrNoRows) {
-		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected."
+		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected.\n\n"
 	} else if err != nil {
 		log.Printf("Inbound radar scan failed: %v", err)
-		inboundText = "📡 Static: Scanner interference detected."
+		inboundText = "📡 Static: Scanner interference detected.\n\n"
 	} else {
 		diff := time.Until(resolveTime)
 		timeLeft := int(diff.Seconds())
 		if timeLeft < 0 {
 			timeLeft = 0
 		}
-		inboundText = fmt.Sprintf("🚨 RADAR WARNING: INBOUND INVASION!\n   Hostile Force: Outpost [%s]\n   Detonation Impact: %s (%ds remaining)\n\n⚠️ TIP: Spend resources to upgrade defenses in camp immediately!", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+		inboundText = fmt.Sprintf("🚨 INBOUND INVASION!\n   Hostile Force: Outpost [%s]\n   Detonation Impact: %s (%ds remaining)\n\n⚠️ TIP: Upgrade defenses immediately!\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+	}
+
+	// 3. --- REAL-TIME SATELLITE & ESPIONAGE TELEMETRY TRACKER (Phase 3) ---
+	timeWindow := time.Now().Add(-30 * time.Second)
+	querySpies := `
+		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
+		FROM spy_missions s
+		JOIN encampments ea ON ea.id = s.spy_id
+		JOIN encampments ed ON ed.id = s.target_id
+		WHERE s.is_intercepted = FALSE AND s.created_at >= $2 AND (s.spy_id = $1 OR s.target_id = $1)`
+
+	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID, timeWindow)
+	spyText := ""
+	if err == nil {
+		defer rowsSpies.Close()
+		for rowsSpies.Next() {
+			var spyID, eaName, edName string
+			var createdAt time.Time
+			var isOutbound bool
+			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &createdAt, &isOutbound); err == nil {
+				timeLeft := 30 - int(time.Since(createdAt).Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				if isOutbound {
+					spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%ds remaining)\n\n", edName, timeLeft)
+				} else {
+					spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%ds remaining)\n\n", eaName, timeLeft)
+					btnIntercept := selector.Data("🛡️ Intercept Drone", "launch_interceptor", spyID)
+					buttons = append(buttons, selector.Row(btnIntercept))
+				}
+			}
+		}
+	}
+
+	if spyText == "" {
+		spyText = "🛰️ ESPIONAGE: No active satellite link signals detected on local frequencies."
 	}
 
 	panelText := fmt.Sprintf(
@@ -268,9 +305,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			"🛸 ACTIVE EXPEDITION RADAR HUD\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"%s"+
+			"%s"+
+			"📡 COGNITIVE SIGNAL SCANNER:\n"+
 			"%s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		outboundText, inboundText,
+		outboundText, inboundText, spyText,
 	)
 
 	selector.Inline(buttons...)
@@ -327,6 +366,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
+
 	return c.Send(report, selector)
 }
 
@@ -538,7 +578,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	defenderCampID := c.Args()[0]
 
-	// --- RESOLVED AMBIGUOUS ID DEFECT: Selected e.id and prefixed coordinates table fields ---
+	// --- RESOLVED AMBIGUOUS ID SELECT DEFECT ---
 	var attackerCampID string
 	var myRegion string
 	var myX, myY int
@@ -569,7 +609,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
 		FROM workshop_inventory 
 		WHERE encampment_id = $1`
-	
+
 	err = tx.QueryRowContext(ctx, queryForces, attackerCampID).Scan(&soldiers, &drones, &jets, &mechs, &nukes, &tanks)
 	if err != nil {
 		log.Printf("Failed querying barracks stocks: %v", err)
@@ -597,7 +637,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		if steps == 0 {
 			steps = 1
 		}
-		
+
 		// Map travel scaling: base 10m per step, up to 90 minutes max duration limit
 		marchingMinutes = steps * 10.0
 		if marchingMinutes > 90.0 {
@@ -681,7 +721,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			"Upgrade your Tent or fortify your facilities immediately!",
 		attackerName, myRegion, resolveTime.UTC().Format("15:04:05"),
 	)
-	
+
 	// Direct Bot.Send Push warning
 	targetUser := &telebot.User{ID: defenderUserID}
 	_, err = c.Bot().Send(targetUser, defenderAlert)
