@@ -202,6 +202,8 @@ func main() {
 	bot.Handle("\fhero_action", hero.HandleHeroCallback)
 	bot.Handle("\flaunch_interceptor", combat.HandleLaunchInterceptor)
 	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
+	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback) // Added missing callback binding
+	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)   // Added missing callback binding
 
 	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")

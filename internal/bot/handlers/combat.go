@@ -49,7 +49,7 @@ func (h *CombatHandler) HandleTargetMatrix(c telebot.Context) error {
 	return h.HandleRaidBoard(c)
 }
 
-// HandleRaidBoard displays player targets, co-op lobbies, and skirmishes
+// HandleRaidBoard displays player targets, co-op lobbies, and skirmishes (Failsafe Navigation)
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -70,11 +70,14 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.user_id = $1`
-	
+
 	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myCampName, &myX, &myY, &myRegion)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
+
+	// 1. FAILSAFE NAVIGATION: Force bottom dock reply keyboard to switch to CombatNavigation instantly
+	_ = c.Send("⚔️ Syncing tactical coordinate systems...", keyboards.CombatNavigation())
 
 	// Query targets
 	queryTargets := `
@@ -151,7 +154,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		JOIN encampments ea ON ea.id = r.attacker_id
 		JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.state = 'staged' AND r.attacker_id != $1`
-	
+
 	rowsCoop, err := h.DB.QueryContext(ctx, queryCoops, myCampID)
 	if err == nil {
 		defer rowsCoop.Close()
@@ -184,7 +187,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	return c.Send(dashboard, selector)
 }
 
-// HandleExpeditionRadar scans and displays active outbound/incoming campaigns and spy devices (Phase 4 HUD)
+// HandleExpeditionRadar scans and displays active outbound/incoming campaigns and spy devices
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -203,9 +206,9 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time, r.state, r.round_number, r.attacker_rations, r.attacker_ammo
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged')
+		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged')
 		LIMIT 2`
-	
+
 	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
 	outboundText := ""
 	selector := &telebot.ReplyMarkup{}
@@ -225,9 +228,12 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
-				if rState == "marching" {
+				switch rState {
+case "marching":
 					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
-				} else {
+				case "staged":
+					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Departure Window: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+				default:
 					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%ds remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), timeLeft, rRations, rAmmo)
 				}
 				btnSpeed := selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID)
@@ -250,7 +256,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		JOIN encampments ea ON ea.id = r.attacker_id
 		WHERE r.defender_id = $1 AND (r.state = 'marching' OR r.state = 'engaged')
 		LIMIT 1`
-	
+
 	var attackerName, rState string
 	var resolveTime time.Time
 	err = h.DB.QueryRowContext(ctx, queryInbound, campID).Scan(&attackerName, &resolveTime, &rState)
@@ -280,8 +286,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
-		WHERE s.is_interecepted = FALSE AND s.created_at >= $2 AND (s.spy_id = $1 OR s.target_id = $1)`
-	
+		WHERE s.is_intercepted = FALSE AND s.created_at >= $2 AND (s.spy_id = $1 OR s.target_id = $1)`
+
 	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID, timeWindow)
 	spyText := ""
 	if err == nil {
@@ -376,7 +382,6 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
-
 	return c.Send(report, selector)
 }
 
@@ -581,6 +586,61 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	return c.Send("🛡️ INTERCEPT SUCCESS: Your Interceptor Drone destroyed the spy satellite! Telemetry was vaporized.")
 }
 
+// HandleStageCoopCallback registers a staged co-op raid invitation lobby
+func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	defenderCampID := c.Args()[0]
+
+	var attackerCampID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&attackerCampID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Staging failed."})
+	}
+	defer tx.Rollback()
+
+	// Stage window is fixed at 5 minutes
+	resolveTime := time.Now().Add(5 * time.Minute)
+
+	insertRaid := `
+		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
+		VALUES ($1, $2, 'staged', $3)`
+	_, err = tx.ExecContext(ctx, insertRaid, attackerCampID, defenderCampID, resolveTime)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error registering co-op lobby."})
+	}
+
+	_ = tx.Commit()
+	return c.Respond(&telebot.CallbackResponse{Text: "🤝 Co-Op lobby staged! Aligned alliance players can join your force."})
+}
+
+// HandleJoinCoopCallback allows allied players to join staged lobbies
+func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
+	ctx := context.Background()
+	raidID := c.Args()[0]
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Joining failed."})
+	}
+	defer tx.Rollback()
+
+	var state string
+	err = tx.QueryRowContext(ctx, "SELECT state FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state)
+	if err != nil || state != "staged" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Lobby Expired: This staged raid has already departed."})
+	}
+
+	// Update lobby to marching once team binds
+	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = CURRENT_TIMESTAMP + INTERVAL '15 minutes' WHERE id = $1", raidID)
+
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces bound! Marching towards coordinates."})
+	return h.HandleExpeditionRadar(c)
+}
+
 // HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
@@ -619,7 +679,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
 		FROM workshop_inventory 
 		WHERE encampment_id = $1`
-	
+
 	err = tx.QueryRowContext(ctx, queryForces, attackerCampID).Scan(&soldiers, &drones, &jets, &mechs, &nukes, &tanks)
 	if err != nil {
 		log.Printf("Failed querying barracks stocks: %v", err)
@@ -647,7 +707,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		if steps == 0 {
 			steps = 1
 		}
-		
+
 		// Map travel scaling: base 10m per step, up to 90 minutes max duration limit
 		marchingMinutes = steps * 10.0
 		if marchingMinutes > 90.0 {
@@ -660,13 +720,15 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		marchDuration := time.Duration(marchingMinutes) * time.Minute
 		resolveTime := time.Now().Add(marchDuration)
 
+		// --- RESOLVED CASTING OF EXPLICIT UUID VALUES (Phase 2) ---
 		insertRaid := `
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-			VALUES ($1, '00000000-0000-0000-0000-000000000000', 'marching', $2)
+			VALUES ($1, '00000000-0000-0000-0000-000000000000'::uuid, 'marching', $2)
 			RETURNING id`
 		var raidID string
 		err = tx.QueryRowContext(ctx, insertRaid, attackerCampID, resolveTime).Scan(&raidID)
 		if err != nil {
+			log.Printf("Failed executing skirmish write: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register skirmish."})
 		}
 		_ = tx.Commit()
@@ -731,7 +793,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			"Upgrade your Tent or fortify your facilities immediately!",
 		attackerName, myRegion, resolveTime.UTC().Format("15:04:05"),
 	)
-	
+
 	// Direct Bot.Send Push warning
 	targetUser := &telebot.User{ID: defenderUserID}
 	_, err = c.Bot().Send(targetUser, defenderAlert)
