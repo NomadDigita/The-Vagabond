@@ -114,11 +114,12 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
 			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
 			soldiers_contributed INT DEFAULT 0,
 			mechs_contributed INT DEFAULT 0,
-			PRIMARY KEY (raid_id, encampment_id)
+			CONSTRAINT unique_raid_coop_member UNIQUE (raid_id, encampment_id)
 		);`,
 
 		`CREATE TABLE IF NOT EXISTS agent_tasks (
@@ -144,8 +145,13 @@ func executeStartupMigrations(db *sql.DB) {
 		`CREATE TABLE IF NOT EXISTS bank_accounts (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			balance DOUBLE PRECISION DEFAULT 0.00,
-			loan_amount DOUBLE PRECISION DEFAULT 0.00
+			balance_cash DOUBLE PRECISION DEFAULT 0.00,
+			loan_amount DOUBLE PRECISION DEFAULT 0.00,
+			loan_cash DOUBLE PRECISION DEFAULT 0.00
 		);`,
+
+		`ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS balance_cash DOUBLE PRECISION DEFAULT 0.00;`,
+		`ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS loan_cash DOUBLE PRECISION DEFAULT 0.00;`,
 
 		`CREATE TABLE IF NOT EXISTS clans (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

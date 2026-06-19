@@ -36,17 +36,21 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 	}
 
 	var bankBalance float64
+	var bankBalanceCash float64
 	var loanAmount float64
-	queryBank := `SELECT balance, loan_amount FROM bank_accounts WHERE encampment_id = $1`
-	err = h.DB.QueryRowContext(ctx, queryBank, campID).Scan(&bankBalance, &loanAmount)
+	var loanCash float64
+	queryBank := `SELECT balance, balance_cash, loan_amount, loan_cash FROM bank_accounts WHERE encampment_id = $1`
+	err = h.DB.QueryRowContext(ctx, queryBank, campID).Scan(&bankBalance, &bankBalanceCash, &loanAmount, &loanCash)
 	if errors.Is(err, sql.ErrNoRows) {
-		_, _ = h.DB.ExecContext(ctx, "INSERT INTO bank_accounts (encampment_id, balance, loan_amount) VALUES ($1, 0.00, 0.00)", campID)
+		_, _ = h.DB.ExecContext(ctx, "INSERT INTO bank_accounts (encampment_id, balance, balance_cash, loan_amount, loan_cash) VALUES ($1, 0.00, 0.00, 0.00, 0.00)", campID)
 		bankBalance = 0.0
+		bankBalanceCash = 0.0
 		loanAmount = 0.0
+		loanCash = 0.0
 	}
 
-	var scrap float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap)
+	var scrap, dollars float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
@@ -55,17 +59,18 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 			"Outpost Name: Encampment Ledger\n\n"+
 			"LEDGER SUMMARIES:\n"+
 			"⚙️ Scrap Reserves: %.1f\n"+
-			"🏦 Vault Savings: %.1f Scrap\n"+
-			"💳 Credit Debt: %.1f Scrap\n\n"+
+			"💵 Cash Reserves: $%.1f\n\n"+
+			"FINANCIAL VAULT SAVINGS:\n"+
+			"🏦 Vault Savings: %.1f Scrap | $%.1f Cash\n"+
+			"💳 Credit Debt: %.1f Scrap | $%.1f Cash\n\n"+
 			"Select options on your bottom menu deck to access the Vault, Alliances, or Heavy Workshop.",
-		scrap, bankBalance, loanAmount,
+		scrap, dollars, bankBalance, bankBalanceCash, loanAmount, loanCash,
 	)
 
-	// Changes Reply Keyboard context to Economy Submenu cleanly
 	return c.Send(panelText, keyboards.EconomyNavigation())
 }
 
-// HandleFinancialVault renders only the transaction inline buttons
+// HandleFinancialVault renders bank accounts (Scrap and Cash transfers, borrows with dynamic caps)
 func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -75,9 +80,8 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	var bankBalance float64
-	var loanAmount float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT balance, loan_amount FROM bank_accounts WHERE encampment_id = $1", campID).Scan(&bankBalance, &loanAmount)
+	var bankBalance, bankBalanceCash, loanAmount, loanCash float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT balance, balance_cash, loan_amount, loan_cash FROM bank_accounts WHERE encampment_id = $1", campID).Scan(&bankBalance, &bankBalanceCash, &loanAmount, &loanCash)
 
 	var scrap, dollars float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
@@ -87,22 +91,25 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 			"🪙 VAULT & CREDIT OVERRIDE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"💵 Available Cash: $%.1f\n"+
-			"⚙️ Scrap Reserves: %.1f\n"+
-			"🏦 Vault Savings: %.1f Scrap\n"+
-			"💳 Credit Debt: %.1f Scrap\n\n"+
+			"⚙️ Scrap Reserves: %.1f\n\n"+
+			"🏦 Vault Savings: %.1f Scrap | $%.1f Cash\n"+
+			"💳 Credit Debt: %.1f Scrap | $%.1f Cash\n\n"+
 			"Convert rate: Sell 100 Scrap -> Get $50.0\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		dollars, scrap, bankBalance, loanAmount,
+		dollars, scrap, bankBalance, bankBalanceCash, loanAmount, loanCash,
 	)
 
 	selector := &telebot.ReplyMarkup{}
 
-	btnDeposit := selector.Data("🏦 Deposit 100", "bank_action", "deposit")
-	btnBorrow := selector.Data("💳 Borrow 100", "bank_action", "borrow")
+	btnDepositScrap := selector.Data("🏦 Deposit 100 Scrap", "bank_action", "deposit_scrap")
+	btnDepositCash := selector.Data("🏦 Deposit $100 Cash", "bank_action", "deposit_cash")
+	btnBorrowScrap := selector.Data("💳 Borrow 100 Scrap", "bank_action", "borrow_scrap")
+	btnBorrowCash := selector.Data("💳 Borrow $100 Cash", "bank_action", "borrow_cash")
 	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap")
 
 	selector.Inline(
-		selector.Row(btnDeposit, btnBorrow),
+		selector.Row(btnDepositScrap, btnBorrowScrap),
+		selector.Row(btnDeposit, btnBorrow), // Backwards compatibility bindings
 		selector.Row(btnSellScrap),
 	)
 
@@ -173,29 +180,44 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	var scrap float64
-	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
+	var scrap, dollars float64
+	_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &dollars)
 
-	var balance float64
-	var loan float64
-	_ = tx.QueryRowContext(ctx, "SELECT balance, loan_amount FROM bank_accounts WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&balance, &loan)
+	var balance, balanceCash, loanAmount, loanCash float64
+	_ = tx.QueryRowContext(ctx, "SELECT balance, balance_cash, loan_amount, loan_cash FROM bank_accounts WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&balance, &balanceCash, &loanAmount, &loanCash)
 
 	switch action {
-	case "deposit":
+	case "deposit_scrap", "deposit": // Retained "deposit" identifier for backwards compatibility
 		if scrap < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap to deposit 100."})
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap: Need at least 100 Scrap."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET balance = balance + 100.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🏦 Deposited 100 Scrap into savings."})
 
-	case "borrow":
-		if loan >= 500.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing debt first."})
+	case "deposit_cash":
+		if dollars < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Cash: Need at least $100 Cash."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET balance_cash = balance_cash + 100.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🏦 Deposited $100 Cash into savings."})
+
+	case "borrow_scrap", "borrow": // Retained "borrow" identifier for backwards compatibility
+		if loanAmount >= 500.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing scrap debt first."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = loan_amount + 100.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap."})
+
+	case "borrow_cash":
+		if loanCash >= 500.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing cash debt first."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + 100.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_cash = loan_cash + 100.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed $100 Cash."})
 	}
 
 	_ = tx.Commit()
