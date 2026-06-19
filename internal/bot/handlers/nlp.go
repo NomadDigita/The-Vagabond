@@ -12,15 +12,39 @@ type NLPHandler struct {
 	Combat     *CombatHandler
 	Econ       *EconomyHandler
 	Clan       *ClanHandler
+	Hero       *HeroHandler
+	Agent      *AgentHandler
+	Factory    *FactoryHandler
+	Silo       *SiloHandler
+	Research   *ResearchHandler
+	Exchange   *ExchangeHandler
 }
 
-func NewNLPHandler(onb *OnboardingHandler, camp *CampHandler, comb *CombatHandler, econ *EconomyHandler, clan *ClanHandler) *NLPHandler {
+func NewNLPHandler(
+	onb *OnboardingHandler,
+	camp *CampHandler,
+	comb *CombatHandler,
+	econ *EconomyHandler,
+	clan *ClanHandler,
+	hero *HeroHandler,
+	agent *AgentHandler,
+	factory *FactoryHandler,
+	silo *SiloHandler,
+	research *ResearchHandler,
+	exchange *ExchangeHandler,
+) *NLPHandler {
 	return &NLPHandler{
 		Onboarding: onb,
 		Camp:       camp,
 		Combat:     comb,
 		Econ:       econ,
 		Clan:       clan,
+		Hero:       hero,
+		Agent:      agent,
+		Factory:    factory,
+		Silo:       silo,
+		Research:   research,
+		Exchange:   exchange,
 	}
 }
 
@@ -47,10 +71,10 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 		return h.Camp.HandleStructuralUpgrades(c)
 	}
 	if text == "👥 hero commander" {
-		return h.Onboarding.HandleStart(c) // Redirect or handle hero
+		return h.Hero.HandleHeroPanel(c) // Restored correct redirect
 	}
 	if text == "🧠 automation agent" {
-		return h.Camp.HandleCamp(c) // Redirect or handle agent
+		return h.Agent.HandleAgent(c) // Restored correct redirect
 	}
 	if text == "🧬 mutation core" {
 		return h.Camp.HandleMutationsPanel(c)
@@ -65,7 +89,10 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 		return h.Clan.HandleClanPanel(c)
 	}
 	if text == "💱 market exchange" {
-		return h.Econ.HandleEconPanel(c) // Redirect or handle exchange
+		return h.Exchange.HandleExchangePanel(c) // Restored correct redirect
+	}
+	if text == "🧪 research lab" {
+		return h.Research.HandleResearchPanel(c) // Restored correct redirect
 	}
 
 	// Lexical intents token matching
