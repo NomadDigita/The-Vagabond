@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"time"
 )
 
 type WeatherEngine struct {
@@ -16,38 +17,46 @@ func NewWeatherEngine(db *sql.DB) *WeatherEngine {
 	return &WeatherEngine{DB: db}
 }
 
-// RunWeatherPass rolls a 10% chance to cycle the world's active weather front
+// RunWeatherPass rolls a 10% chance to cycle the world's active weather front with 2-hour persistence
 func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
+	// --- PERSISTENCE BARRIER (Phase 2): Weather persists for a minimum of 2 hours ---
+	var lastChanged time.Time
+	err := tx.QueryRowContext(ctx, "SELECT last_changed_at FROM world_state WHERE id = 1").Scan(&lastChanged)
+	if err == nil && time.Since(lastChanged) < 2*time.Hour {
+		return nil // Weather holds stable, bypassing the randomized cycle
+	}
+
 	if rand.Float64() >= 0.10 {
-		// Weather remains stable
-		return nil
+		return nil // Weather remains stable
 	}
 
 	weatherFronts := []string{"nominal", "solar_flare", "radiation_storm", "acid_rain"}
 	newWeather := weatherFronts[rand.Intn(len(weatherFronts))]
 
-	// Update global world state
 	updateQuery := `
 		UPDATE world_state 
 		SET active_weather = $1, last_changed_at = CURRENT_TIMESTAMP 
 		WHERE id = 1`
 	
-	_, err := tx.ExecContext(ctx, updateQuery, newWeather)
+	_, err = tx.ExecContext(ctx, updateQuery, newWeather)
 	if err != nil {
 		return fmt.Errorf("failed updating global weather state: %w", err)
 	}
 
-	// Write environmental transition announcement to Wasteland Radio news ticker
+	// Region-specific forecast mapping
+	continents := []string{"Africa", "Europe", "Asia", "Americas"}
+	targetContinent := continents[rand.Intn(len(continents))]
+
 	var alertHeadline string
 	switch newWeather {
 	case "nominal":
-		alertHeadline = "☀️ ENVIRONMENTAL REPORT: Toxic storms have cleared. Regional sectors have returned to nominal conditions."
+		alertHeadline = fmt.Sprintf("☀️ ENVIRONMENTAL REPORT: Toxic storms over %s have cleared. Regional sectors have returned to nominal baseline conditions.", targetContinent)
 	case "solar_flare":
-		alertHeadline = "⚡ SOLAR FLARE DETECTED: Intense electromagnetic wave spikes registered. Outpost solar generators are operating at 200% efficiency. Agent automation stand by."
+		alertHeadline = fmt.Sprintf("⚡ SOLAR FLARE DETECTED: Intense electromagnetic wave spikes registered over %s. Outpost solar generators operating at 200%%. Agent automation stand by.", targetContinent)
 	case "radiation_storm":
-		alertHeadline = "☢️ RADIATION STORM WARNING: High-altitude radioactive fallout sweeping central sectors. Morale decay rates doubled."
+		alertHeadline = fmt.Sprintf("☢️ RADIATION STORM WARNING: High-altitude radioactive fallout sweeping %s sectors. Morale decay rates doubled.", targetContinent)
 	case "acid_rain":
-		alertHeadline = "🌧️ ACID RAIN ALERT: Highly corrosive precipitation is slowing down regional logistics. All active construction projects are running at 50% speed."
+		alertHeadline = fmt.Sprintf("🌧️ ACID RAIN ALERT: Highly corrosive precipitation over %s is slowing down logistics. Active construction projects running at 50%% speed.", targetContinent)
 	}
 
 	insertNews := `INSERT INTO world_news (headline) VALUES ($1)`
@@ -56,6 +65,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		log.Printf("Failed writing weather news headline: %v", err)
 	}
 
-	log.Printf("Weather Cycle Pass resolved: Global weather transitioned to [%s].", newWeather)
+	log.Printf("Weather Cycle Pass resolved: Global weather transitioned to [%s] over %s.", newWeather, targetContinent)
 	return nil
 }

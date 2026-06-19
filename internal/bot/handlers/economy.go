@@ -195,63 +195,7 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = loan_amount + 100.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap. 15% automatic tax applied to ticks."})
-	}
-
-	_ = tx.Commit()
-	return h.HandleFinancialVault(c)
-}
-
-// HandleMarketCallback processes item acquisitions (Dynamic campID lookup)
-func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
-	ctx := context.Background()
-	sender := c.Sender()
-
-	item := c.Args()[0]
-
-	var campID string
-	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
-	}
-
-	tx, err := h.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
-	}
-	defer tx.Rollback()
-
-	var scrap, dollars float64
-	_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &dollars)
-
-	switch item {
-	case "sell_scrap":
-		if scrap < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap to convert."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = dollars + 50.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Scrap for $50.0 Cash!"})
-
-	case "buy_steel":
-		if dollars < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, steel = steel + 50.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🧱 Purchased 50 tons of Steel!"})
-
-	case "buy_uranium":
-		if dollars < 200.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, uranium = uranium + 20.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "☢️ Purchased 20 kg of Uranium!"})
-
-	case "buy_hydrogen":
-		if dollars < 150.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $150."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 150.0, hydrogen = hydrogen + 40.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🎈 Purchased 40 L of Hydrogen Fuel!"})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap."})
 	}
 
 	_ = tx.Commit()

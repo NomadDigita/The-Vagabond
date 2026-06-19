@@ -19,7 +19,7 @@ func NewFactoryHandler(db *sql.DB) *FactoryHandler {
 	return &FactoryHandler{DB: db}
 }
 
-// HandleFactoryPanel renders the maternal heavy workshop intro and updates bottom menu context
+// HandleFactoryPanel renders the heavy workshop menu
 func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -39,7 +39,7 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"🏭 HEAVY WORKSHOP SECTOR SYSTEMS\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Outpost Name: Military Engineering\n\n" +
+		"Outpost Name: Military Engineering Hangar\n\n" +
 		"Select options on your bottom menu deck to recruit troops or craft logistics vehicles."
 
 	return c.Send(panelText, keyboards.WorkshopNavigation())
@@ -59,21 +59,17 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	queryInv := `SELECT soldiers, drones, mechs, nukes FROM workshop_inventory WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes)
 
-	var rations, iron, steel, uranium, gold, diamond float64
-	queryRes := `SELECT rations, iron, steel, uranium, gold, diamond FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &iron, &steel, &uranium, &gold, &diamond)
-
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🪖 BARRACKS RECRUITMENT FORGE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🪖 Soldiers: %d | 🛰️ Drones: %d\n"+
+			"🪖 Soldiers: %d | 🛰️ Spy Devices: %d\n"+
 			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🪖 [Soldier] — Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
-			"🛰️ [Spy Drone] — Cost: 100 Iron, 10 Silver (+25 Offense)\n"+
+			"🛰️ [Spy Device] — Cost: 100 Iron, 10 Silver (+25 Recon)\n"+
 			"🤖 [Colossus Mech] — Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
-			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 100 Gold, 10 Diamonds (+1500 Offense)\n"+
+			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 10 Diamonds (+1500 Detonation)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		soldiers, drones, mechs, nukes,
 	)
@@ -81,7 +77,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	selector := &gopkg.ReplyMarkup{}
 
 	btnCraftSoldier := selector.Data("🪖 Recruit Soldier", "craft_item", "soldier")
-	btnCraftDrone := selector.Data("🛰️ Assemble Drone", "craft_item", "drone")
+	btnCraftDrone := selector.Data("🛰️ Assemble Spy Device", "craft_item", "drone")
 	btnCraftMech := selector.Data("🤖 Forge Mech", "craft_item", "mech")
 	btnCraftNuke := selector.Data("☢️ Forge Nuke", "craft_item", "nuke")
 
@@ -93,7 +89,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleVehiclesPanel renders logistics hangar options with inline buttons
+// HandleVehiclesPanel renders logistics hangar options (Expanded Logistics Fleet)
 func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -107,10 +103,6 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	queryInv := `SELECT COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0) FROM workshop_inventory WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&buggies, &ships, &jets)
 
-	var steel, oil, hydrogen float64
-	queryRes := `SELECT steel, oil, hydrogen FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryRes, campID).Scan(&steel, &oil, &hydrogen)
-
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🚗 LOGISTICS HANGAR FORGE\n"+
@@ -119,30 +111,38 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🚗 [Scrap Buggy] — Cost: 100 Steel, 20 Oil (Land travel +25%% speed)\n"+
 			"⛵ [Clipper Ship] — Cost: 300 Steel (Required to cross oceans)\n"+
-			"✈️ [Cargo Jet] — Cost: 1000 Steel, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n"+
+			"✈️ [Cargo Jet] — Cost: 1000 Steel, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n\n"+
+			"🚛 [Resource Hauler] — Cost: 500 Steel, 50 Oil (+5,000 battle loot cap)\n"+
+			"🛢️ [Fuel Tanker] — Cost: 400 Steel, 100 Hydrogen (-20%% march fuel costs)\n"+
+			"🔧 [Recovery Rig] — Cost: 600 Steel, 50 Iron (-15%% mechanical casualties)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		buggies, ships, jets,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
 
-	btnCraftBuggy := selector.Data("🚗 Craft Scrap Buggy", "craft_item", "buggy")
-	btnCraftShip := selector.Data("⛵ Craft Clipper Ship", "craft_item", "ship")
-	btnCraftJet := selector.Data("✈️ Craft Cargo Jet", "craft_item", "cargo_jet")
+	btnCraftBuggy := selector.Data("🚗 Craft Buggy", "craft_item", "buggy")
+	btnCraftShip := selector.Data("⛵ Craft Ship", "craft_item", "ship")
+	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "cargo_jet")
+	
+	btnCraftHauler := selector.Data("🚛 Craft Hauler", "craft_item", "hauler")
+	btnCraftTanker := selector.Data("🛢️ Craft Tanker", "craft_item", "tanker")
+	btnCraftRig := selector.Data("🔧 Craft Recovery Rig", "craft_item", "rig")
 
 	selector.Inline(
 		selector.Row(btnCraftBuggy, btnCraftShip),
 		selector.Row(btnCraftJet),
+		selector.Row(btnCraftHauler, btnCraftTanker),
+		selector.Row(btnCraftRig),
 	)
 
 	return c.Send(panelText, selector)
 }
 
-// HandleCraftCallback processes blueprints execution
+// HandleCraftCallback processes blueprint executions
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	ctx := context.Background()
-	sender := gopkg.Context(c).Sender()
-
+	sender := c.Sender()
 	item := c.Args()[0]
 
 	var campID string
@@ -173,15 +173,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET iron = iron - 100.0, silver = silver - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛰️ Spy Drone constructed!"})
-
-	case "jet":
-		if iron < 400.0 || oil < 50.0 || hydrogen < 50.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 400 Iron, 50 Oil, 50 Hydrogen."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET iron = iron - 400.0, oil = oil - 50.0, hydrogen = hydrogen - 50.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET jets = jets + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "✈️ Fighter Jet constructed!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛰️ Spy Device assembled!"})
 
 	case "mech":
 		if steel < 1000.0 || uranium < 50.0 || gold < 20.0 {
@@ -197,7 +189,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 2500.0, uranium = uranium - 500.0, gold = gold - 100.0, diamond = diamond - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "☢️ Nuclear strike weapon assembled!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "☢️ Nuclear Device assembled!"})
 
 	case "buggy":
 		if steel < 100.0 || oil < 20.0 {
@@ -217,11 +209,34 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 
 	case "cargo_jet":
 		if steel < 1000.0 || hydrogen < 200.0 || oil < 100.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 1000 Steel, 200 Hydrogen, 100 Oil."})
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials!"})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1000.0, hydrogen = hydrogen - 200.0, oil = oil - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET jets = jets + 1 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&gopkg.CallbackResponse{Text: "✈️ Cargo Jet constructed successfully!"})
+
+	// --- EXPANDED FLEET INTEGRATION (Phase 3) ---
+	case "hauler":
+		if steel < 500.0 || oil < 50.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 500 Steel, 50 Oil."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 500.0, oil = oil - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET buggies = buggies + 1 WHERE encampment_id = $1", campID) // Mapped to inventory slots
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🚛 Resource Hauler constructed successfully!"})
+
+	case "tanker":
+		if steel < 400.0 || hydrogen < 100.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 400 Steel, 100 Hydrogen."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 400.0, hydrogen = hydrogen - 100.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛢️ Fuel Tanker constructed!"})
+
+	case "rig":
+		if steel < 600.0 || iron < 50.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🔧 Recovery Rig constructed successfully!"})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -229,8 +244,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	// Refreshes panel context cleanly depending on what was bought
-	if item == "buggy" || item == "ship" || item == "cargo_jet" {
+	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "hauler" || item == "tanker" || item == "rig" {
 		return h.HandleVehiclesPanel(c)
 	}
 	return h.HandleRecruitPanel(c)

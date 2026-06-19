@@ -67,7 +67,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		btnCreate := selector.Data("🛡️ Establish New Clan", "create_clan", campID)
 		selector.Inline(selector.Row(btnCreate))
 
-		// Removed reply markup parameter so that inline buttons display successfully
 		return c.Send(panelText, selector)
 	}
 
@@ -87,6 +86,12 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	)
 
 	var buttons []telebot.Row
+	
+	// --- CLAN MANAGEMENT MODULES (Phase 3 Additions) ---
+	btnManage := selector.Data("👥 Manage Members", "clan_manage", clanID.String)
+	btnStats := selector.Data("📊 Alliance Stats", "clan_stats", clanID.String)
+	buttons = append(buttons, selector.Row(btnManage, btnStats))
+
 	if role.String == "Leader" {
 		btnDeclare := selector.Data("⚔️ Declare Alliance War", "declare_clan_war", clanID.String)
 		buttons = append(buttons, selector.Row(btnDeclare))
