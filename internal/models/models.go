@@ -77,4 +77,27 @@ type WorkshopInventory struct {
 	Jets           int    `json:"jets"`
 	Mechs          int    `json:"mechs"`
 	Nukes          int    `json:"nukes"`
+	Buggies        int    `json:"buggies"`
+	Ships          int    `json:"ships"`
+	Haulers        int    `json:"haulers"`
+	Tankers        int    `json:"tankers"`
+	Rigs           int    `json:"rigs"`
+}
+
+// RaidCoopMember tracks helper contributions inside cooperative campaigns
+type RaidCoopMember struct {
+	RaidID              string `json:"raid_id"`
+	EncampmentID        string `json:"encampment_id"`
+	SoldiersContributed int    `json:"soldiers_contributed"`
+	MechsContributed    int    `json:"mechs_contributed"`
+}
+
+// ArenaBattle stores finished automated matched parameters
+type ArenaBattle struct {
+	ID             string    `json:"id"`
+	Bracket        string    `json:"bracket"`
+	WinnerUsername string    `json:"winner_username"`
+	LoserUsername  string    `json:"loser_username"`
+	WinnerLoot     float64   `json:"winner_loot"`
+	BattleTime     time.Time `json:"battle_time"`
 }

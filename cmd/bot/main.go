@@ -18,6 +18,226 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
+func executeStartupMigrations(db *sql.DB) {
+	log.Println("Executing database initialization check...")
+
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS users (
+			telegram_id BIGINT PRIMARY KEY,
+			username VARCHAR(255) DEFAULT '',
+			first_name VARCHAR(255) DEFAULT '',
+			state VARCHAR(50) DEFAULT 'onboarding',
+			faction VARCHAR(50) DEFAULT '',
+			premium_until TIMESTAMP WITH TIME ZONE,
+			registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS coordinates (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			x INT NOT NULL,
+			y INT NOT NULL,
+			biome VARCHAR(50) NOT NULL,
+			danger_level INT DEFAULT 1,
+			region VARCHAR(50) NOT NULL,
+			terrain VARCHAR(50) NOT NULL,
+			CONSTRAINT unique_coordinates UNIQUE (x, y)
+		);`,
+
+		`CREATE INDEX IF NOT EXISTS idx_coordinates_xy ON coordinates(x, y);`,
+
+		`CREATE TABLE IF NOT EXISTS encampments (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id BIGINT UNIQUE NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			name VARCHAR(255) NOT NULL,
+			coordinate_id UUID NOT NULL REFERENCES coordinates(id),
+			level INT DEFAULT 1,
+			established_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS resources (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			scrap DOUBLE PRECISION DEFAULT 0.00,
+			rations DOUBLE PRECISION DEFAULT 0.00,
+			energy DOUBLE PRECISION DEFAULT 0.00,
+			neuro_cores DOUBLE PRECISION DEFAULT 0.00,
+			steel DOUBLE PRECISION DEFAULT 0.00,
+			uranium DOUBLE PRECISION DEFAULT 0.00,
+			hydrogen DOUBLE PRECISION DEFAULT 0.00,
+			iron DOUBLE PRECISION DEFAULT 0.00,
+			oil DOUBLE PRECISION DEFAULT 0.00,
+			gold DOUBLE PRECISION DEFAULT 0.00,
+			silver DOUBLE PRECISION DEFAULT 0.00,
+			diamond DOUBLE PRECISION DEFAULT 0.00,
+			dollars DOUBLE PRECISION DEFAULT 0.00,
+			last_mined_at TIMESTAMP WITH TIME ZONE,
+			last_ticked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS modules (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			type VARCHAR(50) NOT NULL,
+			level INT DEFAULT 1,
+			is_upgrading BOOLEAN DEFAULT FALSE,
+			upgrade_ready_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT unique_camp_module UNIQUE (encampment_id, type)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS workshop_inventory (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			fusion_tanks INT DEFAULT 0,
+			nuclear_shields INT DEFAULT 0,
+			soldiers INT DEFAULT 0,
+			drones INT DEFAULT 0,
+			jets INT DEFAULT 0,
+			mechs INT DEFAULT 0,
+			nukes INT DEFAULT 0,
+			buggies INT DEFAULT 0,
+			ships INT DEFAULT 0,
+			haulers INT DEFAULT 0,
+			tankers INT DEFAULT 0,
+			rigs INT DEFAULT 0
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS raids (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			attacker_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			defender_id UUID REFERENCES encampments(id) ON DELETE CASCADE,
+			state VARCHAR(50) NOT NULL,
+			resolve_time TIMESTAMP WITH TIME ZONE NOT NULL,
+			round_number INT DEFAULT 0,
+			attacker_rations DOUBLE PRECISION DEFAULT 100.0,
+			attacker_ammo DOUBLE PRECISION DEFAULT 100.0,
+			attacker_losses INT DEFAULT 0,
+			defender_losses INT DEFAULT 0
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS raid_coop_members (
+			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			soldiers_contributed INT DEFAULT 0,
+			mechs_contributed INT DEFAULT 0,
+			PRIMARY KEY (raid_id, encampment_id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS agent_tasks (
+			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+			mode VARCHAR(50) DEFAULT 'collector',
+			is_active BOOLEAN DEFAULT FALSE
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS mutation_states (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			synaptic_lvl INT DEFAULT 1,
+			salvage_lvl INT DEFAULT 1,
+			bio_lvl INT DEFAULT 1
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS research_states (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			econ_tech_lvl INT DEFAULT 1,
+			defense_tech_lvl INT DEFAULT 1,
+			military_tech_lvl INT DEFAULT 1
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS bank_accounts (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			balance DOUBLE PRECISION DEFAULT 0.00,
+			loan_amount DOUBLE PRECISION DEFAULT 0.00
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS clans (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(255) UNIQUE NOT NULL,
+			leader_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS user_clans (
+			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+			clan_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			role VARCHAR(50) NOT NULL
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS market_exchange (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			seller_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			item_type VARCHAR(50) NOT NULL,
+			quantity INT NOT NULL,
+			price_dollars DOUBLE PRECISION NOT NULL,
+			is_sold BOOLEAN DEFAULT FALSE
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS spy_missions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			spy_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			target_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			is_intercepted BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`ALTER TABLE spy_missions ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT FALSE;`,
+
+		`CREATE TABLE IF NOT EXISTS arena_queue (
+			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+			bracket VARCHAR(50) NOT NULL,
+			entered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS arena_battles (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			bracket VARCHAR(50) NOT NULL,
+			winner_username VARCHAR(255) NOT NULL,
+			loser_username VARCHAR(255) NOT NULL,
+			winner_loot DOUBLE PRECISION DEFAULT 0.00,
+			battle_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS heroes (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			encampment_id UUID UNIQUE NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			name VARCHAR(255) NOT NULL,
+			trait VARCHAR(255) NOT NULL,
+			injuries VARCHAR(255) NOT NULL,
+			battles_survived INT DEFAULT 0,
+			superpower VARCHAR(255) NOT NULL,
+			level INT DEFAULT 1,
+			xp INT DEFAULT 0
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			message TEXT NOT NULL,
+			is_sent BOOLEAN DEFAULT FALSE,
+			queued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS world_state (
+			id INT PRIMARY KEY,
+			active_weather VARCHAR(50) DEFAULT 'nominal',
+			last_changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`INSERT INTO world_state (id, active_weather, last_changed_at)
+		VALUES (1, 'nominal', CURRENT_TIMESTAMP)
+		ON CONFLICT (id) DO NOTHING;`,
+
+		`CREATE TABLE IF NOT EXISTS world_news (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			headline TEXT NOT NULL,
+			logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+	}
+
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			log.Fatalf("Fatal: Failed to execute startup database initialization script: %v", err)
+		}
+	}
+	log.Println("All schema initialization verifications complete.")
+}
+
 func main() {
 	log.Println("Starting The Vagabond server initialization sequence...")
 
@@ -54,8 +274,9 @@ func main() {
 	}
 	defer db.Close()
 
-	db.SetMaxOpenConns(15)
-	db.SetMaxIdleConns(5)
+	// Connection pool properties scaled up for concurrent load handling
+	db.SetMaxOpenConns(100)
+	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
 	if err := db.Ping(); err != nil {
@@ -63,17 +284,7 @@ func main() {
 	}
 	log.Println("Database connection pool established successfully.")
 
-	// Execute Phase 4 Database Migrations
-	_, err = db.Exec(`
-		ALTER TABLE raids ADD COLUMN IF NOT EXISTS round_number INT DEFAULT 0;
-		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_rations DOUBLE PRECISION DEFAULT 100.0;
-		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_ammo DOUBLE PRECISION DEFAULT 100.0;
-		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_losses INT DEFAULT 0;
-		ALTER TABLE raids ADD COLUMN IF NOT EXISTS defender_losses INT DEFAULT 0;
-	`)
-	if err != nil {
-		log.Printf("Warning: Failed executing Phase 4 database schema migrations: %v", err)
-	}
+	executeStartupMigrations(db)
 
 	pref := telebot.Settings{
 		Token:  botToken,
@@ -86,16 +297,12 @@ func main() {
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
-	// --- PHASE 5: EXECUTE STARTUP DIAGNOSTICS & CENTRAL REGISTRY VALIDATION ---
-
-	// 5. Initialize and Boot background system engines
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
 	tickEngine.Start()
 
 	realtimeListener := realtime.NewListener(dbURL, db, bot)
 	realtimeListener.Start()
 
-	// 6. Dependency Injection & Handler Routines Setup with Dynamic Admin IDs forwarding
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db, adminIDs)
 	combat := handlers.NewCombatHandler(db, adminIDs)
@@ -110,7 +317,7 @@ func main() {
 	silo := handlers.NewSiloHandler(db)
 	research := handlers.NewResearchHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
-	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange)
+	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -133,7 +340,6 @@ func main() {
 	bot.Handle("/mine", camp.HandleActiveMining)
 	bot.Handle("/research", research.HandleResearchPanel)
 
-	// Admin Override commands
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
@@ -142,20 +348,17 @@ func main() {
 	bot.Handle("/admin_gift_premium", admin.HandleAdminGiftPremium)
 	bot.Handle("/admin_gift_resources", admin.HandleAdminGiftResources)
 
-	// Bottom-Dock Multi-layered Navigation Handlers (Checks Admin status dynamically)
 	bot.Handle("📡 Terminal HQ", onboarding.HandleStart)
 	bot.Handle("⛺ Outpost Camp", camp.HandleCamp)
 	bot.Handle("⚔️ Tactical Combat", combat.HandleRaidBoard)
 	bot.Handle("🏦 System Economy", econ.HandleEconPanel)
 	bot.Handle("🏭 Heavy Workshop", factory.HandleFactoryPanel)
 
-	// Admin sub-navigation panel routing
 	bot.Handle("🏛️ Admin Terminal", admin.HandleAdminPanel)
 	bot.Handle("⚡ Force Master Tick", admin.HandleAdminTick)
 	bot.Handle("🪙 Inject Resources", admin.HandleAdminGive)
 	bot.Handle("🛰️ Server Metrics", admin.HandleAdminMetrics)
 
-	// Submenu Layer Handlers
 	bot.Handle("🔨 Structural Upgrades", camp.HandleStructuralUpgrades)
 	bot.Handle("👥 Hero Commander", hero.HandleHeroPanel)
 	bot.Handle("🧠 Automation Agent", agentH.HandleAgent)
@@ -175,10 +378,8 @@ func main() {
 	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
-	// Map all plain text inputs to our Natural Language intent router
 	bot.Handle(telebot.OnText, nlp.HandleTextMessage)
 
-	// Button Callbacks
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
@@ -202,10 +403,9 @@ func main() {
 	bot.Handle("\fhero_action", hero.HandleHeroCallback)
 	bot.Handle("\flaunch_interceptor", combat.HandleLaunchInterceptor)
 	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
-	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback) // Added missing callback binding
-	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)   // Added missing callback binding
+	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)
+	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)
 
-	// --- 7. BIND LIGHTWEIGHT HTTP PORT FOR RENDER DEPLOYMENTS ---
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -223,7 +423,6 @@ func main() {
 		}
 	}()
 
-	// --- 8. AUTONOMOUS KEEP-ALIVE SELF-PINGER ---
 	selfPingURL := os.Getenv("SELF_PING_URL")
 	if selfPingURL != "" {
 		go func() {

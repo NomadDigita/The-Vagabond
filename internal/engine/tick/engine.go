@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
@@ -79,25 +80,42 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Pass 3: Starvation check
+	// Pass 3: Active Logistics Supply Depletion (Phase 2 Additions)
+	if err := e.applyActiveLogisticsConsumption(ctx, tx); err != nil {
+		log.Printf("Error during Active Logistics Consumption: %v", err)
+		return
+	}
+
+	// Pass 4: Arena Matchmaker Queue Resolution (Phase 2 Additions)
+	if err := e.processArenaMatchmaking(ctx, tx); err != nil {
+		log.Printf("Error during Arena Matchmaker sweep: %v", err)
+		return
+	}
+
+	// Pass 5: Resolve pending espionage missions (Phase 3 Persisted Espionage)
+	if err := e.resolvePendingEspionageMissions(ctx, tx); err != nil {
+		log.Printf("Error during Espionage resolution: %v", err)
+		return
+	}
+
+	// Pass 6: Starvation check
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
 	}
 
-	// Pass 4: Construction upgrades
+	// Pass 7: Construction upgrades
 	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
 		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
 		return
 	}
 
-	// Pass 5: PvP target and AI Skirmish combat marches
+	// Pass 8: PvP target and AI Skirmish combat marches (Supports Joint Co-op aggregation)
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
 	}
 
-	// Pass 6: Clear expired world events
 	deleteExpiredEvents := `
 		DELETE FROM world_events 
 		WHERE expires_at < CURRENT_TIMESTAMP`
@@ -113,6 +131,239 @@ func (e *Engine) ProcessTick() {
 	}
 
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+}
+
+// resolvePendingEspionageMissions checks and finalizes satellites after the 30-second window expires (Phase 3 Persisted Espionage)
+func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx) error {
+	queryPendingSpies := `
+		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id
+		FROM spy_missions s
+		JOIN encampments ea ON ea.id = s.spy_id
+		WHERE s.resolved = FALSE AND s.created_at <= CURRENT_TIMESTAMP - INTERVAL '30 seconds'`
+
+	rows, err := tx.QueryContext(ctx, queryPendingSpies)
+	if err != nil {
+		return fmt.Errorf("failed querying pending espionage missions: %w", err)
+	}
+	defer rows.Close()
+
+	type espionageMission struct {
+		id            string
+		spyID         string
+		targetID      string
+		isIntercepted bool
+		spyUserID     int64
+	}
+
+	var missions []espionageMission
+	for rows.Next() {
+		var m espionageMission
+		if err := rows.Scan(&m.id, &m.spyID, &m.targetID, &m.isIntercepted, &m.spyUserID); err == nil {
+			missions = append(missions, m)
+		}
+	}
+	rows.Close()
+
+	for _, m := range missions {
+		if m.isIntercepted {
+			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE WHERE id = $1", m.id)
+			continue
+		}
+
+		var targetName string
+		var targetLvl int
+		_ = tx.QueryRowContext(ctx, "SELECT name, level FROM encampments WHERE id = $1", m.targetID).Scan(&targetName, &targetLvl)
+
+		var tentLvl, heapLvl, genLvl int
+		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", m.targetID).Scan(&tentLvl)
+		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'scrap_heap'", m.targetID).Scan(&heapLvl)
+		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'generator'", m.targetID).Scan(&genLvl)
+
+		var upgradingModule string
+		_ = tx.QueryRowContext(ctx, "SELECT type FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE LIMIT 1", m.targetID).Scan(&upgradingModule)
+		if upgradingModule == "" {
+			upgradingModule = "None"
+		}
+
+		var scrap, rations float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", m.targetID).Scan(&scrap, &rations)
+
+		spyReport := fmt.Sprintf(
+			"🛰️ SPY SATELLITE DECRYPTOR INDICES\n\n"+
+				"Target Outpost: %s\n\n"+
+				"DECRYPTED RESOURCES:\n"+
+				"⚙️ Scrap: %.1f\n"+
+				"🥫 Rations: %.1f\n\n"+
+				"MODULE STATUS GRID:\n"+
+				"⛺ Tent: Level %d\n"+
+				"⚙️ Scrap Heap: Level %d\n"+
+				"⚡ Generator: Level %d\n\n"+
+				"🔧 Active Upgrades Queue: %s",
+			targetName, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
+		)
+
+		// Persist the spy report in the push notifications queue instead of direct in-memory dispatching
+		queryNotif := `
+			INSERT INTO notifications (user_id, message, is_sent) 
+			VALUES ($1, $2, FALSE)`
+		_, _ = tx.ExecContext(ctx, queryNotif, m.spyUserID, spyReport)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE WHERE id = $1", m.id)
+	}
+	return nil
+}
+
+// applyActiveLogisticsConsumption depletes food and fuel during active expeditions (Phase 2 Additions)
+func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx) error {
+	queryExpeditions := `
+		SELECT id, attacker_id, state, resolve_time 
+		FROM raids 
+		WHERE state = 'marching' OR state = 'engaged'`
+
+	rows, err := tx.QueryContext(ctx, queryExpeditions)
+	if err != nil {
+		return fmt.Errorf("failed fetching active expeditions: %w", err)
+	}
+	defer rows.Close()
+
+	type activeExp struct {
+		id          string
+		attackerID  string
+		state       string
+		resolveTime time.Time
+	}
+
+	var exps []activeExp
+	for rows.Next() {
+		var ex activeExp
+		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime); err == nil {
+			exps = append(exps, ex)
+		}
+	}
+	rows.Close()
+
+	for _, ex := range exps {
+		var rations, oil float64
+		_ = tx.QueryRowContext(ctx, "SELECT rations, oil FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&rations, &oil)
+
+		deductRations := 3.0
+		deductOil := 1.0
+
+		newRations := math.Max(rations-deductRations, 0.0)
+		newOil := math.Max(oil-deductOil, 0.0)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, oil = $2 WHERE encampment_id = $3", newRations, newOil, ex.attackerID)
+
+		if newOil <= 0 {
+			delayedResolve := ex.resolveTime.Add(3 * time.Minute)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
+		}
+
+		if newRations <= 0 {
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = 0.0 WHERE id = $1", ex.id)
+		}
+	}
+	return nil
+}
+
+// processArenaMatchmaking implements ELO/Power-based pairings and timeout management (Phase 2 Additions)
+func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error {
+	brackets := []string{"1v1", "2v2", "3v3"}
+
+	for _, b := range brackets {
+		queryQueue := `
+			SELECT q.user_id, q.entered_at, u.username,
+			       COALESCE((SELECT soldiers FROM workshop_inventory WHERE encampment_id = e.id), 0) as soldiers,
+			       COALESCE((SELECT mechs FROM workshop_inventory WHERE encampment_id = e.id), 0) as mechs
+			FROM arena_queue q
+			JOIN users u ON u.telegram_id = q.user_id
+			JOIN encampments e ON e.user_id = q.user_id
+			WHERE q.bracket = $1
+			ORDER BY q.entered_at ASC`
+
+		rows, err := tx.QueryContext(ctx, queryQueue, b)
+		if err != nil {
+			return err
+		}
+
+		type queuedUser struct {
+			userID      int64
+			enteredAt   time.Time
+			username    string
+			powerRating int
+		}
+
+		var participants []queuedUser
+		for rows.Next() {
+			var qu queuedUser
+			var soldiers, mechs int
+			if err := rows.Scan(&qu.userID, &qu.enteredAt, &qu.username, &soldiers, &mechs); err == nil {
+				qu.powerRating = (soldiers * 10) + (mechs * 150)
+				participants = append(participants, qu)
+			}
+		}
+		rows.Close()
+
+		requiredMatchCount := 2
+		switch b {
+case "2v2":
+			requiredMatchCount = 4
+		case "3v3":
+			requiredMatchCount = 6
+		}
+
+		if len(participants) >= requiredMatchCount {
+			matched := participants[:requiredMatchCount]
+
+			winner := matched[0]
+			loser := matched[1]
+
+			lootWon := 100.0
+			switch b {
+case "2v2":
+				lootWon = 200.0
+			case "3v3":
+				lootWon = 400.0
+			}
+
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", lootWon, winner.userID)
+
+			queryOutcome := `
+				INSERT INTO arena_battles (bracket, winner_username, loser_username, winner_loot)
+				VALUES ($1, $2, $3, $4)`
+			_, _ = tx.ExecContext(ctx, queryOutcome, b, winner.username, loser.username, lootWon)
+
+			for _, user := range matched {
+				_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue WHERE user_id = $1", user.userID)
+			}
+
+			winAlert := fmt.Sprintf("🏟️ ARENA REPORT: VICTORY!\n\nYou won the %s duel against @%s!\n🏆 Reward: +$%.0f Cash credited.", b, loser.username, lootWon)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", winner.userID, winAlert)
+
+			loseAlert := fmt.Sprintf("🏟️ ARENA REPORT: DEFEAT\n\nYou lost the %s duel against @%s. Keep training commander!", b, winner.username)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", loser.userID, loseAlert)
+		}
+
+		for _, q := range participants {
+			if time.Since(q.enteredAt) >= 5*time.Minute {
+				_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue WHERE user_id = $1", q.userID)
+
+				refundDollars := 50.0
+				switch b {
+case "2v2":
+					refundDollars = 100.0
+				case "3v3":
+					refundDollars = 200.0
+				}
+
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", refundDollars, q.userID)
+
+				alert := fmt.Sprintf("⏳ ARENA QUEUE TIMEOUT\n\nNo equivalent opponents were found for the %s queue. Your entry fee of $%.0f has been refunded.", b, refundDollars)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", q.userID, alert)
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error {
@@ -178,7 +429,6 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	// Rebuilt to scan both 'marching' and 'engaged' multi-layered operational phases
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
 		       r.attacker_rations, r.attacker_ammo, r.attacker_losses, r.defender_losses,
@@ -217,24 +467,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var r activeRaid
 		err := rows.Scan(
-			&r.id, &r.attackerID, &r.defenderID,
+			&r.id, &r.attackerID, &r.defenderID, &r.state, &r.roundNumber,
+			&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses,
 			&r.attackerName, &r.attackerUserID,
-			&r.defenderName, &r.defenderUserID,
+			&r.defenderName, &r.defenderUserID, &r.resolveTime,
 		)
 		if err == nil {
 			raids = append(raids, r)
+		} else {
+			log.Printf("Error scanning combat raid: %v", err)
 		}
 	}
 	rows.Close()
 
 	for _, r := range raids {
-		// --- PHASE 4: ACTIVE MULTI-STAGE ENGAGEMENT TRANSITION ---
 		if r.state == "marching" {
-			// Outpost troops arrived at the battlefield coordinate grid. Shift to 'engaged' battle!
-			// Small battles take 15m, Large scale battles take up to 90m (1h 30m)
 			battleDuration := 20 * time.Minute
 			if r.defenderID == "00000000-0000-0000-0000-000000000000" {
-				battleDuration = 15 * time.Minute // Rogue Drone Skirmish standard duration
+				battleDuration = 15 * time.Minute
 			}
 
 			newResolve := time.Now().Add(battleDuration)
@@ -255,14 +505,39 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		// --- PROCESSING ACTIVE COMBAT ROUNDS (state = 'engaged') ---
-		var soldiersAttacker, dronesAttacker, jetsAttacker, mechsAttacker int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&soldiersAttacker, &dronesAttacker, &jetsAttacker, &mechsAttacker)
+		var primarySoldiers, primaryDrones, primaryJets, primaryMechs int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&primarySoldiers, &primaryDrones, &primaryJets, &primaryMechs)
 
-		attackForce := soldiersAttacker + dronesAttacker + jetsAttacker + mechsAttacker
+		type coopContributor struct {
+			encampment_id string
+			soldiers      int
+			mechs         int
+		}
 
-		var attackerTanks, attackerMechs int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks, &attackerMechs)
+		var helpers []coopContributor
+		queryHelpers := "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1"
+		rowH, errH := tx.QueryContext(ctx, queryHelpers, r.id)
+		if errH == nil {
+			for rowH.Next() {
+				var h coopContributor
+				if err := rowH.Scan(&h.encampment_id, &h.soldiers, &h.mechs); err == nil {
+					helpers = append(helpers, h)
+				}
+			}
+			rowH.Close()
+		}
+
+		totSoldiers := primarySoldiers
+		totMechs := primaryMechs
+		for _, h := range helpers {
+			totSoldiers += h.soldiers
+			totMechs += h.mechs
+		}
+
+		attackForce := totSoldiers + primaryDrones + primaryJets + totMechs
+
+		var attackerTanks int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
 
 		var defenseForce int
 		var defLevel int = 1
@@ -299,7 +574,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		offenseRatingModifier := 1.0
 		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15)
 
-		// Apply Terrain Modifications
 		switch targetBiome {
 		case "forest":
 			offenseRatingModifier *= 0.85
@@ -309,26 +583,26 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenseRatingModifier *= 1.30
 		}
 
-		// Apply Weather Modifications
 		switch activeWeather {
 		case "radiation_storm":
 			offenseRatingModifier *= 0.75
 		case "acid_rain":
-			attackerMechs = int(float64(attackerMechs) * 0.50)
+			totMechs = int(float64(totMechs) * 0.50)
 		}
 
-		// --- SUPPLY & LOGISTICS DEBUFFS (Phase 4) ---
 		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {
-			offenseRatingModifier *= 0.50 // Performance drop due to hunger or ammunition depletion
+			offenseRatingModifier *= 0.50
 		}
 
-		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attackerMechs) * 1.50))
+		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * 1.50))
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attackerCasualties := 0
 		defenderCasualties := 0
 
-		if attackerOffenseRating > defenderDefenseRating {
+		isVictory := attackerOffenseRating > defenderDefenseRating
+
+		if isVictory {
 			defenderCasualties = defenseForce
 			attackerCasualties = attackForce / 2
 		} else {
@@ -336,10 +610,30 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenderCasualties = defenseForce / 3
 		}
 
-		// Write final casualties and finalize
 		if attackerCasualties > 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
+			if math.IsNaN(primRatio) {
+				primRatio = 1.0
+			}
+			primCas := int(float64(attackerCasualties) * primRatio)
+
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", primCas, r.attackerID)
+
+			for _, h := range helpers {
+				hForce := h.soldiers + h.mechs
+				hRatio := float64(hForce) / float64(attackForce)
+				hCas := int(float64(attackerCasualties) * hRatio)
+
+				casSoldiers := hCas / 2
+				casMechs := hCas / 2
+
+				refundSoldiers := h.soldiers - casSoldiers
+				refundMechs := h.mechs - casMechs
+
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", refundSoldiers, refundMechs, h.encampment_id)
+			}
 		}
+
 		if r.defenderID != "00000000-0000-0000-0000-000000000000" && defenderCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
 		}
@@ -358,12 +652,32 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		stolenScrap := defenderScrap * lootPercentage
 
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, r.attackerID)
+		if isVictory {
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
+			if math.IsNaN(primRatio) {
+				primRatio = 1.0
+			}
+			primaryShare := stolenScrap * primRatio
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", primaryShare, r.attackerID)
+
+			for _, h := range helpers {
+				hForce := h.soldiers + h.mechs
+				hRatio := float64(hForce) / float64(attackForce)
+				helperShare := stolenScrap * hRatio
+
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", helperShare, h.encampment_id)
+
+				var helperUserID int64
+				_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", h.encampment_id).Scan(&helperUserID)
+				helperAlert := fmt.Sprintf("🤝 CO-OP RAID RESOLUTION: VICTORY!\n\nYour forces successfully assisted in breaching the defenses of [%s]!\nProportional Loot Share Earned: +%.1f Scrap.", r.defenderName, helperShare)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", helperUserID, helperAlert)
+			}
+		}
+
 		if r.defenderID != "00000000-0000-0000-0000-000000000000" {
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
 		}
 
-		// Complete the raid
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
 		attackerAlert := fmt.Sprintf(
@@ -374,7 +688,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				"💀 Casualties Sustained: %d units",
 			r.defenderName, stolenScrap, attackerCasualties,
 		)
-		if attackerOffenseRating <= defenderDefenseRating {
+		if !isVictory {
 			attackerAlert = fmt.Sprintf(
 				"❌ RAID REPORT: DEFEAT!\n\n"+
 					"Target: %s\n"+
@@ -397,8 +711,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
 		}
-
-		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacker Casualties: %d, Defender Casualties: %d", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties)
 	}
 
 	return nil

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time" // Added missing time package
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
@@ -165,9 +165,8 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	}
 
 	// 3. No Shields: ICBM Detonation sequence triggers
-	// Vaporize 50% of current troops
-	_, _ = tx.ExecContext(ctx, "UPDATE units SET quantity = GREATEST(quantity / 2, 0) WHERE encampment_id = $1", targetCampID)
-	_, _ = tx.ExecContext(ctx, "DELETE FROM units WHERE quantity <= 0")
+	// Vaporize 50% of current workshop_inventory forces
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers / 2, 0), mechs = GREATEST(mechs / 2, 0) WHERE encampment_id = $1", targetCampID)
 
 	// Steal 50% of current Scrap reserves
 	var defenderScrap float64

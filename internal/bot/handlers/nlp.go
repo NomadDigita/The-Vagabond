@@ -18,6 +18,7 @@ type NLPHandler struct {
 	Silo       *SiloHandler
 	Research   *ResearchHandler
 	Exchange   *ExchangeHandler
+	World      *WorldHandler
 }
 
 func NewNLPHandler(
@@ -32,6 +33,7 @@ func NewNLPHandler(
 	silo *SiloHandler,
 	research *ResearchHandler,
 	exchange *ExchangeHandler,
+	world *WorldHandler,
 ) *NLPHandler {
 	return &NLPHandler{
 		Onboarding: onb,
@@ -45,6 +47,7 @@ func NewNLPHandler(
 		Silo:       silo,
 		Research:   research,
 		Exchange:   exchange,
+		World:      world,
 	}
 }
 
@@ -94,10 +97,10 @@ func (h *NLPHandler) HandleTextMessage(c telebot.Context) error {
 		return h.Combat.HandleRaidBoard(c)
 	}
 	if text == "🛸 expedition radar" || text == "radar" {
-		return h.Combat.HandleExpeditionRadar(c) // Restored missing tracking radar routing
+		return h.Combat.HandleExpeditionRadar(c)
 	}
 	if text == "📻 wasteland radio" {
-		return h.Onboarding.HandleHelp(c) // Redirect or handle news
+		return h.World.HandleWorldFeed(c)
 	}
 
 	// --- 4. ECONOMY CONTEXTUAL SUBMENU SHORTCUTS ---
