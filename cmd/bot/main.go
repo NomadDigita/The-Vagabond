@@ -63,6 +63,18 @@ func main() {
 	}
 	log.Println("Database connection pool established successfully.")
 
+	// --- PHASE 4 DATABASE SCHEMA AUTO-MIGRATIONS ---
+	_, err = db.Exec(`
+		ALTER TABLE raids ADD COLUMN IF NOT EXISTS round_number INT DEFAULT 0;
+		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_rations DOUBLE PRECISION DEFAULT 100.0;
+		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_ammo DOUBLE PRECISION DEFAULT 100.0;
+		ALTER TABLE raids ADD COLUMN IF NOT EXISTS attacker_losses INT DEFAULT 0;
+		ALTER TABLE raids ADD COLUMN IF NOT EXISTS defender_losses INT DEFAULT 0;
+	`)
+	if err != nil {
+		log.Printf("Warning: Failed executing Phase 4 database schema migrations: %v", err)
+	}
+
 	pref := telebot.Settings{
 		Token:  botToken,
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},

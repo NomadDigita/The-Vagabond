@@ -13,22 +13,22 @@ import (
 )
 
 type Engine struct {
-	DB                 *sql.DB
-	TickInterval       time.Duration
-	stopChan           chan struct{}
-	resourceProcessor  *resource.Processor
-	starvationEngine   *starvation.Engine
-	weatherEngine      *world.WeatherEngine
+	DB                *sql.DB
+	TickInterval      time.Duration
+	stopChan          chan struct{}
+	resourceProcessor *resource.Processor
+	starvationEngine  *starvation.Engine
+	weatherEngine     *world.WeatherEngine
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 	return &Engine{
-		DB:                 db,
-		TickInterval:       interval,
-		stopChan:           make(chan struct{}),
-		resourceProcessor:  resource.NewProcessor(db),
-		starvationEngine:   starvation.NewEngine(db),
-		weatherEngine:      world.NewWeatherEngine(db),
+		DB:                db,
+		TickInterval:      interval,
+		stopChan:          make(chan struct{}),
+		resourceProcessor: resource.NewProcessor(db),
+		starvationEngine:  starvation.NewEngine(db),
+		weatherEngine:     world.NewWeatherEngine(db),
 	}
 }
 
@@ -178,42 +178,84 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
+	// Rebuilt to scan both 'marching' and 'engaged' multi-layered operational phases
 	query := `
-		SELECT r.id, r.attacker_id, r.defender_id,
+		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
+		       r.attacker_rations, r.attacker_ammo, r.attacker_losses, r.defender_losses,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
 		       COALESCE(ed.name, 'Rogue Drone Nest') as defender_name, 
-		       COALESCE(ed.user_id, 0) as defender_user_id
+		       COALESCE(ed.user_id, 0) as defender_user_id, r.resolve_time
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.state = 'marching' AND r.resolve_time <= CURRENT_TIMESTAMP`
+		WHERE (r.state = 'marching' OR r.state = 'engaged') AND r.resolve_time <= CURRENT_TIMESTAMP`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
-		return fmt.Errorf("failed querying matching combat raids: %w", err)
+		return fmt.Errorf("failed querying combat raids: %w", err)
 	}
 	defer rows.Close()
 
 	type activeRaid struct {
-		id             string
-		attackerID     string
-		defenderID     string
-		attackerName   string
-		attackerUserID int64
-		defenderName   string
-		defenderUserID int64
+		id              string
+		attackerID      string
+		defenderID      string
+		state           string
+		roundNumber     int
+		attackerRations float64
+		attackerAmmo    float64
+		attackerLosses  int
+		defenderLosses  int
+		attackerName    string
+		attackerUserID  int64
+		defenderName    string
+		defenderUserID  int64
+		resolveTime     time.Time
 	}
 
 	var raids []activeRaid
 	for rows.Next() {
 		var r activeRaid
-		if err := rows.Scan(&r.id, &r.attackerID, &r.defenderID, &r.attackerName, &r.attackerUserID, &r.defenderName, &r.defenderUserID); err == nil {
+		err := rows.Scan(
+			&r.id, &r.attackerID, &r.defenderID,
+			&r.attackerName, &r.attackerUserID,
+			&r.defenderName, &r.defenderUserID,
+		)
+		if err == nil {
 			raids = append(raids, r)
 		}
 	}
 	rows.Close()
 
 	for _, r := range raids {
+		// --- PHASE 4: ACTIVE MULTI-STAGE ENGAGEMENT TRANSITION ---
+		if r.state == "marching" {
+			// Outpost troops arrived at the battlefield coordinate grid. Shift to 'engaged' battle!
+			// Small battles take 15m, Large scale battles take up to 90m (1h 30m)
+			battleDuration := 20 * time.Minute
+			if r.defenderID == "00000000-0000-0000-0000-000000000000" {
+				battleDuration = 15 * time.Minute // Rogue Drone Skirmish standard duration
+			}
+
+			newResolve := time.Now().Add(battleDuration)
+			updateMarch := `
+				UPDATE raids 
+				SET state = 'engaged', resolve_time = $1, round_number = 1 
+				WHERE id = $2`
+			_, _ = tx.ExecContext(ctx, updateMarch, newResolve, r.id)
+
+			arrivalAlert := fmt.Sprintf(
+				"⚔️ CAMPAIGN ENGAGEMENT ACTIVATED!\n\n"+
+					"Your forces have arrived at Sector coordinates for Outpost [%s].\n"+
+					"Deployments are actively engaged in battlefield skirmishes.\n"+
+					"Estimated Battle Resolution: %s.",
+				r.defenderName, newResolve.UTC().Format("15:04:05"),
+			)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
+			continue
+		}
+
+		// --- PROCESSING ACTIVE COMBAT ROUNDS (state = 'engaged') ---
 		var soldiersAttacker, dronesAttacker, jetsAttacker, mechsAttacker int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&soldiersAttacker, &dronesAttacker, &jetsAttacker, &mechsAttacker)
 
@@ -229,19 +271,14 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var targetBiome string = "wasteland"
 
 		if r.defenderID == "00000000-0000-0000-0000-000000000000" {
-			// --- PROCEDURAL AI STRATEGIC DIFFICULTY SCALING ---
 			var attackerCoreLvl int
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM encampments WHERE id = $1", r.attackerID).Scan(&attackerCoreLvl)
 			if attackerCoreLvl <= 0 {
 				attackerCoreLvl = 1
 			}
-
-			// AI forces scale up based on core level
-			defenseForce = attackerCoreLvl * 18 
+			defenseForce = attackerCoreLvl * 18
 			defLevel = attackerCoreLvl
-			targetBiome = "wasteland"
 		} else {
-			// Normal PvP path
 			var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
 			defenseForce = soldiersDefender + dronesDefender + jetsDefender + mechsDefender
@@ -256,39 +293,33 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID).Scan(&targetBiome)
 		}
 
-		// Apply global weather variables from world state
 		var activeWeather string
 		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-		// Base offensive/defensive values
 		offenseRatingModifier := 1.0
 		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15)
 
-		// --- GEOGRAPHIC TERRAIN COMBAT MULTIPLIERS (Phase 2 & 3) ---
+		// Apply Terrain Modifications
 		switch targetBiome {
 		case "forest":
-			offenseRatingModifier *= 0.85 // Forest cover reduces incoming accuracy
+			offenseRatingModifier *= 0.85
 			defenseRatingModifier *= 1.15
 		case "ruins":
-			offenseRatingModifier *= 0.75 // Heavy urban blockades reduce troop mobility
+			offenseRatingModifier *= 0.75
 			defenseRatingModifier *= 1.30
 		}
 
-		// --- CLIMATIC WEATHER COMBAT MULTIPLIERS (Phase 2 & 3) ---
+		// Apply Weather Modifications
 		switch activeWeather {
 		case "radiation_storm":
-			offenseRatingModifier *= 0.75 // Radioactive cloud cover reduces combat performance
+			offenseRatingModifier *= 0.75
 		case "acid_rain":
-			attackerMechs = int(float64(attackerMechs) * 0.50) // Corrosive rain reduces mech shielding multipliers
+			attackerMechs = int(float64(attackerMechs) * 0.50)
 		}
 
-		if defenderAgentActive {
-			// Solar flares dampen agent defense sweeps
-			if activeWeather == "solar_flare" {
-				defenseRatingModifier += 1.5
-			} else {
-				defenseRatingModifier += 3.0
-			}
+		// --- SUPPLY & LOGISTICS DEBUFFS (Phase 4) ---
+		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {
+			offenseRatingModifier *= 0.50 // Performance drop due to hunger or ammunition depletion
 		}
 
 		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attackerMechs) * 1.50))
@@ -305,10 +336,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenderCasualties = defenseForce / 3
 		}
 
+		// Write final casualties and finalize
 		if attackerCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
 		}
-		
 		if r.defenderID != "00000000-0000-0000-0000-000000000000" && defenderCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
 		}
@@ -328,11 +359,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap := defenderScrap * lootPercentage
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, r.attackerID)
-		
 		if r.defenderID != "00000000-0000-0000-0000-000000000000" {
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
 		}
 
+		// Complete the raid
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
 		attackerAlert := fmt.Sprintf(
@@ -367,7 +398,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
 		}
 
-		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacked Casualties: %d, Defender Casualties: %d, Stolen Scrap: %.1f", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties, stolenScrap)
+		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacker Casualties: %d, Defender Casualties: %d", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties)
 	}
 
 	return nil
