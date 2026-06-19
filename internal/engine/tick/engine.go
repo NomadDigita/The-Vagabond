@@ -91,7 +91,7 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Pass 5: PvP target combat marches
+	// Pass 5: PvP target and AI Skirmish combat marches
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
@@ -178,13 +178,15 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
+	// LEFT JOIN allows us to resolve attacks even when defender is the AI Drone Nest (id '00000000-0000-0000-0000-000000000000')
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
-		       ed.name as defender_name, ed.user_id as defender_user_id
+		       COALESCE(ed.name, 'Rogue Drone Nest') as defender_name, 
+		       COALESCE(ed.user_id, 0) as defender_user_id
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
-		JOIN encampments ed ON ed.id = r.defender_id
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.state = 'marching' AND r.resolve_time <= CURRENT_TIMESTAMP`
 
 	rows, err := tx.QueryContext(ctx, query)
@@ -216,26 +218,41 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var soldiersAttacker, dronesAttacker, jetsAttacker, mechsAttacker int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&soldiersAttacker, &dronesAttacker, &jetsAttacker, &mechsAttacker)
 
-		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
-
 		attackForce := soldiersAttacker + dronesAttacker + jetsAttacker + mechsAttacker
-		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
-
-		var defLevel int
-		_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID).Scan(&defLevel)
-		if defLevel == 0 {
-			defLevel = 1
-		}
 
 		var attackerTanks, attackerMechs int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks, &attackerMechs)
-		
-		var defenderShields int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID).Scan(&defenderShields)
 
-		var defenderAgentActive bool
-		_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
+		var defenseForce int
+		var defLevel int = 1
+		var defenderShields int = 0
+		var defenderAgentActive bool = false
+
+		if r.defenderID == "00000000-0000-0000-0000-000000000000" {
+			// --- PROCEDURAL AI STRATEGIC DIFFICULTY SCALING ---
+			var attackerCoreLvl int
+			_ = tx.QueryRowContext(ctx, "SELECT level FROM encampments WHERE id = $1", r.attackerID).Scan(&attackerCoreLvl)
+			if attackerCoreLvl <= 0 {
+				attackerCoreLvl = 1
+			}
+
+			// AI forces scale up exponentially based on attacker core levels
+			defenseForce = attackerCoreLvl * 18 
+			defLevel = attackerCoreLvl
+		} else {
+			// Normal PvP path
+			var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
+			defenseForce = soldiersDefender + dronesDefender + jetsDefender + mechsDefender
+
+			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID).Scan(&defLevel)
+			if defLevel == 0 {
+				defLevel = 1
+			}
+
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID).Scan(&defenderShields)
+			_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
+		}
 
 		defenseShieldMultiplier := 1.0 + (float64(defLevel) * 0.15)
 		if defenderAgentActive {
@@ -259,12 +276,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if attackerCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", attackerCasualties, r.attackerID)
 		}
-		if defenderCasualties > 0 {
+		
+		if r.defenderID != "00000000-0000-0000-0000-000000000000" && defenderCasualties > 0 {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID)
 		}
 
 		var defenderScrap float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
+		if r.defenderID == "00000000-0000-0000-0000-000000000000" {
+			defenderScrap = 125.0 // Static AI scrap reserve
+		} else {
+			_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID).Scan(&defenderScrap)
+		}
 
 		lootPercentage := 0.40
 		if defenderShields > 0 {
@@ -274,7 +296,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap := defenderScrap * lootPercentage
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, r.attackerID)
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
+		
+		if r.defenderID != "00000000-0000-0000-0000-000000000000" {
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID)
+		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
@@ -296,17 +321,19 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			)
 		}
 
-		defenderAlert := fmt.Sprintf(
-			"🚨 OUTPOST UNDER ATTACK!\n\n"+
-				"Attacker: %s\n"+
-				"Intruders breached your gates.\n"+
-				"⚙️ Scrap Looted: %.1f Scrap\n"+
-				"💀 Defense Casualties: %d units lost.",
-			r.attackerName, stolenScrap, defenderCasualties,
-		)
-
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, attackerAlert)
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
+
+		if r.defenderID != "00000000-0000-0000-0000-000000000000" {
+			defenderAlert := fmt.Sprintf(
+				"🚨 OUTPOST UNDER ATTACK!\n\n"+
+					"Attacker: %s\n"+
+					"Intruders breached your gates.\n"+
+					"⚙️ Scrap Looted: %.1f Scrap\n"+
+					"💀 Defense Casualties: %d units lost.",
+				r.attackerName, stolenScrap, defenderCasualties,
+			)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
+		}
 
 		log.Printf("Combat Raid Resolved: %s raided %s. Result Attacked Casualties: %d, Defender Casualties: %d, Stolen Scrap: %.1f", r.attackerName, r.defenderName, attackerCasualties, defenderCasualties, stolenScrap)
 	}

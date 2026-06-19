@@ -8,7 +8,6 @@ import (
 	"log"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
-	"github.com/NomadDigita/The-Vagabond/internal/models"
 	"gopkg.in/telebot.v3"
 )
 
@@ -40,27 +39,26 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	var faction string
 	_ = h.DB.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
 
-	var hero models.Hero
-	var lvl int
-	var xp int
-	queryHero := `SELECT id, name, trait, injuries, battles_survived, superpower, level, xp FROM heroes WHERE encampment_id = $1`
-	err = h.DB.QueryRowContext(ctx, queryHero, campID).Scan(&hero.ID, &hero.Name, &hero.Trait, &hero.Injuries, &hero.BattlesSurvived, &hero.Superpower, &lvl, &xp)
+	// Resilient local scan variables to prevent struct validation/NULL field mismatch crashes
+	var heroID, heroName, heroTrait, heroInjuries, heroSuperpower string
+	var battlesSurvived, lvl, xp int
+
+	queryHero := `
+		SELECT id, name, trait, injuries, battles_survived, superpower, level, xp 
+		FROM heroes 
+		WHERE encampment_id = $1`
+	err = h.DB.QueryRowContext(ctx, queryHero, campID).Scan(&heroID, &heroName, &heroTrait, &heroInjuries, &battlesSurvived, &heroSuperpower, &lvl, &xp)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		var heroName string
-		var heroTrait string
-		var heroInjury string
-		var heroSuperpower string
-
 		if faction == "steel_vanguard" {
 			heroName = "Iron Warden"
 			heroTrait = "Fortress Tactician"
-			heroInjury = "Scarred Eye"
+			heroInjuries = "Scarred Eye"
 			heroSuperpower = "🛡️ Kinetic Barrier (Reduces incoming damage by 15%)"
 		} else {
 			heroName = "Waste Phantom"
 			heroTrait = "Salvage Specialist"
-			heroInjury = "Cybernetic Hand"
+			heroInjuries = "Cybernetic Hand"
 			heroSuperpower = "⚙️ Scrap Recovery (+10% combat scrap loot)"
 		}
 
@@ -69,7 +67,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			VALUES ($1, $2, $3, $4, 0, $5, 1, 0) 
 			RETURNING id, name, trait, injuries, battles_survived, superpower, level, xp`
 		
-		err = h.DB.QueryRowContext(ctx, insertHero, campID, heroName, heroTrait, heroInjury, heroSuperpower).Scan(&hero.ID, &hero.Name, &hero.Trait, &hero.Injuries, &hero.BattlesSurvived, &hero.Superpower, &lvl, &xp)
+		err = h.DB.QueryRowContext(ctx, insertHero, campID, heroName, heroTrait, heroInjuries, heroSuperpower).Scan(&heroID, &heroName, &heroTrait, &heroInjuries, &battlesSurvived, &heroSuperpower, &lvl, &xp)
 		if err != nil {
 			log.Printf("Failed creating elite hero: %v", err)
 			return c.Send("⚠️ Failed to write commander metrics.", keyboards.CampNavigation())
@@ -95,7 +93,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			"🏋️ [Train Commander] — Cost: 50 Scrap (+20 XP)\n"+
 			"💊 [Heal Injury] — Cost: 50 Rations (Heals sustained scars)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		lvl, hero.Name, hero.Trait, hero.Injuries, hero.Superpower, xp, hero.BattlesSurvived,
+		lvl, heroName, heroTrait, heroInjuries, heroSuperpower, xp, battlesSurvived,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -143,7 +141,7 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 			newLvl++
 			newXp = 0
 			// Queue Level-up alert
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, '🏆 COMMANDER LEVEL UP: Your Hero commander has successfully reached Level '+ $2::text +'!', FALSE)", sender.ID, newLvl)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, '🏆 COMMANDER LEVEL UP: Your Hero commander has successfully reached Level ' || $2::text || '!', FALSE)", sender.ID, newLvl)
 		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 50.0 WHERE encampment_id = $1", campID)

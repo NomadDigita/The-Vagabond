@@ -151,8 +151,6 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
-	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
-	selector.ResizeKeyboard = true
 
 	return c.Send(dashboard, selector)
 }
@@ -168,8 +166,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	var campID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	var myCampID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID)
 
 	// Fetch outbound active marching raids
 	queryOutbound := `
@@ -179,7 +177,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		WHERE r.attacker_id = $1 AND r.state = 'marching'
 		LIMIT 2`
 	
-	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
+	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, myCampID)
 	outboundText := ""
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
@@ -220,7 +218,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	
 	var attackerName string
 	var resolveTime time.Time
-	err = h.DB.QueryRowContext(ctx, queryInbound, campID).Scan(&attackerName, &resolveTime)
+	err = h.DB.QueryRowContext(ctx, queryInbound, myCampID).Scan(&attackerName, &resolveTime)
 	inboundText := ""
 	if errors.Is(err, sql.ErrNoRows) {
 		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected."
@@ -247,8 +245,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
-	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
-	selector.ResizeKeyboard = true
 
 	return c.Send(panelText, selector)
 }
@@ -303,8 +299,6 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
-	selector.ReplyKeyboard = keyboards.CombatNavigation().ReplyKeyboard
-	selector.ResizeKeyboard = true
 
 	return c.Send(report, selector)
 }
@@ -596,7 +590,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	// Apply Weather travel multipliers
 	switch activeWeather {
-case "radiation_storm":
+	case "radiation_storm":
 		marchingMinutes *= 1.5
 	case "solar_flare":
 		marchingMinutes *= 0.7
