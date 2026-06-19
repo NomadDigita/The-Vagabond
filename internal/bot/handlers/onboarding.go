@@ -108,7 +108,7 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 	)
 
 	welcomeText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"💀 SYSTEM INTRUSION DETECTED\n" +
+		"⚠️ SYSTEM INTRUSION DETECTED\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"WARNING: Faction registration required. Deploy your core systems:\n\n" +
 		"🛡️ [Steel Vanguard]\n" +
@@ -146,7 +146,7 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	return c.Send(helpManual, keyboards.MainNavigation())
 }
 
-// HandleFactionCallback writes registration details depending on faction selection
+// HandleFactionCallback writes registration details depending on faction selection (Thread-safe coordinate generation)
 func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	ctx := context.Background()
 
@@ -180,19 +180,18 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	continents := []string{"Africa", "Europe", "Asia", "Americas"}
 	spawnedContinent := continents[sender.ID%4]
 
+	// ON CONFLICT DO UPDATE handles insertion races atomically to resolve 23505 constraints
 	var coordID string
-	queryCoord := `SELECT id FROM coordinates WHERE x = 0 AND y = 0 AND region = $1`
-	err = tx.QueryRowContext(ctx, queryCoord, spawnedContinent).Scan(&coordID)
-	if errors.Is(err, sql.ErrNoRows) {
-		insertCoord := `
-			INSERT INTO coordinates (x, y, biome, danger_level, region, terrain) 
-			VALUES (0, 0, 'wasteland', 1, $1, 'wasteland') 
-			RETURNING id`
-		err = tx.QueryRowContext(ctx, insertCoord, spawnedContinent).Scan(&coordID)
-		if err != nil {
-			log.Printf("Failed creating coordinates: %v", err)
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mapping allocation error."})
-		}
+	insertCoord := `
+		INSERT INTO coordinates (x, y, biome, danger_level, region, terrain) 
+		VALUES (0, 0, 'wasteland', 1, $1, 'wasteland') 
+		ON CONFLICT (x, y) DO UPDATE SET region = EXCLUDED.region
+		RETURNING id`
+	
+	err = tx.QueryRowContext(ctx, insertCoord, spawnedContinent).Scan(&coordID)
+	if err != nil {
+		log.Printf("Failed creating coordinates: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Mapping allocation error."})
 	}
 
 	var campID string

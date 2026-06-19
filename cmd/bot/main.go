@@ -184,6 +184,8 @@ func executeStartupMigrations(db *sql.DB) {
 			entered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
 
+		`ALTER TABLE arena_queue ADD COLUMN IF NOT EXISTS entered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`,
+
 		`CREATE TABLE IF NOT EXISTS arena_battles (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			bracket VARCHAR(50) NOT NULL,
@@ -204,6 +206,9 @@ func executeStartupMigrations(db *sql.DB) {
 			level INT DEFAULT 1,
 			xp INT DEFAULT 0
 		);`,
+
+		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS level INT DEFAULT 1;`,
+		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS xp INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -274,7 +279,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Connection pool properties scaled up for concurrent load handling
 	db.SetMaxOpenConns(100)
 	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(30 * time.Minute)

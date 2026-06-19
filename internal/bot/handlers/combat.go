@@ -326,7 +326,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleScout performs a username-based target search with input length validation bounds
+// HandleScout performs a username-based target search
 func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -335,7 +335,6 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 		return c.Send("⚠️ Syntax Error: Use `/scout [telegram_username]` (without the @ symbol).")
 	}
 
-	// Input argument boundary validation checks
 	if len(targetUsername) > 32 {
 		return c.Send("❌ Input Blocked: Username must be 32 characters or fewer.")
 	}
@@ -423,7 +422,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderUserID)
 
-	// Persist the spy mission as un-resolved and taze initially
+	// Persist the spy mission as un-resolved initially
 	var spyID string
 	queryInsertSpy := `
 		INSERT INTO spy_missions (spy_id, target_id, is_intercepted, resolved) 
@@ -594,7 +593,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	return h.HandleExpeditionRadar(c)
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes
+// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing and direct push alert fail-safes (Secure Lock)
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -607,7 +606,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// --- RESOLVED NON-TRANSACTIONAL READ SKEW (FOR UPDATE) ---
+	// Atomic read lock inside transaction block to resolve non-transactional read skew bugs
 	var attackerCampID string
 	var myRegion string
 	var myX, myY int
@@ -667,9 +666,10 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		marchDuration := time.Duration(marchingMinutes) * time.Minute
 		resolveTime := time.Now().Add(marchDuration)
 
+		// Set defender_id to NULL to satisfy foreign key raids_defender_id_fkey constraint (Fixes 23503)
 		insertRaid := `
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-			VALUES ($1, '00000000-0000-0000-0000-000000000000'::uuid, 'marching', $2)
+			VALUES ($1, NULL, 'marching', $2)
 			RETURNING id`
 		var raidID string
 		err = tx.QueryRowContext(ctx, insertRaid, attackerCampID, resolveTime).Scan(&raidID)
