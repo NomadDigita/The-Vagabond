@@ -18,19 +18,21 @@ func NewProcessor(db *sql.DB) *Processor {
 }
 
 type ActiveAgent struct {
-	UserID   int64
-	Mode     string
-	CampID   string
-	CampName string
-	Scrap    float64
-	Rations  float64
-	Energy   float64
-	Iron     float64
-	Gold     float64
-	Silver   float64
-	Diamond  float64
-	Dollars  float64
-	TentLvl  int
+	UserID      int64
+	Mode        string
+	CampID      string
+	CampName    string
+	Scrap       float64
+	Rations     float64
+	Energy      float64
+	Iron        float64
+	Gold        float64
+	Silver      float64
+	Diamond     float64
+	Dollars     float64
+	TentLvl     int
+	EconTechLvl int
+	SynapticLvl int
 }
 
 // RunAgentPass executes automation logic for all active agents inside the transaction
@@ -38,7 +40,9 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT t.user_id, t.mode, e.id, e.name, 
 		       r.scrap, r.rations, r.energy, r.iron, r.gold, r.silver, r.diamond, r.dollars,
-		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl
+		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
+		       COALESCE((SELECT res.econ_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as econ_tech_lvl,
+		       COALESCE((SELECT mut.synaptic_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as synaptic_lvl
 		FROM agent_tasks t
 		JOIN encampments e ON e.user_id = t.user_id
 		JOIN resources r ON r.encampment_id = e.id
@@ -56,7 +60,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		err := rows.Scan(
 			&a.UserID, &a.Mode, &a.CampID, &a.CampName, 
 			&a.Scrap, &a.Rations, &a.Energy, &a.Iron, &a.Gold, &a.Silver, &a.Diamond, &a.Dollars,
-			&a.TentLvl,
+			&a.TentLvl, &a.EconTechLvl, &a.SynapticLvl,
 		)
 		if err == nil {
 			agents = append(agents, a)
@@ -67,8 +71,12 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, a := range agents {
-		// Consume 0.2 energy cells as operation fuel (Balanced Energy Upkeep)
-		if a.Energy < 0.2 {
+		// Calculate energy upkeep reduction factors (Neuro-Efficiency & Synaptic Accel)
+		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
+		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10)
+		upkeepEnergy := 0.2 * upkeepMultiplier
+
+		if a.Energy < upkeepEnergy {
 			// Energy depleted: Force shutdown agent task
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)
 
@@ -84,12 +92,11 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		newEnergy := math.Max(a.Energy-0.2, 0.0)
+		newEnergy := math.Max(a.Energy-upkeepEnergy, 0.0)
 		storageCap := float64(a.TentLvl) * 500.0
 
 		switch a.Mode {
 		case "collector":
-			// Generate +2.0 Scrap and +1.0 Rations up to the Tent storage capacity cap
 			newScrap := math.Min(a.Scrap+2.00, storageCap)
 			newRations := math.Min(a.Rations+1.00, storageCap)
 
@@ -105,7 +112,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector] executed action for outpost: %s (+2.0 Scrap, +1.0 Rations capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_omega":
-			// Generate +20.0 Scrap and heavy war resources respecting warehouse storage cap limits
 			newScrap := math.Min(a.Scrap+20.00, storageCap)
 			newIron := a.Iron + 5.00
 			newGold := a.Gold + 1.00
@@ -125,16 +131,13 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s", a.CampName)
 
 		case "builder":
-			// Check if any module is currently upgrading in this camp
 			var isUpgrading bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE)", a.CampID).Scan(&isUpgrading)
 			if isUpgrading {
-				// Queue is busy, builder agent waits but still consumes fuel
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 				continue
 			}
 
-			// Find modules eligible for upgrade (Tent, Scrap Heap, or Generator)
 			queryEligible := `
 				SELECT type, level 
 				FROM modules 
@@ -177,7 +180,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
 				log.Printf("Agent [Builder] auto-triggered upgrade for module %s level %d on camp %s", modType, lvl+1, a.CampName)
 			} else {
-				// Scrap is insufficient, builder agent waits but still consumes fuel
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 			}
 
@@ -193,7 +195,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				
 				log.Printf("Agent [Military] auto-recruited 1 Soldier for outpost: %s", a.CampName)
 			} else {
-				// Rations or materials are insufficient, military agent waits but still consumes fuel
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 			}
 		}

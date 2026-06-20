@@ -16,26 +16,26 @@ func NewProcessor(db *sql.DB) *Processor {
 }
 
 type EncampmentState struct {
-	ID           string
-	Scrap        float64
-	Rations      float64
-	Energy       float64
-	TentLvl      int
-	ScrapHeapLvl int
-	GeneratorLvl int
-	TroopCount   int
-	LoanAmount   float64
-	BuggyCount   int
-	ShipCount    int
-	JetCount     int
+	ID             string
+	Scrap          float64
+	Rations        float64
+	Energy         float64
+	TentLvl        int
+	ScrapHeapLvl   int
+	GeneratorLvl   int
+	TroopCount     int
+	LoanAmount     float64
+	BuggyCount     int
+	ShipCount      int
+	JetCount       int
+	DefenseTechLvl int
+	SalvageLvl     int
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
-	// Query active global weather front
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	// --- EXPANDED LOGISTICS FLEET STATE QUERY (Phase 3) ---
 	query := `
 		SELECT 
 			e.id, r.scrap, r.rations, r.energy,
@@ -46,7 +46,9 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT b.loan_amount FROM bank_accounts b WHERE b.encampment_id = e.id), 0) as loan_amount,
 			COALESCE((SELECT buggies FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as buggy_count,
 			COALESCE((SELECT ships FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as ship_count,
-			COALESCE((SELECT jets FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as jet_count
+			COALESCE((SELECT jets FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as jet_count,
+			COALESCE((SELECT res.defense_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as defense_tech_lvl,
+			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl
 		FROM encampments e
 		JOIN resources r ON r.encampment_id = e.id`
 
@@ -60,10 +62,11 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var s EncampmentState
 		err := rows.Scan(
-			&s.ID, &s.Scrap, &s.Rations, &s.Energy, 
-			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
-			&s.TroopCount, &s.LoanAmount, 
+			&s.ID, &s.Scrap, &s.Rations, &s.Energy,
+			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl,
+			&s.TroopCount, &s.LoanAmount,
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
+			&s.DefenseTechLvl, &s.SalvageLvl,
 		)
 		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
@@ -73,16 +76,19 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	for _, s := range states {
-		scrapGenerated := 0.25 * float64(s.ScrapHeapLvl)
+		// Calculate Overclock & Mutation modifiers (Scrap Overclock & Cybernetic Salvage)
+		overclockBonus := float64(s.DefenseTechLvl-1) * 0.20
+		salvageBonus := float64(s.SalvageLvl-1) * 0.15
+
+		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
 		energyGenerated := 0.05 * float64(s.GeneratorLvl)
 
-		// Apply Dynamic Weather Multipliers
 		switch activeWeather {
 		case "solar_flare":
-			energyGenerated *= 2.0 // Solar panels get 2x power
+			energyGenerated *= 2.0
 		case "radiation_storm":
-			energyGenerated *= 0.5 // Cloud cover drops solar efficiency by 50%
+			energyGenerated *= 0.5
 		}
 
 		var taxDeducted float64
@@ -96,7 +102,6 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = GREATEST(loan_amount - $1, 0) WHERE encampment_id = $2", taxDeducted, s.ID)
 		}
 
-		// --- ADVANCED MILITARY & VEHICLE MAINTENANCE UPKEEP (Phase 3) ---
 		rationsConsumed := float64(s.TroopCount) * 0.05
 		energyConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
@@ -126,7 +131,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			UPDATE resources 
 			SET scrap = $1, rations = $2, energy = $3, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
-		
+
 		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newEnergy, s.ID)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)

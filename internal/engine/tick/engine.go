@@ -644,11 +644,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
 
+		var attackerMilitaryTechLvl int = 1
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerMilitaryTechLvl)
+
+		var attackerBioLvl int = 1
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
+
 		var defenseForce int
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
+		var defenderBioLvl int = 1
 
 		if !r.defenderID.Valid {
 			var attackerCoreLvl int
@@ -671,6 +678,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT nuclear_shields FROM workshop_inventory WHERE encampment_id = $1), 0)", r.defenderID.String).Scan(&defenderShields)
 			_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&targetBiome)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
 		}
 
 		var activeWeather string
@@ -699,7 +707,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			offenseRatingModifier *= 0.50
 		}
 
-		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * 1.50))
+		// Apply Mech Armor Plating level modifiers to Colossus Mech offensive ratings
+		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
+		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attackerCasualties := 0
@@ -713,6 +723,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		} else {
 			attackerCasualties = attackForce
 			defenderCasualties = defenseForce / 3
+		}
+
+		// Apply Biospheric Adaptation level casualty reductions
+		if attackerCasualties > 0 {
+			reduction := float64(attackerBioLvl-1) * 0.10
+			reduction = math.Min(reduction, 0.90) // Cap dynamic casualty reduction at 90%
+			attackerCasualties = int(float64(attackerCasualties) * (1.0 - reduction))
+		}
+		if defenderCasualties > 0 && r.defenderID.Valid {
+			reduction := float64(defenderBioLvl-1) * 0.10
+			reduction = math.Min(reduction, 0.90)
+			defenderCasualties = int(float64(defenderCasualties) * (1.0 - reduction))
 		}
 
 		var primSurvSoldiers, primSurvMechs int
