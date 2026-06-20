@@ -596,59 +596,140 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	return h.HandleExpeditionRadar(c)
 }
 
-// HandleLaunchRaidCallback registers a marching raid inside the database with dynamic regional routing (Secure Lock)
+// HandleLaunchRaidCallback triggers the troops mobilization hangar deck (Phase 4: Stage 2 Implementation)
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-
 	defenderCampID := c.Args()[0]
+
+	// Query player coordinates and owned resources inside atomic read locks
+	var myCampID string
+	var myRegion string
+	var myX, myY int
+	queryMe := `
+		SELECT e.id, c.region, c.x, c.y 
+		FROM encampments e 
+		JOIN coordinates c ON c.id = e.coordinate_id 
+		WHERE e.user_id = $1`
+	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myRegion, &myX, &myY)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Outpost core not found. Choose faction first."})
+	}
+
+	// Fetch available army units to display selection panel
+	var soldiers, mechs, buggies int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
+
+	totForce := soldiers + mechs + buggies
+	if totForce <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Empty: Recruit soldiers or craft vehicles first!"})
+	}
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"✈️ HANGAR COMMAND EXPEDITION DECK\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Select an offensive force deployment size and route coordinates:\n\n"+
+			"BARRACKS STOCKPILES:\n"+
+			"🪖 Soldiers: %d | 🤖 Mechs: %d | 🚗 Buggies: %d\n\n"+
+			"TACTICAL ROUTING DECK:\n"+
+			"🚀 [Direct Route] — Base travel speed. Alerts defenders.\n"+
+			"🛡️ [Safe Route] — Costs 1.5x Fuel. Travels fast (0.7x duration).\n"+
+			"🛰️ [Stealth Route] — Slow travel (1.5x duration). BYPASSES ALL RADAR WARNINGS!\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		soldiers, mechs, buggies,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	
+	// Confirmation callbacks map to deployment weights and route options (Phase 4: Stage 2)
+	btnDirect25 := selector.Data("🚀 Deploy 25% [Direct]", "confirm_launch", defenderCampID, "25", "direct")
+	btnDirect50 := selector.Data("🚀 Deploy 50% [Direct]", "confirm_launch", defenderCampID, "50", "direct")
+	btnDirect100 := selector.Data("🚀 Deploy 100% [Direct]", "confirm_launch", defenderCampID, "100", "direct")
+	btnStealth100 := selector.Data("🛰️ Deploy 100% [Stealth]", "confirm_launch", defenderCampID, "100", "stealth")
+	btnSafe100 := selector.Data("🛡️ Deploy 100% [Safe]", "confirm_launch", defenderCampID, "100", "safe")
+
+	selector.Inline(
+		selector.Row(btnDirect25, btnDirect50),
+		selector.Row(btnDirect100),
+		selector.Row(btnStealth100, btnSafe100),
+	)
+
+	return c.Send(panelText, selector)
+}
+
+// HandleConfirmHangarLaunchCallback processes precise troop deductions and routes deployments (Phase 4: Stage 2)
+func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	
+	defenderCampID := c.Args()[0]
+	weightPctStr := c.Args()[1]
+	routeType := c.Args()[2]
+
+	weightPct, _ := strconv.Atoi(weightPctStr)
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database transaction error."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Launch failed."})
 	}
 	defer tx.Rollback()
 
-	// Atomic read lock inside transaction block to resolve non-transactional read skew bugs
-	var attackerCampID string
+	var myCampID string
 	var myRegion string
 	var myX, myY int
-	queryAttacker := `
+	queryMe := `
 		SELECT e.id, c.region, c.x, c.y 
 		FROM encampments e 
 		JOIN coordinates c ON c.id = e.coordinate_id 
 		WHERE e.user_id = $1 FOR UPDATE`
-	err = tx.QueryRowContext(ctx, queryAttacker, sender.ID).Scan(&attackerCampID, &myRegion, &myX, &myY)
-	if err != nil {
-		log.Printf("Failed querying attacker Outpost details: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error resolving Outpost."})
-	}
+	_ = tx.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myRegion, &myX, &myY)
 
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	var soldiers, drones, jets, mechs, nukes, tanks int
-	queryForces := `
-		SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(nukes, 0), COALESCE(fusion_tanks, 0)
-		FROM workshop_inventory 
-		WHERE encampment_id = $1`
+	// Fetch active Hero Commander to bind stats
+	var heroID sql.NullString
+	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
 
-	err = tx.QueryRowContext(ctx, queryForces, attackerCampID).Scan(&soldiers, &drones, &jets, &mechs, &nukes, &tanks)
-	if err != nil {
-		log.Printf("Failed querying barracks stocks: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error reading military arrays."})
+	var soldiers, mechs, buggies int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
+	_ = tx.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
+
+	// Calculate precise percentage mobilization sizes
+	mobRatio := float64(weightPct) / 100.0
+	mobSoldiers := int(float64(soldiers) * mobRatio)
+	mobMechs := int(float64(mechs) * mobRatio)
+	mobBuggies := int(float64(buggies) * mobRatio)
+
+	if mobSoldiers <= 0 && mobMechs <= 0 {
+		// Enforce minimum rounding allocation
+		if soldiers > 0 {
+			mobSoldiers = 1
+		} else if mechs > 0 {
+			mobMechs = 1
+		} else {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient troops to allocate."})
+		}
 	}
 
-	troopCount := soldiers + drones + jets + mechs + nukes + tanks
-	if troopCount <= 0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Forbidden: Recruit Soldiers or construct mechs/tanks in your Heavy Workshop first!"})
+	// Verify and deduct active logistics fuel cells
+	var energy float64
+	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+
+	fuelCost := 30.0
+	if routeType == "safe" {
+		fuelCost = 45.0 // Safe route costs 1.5x fuel
 	}
 
-	var attackerName string
-	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerName)
+	if energy < fuelCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", fuelCost)})
+	}
 
-	var ships int
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0), COALESCE(mechs, 0), COALESCE(ships, 0), COALESCE(jets, 0) FROM workshop_inventory WHERE encampment_id = $1", attackerCampID).Scan(&tanks, &mechs, &ships, &jets)
+	// Deduct forces from hangar storage to lock them from double-deployment exploits
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3 WHERE encampment_id = $4", mobSoldiers, mobMechs, mobBuggies, myCampID)
 
 	var marchingMinutes float64
 
@@ -657,32 +738,26 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		if steps == 0 {
 			steps = 1
 		}
-
 		marchingMinutes = steps * 10.0
-		if marchingMinutes > 90.0 {
-			marchingMinutes = 90.0
-		}
 		if marchingMinutes < 15.0 {
 			marchingMinutes = 15.0
 		}
 
-		// Fixed timezone drift on startup: using parameterized UTC.Add instead of database CURRENT_TIMESTAMP
 		resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 
-		// Set defender_id to NULL to satisfy foreign key raids_defender_id_fkey constraint (Fixes 23503)
 		insertRaid := `
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
 			VALUES ($1, NULL, 'marching', $2)
 			RETURNING id`
 		var raidID string
-		err = tx.QueryRowContext(ctx, insertRaid, attackerCampID, resolveTime).Scan(&raidID)
-		if err != nil {
-			log.Printf("Failed executing skirmish write: %v", err)
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register skirmish."})
-		}
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime).Scan(&raidID)
+
+		// Map custom mobilized troop figures to the active raid forces
+		_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
+
 		_ = tx.Commit()
-		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🤖 Skirmish launched! Marching on Drone Nest... Journey time: %s", (time.Duration(marchingMinutes) * time.Minute).Round(time.Second))})
-		return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🤖 Skirmish forces deployed!"})
+		return c.Send(fmt.Sprintf("🤖 Skirmish launched! Your army of %d Soldiers and %d Mechs is marching on Rogue Drone Nest...", mobSoldiers, mobMechs), keyboards.MainNavigation())
 	}
 
 	var defenderName string
@@ -696,15 +771,25 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		steps = 1
 	}
 
-	marchingMinutes = (steps * 10.0) + (float64(tanks) * 3.0) + (float64(mechs) * 5.0)
+	marchingMinutes = (steps * 10.0) + (float64(mobBuggies) * -2.0) + (float64(mobMechs) * 5.0)
+
+	// Apply Route travel speeds
+	switch routeType {
+	case "safe":
+		marchingMinutes *= 0.7  // Safe route travels fast
+	case "stealth":
+		marchingMinutes *= 1.5  // Stealth route travels slow to bypass detection
+	}
 
 	if defRegion != myRegion {
+		var jets, ships int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(jets, 0), COALESCE(ships, 0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&jets, &ships)
 		if jets > 0 {
 			marchingMinutes = 120.0
 		} else if ships > 0 {
 			marchingMinutes = 720.0
 		} else {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Target is on a different continent. Build a Clipper Ship or Cargo Jet in the Workshop to cross!"})
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Build a Clipper Ship or Cargo Jet first!"})
 		}
 	}
 
@@ -715,137 +800,32 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		marchingMinutes *= 0.7
 	}
 
-	marchDuration := time.Duration(marchingMinutes) * time.Minute
-	resolveTime := time.Now().UTC().Add(marchDuration)
+	resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 
 	var raidID string
 	insertRaid := `
 		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
 		VALUES ($1, $2, 'marching', $3)
 		RETURNING id`
-	err = tx.QueryRowContext(ctx, insertRaid, attackerCampID, defenderCampID, resolveTime).Scan(&raidID)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register raid."})
-	}
+	_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime).Scan(&raidID)
 
-	defenderAlert := fmt.Sprintf(
-		"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\n\n"+
-			"Our sensors have detected a hostile staged raid marching from Outpost [%s] in %s.\n"+
-			"Estimated Arrival Time: %s.\n\n"+
-			"Upgrade your Tent or fortify your facilities immediately!",
-		attackerName, myRegion, resolveTime.UTC().Format("15:04:05"),
-	)
-
-	targetUser := &telebot.User{ID: defenderUserID}
-	_, err = c.Bot().Send(targetUser, defenderAlert)
-	if err != nil {
-		log.Printf("Failsafe Direct Push failed to deliver to %d: %v", defenderUserID, err)
-	}
-
-	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, TRUE)", defenderUserID, defenderAlert)
-
-	_ = tx.Commit()
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Raiders deployed! Marching towards target..."})
-
-	return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
-}
-
-func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID string, attackerName string, resolveTime time.Time) error {
-	diff := time.Until(resolveTime)
-	timeLeft := int(diff.Seconds())
-	if timeLeft < 0 {
-		timeLeft = 0
-	}
-
-	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🚀 ACTIVE MILITARY EXPEDITION HUD\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Outpost Force: %s\n"+
-			"Estimated Arrival: %s (%ds remaining)\n\n"+
-			"TACTICAL COMMAND CONTROLS:\n"+
-			"⚡ [Speed Up] - Costs 100 Scrap. Advances arrival by 30s.\n"+
-			"↩️ [Abort] - Recalls troops instantly back to base.\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft,
-	)
-
-	selector := &telebot.ReplyMarkup{}
-	btnSpeed := selector.Data("⚡ Speed Up (100 Scrap)", "exp_action", "speed", raidID)
-	btnAbort := selector.Data("↩️ Abort Expedition", "exp_action", "abort", raidID)
-
-	selector.Inline(
-		selector.Row(btnSpeed),
-		selector.Row(btnAbort),
-	)
-
-	return c.Send(panelText, selector)
-}
-
-// HandleExpeditionActions processes inline tactical movements (Enables speedups on returning marches)
-func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
-	ctx := context.Background()
-	action := c.Args()[0]
-	raidID := c.Args()[1]
-
-	tx, err := h.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
-	}
-	defer tx.Rollback()
-
-	var state string
-	var attackerID string
-	var resolveTime time.Time
-	err = tx.QueryRowContext(ctx, "SELECT state, attacker_id, resolve_time FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state, &attackerID, &resolveTime)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
-	}
-
-	// Speedups allowed on both forward marching and return march states (Fixes Concluded Bugs)
-	if state != "marching" && state != "returning" {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
-	}
-
-	switch action {
-	case "speed":
-		var scrap, dollars float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
-		if scrap < 500.0 || dollars < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
-		}
-
-		if time.Until(resolveTime) <= 30*time.Second {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
-		}
-
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
-		newResolve := resolveTime.Add(-30 * time.Minute)
-		if time.Until(newResolve) < 0 {
-			newResolve = time.Now().UTC().Add(5 * time.Second)
-		}
-
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 minutes."})
-		resolveTime = newResolve
-
-	case "abort":
-		var scrap float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
-
-		penalty := scrap * 0.20
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", penalty, attackerID)
-		_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
-
-		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted! 20% Scrap penalty applied."})
-		_ = tx.Commit()
-		return c.Send("↩️ Expedition aborted. Remaining forces returned safely to hangar.", keyboards.MainNavigation())
-	}
+	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
 	_ = tx.Commit()
 
-	var attackerName string
-	_ = h.DB.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
+	// If Stealth Route is selected, bypass and suppress all direct notifications to the defender (Fixed Warning leak)
+	if routeType != "stealth" {
+		defenderAlert := fmt.Sprintf(
+			"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\n\n"+
+				"Our sensors have detected a hostile staged raid marching from Outpost [%s] in %s.\n"+
+				"Estimated Arrival Time: %s.",
+			sender.FirstName, myRegion, resolveTime.UTC().Format("15:04:05"),
+		)
+		targetUser := &telebot.User{ID: defenderUserID}
+		_, _ = c.Bot().Send(targetUser, defenderAlert)
+		_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, TRUE)", defenderUserID, defenderAlert)
+	}
 
-	return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Expedition deployed!"})
+	return c.Send(fmt.Sprintf("🚀 Raiders deployed! Deployed: %d Soldiers, %d Mechs over [%s Route]. Check Expedition Radar for travel progress.", mobSoldiers, mobMechs, routeType), keyboards.MainNavigation())
 }
