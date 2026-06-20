@@ -845,12 +845,16 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
-	if state != "marching" && state != "returning" {
+	// Updated state check to accept 'engaged' as a valid state for aborting (Tactical Retreat)
+	if state != "marching" && state != "returning" && state != "engaged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
 
 	switch action {
 	case "speed":
+		if state == "engaged" {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Active engagements cannot be speed-boosted."})
+		}
 		var scrap, dollars float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
 		if scrap < 500.0 || dollars < 100.0 {
@@ -875,6 +879,27 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		var createdAt time.Time
 		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
 
+		// Tactical Retreat cover casualties penalty (15%) when aborting under active combat fire
+		if state == "engaged" {
+			var soldiersMob, mechsMob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", raidID).Scan(&soldiersMob, &mechsMob)
+
+			lostSoldiers := int(float64(soldiersMob) * 0.15)
+			lostMechs := int(float64(mechsMob) * 0.15)
+
+			survSoldiers := soldiersMob - lostSoldiers
+			survMechs := mechsMob - lostMechs
+
+			if survSoldiers < 0 {
+				survSoldiers = 0
+			}
+			if survMechs < 0 {
+				survMechs = 0
+			}
+
+			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", survSoldiers, survMechs, raidID)
+		}
+
 		var scrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
 
@@ -890,9 +915,9 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
 
-		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Expedition aborted! Return march engaged."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Tactical retreat engaged! Return march started."})
 		_ = tx.Commit()
-		return c.Send("↩️ Expedition aborted. Remaining forces are marching back to hangar.", keyboards.MainNavigation())
+		return c.Send("↩️ Tactical retreat ordered. Remaining forces are marching back to base.", keyboards.MainNavigation())
 	}
 
 	_ = tx.Commit()
