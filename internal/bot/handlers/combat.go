@@ -34,7 +34,6 @@ func NewCombatHandler(db *sql.DB, adminIDStrs string) *CombatHandler {
 	}
 }
 
-// IsAdmin checks if the sender is an authorized developer
 func (h *CombatHandler) IsAdmin(senderID int64) bool {
 	for _, id := range h.AdminIDs {
 		if id == senderID {
@@ -44,12 +43,10 @@ func (h *CombatHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// HandleTargetMatrix maps the scan targets button to the raid board dashboard
 func (h *CombatHandler) HandleTargetMatrix(c telebot.Context) error {
 	return h.HandleRaidBoard(c)
 }
 
-// HandleRaidBoard displays player targets, co-op lobbies, and skirmishes (Failsafe Navigation)
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -184,7 +181,6 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	return c.Send(dashboard, selector)
 }
 
-// HandleExpeditionRadar scans and displays active outbound/incoming campaigns and spy devices
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -301,7 +297,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%ds remaining)\n\n", edName, timeLeft)
 				} else {
 					spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%ds remaining)\n\n", eaName, timeLeft)
-					btnIntercept := selector.Data("🛡️ Intercept Drone", "launch_interceptor", spyID)
+					btnIntercept := selector.Data("🛡️ Launch Interceptor Drone", "launch_interceptor", spyID)
 					buttons = append(buttons, selector.Row(btnIntercept))
 				}
 			}
@@ -328,7 +324,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleScout performs a username-based target search
 func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -385,7 +380,6 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	return c.Send(report, selector)
 }
 
-// HandleSpyCallback initiates persistent state-driven satellite launch records (Phase 3 Persisted Espionage)
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
@@ -424,7 +418,6 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderUserID)
 
-	// Persist the spy mission as un-resolved initially
 	var spyID string
 	queryInsertSpy := `
 		INSERT INTO spy_missions (spy_id, target_id, is_intercepted, resolved) 
@@ -459,7 +452,6 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	return c.Send("🛰️ Downlink established. Decryption completes on next clock ticks...")
 }
 
-// HandleLaunchInterceptor handles intercepting a running spy scan
 func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -483,7 +475,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Connection Closed: This satellite has already returned to orbit."})
 	}
 
-	// Lock the interceptor from deploying if already resolved
 	if resolved {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Transmission Complete: Intel was already transmitted."})
 	}
@@ -515,7 +506,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	return c.Send("🛡️ INTERCEPT SUCCESS: Your Interceptor Drone destroyed the spy satellite! Telemetry was vaporized.")
 }
 
-// HandleStageCoopCallback registers a staged co-op raid invitation lobby
 func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -544,7 +534,6 @@ func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
 	return c.Respond(&telebot.CallbackResponse{Text: "🤝 Co-Op lobby staged! Aligned alliance players can join your force."})
 }
 
-// HandleJoinCoopCallback aggregates allied forces proportionally into the staged coop lobby
 func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -563,7 +552,8 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	defer tx.Rollback()
 
 	var state string
-	err = tx.QueryRowContext(ctx, "SELECT state FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state)
+	var attackerCampID string
+	err = tx.QueryRowContext(ctx, "SELECT state, attacker_id FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state, &attackerCampID)
 	if err != nil || state != "staged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Lobby Expired: This staged raid has already departed."})
 	}
@@ -588,7 +578,18 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing helper contribution details."})
 	}
 
-	// Dynamic returning checks: uses parameterized UTC time to bypass localized 17h offsets
+	var primSoldiers, primMechs int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", attackerCampID).Scan(&primSoldiers, &primMechs)
+
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = 0, mechs = 0 WHERE encampment_id = $1", attackerCampID)
+
+	_, _ = tx.ExecContext(ctx, `
+		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
+		VALUES ($1, $2, $3, 0, 'direct')
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
+		raidID, primSoldiers, primMechs,
+	)
+
 	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
 
 	_ = tx.Commit()
@@ -596,13 +597,11 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	return h.HandleExpeditionRadar(c)
 }
 
-// HandleLaunchRaidCallback triggers the troops mobilization hangar deck (Phase 4: Stage 2 Implementation)
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 	defenderCampID := c.Args()[0]
 
-	// Query player coordinates and owned resources inside atomic read locks
 	var myCampID string
 	var myRegion string
 	var myX, myY int
@@ -616,7 +615,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Outpost core not found. Choose faction first."})
 	}
 
-	// Fetch available army units to display selection panel
 	var soldiers, mechs, buggies int
 	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
@@ -643,7 +641,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 
-	// Confirmation callbacks map to deployment weights and route options (Phase 4: Stage 2)
 	btnDirect25 := selector.Data("🚀 Deploy 25% [Direct]", "confirm_launch", defenderCampID, "25", "direct")
 	btnDirect50 := selector.Data("🚀 Deploy 50% [Direct]", "confirm_launch", defenderCampID, "50", "direct")
 	btnDirect100 := selector.Data("🚀 Deploy 100% [Direct]", "confirm_launch", defenderCampID, "100", "direct")
@@ -659,7 +656,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleConfirmHangarLaunchCallback processes precise troop deductions and routes deployments (Phase 4: Stage 2)
 func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -689,7 +685,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var activeWeather string
 	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	// Fetch active Hero Commander to bind stats
 	var heroID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
 
@@ -697,14 +692,12 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
 	_ = tx.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
 
-	// Calculate precise percentage mobilization sizes
 	mobRatio := float64(weightPct) / 100.0
 	mobSoldiers := int(float64(soldiers) * mobRatio)
 	mobMechs := int(float64(mechs) * mobRatio)
 	mobBuggies := int(float64(buggies) * mobRatio)
 
 	if mobSoldiers <= 0 && mobMechs <= 0 {
-		// Enforce minimum rounding allocation
 		if soldiers > 0 {
 			mobSoldiers = 1
 		} else if mechs > 0 {
@@ -714,20 +707,18 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		}
 	}
 
-	// Verify and deduct active logistics fuel cells
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
 
 	fuelCost := 30.0
 	if routeType == "safe" {
-		fuelCost = 45.0 // Safe route costs 1.5x fuel
+		fuelCost = 45.0
 	}
 
 	if energy < fuelCost {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", fuelCost)})
 	}
 
-	// Deduct forces from hangar storage to lock them from double-deployment exploits
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3 WHERE encampment_id = $4", mobSoldiers, mobMechs, mobBuggies, myCampID)
 
@@ -752,7 +743,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		var raidID string
 		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime).Scan(&raidID)
 
-		// Map custom mobilized troop figures to the active raid forces
 		_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
 		_ = tx.Commit()
@@ -773,12 +763,11 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	marchingMinutes = (steps * 10.0) + (float64(mobBuggies) * -2.0) + (float64(mobMechs) * 5.0)
 
-	// Apply Route travel speeds
 	switch routeType {
 	case "safe":
-		marchingMinutes *= 0.7 // Safe route travels fast
+		marchingMinutes *= 0.7
 	case "stealth":
-		marchingMinutes *= 1.5 // Stealth route travels slow to bypass detection
+		marchingMinutes *= 1.5
 	}
 
 	if defRegion != myRegion {
@@ -814,7 +803,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_ = tx.Commit()
 
-	// If Stealth Route is selected, bypass and suppress all direct notifications to the defender (Fixed Warning leak)
 	if routeType != "stealth" {
 		defenderAlert := fmt.Sprintf(
 			"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\n\n"+
@@ -831,7 +819,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	return c.Send(fmt.Sprintf("🚀 Raiders deployed! Deployed: %d Soldiers, %d Mechs over [%s Route]. Check Expedition Radar for travel progress.", mobSoldiers, mobMechs, routeType), keyboards.MainNavigation())
 }
 
-// HandleExpeditionActions processes inline tactical movements
 func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	ctx := context.Background()
 	action := c.Args()[0]

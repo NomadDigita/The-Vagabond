@@ -33,7 +33,6 @@ func NewCampHandler(db *sql.DB, adminIDStrs string) *CampHandler {
 	}
 }
 
-// IsAdmin checks if the sender is an authorized developer
 func (h *CampHandler) IsAdmin(senderID int64) bool {
 	for _, id := range h.AdminIDs {
 		if id == senderID {
@@ -43,7 +42,6 @@ func (h *CampHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// HandleCamp renders the main outpost summary HUD and updates the bottom keyboard to CampNavigation
 func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -90,7 +88,6 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	return c.Send(panelText, keyboards.CampNavigation())
 }
 
-// HandleStructuralUpgrades renders ONLY the inline buttons
 func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -138,7 +135,6 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleActiveMining renders the manual extraction workstation HUD
 func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -212,7 +208,6 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues (With Safe Aggregate Locks)
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -224,7 +219,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Queries are executed inside tx connection space to prevent thread blocking/lock locks
 	var campID string
 	var campLvl int
 	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
@@ -235,7 +229,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	var ownedMiners int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&ownedMiners)
 
-	// Removed aggregate FOR UPDATE locking to comply with Postgres standards (Fixes aborted transaction errors)
 	var activeMiners int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", campID).Scan(&activeMiners)
 
@@ -314,7 +307,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	return h.HandleActiveMining(c)
 }
 
-// HandleMutationsPanel renders biological modification workstations
 func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -368,7 +360,6 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleMutationCallback processes biological mutations
 func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -424,7 +415,6 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 	return h.HandleMutationsPanel(c)
 }
 
-// HandleUpgradeCallback manages the inline upgrade actions (Dynamic campID & Admin lookup)
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -522,9 +512,15 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 
 func (h *CampHandler) getModuleLevel(ctx context.Context, campID string, modType string) int {
 	var lvl int
-	err := h.DB.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = $2", campID, modType).Scan(&lvl)
+	query := `
+		INSERT INTO modules (encampment_id, type, level) 
+		VALUES ($1, $2, 1) 
+		ON CONFLICT (encampment_id, type) 
+		DO UPDATE SET level = modules.level 
+		RETURNING level`
+	err := h.DB.QueryRowContext(ctx, query, campID, modType).Scan(&lvl)
 	if err != nil {
-		_, _ = h.DB.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, $2, 1) ON CONFLICT DO NOTHING", campID, modType)
+		log.Printf("Error resolving module level for type %s on camp %s: %v", modType, campID, err)
 		return 1
 	}
 	return lvl

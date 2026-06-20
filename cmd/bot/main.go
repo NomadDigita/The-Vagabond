@@ -262,6 +262,14 @@ func executeStartupMigrations(db *sql.DB) {
 			headline TEXT NOT NULL,
 			logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		`CREATE TABLE IF NOT EXISTS world_events (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			event_type VARCHAR(50) NOT NULL,
+			expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+		);`,
+
+		`CREATE INDEX IF NOT EXISTS idx_world_events_expires ON world_events(expires_at);`,
 	}
 
 	for _, stmt := range migrations {
@@ -439,13 +447,11 @@ func main() {
 	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)
 	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)
 
-	// Responsive Alliance callbacks mapped (Phase 3)
 	bot.Handle("\fclan_manage", clan.HandleManageMembersCallback)
 	bot.Handle("\fclan_stats", clan.HandleAllianceStatsCallback)
 	bot.Handle("\fclan_kick", clan.HandleKickMemberCallback)
 	bot.Handle("\fclan_promote", clan.HandlePromoteMemberCallback)
 
-	// Confirmation route for custom Hangar Command deployment added (Stage 2)
 	bot.Handle("\fconfirm_launch", combat.HandleConfirmHangarLaunchCallback)
 
 	port := os.Getenv("PORT")
