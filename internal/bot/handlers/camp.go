@@ -138,7 +138,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleActiveMining renders the manual extraction workstation HUD (Stage 3 Complete)
+// HandleActiveMining renders the manual extraction workstation HUD
 func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -153,7 +153,6 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	query := `SELECT energy, iron, oil, gold, silver, diamond, uranium, steel FROM resources WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond, &uranium, &steel)
 
-	// Fetch Miner metrics
 	var ownedMiners int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&ownedMiners)
 
@@ -213,7 +212,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues (Stage 3 Complete)
+// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -225,7 +224,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Resolves target campID inside atomic database transactions to clear checking glitches
+	// All queries moved inside active transaction tx block to resolve resource checking anomalies
 	var campID string
 	var campLvl int
 	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
