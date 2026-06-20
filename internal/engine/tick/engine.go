@@ -517,6 +517,41 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
+	// Standalone warning sub-query for all marching campaigns (Warning Alerts)
+	queryAllMarching := `
+		SELECT r.id, r.resolve_time, ea.name, ed.user_id, ed.name, rf.route_type
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		JOIN encampments ed ON ed.id = r.defender_id
+		JOIN raid_forces rf ON rf.raid_id = r.id
+		WHERE r.state = 'marching' AND r.resolve_time > CURRENT_TIMESTAMP`
+
+	rowsMarch, errMarch := tx.QueryContext(ctx, queryAllMarching)
+	if errMarch == nil {
+		defer rowsMarch.Close()
+		for rowsMarch.Next() {
+			var rID string
+			var resTime time.Time
+			var attName, defName, routeType string
+			var defUserID int64
+			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
+				if routeType != "stealth" {
+					timeLeft := int(time.Until(resTime.UTC()).Seconds())
+					if timeLeft > 0 {
+						proximityAlert := fmt.Sprintf(
+							"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
+								"Hostile Force: Outpost [%s]\n"+
+								"Threat Distance Status: %ds remaining until direct impact.",
+							attName, timeLeft,
+						)
+						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defUserID, proximityAlert)
+					}
+				}
+			}
+		}
+		rowsMarch.Close()
+	}
+
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
 		       r.attacker_rations, r.attacker_ammo, r.attacker_losses, r.defender_losses,
@@ -587,47 +622,27 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "marching" {
-			var routeType string
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(route_type, 'direct') FROM raid_forces WHERE raid_id = $1", r.id).Scan(&routeType)
-
-			if routeType != "stealth" && r.defenderID.Valid {
-				timeLeft := int(time.Until(r.resolveTime.UTC()).Seconds())
-				if timeLeft > 0 {
-					proximityAlert := fmt.Sprintf(
-						"🛰️ RADAR WARNING: incoming offensive force is approaching coordinate perimeter!\n"+
-							"Target: Your base [%s]\n"+
-							"Threat Distance Status: In Transit (%ds remaining until boundary breach).",
-						r.defenderName, timeLeft,
-					)
-					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, proximityAlert)
-				}
-			}
-
-			battleDuration := 20 * time.Minute
-			if !r.defenderID.Valid {
-				battleDuration = 15 * time.Minute
-			}
-
-			newResolve := time.Now().Add(battleDuration)
+			nextRoundResolve := time.Now().UTC().Add(e.TickInterval)
 			updateMarch := `
 				UPDATE raids 
 				SET state = 'engaged', resolve_time = $1, round_number = 1 
 				WHERE id = $2`
-			_, _ = tx.ExecContext(ctx, updateMarch, newResolve, r.id)
+			_, _ = tx.ExecContext(ctx, updateMarch, nextRoundResolve, r.id)
 
 			arrivalAlert := fmt.Sprintf(
 				"⚔️ CAMPAIGN ENGAGEMENT ACTIVATED!\n\n"+
-					"Your forces have arrived at Sector coordinates for Outpost [%s].\n"+
+					"Your forces have arrived at Outpost [%s].\n"+
 					"Deployments are actively engaged in battlefield skirmishes.\n"+
-					"Estimated Battle Resolution: %s.",
-				r.defenderName, newResolve.UTC().Format("15:04:05"),
+					"Decisive Resolution progress starting next tick cycle.",
+				r.defenderName,
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
 			continue
 		}
 
+		// PROCESS COMBAT ROUND (Tick-by-Tick Combat Rounds Engine)
 		var primarySoldiers, primaryMechs, primaryBuggies int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies)
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies)
 
 		type coopContributor struct {
 			encampment_id string
@@ -655,6 +670,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs += h.mechs
 		}
 
+		attackForce := totSoldiers + totMechs
+
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
 
@@ -664,11 +681,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerBioLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
+		var defenseForce int
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
+
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
 		if !r.defenderID.Valid {
@@ -680,7 +699,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			soldiersDefender = attackerCoreLvl * 18
 			defLevel = attackerCoreLvl
 		} else {
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
 
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID.String).Scan(&defLevel)
 			if defLevel == 0 {
@@ -692,6 +711,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&targetBiome)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
 		}
+
+		defenseForce = soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
 		var activeWeather string
 		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
@@ -721,148 +742,70 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
 
-		round := 1
-		attSols := totSoldiers
-		attMechs := totMechs
-		defSols := soldiersDefender
-		defMechs := mechsDefender
-		defDrones := dronesDefender
-		defJets := jetsDefender
+		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
+		defRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
-		var narrationLogs []string
+		attCas := 0
+		defCas := 0
 
-		for round <= 5 && (attSols > 0 || attMechs > 0) && (defSols > 0 || defMechs > 0 || defDrones > 0 || defJets > 0) {
-			attRating := (float64(attSols+attMechs) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attMechs) * mechOffenseMultiplier))
-			defRating := float64(defSols+defMechs+defDrones+defJets) * 10.0 * defenseRatingModifier
-
-			attCas := 0
-			defCas := 0
-			if attRating > defRating {
-				defCas = int(float64(defSols+defMechs+defDrones+defJets) * 0.40)
-				if defCas <= 0 && (defSols+defMechs+defDrones+defJets) > 0 {
-					defCas = 1
-				}
-				attCas = int(float64(attSols+attMechs) * 0.15)
-			} else {
-				attCas = int(float64(attSols+attMechs) * 0.35)
-				if attCas <= 0 && (attSols+attMechs) > 0 {
-					attCas = 1
-				}
-				defCas = int(float64(defSols+defMechs+defDrones+defJets) * 0.10)
+		if attRating > defRating {
+			defCas = int(float64(defenseForce) * 0.35)
+			if defCas <= 0 && defenseForce > 0 {
+				defCas = 1
 			}
+			attCas = int(float64(attackForce) * 0.12)
+		} else {
+			attCas = int(float64(attackForce) * 0.30)
+			if attCas <= 0 && attackForce > 0 {
+				attCas = 1
+			}
+			defCas = int(float64(defenseForce) * 0.10)
+		}
 
-			if attCas > 0 {
-				reduction := float64(attackerBioLvl-1) * 0.10
-				reduction = math.Min(reduction, 0.90)
-				attCas = int(float64(attCas) * (1.0 - reduction))
-			}
-			if defCas > 0 && r.defenderID.Valid {
-				reduction := float64(defenderBioLvl-1) * 0.10
-				reduction = math.Min(reduction, 0.90)
-				defCas = int(float64(defCas) * (1.0 - reduction))
-			}
+		// Apply dynamic Bio Adaptation casualty reductions
+		if attCas > 0 {
+			reduction := float64(attackerBioLvl-1) * 0.10
+			reduction = math.Min(reduction, 0.90)
+			attCas = int(float64(attCas) * (1.0 - reduction))
+		}
+		if defCas > 0 && r.defenderID.Valid {
+			reduction := float64(defenderBioLvl-1) * 0.10
+			reduction = math.Min(reduction, 0.90)
+			defCas = int(float64(defCas) * (1.0 - reduction))
+		}
 
-			lostAttSols := int(float64(attCas) * 0.70)
-			lostAttMechs := attCas - lostAttSols
-			if lostAttSols > attSols {
-				lostAttSols = attSols
-			}
-			if lostAttMechs > attMechs {
-				lostAttMechs = attMechs
-			}
-			attSols -= lostAttSols
-			attMechs -= lostAttMechs
+		// Calculate cover casualties distribution proportionally
+		lostAttSols := int(float64(attCas) * 0.70)
+		lostAttMechs := attCas - lostAttSols
+		if lostAttSols > primarySoldiers {
+			lostAttSols = primarySoldiers
+		}
+		if lostAttMechs > primaryMechs {
+			lostAttMechs = primaryMechs
+		}
 
+		newAttSols := primarySoldiers - lostAttSols
+		newAttMechs := primaryMechs - lostAttMechs
+
+		// Subtract survivors from the transaction-locked raid forces table
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", newAttSols, newAttMechs, r.id)
+
+		// Subtract casualties from standard defender warehouse stocks (if target is valid player)
+		if r.defenderID.Valid && defCas > 0 {
 			lostDefSols := int(float64(defCas) * 0.60)
 			lostDefMechs := int(float64(defCas) * 0.20)
-			lostDefDrones := defCas - lostDefSols - lostDefMechs
-			if lostDefSols > defSols {
-				lostDefSols = defSols
+			if lostDefSols > soldiersDefender {
+				lostDefSols = soldiersDefender
 			}
-			if lostDefMechs > defMechs {
-				lostDefMechs = defMechs
+			if lostDefMechs > mechsDefender {
+				lostDefMechs = mechsDefender
 			}
-			if lostDefDrones > (defDrones + defJets) {
-				lostDefDrones = defDrones + defJets
-			}
-
-			defSols -= lostDefSols
-			defMechs -= lostDefMechs
-			if lostDefDrones > defDrones {
-				rem := lostDefDrones - defDrones
-				defDrones = 0
-				defJets -= rem
-				if defJets < 0 {
-					defJets = 0
-				}
-			} else {
-				defDrones -= lostDefDrones
-			}
-
-			roundLog := fmt.Sprintf(
-				"Round %d Summary:\n"+
-					"💥 Attacker Casualties: %d Soldiers, %d Mechs lost.\n"+
-					"🛡️ Defender Casualties: %d Soldiers, %d Mechs/Drones lost.\n"+
-					"⚔️ Remaining Forces -> Attacker: %d units | Defender: %d units.\n",
-				round, lostAttSols, lostAttMechs, lostDefSols, lostDefMechs,
-				attSols+attMechs, defSols+defMechs+defDrones+defJets,
-			)
-			narrationLogs = append(narrationLogs, roundLog)
-			round++
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		isVictory := (defSols+defMechs+defDrones+defJets) <= 0 && (attSols+attMechs) > 0
-		attackerCasualties := (totSoldiers + totMechs) - (attSols + attMechs)
-		defenderCasualties := (soldiersDefender + dronesDefender + jetsDefender + mechsDefender) - (defSols + defMechs + defDrones + defJets)
-
-		var primSurvSoldiers, primSurvMechs int
-
-		if attackerCasualties > 0 {
-			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
-			if math.IsNaN(primRatio) {
-				primRatio = 1.0
-			}
-			primCas := int(float64(attackerCasualties) * primRatio)
-
-			casSoldiers := primCas / 2
-			casMechs := primCas / 2
-
-			primSurvSoldiers = primarySoldiers - casSoldiers
-			primSurvMechs = primaryMechs - casMechs
-			if primSurvSoldiers < 0 {
-				primSurvSoldiers = 0
-			}
-			if primSurvMechs < 0 {
-				primSurvMechs = 0
-			}
-
-			for _, h := range helpers {
-				hForce := h.soldiers + h.mechs
-				hRatio := float64(hForce) / float64(totSoldiers+totMechs)
-				hCas := int(float64(attackerCasualties) * hRatio)
-
-				casSoldiersH := hCas / 2
-				casMechsH := hCas / 2
-
-				refundSoldiers := h.soldiers - casSoldiersH
-				refundMechs := h.mechs - casMechsH
-				if refundSoldiers < 0 {
-					refundSoldiers = 0
-				}
-				if refundMechs < 0 {
-					refundMechs = 0
-				}
-
-				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", refundSoldiers, refundMechs, h.encampment_id)
-			}
-		} else {
-			primSurvSoldiers = primarySoldiers
-			primSurvMechs = primaryMechs
-		}
-
-		if r.defenderID.Valid && defenderCasualties > 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0) WHERE encampment_id = $2", defenderCasualties, r.defenderID.String)
-		}
+		// Check resolution conditions
+		attackerStillStanding := (newAttSols + newAttMechs) > 0
+		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
 		if r.defenderID.Valid {
@@ -875,17 +818,39 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if defenderShields > 0 {
 			lootPercentage = 0.20
 		}
-
 		stolenScrap := defenderScrap * lootPercentage
 
-		if isVictory {
+		roundLog := fmt.Sprintf(
+			"⚔️ BATTLE REPORT: ROUND %d COMPLETE!\n\n"+
+				"💥 Attacker Casualties: %d Soldiers, %d Mechs lost.\n"+
+				"🛡️ Defender Casualties: %d units lost.\n"+
+				"⏳ Next skirmish round starting on next clock tick.",
+			r.roundNumber, lostAttSols, lostAttMechs, defCas,
+		)
+
+		// Notify participants about this round's summary
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
+		if r.defenderID.Valid {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, roundLog)
+		}
+
+		if !attackerStillStanding {
+			// Attacker wiped out: Defeat
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+			defeatAlert := fmt.Sprintf("❌ BATTLE RESOLUTION: DEFEAT!\n\nYour forces were entirely repelled at Outpost [%s]. All deployed raiders were lost.", r.defenderName)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, defeatAlert)
+
+			if r.defenderID.Valid {
+				winAlert := fmt.Sprintf("🛡️ BATTLE RESOLUTION: BASE DEFENSED!\n\nHostile forces marching from [%s] were repelled.", r.attackerName)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, winAlert)
+			}
+		} else if !defenderStillStanding {
+			// Defender wiped out: Attacker Victory
 			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
 			primaryShare := stolenScrap * primRatio
-
-			_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, route_type) VALUES ($1, $2, $3, 'direct') ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3", r.id, primSurvSoldiers, primSurvMechs)
 
 			var haulers int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&haulers)
@@ -901,66 +866,46 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, resolve_time = $2 WHERE id = $3", primaryShare, resolveTime, r.id)
 
-			for _, h := range helpers {
-				hForce := h.soldiers + h.mechs
-				hRatio := float64(hForce) / float64(totSoldiers+totMechs)
-				helperShare := stolenScrap * hRatio
+			if r.defenderID.Valid {
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID.String)
+			}
 
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", helperShare, h.encampment_id)
+			winAlert := fmt.Sprintf(
+				"🏆 BATTLE RESOLUTION: VICTORY!\n\n"+
+					"Your forces breached the coordinate gates of [%s]!\n"+
+					"⚙️ Looted: +%.1f Scrap\n\n"+
+					"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot.",
+				r.defenderName, primaryShare,
+			)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, winAlert)
 
-				var helperUserID int64
-				_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", h.encampment_id).Scan(&helperUserID)
-				helperAlert := fmt.Sprintf("🤝 CO-OP RAID RESOLUTION: VICTORY!\n\nYour forces successfully assisted in breaching the defenses of [%s]!\nProportional Loot Share Earned: +%.1f Scrap.", r.defenderName, helperShare)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", helperUserID, helperAlert)
+			if r.defenderID.Valid {
+				loseAlert := fmt.Sprintf(
+					"🚨 BATTLE RESOLUTION: BASE BREACHED!\n\n"+
+						"Our coordinate perimeters were breached by [%s]!\n"+
+						"⚙️ Looted: -%.1f Scrap stolen from warehouses.",
+					r.attackerName, stolenScrap,
+				)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, loseAlert)
+			}
+		} else if r.roundNumber >= 5 {
+			// Combat Timeout (Maximum 5 rounds): Draws retreat
+			returnMinutes := 15.0
+			resolveTime := time.Now().UTC().Add(time.Duration(returnMinutes) * time.Minute)
+
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
+
+			drawAlert := "⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home."
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, drawAlert)
+
+			if r.defenderID.Valid {
+				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
 			}
 		} else {
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
-		}
-
-		if r.defenderID.Valid {
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID.String)
-		}
-
-		battleReportHeader := fmt.Sprintf(
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"⚔️ DETAILED BATTLE REPORT (%s vs %s)\n"+
-				"━━━━━━━━━━━━━━━━━━━━━━\n\n",
-			r.attackerName, r.defenderName,
-		)
-		battleReportNarrative := strings.Join(narrationLogs, "\n")
-
-		attackerAlert := battleReportHeader + battleReportNarrative + fmt.Sprintf(
-			"\n🏆 RESOLUTION: ATTACKER VICTORY!\n"+
-				"⚙️ Proportional Loot Earned: %.1f Scrap\n"+
-				"💀 Total Casualties Sustained: %d units\n\n"+
-				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot. Check Expedition Radar for travel progress.",
-			stolenScrap, attackerCasualties,
-		)
-		if !isVictory {
-			attackerAlert = battleReportHeader + battleReportNarrative + fmt.Sprintf(
-				"\n❌ RESOLUTION: ATTACKER DEFEATED!\n"+
-					"💀 Casualties Sustained: All %d units lost.",
-				attackerCasualties,
-			)
-		}
-
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, attackerAlert)
-
-		if r.defenderID.Valid {
-			defenderAlert := battleReportHeader + battleReportNarrative + fmt.Sprintf(
-				"\n🚨 RESOLUTION: BASE DEFENSES BREACHED!\n"+
-					"⚙️ Scrap Stolen from Warehouse: %.1f Scrap\n"+
-					"💀 Defense Casualties: %d units lost.",
-				stolenScrap, defenderCasualties,
-			)
-			if !isVictory {
-				defenderAlert = battleReportHeader + battleReportNarrative + fmt.Sprintf(
-					"\n🛡️ RESOLUTION: BASE SHIELDED AND SECURE!\n"+
-						"💀 Enemy repelled. Defense Casualties: %d units lost.",
-					defenderCasualties,
-				)
-			}
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
+			// Combat continues to next tick
+			nextRoundResolve := time.Now().UTC().Add(e.TickInterval)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET round_number = round_number + 1, resolve_time = $1 WHERE id = $2", nextRoundResolve, r.id)
 		}
 	}
 
