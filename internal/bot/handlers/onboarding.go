@@ -48,13 +48,13 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 		var myX, myY int
 
 		queryCamp := `
-			SELECT e.name, r.scrap, r.rations, r.energy, c.region, c.x, c.y 
+			SELECT e.id, e.name, r.scrap, r.rations, r.energy, c.region, c.x, c.y 
 			FROM encampments e
 			JOIN resources r ON r.encampment_id = e.id
 			JOIN coordinates c ON c.id = e.coordinate_id
 			WHERE e.user_id = $1`
 		
-		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.Name, &res.Scrap, &res.Rations, &res.Energy, &region, &myX, &myY)
+		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.ID, &camp.Name, &res.Scrap, &res.Rations, &res.Energy, &region, &myX, &myY)
 		if err != nil {
 			log.Printf("Failed to query existing player details: %v", err)
 			return c.Send("⚠️ System error reclaiming session database.", keyboards.MainNavigation())
@@ -62,11 +62,32 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 
 		_ = h.DB.QueryRowContext(ctx, "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE telegram_id = $1", user.TelegramID)
 
+		var activeMiners int
+		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", camp.ID).Scan(&activeMiners)
+
+		var ownedMiners int
+		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1", camp.ID).Scan(&ownedMiners)
+
+		var outboundCount int
+		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND (state = 'marching' OR state = 'engaged')", camp.ID).Scan(&outboundCount)
+
+		var inboundExists bool
+		_ = h.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM raids WHERE defender_id = $1 AND state = 'marching')", camp.ID).Scan(&inboundExists)
+
+		systemState := "🟢 SECURE (NOMINAL)"
+		if inboundExists {
+			systemState = "🔴 WARNING (HOSTILE RAID IN TRANSIT)"
+		}
+
 		dashboard := fmt.Sprintf(
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"📡 VAGABOND SYSTEM TERMINAL\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Welcome back, Commander %s.\n\n"+
+				"SYSTEM TELEMETRY HUD:\n"+
+				"📡 State: %s\n"+
+				"⛏️ Miners: %d / %d active | Idle: %d\n"+
+				"🚀 Transits: %d outbound transits running\n\n"+
 				"Faction: %s\n"+
 				"🌍 Territory: Encampment located in [%s]\n"+
 				"⛺ Encampment: %s\n"+
@@ -77,7 +98,8 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"🔋 Energy Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Use the command manual below to learn terminal shortcuts.",
-			user.FirstName, formatFactionLabel(user.Faction), region, camp.Name, myX, myY, res.Scrap, res.Rations, res.Energy,
+			user.FirstName, systemState, activeMiners, ownedMiners, ownedMiners-activeMiners, outboundCount,
+			formatFactionLabel(user.Faction), region, camp.Name, myX, myY, res.Scrap, res.Rations, res.Energy,
 		)
 
 		selector := &telebot.ReplyMarkup{}
@@ -184,7 +206,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var x, y int
 	var success bool
 
-	// Seed math/rand dynamically to ensure random distribution
 	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 	rGen := rand.New(rSource)
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -276,15 +277,14 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
-	timeWindow := time.Now().UTC().Add(-30 * time.Second)
 	querySpies := `
 		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
-		WHERE s.is_intercepted = FALSE AND s.created_at >= $2 AND (s.spy_id = $1 OR s.target_id = $1)`
+		WHERE s.is_intercepted = FALSE AND (s.spy_id = $1 OR s.target_id = $1) AND s.resolved = FALSE`
 
-	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID, timeWindow)
+	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID)
 	spyText := ""
 	if err == nil {
 		defer rowsSpies.Close()
@@ -416,6 +416,21 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 30.0 WHERE encampment_id = $1", myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones - 1 WHERE encampment_id = $1", myCampID)
 
+	var myX, myY int
+	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", myCampID).Scan(&myX, &myY)
+
+	var defX, defY int
+	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", targetCampID).Scan(&defX, &defY)
+
+	steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
+	if steps == 0 {
+		steps = 1
+	}
+
+	// Dynamic Spy satellite travel duration based on cartographic grid steps (Physical voyages)
+	marchingMinutes := steps * 1.5
+	resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
+
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", myCampID).Scan(&attackerName)
 
@@ -424,10 +439,10 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	var spyID string
 	queryInsertSpy := `
-		INSERT INTO spy_missions (spy_id, target_id, is_intercepted, resolved) 
-		VALUES ($1, $2, FALSE, FALSE) 
+		INSERT INTO spy_missions (spy_id, target_id, is_intercepted, resolved, resolve_time) 
+		VALUES ($1, $2, FALSE, FALSE, $3) 
 		RETURNING id`
-	err = tx.QueryRowContext(ctx, queryInsertSpy, myCampID, targetCampID).Scan(&spyID)
+	err = tx.QueryRowContext(ctx, queryInsertSpy, myCampID, targetCampID, resolveTime).Scan(&spyID)
 	if err != nil {
 		log.Printf("Failed registering spy mission: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing espionage index."})
@@ -479,10 +494,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Connection Closed: This satellite has already returned to orbit."})
 	}
 
-	if resolved {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Transmission Complete: Intel was already transmitted."})
-	}
-
 	if isIntercepted {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already Neutralized."})
 	}
@@ -495,11 +506,29 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 10.0 WHERE encampment_id = $1", myCampID)
-	_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
+	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
+	if resolved {
+		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
+		rGen := rand.New(rSource)
+		if rGen.Float64() < 0.60 {
+			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
+			_ = tx.Commit()
+			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
+
+			attackerUser := &telebot.User{ID: attackerUserID}
+			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
+			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
+		} else {
+			_ = tx.Commit()
+			return c.Send("❌ CHASE FAILED: The spy satellite was too fast! Your Interceptor Drone failed to catch it before it exited communications range. Interceptor lost.")
+		}
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 	_ = tx.Commit()
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone launched! Tracking satellite..."})
@@ -590,7 +619,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
 		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
 		raidID, primSoldiers, primMechs,
 	)
 
@@ -845,7 +874,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
-	// Updated state check to accept 'engaged' as a valid state for aborting (Tactical Retreat)
 	if state != "marching" && state != "returning" && state != "engaged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
@@ -879,7 +907,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		var createdAt time.Time
 		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
 
-		// Tactical Retreat cover casualties penalty (15%) when aborting under active combat fire
 		if state == "engaged" {
 			var soldiersMob, mechsMob int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", raidID).Scan(&soldiersMob, &mechsMob)

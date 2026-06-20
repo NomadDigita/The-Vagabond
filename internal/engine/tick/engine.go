@@ -210,7 +210,7 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
-		WHERE s.resolved = FALSE AND s.created_at <= CURRENT_TIMESTAMP - INTERVAL '30 seconds'`
+		WHERE s.resolved = FALSE AND s.resolve_time <= CURRENT_TIMESTAMP`
 
 	rows, err := tx.QueryContext(ctx, queryPendingSpies)
 	if err != nil {
@@ -597,7 +597,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
 		)
 		if err == nil {
-			raids = append(raids, r)
+			err = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo, attacker_losses, defender_losses FROM raids WHERE id = $1", r.id).Scan(&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses)
+			if err == nil {
+				raids = append(raids, r)
+			}
 		} else {
 			log.Printf("Error scanning combat raid: %v", err)
 		}
@@ -681,13 +684,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerBioLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
-		var defenseForce int
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
-
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
 		if !r.defenderID.Valid {
@@ -712,7 +713,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
 		}
 
-		defenseForce = soldiersDefender + dronesDefender + jetsDefender + mechsDefender
+		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
 		var activeWeather string
 		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
@@ -762,7 +763,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defCas = int(float64(defenseForce) * 0.10)
 		}
 
-		// Apply dynamic Bio Adaptation casualty reductions
 		if attCas > 0 {
 			reduction := float64(attackerBioLvl-1) * 0.10
 			reduction = math.Min(reduction, 0.90)
@@ -774,7 +774,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defCas = int(float64(defCas) * (1.0 - reduction))
 		}
 
-		// Calculate cover casualties distribution proportionally
 		lostAttSols := int(float64(attCas) * 0.70)
 		lostAttMechs := attCas - lostAttSols
 		if lostAttSols > primarySoldiers {
@@ -787,10 +786,31 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		newAttSols := primarySoldiers - lostAttSols
 		newAttMechs := primaryMechs - lostAttMechs
 
-		// Subtract survivors from the transaction-locked raid forces table
 		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", newAttSols, newAttMechs, r.id)
 
-		// Subtract casualties from standard defender warehouse stocks (if target is valid player)
+		attackerCasualties := (totSoldiers + totMechs) - (newAttSols + newAttMechs)
+
+		for _, h := range helpers {
+			hForce := h.soldiers + h.mechs
+			hRatio := float64(hForce) / float64(totSoldiers+totMechs)
+			hCas := int(float64(attackerCasualties) * hRatio)
+
+			casSoldiersH := hCas / 2
+			casMechsH := hCas / 2
+
+			refundSoldiers := h.soldiers - casSoldiersH
+			refundMechs := h.mechs - casMechsH
+			if refundSoldiers < 0 {
+				refundSoldiers = 0
+			}
+			if refundMechs < 0 {
+				refundMechs = 0
+			}
+
+			// Persist dynamic helper casualties inside database state row
+			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
+		}
+
 		if r.defenderID.Valid && defCas > 0 {
 			lostDefSols := int(float64(defCas) * 0.60)
 			lostDefMechs := int(float64(defCas) * 0.20)
@@ -803,7 +823,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		// Check resolution conditions
 		attackerStillStanding := (newAttSols + newAttMechs) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
@@ -828,14 +847,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			r.roundNumber, lostAttSols, lostAttMechs, defCas,
 		)
 
-		// Notify participants about this round's summary
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
 		if r.defenderID.Valid {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, roundLog)
 		}
 
 		if !attackerStillStanding {
-			// Attacker wiped out: Defeat
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 			defeatAlert := fmt.Sprintf("❌ BATTLE RESOLUTION: DEFEAT!\n\nYour forces were entirely repelled at Outpost [%s]. All deployed raiders were lost.", r.defenderName)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, defeatAlert)
@@ -845,7 +862,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, winAlert)
 			}
 		} else if !defenderStillStanding {
-			// Defender wiped out: Attacker Victory
 			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
@@ -872,7 +888,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			winAlert := fmt.Sprintf(
 				"🏆 BATTLE RESOLUTION: VICTORY!\n\n"+
-					"Your forces breached the coordinate gates of [%s]!\n"+
+					"Your forces breached the coordinate perimeters of [%s]!\n"+
 					"⚙️ Looted: +%.1f Scrap\n\n"+
 					"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot.",
 				r.defenderName, primaryShare,
@@ -882,14 +898,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if r.defenderID.Valid {
 				loseAlert := fmt.Sprintf(
 					"🚨 BATTLE RESOLUTION: BASE BREACHED!\n\n"+
-						"Our coordinate perimeters were breached by [%s]!\n"+
+						"Our perimeters were breached by [%s]!\n"+
 						"⚙️ Looted: -%.1f Scrap stolen from warehouses.",
 					r.attackerName, stolenScrap,
 				)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, loseAlert)
 			}
+
+			// Concluding pass co-op helper refunds
+			for _, h := range helpers {
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
+			}
 		} else if r.roundNumber >= 5 {
-			// Combat Timeout (Maximum 5 rounds): Draws retreat
 			returnMinutes := 15.0
 			resolveTime := time.Now().UTC().Add(time.Duration(returnMinutes) * time.Minute)
 
@@ -902,8 +922,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
 			}
+
+			// Concluding pass co-op helper refunds on Timeout Draw
+			for _, h := range helpers {
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
+			}
 		} else {
-			// Combat continues to next tick
 			nextRoundResolve := time.Now().UTC().Add(e.TickInterval)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET round_number = round_number + 1, resolve_time = $1 WHERE id = $2", nextRoundResolve, r.id)
 		}

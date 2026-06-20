@@ -207,6 +207,7 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 
 		`ALTER TABLE spy_missions ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT FALSE;`,
+		`ALTER TABLE spy_missions ADD COLUMN IF NOT EXISTS resolve_time TIMESTAMP WITH TIME ZONE;`,
 
 		`CREATE TABLE IF NOT EXISTS arena_queue (
 			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
