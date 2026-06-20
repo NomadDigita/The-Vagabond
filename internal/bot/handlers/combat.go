@@ -642,7 +642,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	
+
 	// Confirmation callbacks map to deployment weights and route options (Phase 4: Stage 2)
 	btnDirect25 := selector.Data("🚀 Deploy 25% [Direct]", "confirm_launch", defenderCampID, "25", "direct")
 	btnDirect50 := selector.Data("🚀 Deploy 50% [Direct]", "confirm_launch", defenderCampID, "50", "direct")
@@ -663,7 +663,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	
+
 	defenderCampID := c.Args()[0]
 	weightPctStr := c.Args()[1]
 	routeType := c.Args()[2]
@@ -776,9 +776,9 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	// Apply Route travel speeds
 	switch routeType {
 	case "safe":
-		marchingMinutes *= 0.7  // Safe route travels fast
+		marchingMinutes *= 0.7 // Safe route travels fast
 	case "stealth":
-		marchingMinutes *= 1.5  // Stealth route travels slow to bypass detection
+		marchingMinutes *= 1.5 // Stealth route travels slow to bypass detection
 	}
 
 	if defRegion != myRegion {
@@ -896,4 +896,32 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
 
 	return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
+}
+
+func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
+	diff := time.Until(resolveTime)
+	timeLeft := int(diff.Seconds())
+	if timeLeft < 0 {
+		timeLeft = 0
+	}
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🛰️ EXPEDITION COMMAND PANEL\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Attacker: %s\n"+
+			"Estimated Arrival: %s (%ds remaining)\n\n"+
+			"Use the action buttons to speed up or abort the current expedition.\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		attackerName,
+		resolveTime.UTC().Format("15:04:05"),
+		timeLeft,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	btnSpeed := selector.Data("⚡ Speed Up", "exp_action", "speed", raidID)
+	btnAbort := selector.Data("↩️ Abort", "exp_action", "abort", raidID)
+	selector.Inline(selector.Row(btnSpeed, btnAbort))
+
+	return c.Send(panelText, selector)
 }
