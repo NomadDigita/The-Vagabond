@@ -423,11 +423,10 @@ func main() {
 	bot.Handle("\fcreate_clan", clan.HandleCreateClanCallback)
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
-	// expedition action callback: fallback inline handler to avoid undefined method on combat handler
-	bot.Handle("\fexp_action", func(c telebot.Context) error {
-		// TODO: replace with combat.HandleExpeditionActions when method is implemented on CombatHandler
-		return nil
-	})
+	
+	// Speedup and abort expedition actions mapped (Stage 1 Remediation Complete)
+	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
+	
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
@@ -446,7 +445,7 @@ func main() {
 	bot.Handle("\fclan_manage", clan.HandleManageMembersCallback)
 	bot.Handle("\fclan_stats", clan.HandleAllianceStatsCallback)
 
-	// Confirmation route for custom Hangar Command deployment added (Stage 2)
+	// Confirmation route for custom Hangar Command deployment added
 	bot.Handle("\fconfirm_launch", combat.HandleConfirmHangarLaunchCallback)
 
 	port := os.Getenv("PORT")

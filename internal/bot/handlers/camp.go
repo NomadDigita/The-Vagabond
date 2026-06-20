@@ -212,7 +212,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues
+// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues (With Strict Transaction checks)
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -224,10 +224,10 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// All queries moved inside active transaction tx block to resolve resource checking anomalies
+	// Queries are executed inside tx connection space to prevent thread blocking/lock locks
 	var campID string
 	var campLvl int
-	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
+	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1 FOR UPDATE", sender.ID).Scan(&campID, &campLvl)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Establish outpost camp first using /start"})
 	}
@@ -271,7 +271,11 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	}
 
 	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+	err = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+	if err != nil {
+		log.Printf("Failed scanning energy cells inside active transaction: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database error querying energy reserves."})
+	}
 
 	var cost float64
 	switch mineType {
