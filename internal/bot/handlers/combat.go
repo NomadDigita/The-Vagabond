@@ -202,7 +202,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time, r.state, r.round_number, r.attacker_rations, r.attacker_ammo
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged')
+		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged' OR r.state = 'returning')
 		LIMIT 2`
 
 	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
@@ -229,6 +229,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
 				case "staged":
 					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Departure Window: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+				case "returning":
+					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n   Base Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
 				default:
 					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%ds remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), timeLeft, rRations, rAmmo)
 				}
@@ -586,7 +588,8 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing helper contribution details."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = CURRENT_TIMESTAMP + INTERVAL '15 minutes' WHERE id = $1", raidID)
+	// Dynamic returning checks: uses parameterized UTC time to bypass localized 17h offsets
+	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
 
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces bound! Marching towards coordinates."})
@@ -663,8 +666,8 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			marchingMinutes = 15.0
 		}
 
-		marchDuration := time.Duration(marchingMinutes) * time.Minute
-		resolveTime := time.Now().Add(marchDuration)
+		// Fixed timezone drift on startup: using parameterized UTC.Add instead of database CURRENT_TIMESTAMP
+		resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 
 		// Set defender_id to NULL to satisfy foreign key raids_defender_id_fkey constraint (Fixes 23503)
 		insertRaid := `
@@ -678,7 +681,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to register skirmish."})
 		}
 		_ = tx.Commit()
-		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🤖 Skirmish launched! Marching on Drone Nest... Journey time: %s", marchDuration.Round(time.Second))})
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🤖 Skirmish launched! Marching on Drone Nest... Journey time: %s", (time.Duration(marchingMinutes) * time.Minute).Round(time.Second))})
 		return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
 	}
 
@@ -713,7 +716,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	}
 
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
-	resolveTime := time.Now().Add(marchDuration)
+	resolveTime := time.Now().UTC().Add(marchDuration)
 
 	var raidID string
 	insertRaid := `
@@ -779,7 +782,7 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID string, 
 	return c.Send(panelText, selector)
 }
 
-// HandleExpeditionActions processes inline tactical movements (Highly costly 30m speedup limits)
+// HandleExpeditionActions processes inline tactical movements (Enables speedups on returning marches)
 func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	ctx := context.Background()
 	action := c.Args()[0]
@@ -799,20 +802,19 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
-	if state != "marching" {
+	// Speedups allowed on both forward marching and return march states (Fixes Concluded Bugs)
+	if state != "marching" && state != "returning" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
 
 	switch action {
 	case "speed":
-		// Speed up is now highly costly: Costs 500 Scrap + 100 Dollars and reduces up to 30 mins
 		var scrap, dollars float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
 		if scrap < 500.0 || dollars < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
 		}
 
-		// Enforce minimum remaining time to prevent immediate past-resolution speedups
 		if time.Until(resolveTime) <= 30*time.Second {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
 		}
@@ -820,7 +822,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
 		newResolve := resolveTime.Add(-30 * time.Minute)
 		if time.Until(newResolve) < 0 {
-			newResolve = time.Now().Add(5 * time.Second) // Dynamic soft landing
+			newResolve = time.Now().UTC().Add(5 * time.Second)
 		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
@@ -828,7 +830,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		resolveTime = newResolve
 
 	case "abort":
-		// Aborting a mission now costs a resource penalty (20% of scrap)
 		var scrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
 
