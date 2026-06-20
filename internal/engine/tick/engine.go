@@ -116,7 +116,7 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Pass 9: PvP target and AI Skirmish combat resolutions (Supports return march transition)
+	// Pass 9: PvP target and AI Skirmish combat resolutions
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
@@ -139,7 +139,7 @@ func (e *Engine) ProcessTick() {
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
 }
 
-// resolveCompletedMiningQueues finalizes active extraction tasks
+// resolveCompletedMiningQueues finalizes active extraction tasks (Phase 2 Addition)
 func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) error {
 	queryCompleted := `
 		SELECT q.id, q.encampment_id, q.resource_type, q.miners_assigned, e.user_id
@@ -607,8 +607,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldians, primaryDrones, primaryJets, primaryMechs int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&primarySoldians, &primaryDrones, &primaryJets, &primaryMechs)
+		var primarySoldiers, primaryDrones, primaryJets, primaryMechs int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&primarySoldiers, &primaryDrones, &primaryJets, &primaryMechs)
 
 		type coopContributor struct {
 			encampment_id string
@@ -629,7 +629,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			rowH.Close()
 		}
 
-		totSoldiers := primarySoldians
+		totSoldiers := primarySoldiers
 		totMechs := primaryMechs
 		for _, h := range helpers {
 			totSoldiers += h.soldiers
@@ -715,14 +715,14 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var primSurvSoldiers, primSurvMechs int
 
 		if attackerCasualties > 0 {
-			primRatio := float64(primarySoldians+primaryMechs) / float64(attackForce)
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
 			primCas := int(float64(attackerCasualties) * primRatio)
 
 			// Calculate surviving forces for primary attacker (will return during the returning state resolve pass)
-			primSurvSoldiers = primarySoldians - (primCas / 2)
+			primSurvSoldiers = primarySoldiers - (primCas / 2)
 			primSurvMechs = primaryMechs - (primCas / 2)
 			if primSurvSoldiers < 0 {
 				primSurvSoldiers = 0
@@ -755,7 +755,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", refundSoldiers, refundMechs, h.encampment_id)
 			}
 		} else {
-			primSurvSoldiers = primarySoldians
+			primSurvSoldiers = primarySoldiers
 			primSurvMechs = primaryMechs
 		}
 
@@ -779,7 +779,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		// If victory, save primary loot and transition state to returning march (Phase 4 Return Journeys)
 		if isVictory {
-			primRatio := float64(primarySoldians+primaryMechs) / float64(attackForce)
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
@@ -819,7 +819,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				"Your raiders breached the base defense grid.\n"+
 				"⚙️ Looted: %.1f Scrap\n"+
 				"💀 Casualties Sustained: %d units\n\n"+
-				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot (15m travel time). Check Expedition Radar for statuses.",
+				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot (15m travel time). Check Expedition Radar for travel progress.",
 			r.defenderName, stolenScrap, attackerCasualties,
 		)
 		if !isVictory {
