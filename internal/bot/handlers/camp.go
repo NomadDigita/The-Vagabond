@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,7 +53,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	}
 
 	ctx := context.Background()
-	
+
 	var campID string
 	var campName string
 	var campLvl int
@@ -123,7 +124,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	
+
 	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent")
 	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap")
 	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator")
@@ -197,7 +198,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	btnUranium := selector.Data("☢️ Uranium", "mine_action", "uranium")
 	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
 	btnSteel := selector.Data("🧱 Steel", "mine_action", "steel")
-	
+
 	btnBuyMiner := selector.Data(fmt.Sprintf("Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")
 
 	selector.Inline(
@@ -296,7 +297,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	queryInsertQueue := `
 		INSERT INTO active_mining_queues (encampment_id, resource_type, miners_assigned, ready_at, is_completed)
 		VALUES ($1, $2, 1, $3, FALSE)`
-	
+
 	_, err = tx.ExecContext(ctx, queryInsertQueue, campID, mineType, readyAt)
 	if err != nil {
 		log.Printf("Failed registering mining queue task: %v", err)
@@ -422,7 +423,7 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	
+
 	moduleType := c.Args()[0]
 
 	var campID string
@@ -444,7 +445,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
 	isAdmin := h.IsAdmin(sender.ID)
-	
+
 	if moduleType == "camp_core" {
 		if campLvl >= 30 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level reached (Level 30)."})
@@ -502,7 +503,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		VALUES ($1, $2, $3, TRUE, $4)
 		ON CONFLICT (encampment_id, type)
 		DO UPDATE SET is_upgrading = TRUE, upgrade_ready_at = $4`
-	
+
 	_, err = tx.ExecContext(ctx, upsertModule, campID, moduleType, currentLvl, readyAt)
 	if err != nil {
 		log.Printf("Failed executing module upgrade: %v", err)
