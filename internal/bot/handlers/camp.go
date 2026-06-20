@@ -212,7 +212,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues (With Strict Transaction checks)
+// HandleMineCallback handles purchasing miners and scheduling time-locked mining queues (With Safe Aggregate Locks)
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -227,7 +227,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	// Queries are executed inside tx connection space to prevent thread blocking/lock locks
 	var campID string
 	var campLvl int
-	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1 FOR UPDATE", sender.ID).Scan(&campID, &campLvl)
+	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Establish outpost camp first using /start"})
 	}
@@ -235,8 +235,9 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	var ownedMiners int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&ownedMiners)
 
+	// Removed aggregate FOR UPDATE locking to comply with Postgres standards (Fixes aborted transaction errors)
 	var activeMiners int
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE FOR UPDATE", campID).Scan(&activeMiners)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(miners_assigned), 0) FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", campID).Scan(&activeMiners)
 
 	idleMiners := ownedMiners - activeMiners
 

@@ -423,10 +423,7 @@ func main() {
 	bot.Handle("\fcreate_clan", clan.HandleCreateClanCallback)
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
-	
-	// Speedup and abort expedition actions mapped (Stage 1 Remediation Complete)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
-	
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
@@ -442,10 +439,13 @@ func main() {
 	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)
 	bot.Handle("\fjoin_coop", combat.HandleJoinCoopCallback)
 
+	// Responsive Alliance callbacks mapped (Phase 3)
 	bot.Handle("\fclan_manage", clan.HandleManageMembersCallback)
 	bot.Handle("\fclan_stats", clan.HandleAllianceStatsCallback)
+	bot.Handle("\fclan_kick", clan.HandleKickMemberCallback)
+	bot.Handle("\fclan_promote", clan.HandlePromoteMemberCallback)
 
-	// Confirmation route for custom Hangar Command deployment added
+	// Confirmation route for custom Hangar Command deployment added (Stage 2)
 	bot.Handle("\fconfirm_launch", combat.HandleConfirmHangarLaunchCallback)
 
 	port := os.Getenv("PORT")

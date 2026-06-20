@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv" // Added missing strconv package to resolve compiler errors (Fixes undefined: strconv)
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
@@ -50,7 +51,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		FROM user_clans uc
 		JOIN clans c ON c.id = uc.clan_id
 		WHERE uc.user_id = $1`
-	
+
 	err = h.DB.QueryRowContext(ctx, queryUserClan, sender.ID).Scan(&clanID, &clanName, &role)
 
 	selector := &telebot.ReplyMarkup{}
@@ -85,7 +86,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	)
 
 	var buttons []telebot.Row
-	
+
 	btnManage := selector.Data("👥 Manage Members", "clan_manage", clanID.String)
 	btnStats := selector.Data("📊 Alliance Stats", "clan_stats", clanID.String)
 	buttons = append(buttons, selector.Row(btnManage, btnStats))
@@ -101,18 +102,16 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleManageMembersCallback renders the roster management page (Phase 3 Addition)
+// HandleManageMembersCallback renders the roster management page with Promote & Kick inline buttons (Phase 3 Complete)
 func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
+	sender := c.Sender()
 
-	queryMembers := `
-		SELECT u.first_name, u.username, uc.role 
-		FROM user_clans uc
-		JOIN users u ON u.telegram_id = uc.user_id
-		WHERE uc.clan_id = $1`
+	var senderRole string
+	_ = h.DB.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1 AND clan_id = $2", sender.ID, clanID).Scan(&senderRole)
 
-	rows, err := h.DB.QueryContext(ctx, queryMembers, clanID)
+	rows, err := h.DB.QueryContext(ctx, "SELECT u.telegram_id, u.first_name, u.username, uc.role FROM user_clans uc JOIN users u ON u.telegram_id = uc.user_id WHERE uc.clan_id = $1", clanID)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to fetch roster."})
 	}
@@ -120,22 +119,93 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 
 	rosterText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"👥 ALLIANCE ROSTER LISTING\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+		"━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"Manage your allied commanders below:\n\n"
+
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
 
 	index := 1
 	for rows.Next() {
+		var memberID int64
 		var fName, username, role string
-		if err := rows.Scan(&fName, &username, &role); err == nil {
-			rosterText += fmt.Sprintf("[%d] %s (@%s)\n    Role: %s\n\n", index, fName, username, role)
+		if err := rows.Scan(&memberID, &fName, &username, &role); err == nil {
+			rosterText += fmt.Sprintf("[%d] %s (@%s)\n    Rank: %s\n\n", index, fName, username, role)
+
+			// Show administrative actions for leaders on non-leader members
+			if senderRole == "Leader" && memberID != sender.ID {
+				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
+				btnPromote := selector.Data(fmt.Sprintf("🛡️ Promote [%d]", index), "clan_promote", strconv.FormatInt(memberID, 10))
+				buttons = append(buttons, selector.Row(btnPromote, btnKick))
+			}
 			index++
 		}
 	}
 
 	rosterText += "━━━━━━━━━━━━━━━━━━━━━━"
-	return c.Send(rosterText, keyboards.EconomyNavigation())
+	selector.Inline(buttons...)
+	return c.Send(rosterText, selector)
 }
 
-// HandleAllianceStatsCallback calculates the accumulated strength metrics (Phase 3 Addition)
+// HandleKickMemberCallback processes kicking members from the alliance (Phase 3 Complete)
+func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
+	ctx := context.Background()
+	targetIDStr := c.Args()[0]
+	targetID, _ := strconv.ParseInt(targetIDStr, 10, 64)
+	sender := c.Sender()
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Action failed."})
+	}
+	defer tx.Rollback()
+
+	var leaderRole string
+	_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole)
+	if leaderRole != "Leader" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
+	}
+
+	_, _ = tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1", targetID)
+
+	alertMsg := "🚪 ALLIANCE NOTICE: You have been removed from the alliance roster by the Clan Leader."
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
+
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: "❌ Allied commander removed."})
+	return h.HandleClanPanel(c)
+}
+
+// HandlePromoteMemberCallback processes promoting members to Co-Leaders (Phase 3 Complete)
+func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
+	ctx := context.Background()
+	targetIDStr := c.Args()[0]
+	targetID, _ := strconv.ParseInt(targetIDStr, 10, 64)
+	sender := c.Sender()
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Action failed."})
+	}
+	defer tx.Rollback()
+
+	var leaderRole string
+	_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole)
+	if leaderRole != "Leader" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE user_clans SET role = 'Co-Leader' WHERE user_id = $1", targetID)
+
+	alertMsg := "🛡️ CONGRATULATIONS: You have been promoted to Co-Leader within your alliance!"
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
+
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Member promoted to Co-Leader!"})
+	return h.HandleClanPanel(c)
+}
+
+// HandleAllianceStatsCallback calculates the accumulated strength metrics (Phase 3 Complete)
 func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
@@ -250,7 +320,7 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 		WHERE id != $1 
 		ORDER BY RANDOM() 
 		LIMIT 1`
-	
+
 	err := h.DB.QueryRowContext(ctx, queryEnemy, clanID).Scan(&enemyClanID, &enemyClanName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Scanning: No equivalent rivals detected."})
