@@ -331,7 +331,7 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, oil = $2 WHERE encampment_id = $3", newRations, newOil, ex.attackerID)
 
 		if newOil <= 0 {
-			delayedResolve := ex.resolveTime.Add(3 * time.Minute)
+			delayedResolve := ex.resolveTime.UTC().Add(3 * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
 		}
 
@@ -433,7 +433,7 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 		}
 
 		for _, q := range participants {
-			if time.Since(q.enteredAt) >= 5*time.Minute {
+			if time.Since(q.enteredAt.UTC()) >= 5*time.Minute {
 				_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue WHERE user_id = $1", q.userID)
 
 				refundDollars := 50.0
@@ -592,7 +592,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				battleDuration = 15 * time.Minute
 			}
 
-			newResolve := time.Now().Add(battleDuration)
+			newResolve := time.Now().UTC().Add(battleDuration)
 			updateMarch := `
 				UPDATE raids 
 				SET state = 'engaged', resolve_time = $1, round_number = 1 
@@ -707,7 +707,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			offenseRatingModifier *= 0.50
 		}
 
-		// Apply Mech Armor Plating level modifiers to Colossus Mech offensive ratings
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
 		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
 		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseRatingModifier
@@ -725,10 +724,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenderCasualties = defenseForce / 3
 		}
 
-		// Apply Biospheric Adaptation level casualty reductions
 		if attackerCasualties > 0 {
 			reduction := float64(attackerBioLvl-1) * 0.10
-			reduction = math.Min(reduction, 0.90) // Cap dynamic casualty reduction at 90%
+			reduction = math.Min(reduction, 0.90)
 			attackerCasualties = int(float64(attackerCasualties) * (1.0 - reduction))
 		}
 		if defenderCasualties > 0 && r.defenderID.Valid {
@@ -809,7 +807,19 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, route_type) VALUES ($1, $2, $3, 'direct') ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3", r.id, primSurvSoldiers, primSurvMechs)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, resolve_time = CURRENT_TIMESTAMP + INTERVAL '15 minutes' WHERE id = $2", primaryShare, r.id)
+			var haulers int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&haulers)
+
+			weightFactor := primaryShare / 5000.0
+			if haulers > 0 {
+				weightFactor *= 0.50
+			}
+
+			returnMinutes := 15.0 * (1.0 + weightFactor)
+			returnDuration := time.Duration(returnMinutes) * time.Minute
+			resolveTime := time.Now().UTC().Add(returnDuration)
+
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, resolve_time = $2 WHERE id = $3", primaryShare, resolveTime, r.id)
 
 			for _, h := range helpers {
 				hForce := h.soldiers + h.mechs
@@ -837,7 +847,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				"Your raiders breached the base defense grid.\n"+
 				"⚙️ Looted: %.1f Scrap\n"+
 				"💀 Casualties Sustained: %d units\n\n"+
-				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot (15m travel time). Check Expedition Radar for travel progress.",
+				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot. Check Expedition Radar for travel progress.",
 			r.defenderName, stolenScrap, attackerCasualties,
 		)
 		if !isVictory {

@@ -161,7 +161,11 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 					dashboard += "🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\n"
 					hasCoops = true
 				}
-				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  Departure window expires in: %ds\n\n", aName, dName, int(time.Until(resTime).Seconds()))
+				timeLeft := int(time.Until(resTime.UTC()).Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  Departure window expires in: %ds\n\n", aName, dName, timeLeft)
 				btnJoin := selector.Data(fmt.Sprintf("🤝 Join %s", aName), "join_coop", rID)
 				buttons = append(buttons, selector.Row(btnJoin))
 			}
@@ -215,7 +219,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var rRations, rAmmo float64
 			var resTime time.Time
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
-				diff := time.Until(resTime)
+				diff := time.Until(resTime.UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
@@ -260,7 +264,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		log.Printf("Inbound radar scan failed: %v", err)
 		inboundText = "📡 Static: Scanner interference detected.\n\n"
 	} else {
-		diff := time.Until(resolveTime)
+		diff := time.Until(resolveTime.UTC())
 		timeLeft := int(diff.Seconds())
 		if timeLeft < 0 {
 			timeLeft = 0
@@ -272,7 +276,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
-	timeWindow := time.Now().Add(-30 * time.Second)
+	timeWindow := time.Now().UTC().Add(-30 * time.Second)
 	querySpies := `
 		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
 		FROM spy_missions s
@@ -289,7 +293,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var createdAt time.Time
 			var isOutbound bool
 			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &createdAt, &isOutbound); err == nil {
-				timeLeft := 30 - int(time.Since(createdAt).Seconds())
+				timeLeft := 30 - int(time.Since(createdAt.UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
@@ -520,7 +524,7 @@ func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	resolveTime := time.Now().Add(5 * time.Minute)
+	resolveTime := time.Now().UTC().Add(5 * time.Minute)
 
 	insertRaid := `
 		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
@@ -756,30 +760,33 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var defRegion string
 	_ = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
 
-	steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
-	if steps == 0 {
-		steps = 1
+	if defRegion != myRegion {
+		var jets, ships int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(jets, 0), COALESCE(ships, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&jets, &ships)
+		if jets <= 0 && ships <= 0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Build a Clipper Ship or Cargo Jet first to deploy across continents!"})
+		}
+		if jets > 0 {
+			marchingMinutes = 120.0
+		} else {
+			marchingMinutes = 720.0
+		}
+	} else {
+		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
+		if steps == 0 {
+			steps = 1
+		}
+		marchingMinutes = steps * 10.0
+		if mobBuggies > 0 {
+			marchingMinutes *= 0.75
+		}
 	}
-
-	marchingMinutes = (steps * 10.0) + (float64(mobBuggies) * -2.0) + (float64(mobMechs) * 5.0)
 
 	switch routeType {
 	case "safe":
 		marchingMinutes *= 0.7
 	case "stealth":
 		marchingMinutes *= 1.5
-	}
-
-	if defRegion != myRegion {
-		var jets, ships int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(jets, 0), COALESCE(ships, 0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&jets, &ships)
-		if jets > 0 {
-			marchingMinutes = 120.0
-		} else if ships > 0 {
-			marchingMinutes = 720.0
-		} else {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Build a Clipper Ship or Cargo Jet first!"})
-		}
 	}
 
 	switch activeWeather {
@@ -850,12 +857,12 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
 		}
 
-		if time.Until(resolveTime) <= 30*time.Second {
+		if time.Until(resolveTime.UTC()) <= 30*time.Second {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
 		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
-		newResolve := resolveTime.Add(-30 * time.Minute)
+		newResolve := resolveTime.UTC().Add(-30 * time.Minute)
 		if time.Until(newResolve) < 0 {
 			newResolve = time.Now().UTC().Add(5 * time.Second)
 		}
@@ -886,7 +893,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 }
 
 func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
-	diff := time.Until(resolveTime)
+	diff := time.Until(resolveTime.UTC())
 	timeLeft := int(diff.Seconds())
 	if timeLeft < 0 {
 		timeLeft = 0
