@@ -163,6 +163,31 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 
 	minerCost := ownedMiners * 500
 
+	var activeQueuesText string = ""
+	rowsActive, errActive := h.DB.QueryContext(ctx, "SELECT resource_type, ready_at FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", campID)
+	if errActive == nil {
+		defer rowsActive.Close()
+		hasQueues := false
+		for rowsActive.Next() {
+			var rType string
+			var rReady time.Time
+			if err := rowsActive.Scan(&rType, &rReady); err == nil {
+				if !hasQueues {
+					activeQueuesText += "⚙️ ACTIVE EXTRACTION PROCESSORS:\n"
+					hasQueues = true
+				}
+				timeLeft := int(time.Until(rReady.UTC()).Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				activeQueuesText += fmt.Sprintf("• ⛏️ %s Miner: %ds remaining to finish extraction\n", strings.Title(rType), timeLeft)
+			}
+		}
+		if hasQueues {
+			activeQueuesText += "\n"
+		}
+	}
+
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"⛏️ HEAVY EXTRACTION WORKSTATION [PRO]\n"+
@@ -171,6 +196,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"🔋 Energy Cells: %.1f cells\n"+
 			"👥 Miners Stationed: %d / %d active | Idle: %d miners\n"+
 			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n\n"+
+			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
 			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron / miner)\n"+
 			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil / miner)\n"+
@@ -182,7 +208,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"🧱 [Forging Steel] — Costs: 10.0 Energy (+20.0 Steel / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
 			"👥 Recruit Miner -> Cost: %d Scrap",
-		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, minerCost,
+		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, activeQueuesText, minerCost,
 	)
 
 	selector := &telebot.ReplyMarkup{}

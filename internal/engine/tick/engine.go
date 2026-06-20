@@ -587,12 +587,28 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "marching" {
+			var routeType string
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(route_type, 'direct') FROM raid_forces WHERE raid_id = $1", r.id).Scan(&routeType)
+
+			if routeType != "stealth" && r.defenderID.Valid {
+				timeLeft := int(time.Until(r.resolveTime.UTC()).Seconds())
+				if timeLeft > 0 {
+					proximityAlert := fmt.Sprintf(
+						"🛰️ RADAR WARNING: incoming offensive force is approaching coordinate perimeter!\n"+
+							"Target: Your base [%s]\n"+
+							"Threat Distance Status: In Transit (%ds remaining until boundary breach).",
+						r.defenderName, timeLeft,
+					)
+					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, proximityAlert)
+				}
+			}
+
 			battleDuration := 20 * time.Minute
 			if !r.defenderID.Valid {
 				battleDuration = 15 * time.Minute
 			}
 
-			newResolve := time.Now().UTC().Add(battleDuration)
+			newResolve := time.Now().Add(battleDuration)
 			updateMarch := `
 				UPDATE raids 
 				SET state = 'engaged', resolve_time = $1, round_number = 1 
@@ -639,8 +655,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs += h.mechs
 		}
 
-		attackForce := totSoldiers + totMechs
-
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
 
@@ -650,12 +664,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerBioLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
-		var defenseForce int
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
+		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
 		if !r.defenderID.Valid {
 			var attackerCoreLvl int
@@ -663,12 +677,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if attackerCoreLvl <= 0 {
 				attackerCoreLvl = 1
 			}
-			defenseForce = attackerCoreLvl * 18
+			soldiersDefender = attackerCoreLvl * 18
 			defLevel = attackerCoreLvl
 		} else {
-			var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
-			defenseForce = soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID.String).Scan(&defLevel)
 			if defLevel == 0 {
@@ -708,37 +720,105 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
-		attackerOffenseRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
-		defenderDefenseRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
-		attackerCasualties := 0
-		defenderCasualties := 0
+		round := 1
+		attSols := totSoldiers
+		attMechs := totMechs
+		defSols := soldiersDefender
+		defMechs := mechsDefender
+		defDrones := dronesDefender
+		defJets := jetsDefender
 
-		isVictory := attackerOffenseRating > defenderDefenseRating
+		var narrationLogs []string
 
-		if isVictory {
-			defenderCasualties = defenseForce
-			attackerCasualties = attackForce / 2
-		} else {
-			attackerCasualties = attackForce
-			defenderCasualties = defenseForce / 3
+		for round <= 5 && (attSols > 0 || attMechs > 0) && (defSols > 0 || defMechs > 0 || defDrones > 0 || defJets > 0) {
+			attRating := (float64(attSols+attMechs) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(attMechs) * mechOffenseMultiplier))
+			defRating := float64(defSols+defMechs+defDrones+defJets) * 10.0 * defenseRatingModifier
+
+			attCas := 0
+			defCas := 0
+			if attRating > defRating {
+				defCas = int(float64(defSols+defMechs+defDrones+defJets) * 0.40)
+				if defCas <= 0 && (defSols+defMechs+defDrones+defJets) > 0 {
+					defCas = 1
+				}
+				attCas = int(float64(attSols+attMechs) * 0.15)
+			} else {
+				attCas = int(float64(attSols+attMechs) * 0.35)
+				if attCas <= 0 && (attSols+attMechs) > 0 {
+					attCas = 1
+				}
+				defCas = int(float64(defSols+defMechs+defDrones+defJets) * 0.10)
+			}
+
+			if attCas > 0 {
+				reduction := float64(attackerBioLvl-1) * 0.10
+				reduction = math.Min(reduction, 0.90)
+				attCas = int(float64(attCas) * (1.0 - reduction))
+			}
+			if defCas > 0 && r.defenderID.Valid {
+				reduction := float64(defenderBioLvl-1) * 0.10
+				reduction = math.Min(reduction, 0.90)
+				defCas = int(float64(defCas) * (1.0 - reduction))
+			}
+
+			lostAttSols := int(float64(attCas) * 0.70)
+			lostAttMechs := attCas - lostAttSols
+			if lostAttSols > attSols {
+				lostAttSols = attSols
+			}
+			if lostAttMechs > attMechs {
+				lostAttMechs = attMechs
+			}
+			attSols -= lostAttSols
+			attMechs -= lostAttMechs
+
+			lostDefSols := int(float64(defCas) * 0.60)
+			lostDefMechs := int(float64(defCas) * 0.20)
+			lostDefDrones := defCas - lostDefSols - lostDefMechs
+			if lostDefSols > defSols {
+				lostDefSols = defSols
+			}
+			if lostDefMechs > defMechs {
+				lostDefMechs = defMechs
+			}
+			if lostDefDrones > (defDrones + defJets) {
+				lostDefDrones = defDrones + defJets
+			}
+
+			defSols -= lostDefSols
+			defMechs -= lostDefMechs
+			if lostDefDrones > defDrones {
+				rem := lostDefDrones - defDrones
+				defDrones = 0
+				defJets -= rem
+				if defJets < 0 {
+					defJets = 0
+				}
+			} else {
+				defDrones -= lostDefDrones
+			}
+
+			roundLog := fmt.Sprintf(
+				"Round %d Summary:\n"+
+					"💥 Attacker Casualties: %d Soldiers, %d Mechs lost.\n"+
+					"🛡️ Defender Casualties: %d Soldiers, %d Mechs/Drones lost.\n"+
+					"⚔️ Remaining Forces -> Attacker: %d units | Defender: %d units.\n",
+				round, lostAttSols, lostAttMechs, lostDefSols, lostDefMechs,
+				attSols+attMechs, defSols+defMechs+defDrones+defJets,
+			)
+			narrationLogs = append(narrationLogs, roundLog)
+			round++
 		}
 
-		if attackerCasualties > 0 {
-			reduction := float64(attackerBioLvl-1) * 0.10
-			reduction = math.Min(reduction, 0.90)
-			attackerCasualties = int(float64(attackerCasualties) * (1.0 - reduction))
-		}
-		if defenderCasualties > 0 && r.defenderID.Valid {
-			reduction := float64(defenderBioLvl-1) * 0.10
-			reduction = math.Min(reduction, 0.90)
-			defenderCasualties = int(float64(defenderCasualties) * (1.0 - reduction))
-		}
+		isVictory := (defSols+defMechs+defDrones+defJets) <= 0 && (attSols+attMechs) > 0
+		attackerCasualties := (totSoldiers + totMechs) - (attSols + attMechs)
+		defenderCasualties := (soldiersDefender + dronesDefender + jetsDefender + mechsDefender) - (defSols + defMechs + defDrones + defJets)
 
 		var primSurvSoldiers, primSurvMechs int
 
 		if attackerCasualties > 0 {
-			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
@@ -758,7 +838,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			for _, h := range helpers {
 				hForce := h.soldiers + h.mechs
-				hRatio := float64(hForce) / float64(attackForce)
+				hRatio := float64(hForce) / float64(totSoldiers+totMechs)
 				hCas := int(float64(attackerCasualties) * hRatio)
 
 				casSoldiersH := hCas / 2
@@ -799,7 +879,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap := defenderScrap * lootPercentage
 
 		if isVictory {
-			primRatio := float64(primarySoldiers+primaryMechs) / float64(attackForce)
+			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
@@ -823,7 +903,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			for _, h := range helpers {
 				hForce := h.soldiers + h.mechs
-				hRatio := float64(hForce) / float64(attackForce)
+				hRatio := float64(hForce) / float64(totSoldiers+totMechs)
 				helperShare := stolenScrap * hRatio
 
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", helperShare, h.encampment_id)
@@ -841,36 +921,45 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID.String)
 		}
 
-		attackerAlert := fmt.Sprintf(
-			"⚔️ RAID REPORT: VICTORY!\n\n"+
-				"Target: %s\n"+
-				"Your raiders breached the base defense grid.\n"+
-				"⚙️ Looted: %.1f Scrap\n"+
-				"💀 Casualties Sustained: %d units\n\n"+
+		battleReportHeader := fmt.Sprintf(
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"⚔️ DETAILED BATTLE REPORT (%s vs %s)\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━\n\n",
+			r.attackerName, r.defenderName,
+		)
+		battleReportNarrative := strings.Join(narrationLogs, "\n")
+
+		attackerAlert := battleReportHeader + battleReportNarrative + fmt.Sprintf(
+			"\n🏆 RESOLUTION: ATTACKER VICTORY!\n"+
+				"⚙️ Proportional Loot Earned: %.1f Scrap\n"+
+				"💀 Total Casualties Sustained: %d units\n\n"+
 				"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot. Check Expedition Radar for travel progress.",
-			r.defenderName, stolenScrap, attackerCasualties,
+			stolenScrap, attackerCasualties,
 		)
 		if !isVictory {
-			attackerAlert = fmt.Sprintf(
-				"❌ RAID REPORT: DEFEAT!\n\n"+
-					"Target: %s\n"+
-					"Your forces were repelled. March failed.\n"+
+			attackerAlert = battleReportHeader + battleReportNarrative + fmt.Sprintf(
+				"\n❌ RESOLUTION: ATTACKER DEFEATED!\n"+
 					"💀 Casualties Sustained: All %d units lost.",
-				r.defenderName, attackerCasualties,
+				attackerCasualties,
 			)
 		}
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, attackerAlert)
 
 		if r.defenderID.Valid {
-			defenderAlert := fmt.Sprintf(
-				"🚨 OUTPOST UNDER ATTACK!\n\n"+
-					"Attacker: %s\n"+
-					"Intruders breached your gates.\n"+
-					"⚙️ Scrap Looted: %.1f Scrap\n"+
+			defenderAlert := battleReportHeader + battleReportNarrative + fmt.Sprintf(
+				"\n🚨 RESOLUTION: BASE DEFENSES BREACHED!\n"+
+					"⚙️ Scrap Stolen from Warehouse: %.1f Scrap\n"+
 					"💀 Defense Casualties: %d units lost.",
-				r.attackerName, stolenScrap, defenderCasualties,
+				stolenScrap, defenderCasualties,
 			)
+			if !isVictory {
+				defenderAlert = battleReportHeader + battleReportNarrative + fmt.Sprintf(
+					"\n🛡️ RESOLUTION: BASE SHIELDED AND SECURE!\n"+
+						"💀 Enemy repelled. Defense Casualties: %d units lost.",
+					defenderCasualties,
+				)
+			}
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderAlert)
 		}
 	}

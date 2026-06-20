@@ -872,16 +872,27 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		resolveTime = newResolve
 
 	case "abort":
+		var createdAt time.Time
+		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
+
 		var scrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
 
 		penalty := scrap * 0.20
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", penalty, attackerID)
-		_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
 
-		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted! 20% Scrap penalty applied."})
+		elapsed := time.Since(createdAt.UTC())
+		if elapsed < 10*time.Second {
+			elapsed = 10 * time.Second
+		}
+
+		returnResolveTime := time.Now().UTC().Add(elapsed)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
+
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Expedition aborted! Return march engaged."})
 		_ = tx.Commit()
-		return c.Send("↩️ Expedition aborted. Remaining forces returned safely to hangar.", keyboards.MainNavigation())
+		return c.Send("↩️ Expedition aborted. Remaining forces are marching back to hangar.", keyboards.MainNavigation())
 	}
 
 	_ = tx.Commit()
