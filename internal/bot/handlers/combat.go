@@ -800,7 +800,8 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		marchingMinutes *= 0.7
 	}
 
-	resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
+	marchDuration := time.Duration(marchingMinutes) * time.Minute
+	resolveTime := time.Now().UTC().Add(marchDuration)
 
 	var raidID string
 	insertRaid := `
@@ -828,4 +829,71 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Expedition deployed!"})
 	return c.Send(fmt.Sprintf("🚀 Raiders deployed! Deployed: %d Soldiers, %d Mechs over [%s Route]. Check Expedition Radar for travel progress.", mobSoldiers, mobMechs, routeType), keyboards.MainNavigation())
+}
+
+// HandleExpeditionActions processes inline tactical movements
+func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
+	ctx := context.Background()
+	action := c.Args()[0]
+	raidID := c.Args()[1]
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+	}
+	defer tx.Rollback()
+
+	var state string
+	var attackerID string
+	var resolveTime time.Time
+	err = tx.QueryRowContext(ctx, "SELECT state, attacker_id, resolve_time FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state, &attackerID, &resolveTime)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
+	}
+
+	if state != "marching" && state != "returning" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
+	}
+
+	switch action {
+	case "speed":
+		var scrap, dollars float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
+		if scrap < 500.0 || dollars < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
+		}
+
+		if time.Until(resolveTime) <= 30*time.Second {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
+		}
+
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
+		newResolve := resolveTime.Add(-30 * time.Minute)
+		if time.Until(newResolve) < 0 {
+			newResolve = time.Now().UTC().Add(5 * time.Second)
+		}
+
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 minutes."})
+		resolveTime = newResolve
+
+	case "abort":
+		var scrap float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
+
+		penalty := scrap * 0.20
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", penalty, attackerID)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
+
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Mission aborted! 20% Scrap penalty applied."})
+		_ = tx.Commit()
+		return c.Send("↩️ Expedition aborted. Remaining forces returned safely to hangar.", keyboards.MainNavigation())
+	}
+
+	_ = tx.Commit()
+
+	var attackerName string
+	_ = h.DB.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
+
+	return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
 }
