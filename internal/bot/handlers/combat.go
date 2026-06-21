@@ -220,6 +220,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var rRations, rAmmo float64
 			var resTime time.Time
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
+				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
@@ -523,7 +524,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
-	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
 	if resolved {
 		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 		rGen := rand.New(rSource)
@@ -531,7 +531,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-			
+
 			attackerUser := &telebot.User{ID: attackerUserID}
 			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
 			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
@@ -632,7 +632,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
 		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
 		raidID, primSoldiers, primMechs,
 	)
 
@@ -695,7 +695,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
-		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`, 
+		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`,
 		sender.ID, defenderCampID,
 	)
 
@@ -895,6 +895,65 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Staging Empty: Allocate at least 1 unit to deploy!"})
 	}
 
+	var defenderName string
+	var defenderUserID int64
+	var defX, defY int
+	var defRegion string
+
+	var isAI bool = defenderCampID == "ai_drone_nest"
+	if !isAI {
+		_ = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
+	} else {
+		defenderName = "Rogue Drone Nest"
+		defX = 1
+		defY = 1
+		defRegion = myRegion
+	}
+
+	// Dynamic Terrain Routing and Fleet Enforcement calculations
+	var marchingMinutes float64
+
+	if defRegion != myRegion {
+		// Ocean Crossings: Enforce Cargo Jet or Clipper Ship requirements on cross-continental campaigns
+		if mobJets <= 0 && mobShips <= 0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: You must include at least 1 Clipper Ship or 1 Cargo Jet in your campaign draft to deploy across continents!"})
+		}
+		if mobJets > 0 {
+			marchingMinutes = 120.0 // Air Travel transit speed (flat 2-hour window)
+		} else {
+			marchingMinutes = 720.0 // Sea Travel transit speed (Clipper Ship takes 12 hours)
+		}
+	} else {
+		// Same Continent: Treated as Land Travel
+		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
+		if steps == 0 {
+			steps = 1
+		}
+		marchingMinutes = steps * 10.0
+		// Land Travel Buggy Speed Boosts: Deploying buggies reduces land transit duration by 25%
+		if mobBuggies > 0 {
+			marchingMinutes *= 0.75
+		}
+	}
+
+	// Apply Route specific speed multipliers
+	switch routeType {
+	case "safe":
+		marchingMinutes *= 0.7 // Safe route travels fast
+	case "stealth":
+		marchingMinutes *= 1.5 // Stealth route travels slow to bypass detection
+	}
+
+	// Apply dynamic weather speed modifiers
+	switch activeWeather {
+	case "radiation_storm":
+		marchingMinutes *= 1.5
+	case "solar_flare":
+		marchingMinutes *= 0.7
+	case "acid_rain":
+		marchingMinutes *= 2.0 // Acid Rain doubles travel times
+	}
+
 	var energy float64
 	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
 
@@ -912,123 +971,35 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
 		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6 
-		WHERE encampment_id = $7`, 
+		WHERE encampment_id = $7`,
 		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID,
 	)
 
 	// Clean up draft row
 	_, _ = tx.ExecContext(ctx, "DELETE FROM campaign_drafts WHERE user_id = $1", sender.ID)
 
-	var marchingMinutes float64
-
-	if defenderCampID == "ai_drone_nest" {
-		steps := math.Abs(float64(1-myX)) + math.Abs(float64(1-myY))
-		if steps == 0 {
-			steps = 1
-		}
-		marchingMinutes = steps * 10.0
-		if marchingMinutes < 15.0 {
-			marchingMinutes = 15.0
-		}
-
-		resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
-
-		insertRaid := `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-			VALUES ($1, NULL, 'marching', $2)
-			RETURNING id`
-		var raidID string
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime).Scan(&raidID)
-
-		_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
-
-		_ = tx.Commit()
-
-		// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning trajectory ascends
-		msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
-		if errAnim == nil {
-			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
-			time.Sleep(300 * time.Millisecond)
-			
-			weatherStatus := "Nominal baseline limits"
-			switch activeWeather {
-case "radiation_storm":
-				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
-			case "solar_flare":
-				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
-			}
-			
-			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
-			time.Sleep(300 * time.Millisecond)
-			
-			fleetStatus := "None"
-			if mobBuggies > 0 {
-				fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
-			}
-			
-			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
-			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
-			time.Sleep(300 * time.Millisecond)
-			_ = c.Bot().Delete(msg)
-		}
-
-		return c.Send(fmt.Sprintf("🤖 Skirmish launched! Your army of %d Soldiers and %d Mechs is marching on Rogue Drone Nest...", mobSoldiers, mobMechs), keyboards.MainNavigation())
-	}
-
-	var defenderName string
-	var defenderUserID int64
-	var defX, defY int
-	var defRegion string
-	_ = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
-
-	if defRegion != myRegion {
-		if mobJets <= 0 && mobShips <= 0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Include Clipper Ships or Cargo Jets in your draft to cross oceans!"})
-		}
-		if mobJets > 0 {
-			marchingMinutes = 120.0
-		} else {
-			marchingMinutes = 720.0
-		}
-	} else {
-		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
-		if steps == 0 {
-			steps = 1
-		}
-		marchingMinutes = steps * 10.0
-		if mobBuggies > 0 {
-			marchingMinutes *= 0.75
-		}
-	}
-
-	switch routeType {
-	case "safe":
-		marchingMinutes *= 0.7
-	case "stealth":
-		marchingMinutes *= 1.5
-	}
-
-	switch activeWeather {
-	case "radiation_storm":
-		marchingMinutes *= 1.5
-	case "solar_flare":
-		marchingMinutes *= 0.7
-	}
-
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
 	resolveTime := time.Now().UTC().Add(marchDuration)
 
 	var raidID string
-	insertRaid := `
-		INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-		VALUES ($1, $2, 'marching', $3)
-		RETURNING id`
-	_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime).Scan(&raidID)
+	var insertRaid string
+	if isAI {
+		insertRaid = `
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
+			VALUES ($1, NULL, 'marching', $2)
+			RETURNING id`
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime).Scan(&raidID)
+	} else {
+		insertRaid = `
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
+			VALUES ($1, $2, 'marching', $3)
+			RETURNING id`
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime).Scan(&raidID)
+	}
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
+	// Broadcast campaign departure news wire to the live radio feed
 	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
@@ -1040,23 +1011,30 @@ case "radiation_storm":
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
 		time.Sleep(300 * time.Millisecond)
-		
+
 		weatherStatus := "Nominal baseline limits"
 		switch activeWeather {
 case "radiation_storm":
 			weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
 		case "solar_flare":
 			weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
+		case "acid_rain":
+			weatherStatus = "🌧️ Acid Rain alert: Corrosive precipitation (+100% transit delays)"
 		}
-		
+
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 		time.Sleep(300 * time.Millisecond)
-		
+
 		fleetStatus := "None"
 		if mobBuggies > 0 {
 			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
 		}
-		
+		if mobJets > 0 {
+			fleetStatus = "✈️ Cargo Jets deployed (Air Travel cross-continent transit enabled)"
+		} else if mobShips > 0 {
+			fleetStatus = "⛵ Clipper Ships deployed (Sea Travel cross-continent transit enabled)"
+		}
+
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
@@ -1064,7 +1042,7 @@ case "radiation_storm":
 		_ = c.Bot().Delete(msg)
 	}
 
-	if routeType != "stealth" {
+	if !isAI && routeType != "stealth" {
 		defenderAlert := fmt.Sprintf(
 			"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\n\n"+
 				"Our sensors have detected a hostile staged raid marching from Outpost [%s] in %s.\n"+
@@ -1193,7 +1171,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			elapsed = 10 * time.Second
 		}
 
-		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 		returnResolveTime := time.Now().UTC().Add(elapsed)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
