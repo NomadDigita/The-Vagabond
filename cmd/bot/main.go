@@ -445,6 +445,7 @@ func main() {
 	bot.Handle("/research", research.HandleResearchPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
+	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset) // Registered manual database reset command (Secured Admin Controls)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
 	bot.Handle("/admin_give", admin.HandleAdminGive)

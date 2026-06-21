@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"runtime"
 	"strconv"
 	"strings"
@@ -141,6 +142,77 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered.")
 }
 
+func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	ctx := context.Background()
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Send("⚠️ Transaction initialization error.")
+	}
+	defer tx.Rollback()
+
+	// Flush active matchmaking queue and historical testing logs
+	_, _ = tx.ExecContext(ctx, "DELETE FROM world_news")
+	_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue")
+	_, _ = tx.ExecContext(ctx, "DELETE FROM spy_missions")
+
+	// Reset player coordinate mappings to zero coordinates to force self-healing relocation sweeps
+	_, _ = tx.ExecContext(ctx, "UPDATE coordinates SET x = 0, y = 0")
+
+	_ = tx.Commit()
+
+	log.Println("Database coordinates manual reset initiated...")
+	rows, err := h.DB.QueryContext(ctx, "SELECT c.id, c.region FROM coordinates c WHERE c.x = 0 AND c.y = 0")
+	if err == nil {
+		defer rows.Close()
+		type zeroCoord struct {
+			id     string
+			region string
+		}
+		var coords []zeroCoord
+		for rows.Next() {
+			var z zeroCoord
+			if err := rows.Scan(&z.id, &z.region); err == nil {
+				coords = append(coords, z)
+			}
+		}
+		rows.Close()
+
+		for _, cCoord := range coords {
+			rSource := rand.NewSource(time.Now().UnixNano())
+			rGen := rand.New(rSource)
+			var x, y int
+			switch cCoord.region {
+			case "Africa":
+				x = rGen.Intn(991) + 10
+				y = rGen.Intn(991) + 10
+			case "Europe":
+				x = -(rGen.Intn(991) + 10)
+				y = rGen.Intn(991) + 10
+			case "Asia":
+				x = rGen.Intn(991) + 10
+				y = -(rGen.Intn(991) + 10)
+			default: // Americas
+				x = -(rGen.Intn(991) + 10)
+				y = -(rGen.Intn(991) + 10)
+			}
+
+			_, _ = h.DB.ExecContext(ctx, "UPDATE coordinates SET x = $1, y = $2 WHERE id = $3 AND NOT EXISTS(SELECT 1 FROM coordinates WHERE x = $1 AND y = $2)", x, y, cCoord.id)
+		}
+	}
+
+	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Database reset completed. Testing news cleared, queues flushed, and all coordinates redistributed securely.")
+}
+
 func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -211,7 +283,6 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 		return c.Send("⚠️ Amount must be a valid float value.")
 	}
 
-	// Validate resource column matches GDD designations to block SQL Injection
 	validColumns := map[string]string{
 		"scrap": "scrap", "rations": "rations", "energy": "energy", "steel": "steel",
 		"uranium": "uranium", "hydrogen": "hydrogen", "iron": "iron", "oil": "oil",
