@@ -210,16 +210,17 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	rGen := rand.New(rSource)
 
 	for attempt := 0; attempt < 15; attempt++ {
-		if spawnedContinent == "Africa" {
+		switch spawnedContinent {
+case "Africa":
 			x = rGen.Intn(991) + 10 // [10, 1000]
 			y = rGen.Intn(991) + 10 // [10, 1000]
-		} else if spawnedContinent == "Europe" {
+		case "Europe":
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
 			y = rGen.Intn(991) + 10 // [10, 1000]
-		} else if spawnedContinent == "Asia" {
+		case "Asia":
 			x = rGen.Intn(991) + 10 // [10, 1000]
 			y = -(rGen.Intn(991) + 10) // [-1000, -10]
-		} else { // Americas
+		default: // Americas
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
 			y = -(rGen.Intn(991) + 10) // [-1000, -10]
 		}
