@@ -189,6 +189,8 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	queryRes := `SELECT rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1 FOR UPDATE`
 	_ = tx.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond)
 
+	var successAlert string
+
 	switch item {
 	case "soldier":
 		if rations < 50.0 || iron < 10.0 {
@@ -196,7 +198,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - 50.0, iron = iron - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🪖 Soldier recruited successfully!"})
+		successAlert = "🪖 Soldier recruited successfully!"
 
 	case "drone":
 		if iron < 100.0 || silver < 10.0 {
@@ -204,7 +206,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET iron = iron - 100.0, silver = silver - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛰️ Spy Device assembled!"})
+		successAlert = "🛰️ Spy Device assembled!"
 
 	case "mech":
 		if steel < 1000.0 || uranium < 50.0 || gold < 20.0 {
@@ -212,7 +214,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1000.0, uranium = uranium - 50.0, gold = gold - 20.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET mechs = mechs + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🤖 Colossus Mech forged successfully!"})
+		successAlert = "🤖 Colossus Mech forged successfully!"
 
 	case "nuke":
 		if steel < 2500.0 || uranium < 500.0 || gold < 100.0 || diamond < 10.0 {
@@ -220,7 +222,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 2500.0, uranium = uranium - 500.0, gold = gold - 100.0, diamond = diamond - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "☢️ Nuclear Device assembled!"})
+		successAlert = "☢️ Nuclear Device assembled!"
 
 	case "buggy":
 		if steel < 100.0 || oil < 20.0 {
@@ -228,7 +230,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 100.0, oil = oil - 20.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET buggies = buggies + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🚗 Scrap Buggy crafted successfully!"})
+		successAlert = "🚗 Scrap Buggy crafted successfully!"
 
 	case "ship":
 		if steel < 300.0 {
@@ -236,7 +238,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 300.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET ships = ships + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "⛵ Clipper Ship constructed!"})
+		successAlert = "⛵ Clipper Ship constructed!"
 
 	case "cargo_jet", "jet":
 		if steel < 1000.0 || hydrogen < 200.0 || oil < 100.0 {
@@ -244,7 +246,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1000.0, hydrogen = hydrogen - 200.0, oil = oil - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET jets = jets + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "✈️ Cargo Jet constructed successfully!"})
+		successAlert = "✈️ Cargo Jet constructed successfully!"
 
 	case "hauler":
 		if steel < 500.0 || oil < 50.0 {
@@ -252,7 +254,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 500.0, oil = oil - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🚛 Resource Hauler constructed successfully!"})
+		successAlert = "🚛 Resource Hauler constructed successfully!"
 
 	case "tanker":
 		if steel < 400.0 || hydrogen < 100.0 {
@@ -260,7 +262,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 400.0, hydrogen = hydrogen - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET tankers = tankers + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛡️ Fuel Tanker constructed!"})
+		successAlert = "🛡️ Fuel Tanker constructed!"
 
 	case "rig":
 		if steel < 600.0 || iron < 50.0 {
@@ -268,12 +270,17 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛠️ Recovery Rig constructed!"})
+		successAlert = "🔧 Recovery Rig constructed!"
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing craft transaction: %v", err)
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
+	}
+
+	// Dynamic Post-Commit Success Dispatcher: Only sends notification after database safely registers changes
+	if successAlert != "" {
+		_ = c.Respond(&gopkg.CallbackResponse{Text: successAlert})
 	}
 
 	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" {
