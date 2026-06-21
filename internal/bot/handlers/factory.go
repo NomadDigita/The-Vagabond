@@ -53,7 +53,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Secure Hangar Allocator: Upsert row before reading inventory to prevent ErrNoRows defaults
+	// Secure Hangar Allocator: Ensure the workshop row is fully allocated
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
 	var soldiers, drones, mechs, nukes int
@@ -99,7 +99,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Secure Hangar Allocator: Upsert row before reading inventory to prevent ErrNoRows defaults
+	// Secure Hangar Allocator: Ensure the workshop row is fully allocated
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
 	var buggies, ships, jets, haulers, tankers, rigs int
@@ -132,7 +132,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	selector := &gopkg.ReplyMarkup{}
 	btnCraftBuggy := selector.Data("🚗 Craft Buggy", "craft_item", "buggy")
 	btnCraftShip := selector.Data("⛵ Craft Ship", "craft_item", "ship")
-	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "jet")
+	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "cargo_jet")
 	btnCraftHauler := selector.Data("🚛 Craft Hauler", "craft_item", "hauler")
 	btnCraftTanker := selector.Data("🛡️ Craft Tanker", "craft_item", "tanker")
 	btnCraftRig := selector.Data("🛠️ Craft Recovery Rig", "craft_item", "rig")
@@ -150,7 +150,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	item := c.Args()[0]
+	item := strings.ToLower(strings.TrimSpace(c.Args()[0]))
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
@@ -217,7 +217,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET ships = ships + 1 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&gopkg.CallbackResponse{Text: "⛵ Clipper Ship constructed!"})
 
-	case "cargo_jet":
+	case "cargo_jet", "jet":
 		if steel < 1000.0 || hydrogen < 200.0 || oil < 100.0 {
 			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials!"})
 		}
@@ -243,11 +243,11 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 
 	case "rig":
 		if steel < 600.0 || iron < 50.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
+			return gopkg.Context(c).Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛠️ Recovery Rig constructed!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🔧 Recovery Rig constructed!"})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -255,7 +255,8 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "hauler" || item == "tanker" || item == "rig" {
+	// Aligned Item Redirect checks: Supports both cargo_jet and jet as valid logistics payloads
+	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" {
 		return h.HandleVehiclesPanel(c)
 	}
 	return h.HandleRecruitPanel(c)
