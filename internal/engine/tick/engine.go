@@ -163,6 +163,7 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 	rows.Close()
 
 	for _, m := range completed {
+		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.readyAt.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -197,8 +198,10 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 			column = "steel"
 		}
 
-		queryUpdateRes := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", column, column)
-		_, _ = tx.ExecContext(ctx, queryUpdateRes, gain, m.encampmentID)
+		if column != "" {
+			queryUpdateRes := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", column, column)
+			_, _ = tx.ExecContext(ctx, queryUpdateRes, gain, m.encampmentID)
+		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE active_mining_queues SET is_completed = TRUE WHERE id = $1", m.id)
 
@@ -242,6 +245,7 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 	rows.Close()
 
 	for _, m := range missions {
+		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -474,10 +478,10 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 
 func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error {
 	query := `
-		SELECT m.id, e.user_id, e.name, m.type, m.level
+		SELECT m.id, e.user_id, e.name, m.type, m.level, m.upgrade_ready_at
 		FROM modules m
 		JOIN encampments e ON e.id = m.encampment_id
-		WHERE m.is_upgrading = TRUE AND m.upgrade_ready_at <= CURRENT_TIMESTAMP`
+		WHERE m.is_upgrading = TRUE`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
@@ -486,23 +490,29 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 	defer rows.Close()
 
 	type completedUpgrade struct {
-		id       string
-		userID   int64
-		campName string
-		modType  string
-		oldLvl   int
+		id             string
+		userID         int64
+		campName       string
+		modType        string
+		oldLvl         int
+		upgradeReadyAt sql.NullTime
 	}
 
 	var completed []completedUpgrade
 	for rows.Next() {
 		var c completedUpgrade
-		if err := rows.Scan(&c.id, &c.userID, &c.campName, &c.modType, &c.oldLvl); err == nil {
+		if err := rows.Scan(&c.id, &c.userID, &c.campName, &c.modType, &c.oldLvl, &c.upgradeReadyAt); err == nil {
 			completed = append(completed, c)
 		}
 	}
 	rows.Close()
 
 	for _, c := range completed {
+		// Timezone-Normalized HUD Timers: Compute countdown strictly inside Go UTC boundaries
+		if c.upgradeReadyAt.Valid && c.upgradeReadyAt.Time.UTC().After(time.Now().UTC()) {
+			continue
+		}
+
 		newLvl := c.oldLvl + 1
 		updateQuery := `
 			UPDATE modules 
@@ -553,9 +563,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var attName, defName, routeType string
 			var defUserID int64
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				// Timezone Neutralization: Compute remaining steps in Go
+				// Timezone-Normalized HUD Timers: Compute remaining steps in Go
 				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
-					timeLeft := int(time.Until(resTime.UTC()).Seconds())
+					timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
 					if timeLeft > 0 {
 						proximityAlert := fmt.Sprintf(
 							"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
@@ -700,7 +710,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
 		var attackerHeroSuperpower string
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(h.superpower, '') FROM raid_forces rf JOIN heroes h ON h.id = rf.hero_id WHERE rf.raid_id = $1", r.id).Scan(&attackerHeroSuperpower)
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(h.superpower, '') FROM raid_forces rf LEFT JOIN heroes h ON h.id = rf.hero_id WHERE rf.raid_id = $1", r.id).Scan(&attackerHeroSuperpower)
 
 		var defLevel int = 1
 		var defenderShields int = 0
@@ -836,6 +846,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				refundMechs = 0
 			}
 
+			// Persist dynamic helper casualties inside database state row
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
 		}
 
