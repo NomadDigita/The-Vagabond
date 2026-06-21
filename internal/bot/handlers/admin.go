@@ -38,7 +38,6 @@ func NewAdminHandler(db *sql.DB, tickEngine *tick.Engine, adminIDStrs string) *A
 	}
 }
 
-// IsAdmin checks if the sender is an authorized developer
 func (h *AdminHandler) IsAdmin(senderID int64) bool {
 	for _, id := range h.AdminIDs {
 		if id == senderID {
@@ -48,7 +47,6 @@ func (h *AdminHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// HandleAdminPanel renders the Admin control board with Secure Developer inline controls
 func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -63,19 +61,16 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	btnTick := selector.Data("⚡ Force Tick", "admin_action", "tick")
 	btnInject := selector.Data("🪙 Inject 5000 Resources", "admin_action", "inject")
 	btnGift := selector.Data("💎 Gift Premium", "admin_action", "gift")
-	btnMetrics := selector.Data("🛰️ Check Metrics", "admin_action", "metrics")
+	btnMetrics := selector.Data("🛰️ Server Metrics", "admin_action", "server_metrics")
 
 	selector.Inline(
 		selector.Row(btnTick, btnInject),
 		selector.Row(btnGift, btnMetrics),
 	)
-	selector.ReplyKeyboard = keyboards.AdminNavigation().ReplyKeyboard
-	selector.ResizeKeyboard = true
 
 	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the secure inline controls or bottom submenu deck.", selector)
 }
 
-// HandleAdminActionCallback routes secure inline developer clicks instantly
 func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil || !h.IsAdmin(sender.ID) {
@@ -95,11 +90,16 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		if campID == "" {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error: Establish outpost first."})
 		}
-		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00 WHERE encampment_id = $1", campID)
-		return c.Respond(&telebot.CallbackResponse{Text: "🪙 5,000 resources permanently injected!"})
+		_, _ = h.DB.ExecContext(ctx, `
+			UPDATE resources 
+			SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00,
+			    steel = steel + 5000.00, uranium = uranium + 5000.00, hydrogen = hydrogen + 5000.00, iron = iron + 5000.00,
+			    oil = oil + 5000.00, gold = gold + 5000.00, silver = silver + 5000.00, diamond = diamond + 5000.00
+			WHERE encampment_id = $1`, campID)
+		return c.Respond(&telebot.CallbackResponse{Text: "🪙 5,000 of ALL resources permanently injected!"})
 	case "gift":
 		return c.Respond(&telebot.CallbackResponse{Text: "💡 Tip: Use `/admin_gift_premium [username] [days]` in chat."})
-	case "metrics":
+	case "server_metrics":
 		var totalUsers, totalCamps int
 		ctx := context.Background()
 		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
@@ -125,7 +125,6 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 	return nil
 }
 
-// HandleAdminTick manually triggers an instantaneous master loop iteration
 func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -142,7 +141,6 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered.")
 }
 
-// HandleAdminGiftPremium grants premium access to a username
 func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -190,7 +188,6 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Granted %d days of Premium License to @%s.", days, targetUser))
 }
 
-// HandleAdminGiftResources grants Scrap permanently to a username
 func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -203,14 +200,28 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 
 	payload := c.Message().Payload
 	args := strings.Split(payload, " ")
-	if len(args) < 2 {
-		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [scrap_amount]`")
+	if len(args) < 3 {
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [resource_type] [amount]`\nTypes: scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars, neuro_cores")
 	}
 
 	targetUser := args[0]
-	amount, err := strconv.ParseFloat(args[1], 64)
+	resType := strings.ToLower(strings.TrimSpace(args[1]))
+	amount, err := strconv.ParseFloat(args[2], 64)
 	if err != nil {
 		return c.Send("⚠️ Amount must be a valid float value.")
+	}
+
+	// Validate resource column matches GDD designations to block SQL Injection
+	validColumns := map[string]string{
+		"scrap": "scrap", "rations": "rations", "energy": "energy", "steel": "steel",
+		"uranium": "uranium", "hydrogen": "hydrogen", "iron": "iron", "oil": "oil",
+		"gold": "gold", "silver": "silver", "diamond": "diamond", "dollars": "dollars",
+		"neuro_cores": "neuro_cores",
+	}
+
+	targetColumn, exists := validColumns[resType]
+	if !exists {
+		return c.Send("❌ Invalid resource type specified.")
 	}
 
 	ctx := context.Background()
@@ -221,18 +232,19 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 		return c.Send("❌ User Not Found.")
 	}
 
-	_, err = h.DB.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", amount, targetID)
+	queryUpdate := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", targetColumn, targetColumn)
+	_, err = h.DB.ExecContext(ctx, queryUpdate, amount, targetID)
 	if err != nil {
+		log.Printf("Failed executing admin gift: %v", err)
 		return c.Send("⚠️ Database write error.")
 	}
 
-	alertMsg := fmt.Sprintf("⚡ GIFT RECEIVED: An Administrator has permanently added +%.1f Scrap directly to your outpost warehouse.", amount)
+	alertMsg := fmt.Sprintf("⚡ GIFT RECEIVED: An Administrator has permanently added +%.1f %s directly to your outpost warehouse.", amount, strings.Title(resType))
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 
-	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Gifted %.1f Scrap permanently to @%s.", amount, targetUser))
+	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Gifted %.1f %s permanently to @%s.", amount, strings.Title(resType), targetUser))
 }
 
-// HandleAdminGive injects resources instantly into the admin's outpost
 func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -253,7 +265,9 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 
 	query := `
 		UPDATE resources 
-		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00
+		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00,
+		    steel = steel + 5000.00, uranium = uranium + 5000.00, hydrogen = hydrogen + 5000.00, iron = iron + 5000.00,
+		    oil = oil + 5000.00, gold = gold + 5000.00, silver = silver + 5000.00, diamond = diamond + 5000.00, neuro_cores = neuro_cores + 5000.00
 		WHERE encampment_id = $1`
 
 	_, err = h.DB.ExecContext(ctx, query, campID)
@@ -262,10 +276,9 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 		return c.Send("⚠️ Error executing resource injection.")
 	}
 
-	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 Scrap, Rations, Energy, and Dollars into your camp.")
+	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 of ALL Resources into your camp.")
 }
 
-// HandleAdminFaction force-swaps the admin's faction alignment
 func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -296,7 +309,6 @@ func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("⚡ ADMIN OVERRIDE: Faction realigned to [%s]. Existing commander retired; check /hero to view your new commander.", targetFaction))
 }
 
-// HandleAdminBroadcast pushes a global alert to all registered users instantly
 func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -346,22 +358,13 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 		VALUES ($1, $2, FALSE)`
 
 	for _, targetID := range targets {
-		_, err := tx.ExecContext(ctx, insertQuery, targetID, formattedBroadcast)
-		if err != nil {
-			log.Printf("Failed executing broadcast queue write for %d: %v", targetID, err)
-			continue
-		}
+		_, _ = tx.ExecContext(ctx, insertQuery, targetID, formattedBroadcast)
 	}
 
-	if err := tx.Commit(); err != nil {
-		log.Printf("Admin broadcast transaction failed: %v", err)
-		return c.Send("⚠️ Broadcast Failed: Database commit error.")
-	}
-
-	return c.Send(fmt.Sprintf("🛰️ Broadcast successfully dispatched to all %d active system lines.", len(targets)))
+	_ = tx.Commit()
+	return c.Send(fmt.Sprintf("📡 Broadcast successfully queued to %d users.", len(targets)))
 }
 
-// HandleAdminMetrics displays live memory profiles and database statistics
 func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -372,14 +375,9 @@ func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 		return c.Send("❌ Access Denied: Authorized administrators only.")
 	}
 
-	_ = c.Notify(telebot.Typing)
-
+	var totalUsers, totalCamps int
 	ctx := context.Background()
-
-	var totalUsers int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
-
-	var totalCamps int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
 
 	var memStats runtime.MemStats

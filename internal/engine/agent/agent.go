@@ -71,16 +71,13 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, a := range agents {
-		// Calculate energy upkeep reduction factors (Neuro-Efficiency & Synaptic Accel)
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
 		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10)
 		upkeepEnergy := 0.2 * upkeepMultiplier
 
 		if a.Energy < upkeepEnergy {
-			// Energy depleted: Force shutdown agent task
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)
 
-			// Queue alert notification for player
 			alertMsg := fmt.Sprintf(
 				"🔌 AGENT DEACTIVATED\n\n"+
 					"Outpost: %s\n"+
@@ -97,8 +94,14 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 
 		switch a.Mode {
 		case "collector":
-			newScrap := math.Min(a.Scrap+2.00, storageCap)
-			newRations := math.Min(a.Rations+1.00, storageCap)
+			newScrap := a.Scrap
+			if a.Scrap < storageCap {
+				newScrap = math.Min(a.Scrap+2.00, storageCap)
+			}
+			newRations := a.Rations
+			if a.Rations < storageCap {
+				newRations = math.Min(a.Rations+1.00, storageCap)
+			}
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
@@ -112,7 +115,10 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector] executed action for outpost: %s (+2.0 Scrap, +1.0 Rations capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_omega":
-			newScrap := math.Min(a.Scrap+20.00, storageCap)
+			newScrap := a.Scrap
+			if a.Scrap < storageCap {
+				newScrap = math.Min(a.Scrap+20.00, storageCap)
+			}
 			newIron := a.Iron + 5.00
 			newGold := a.Gold + 1.00
 			newSilver := a.Silver + 1.00

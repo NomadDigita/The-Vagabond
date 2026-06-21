@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 )
 
 type Processor struct {
@@ -62,9 +63,9 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var s EncampmentState
 		err := rows.Scan(
-			&s.ID, &s.Scrap, &s.Rations, &s.Energy,
-			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl,
-			&s.TroopCount, &s.LoanAmount,
+			&s.ID, &s.Scrap, &s.Rations, &s.Energy, 
+			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
+			&s.TroopCount, &s.LoanAmount, 
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
 			&s.DefenseTechLvl, &s.SalvageLvl,
 		)
@@ -76,10 +77,9 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	for _, s := range states {
-		// Calculate Overclock & Mutation modifiers (Scrap Overclock & Cybernetic Salvage)
 		overclockBonus := float64(s.DefenseTechLvl-1) * 0.20
 		salvageBonus := float64(s.SalvageLvl-1) * 0.15
-
+		
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
 		energyGenerated := 0.05 * float64(s.GeneratorLvl)
@@ -105,33 +105,39 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		rationsConsumed := float64(s.TroopCount) * 0.05
 		energyConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
-		newScrap := s.Scrap + scrapGenerated
-		newRations := s.Rations + rationsGenerated - rationsConsumed
-		newEnergy := s.Energy + energyGenerated - energyConsumed
-
-		if newRations < 0 {
-			newRations = 0
-		}
-		if newEnergy < 0 {
-			newEnergy = 0
-		}
-
 		storageCap := float64(s.TentLvl) * 500.0
-		if newScrap > storageCap {
-			newScrap = storageCap
+
+		// Surplus Preservation System: Only caps new passive allocations. Pre-existing balances are preserved.
+		newScrap := s.Scrap
+		if s.Scrap < storageCap {
+			newScrap = math.Min(s.Scrap+scrapGenerated, storageCap)
 		}
-		if newRations > storageCap {
-			newRations = storageCap
+
+		newRations := s.Rations
+		rationsDiff := rationsGenerated - rationsConsumed
+		if rationsDiff > 0 {
+			if s.Rations < storageCap {
+				newRations = math.Min(s.Rations+rationsDiff, storageCap)
+			}
+		} else {
+			newRations = math.Max(s.Rations+rationsDiff, 0.0)
 		}
-		if newEnergy > storageCap {
-			newEnergy = storageCap
+
+		newEnergy := s.Energy
+		energyDiff := energyGenerated - energyConsumed
+		if energyDiff > 0 {
+			if s.Energy < storageCap {
+				newEnergy = math.Min(s.Energy+energyDiff, storageCap)
+			}
+		} else {
+			newEnergy = math.Max(s.Energy+energyDiff, 0.0)
 		}
 
 		updateQuery := `
 			UPDATE resources 
 			SET scrap = $1, rations = $2, energy = $3, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
-
+		
 		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newEnergy, s.ID)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
