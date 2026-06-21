@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings" // Added missing strings package import block
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	gopkg "gopkg.in/telebot.v3"
@@ -243,7 +244,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 
 	case "rig":
 		if steel < 600.0 || iron < 50.0 {
-			return gopkg.Context(c).Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
@@ -255,7 +256,6 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	// Aligned Item Redirect checks: Supports both cargo_jet and jet as valid logistics payloads
 	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" {
 		return h.HandleVehiclesPanel(c)
 	}
