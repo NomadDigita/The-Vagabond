@@ -20,6 +20,14 @@ func NewFactoryHandler(db *sql.DB) *FactoryHandler {
 	return &FactoryHandler{DB: db}
 }
 
+// renderOrEdit dynamically edits the current message if accessed via callbacks, saving layout space and preventing desyncs
+func renderOrEdit(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error {
+	if c.Callback() != nil {
+		return c.Edit(text, markup)
+	}
+	return c.Send(text, markup)
+}
+
 func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -96,7 +104,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		selector.Row(btnCraftMech, btnCraftNuke),
 	)
 
-	return c.Send(panelText, selector)
+	return renderOrEdit(c, panelText, selector)
 }
 
 func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
@@ -161,7 +169,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 		selector.Row(btnCraftRig),
 	)
 
-	return c.Send(panelText, selector)
+	return renderOrEdit(c, panelText, selector)
 }
 
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
