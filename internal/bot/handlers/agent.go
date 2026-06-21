@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -20,8 +21,9 @@ type AgentHandler struct {
 
 func NewAgentHandler(db *sql.DB, adminIDStrs string) *AgentHandler {
 	var ids []int64
-	for _, s := range stringSlice(adminIDStrs, ",") {
-		if val, err := strconv.ParseInt(s, 10, 64); err == nil {
+	for _, s := range strings.Split(adminIDStrs, ",") {
+		trimmed := strings.TrimSpace(s)
+		if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 			ids = append(ids, val)
 		}
 	}
@@ -37,7 +39,6 @@ func (h *AgentHandler) IsAdmin(id int64) bool {
 	return false
 }
 
-// HandleAgent renders the high-end automation manager control panel
 func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -98,10 +99,11 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"⚡ Consumes 0.2 Energy Cells per tick.\n"+
 			"⚠️ Agent auto-shuts down if reserves hit 0.\n\n"+
 			"BEHAVIOR MODES:\n"+
-			"🛠️ [Collector]: Auto-scavenges +2.0 Scrap, +1.0 Rations per tick.\n"+
-			"💱 [Collector Ω]: Auto-mines heavy ores +5.0 Iron, +1.0 Gold, +0.2 Diamonds per tick.\n"+
-			"🏗️ [Builder]: Auto-upgrades camp modules if Scrap permits.\n"+
-			"🪖 [Military]: Auto-recruits Soldiers in your barracks if Rations permit.\n"+
+			"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\n"+
+			"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Steel, +5.0 Hydrogen.\n"+
+			"💎 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Uranium, +0.1 Diamonds, +1.0 Neuro.\n"+
+			"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\n"+
+			"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		statusLabel, licenseText, mode, energy,
 	)
@@ -117,19 +119,20 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	btnToggle := selector.Data(toggleLabel, "toggle_agent", senderIDStr)
 	btnModeCollector := selector.Data("🛠️ Collector", "set_agent_mode", "collector", senderIDStr)
 	btnModeCollectorOmega := selector.Data("💱 Collector Ω", "set_agent_mode", "collector_omega", senderIDStr)
+	btnModeCollectorPrecious := selector.Data("💎 Precious", "set_agent_mode", "collector_precious", senderIDStr)
 	btnModeBuilder := selector.Data("🏗️ Builder", "set_agent_mode", "builder", senderIDStr)
 	btnModeMilitary := selector.Data("🪖 Military", "set_agent_mode", "military", senderIDStr)
 
 	selector.Inline(
 		selector.Row(btnToggle),
 		selector.Row(btnModeCollector, btnModeCollectorOmega),
+		selector.Row(btnModeCollectorPrecious),
 		selector.Row(btnModeBuilder, btnModeMilitary),
 	)
 
 	return c.Send(panelText, selector)
 }
 
-// HandleToggleAgentCallback handles switching the active state with premium checks
 func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {
 	ctx := context.Background()
 	userIDStr := c.Args()[0]
@@ -175,7 +178,6 @@ func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {
 	return h.HandleAgent(c)
 }
 
-// HandleSetModeCallback toggles the behavior of the agent
 func (h *AgentHandler) HandleSetModeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	targetMode := c.Args()[0]
@@ -188,41 +190,4 @@ func (h *AgentHandler) HandleSetModeCallback(c telebot.Context) error {
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚙️ Mode switched to: %s", targetMode)})
 	return h.HandleAgent(c)
-}
-
-func stringSlice(s, sep string) []string {
-	var out []string
-	for _, val := range stringSliceRaw(s, sep) {
-		trimmed := trimSpace(val)
-		if trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
-func stringSliceRaw(s, sep string) []string {
-	var res []string
-	start := 0
-	for i := 0; i+len(sep) <= len(s); i++ {
-		if s[i:i+len(sep)] == sep {
-			res = append(res, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	res = append(res, s[start:])
-	return res
-}
-
-func trimSpace(s string) string {
-	start := 0
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	end := len(s)
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }

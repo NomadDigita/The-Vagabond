@@ -25,11 +25,16 @@ type ActiveAgent struct {
 	Scrap       float64
 	Rations     float64
 	Energy      float64
+	Steel       float64
+	Uranium     float64
+	Hydrogen    float64
 	Iron        float64
+	Oil         float64
 	Gold        float64
 	Silver      float64
 	Diamond     float64
 	Dollars     float64
+	NeuroCores  float64
 	TentLvl     int
 	EconTechLvl int
 	SynapticLvl int
@@ -39,7 +44,7 @@ type ActiveAgent struct {
 func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT t.user_id, t.mode, e.id, e.name, 
-		       r.scrap, r.rations, r.energy, r.iron, r.gold, r.silver, r.diamond, r.dollars,
+		       r.scrap, r.rations, r.energy, r.steel, r.uranium, r.hydrogen, r.iron, r.oil, r.gold, r.silver, r.diamond, r.dollars, r.neuro_cores,
 		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
 		       COALESCE((SELECT res.econ_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as econ_tech_lvl,
 		       COALESCE((SELECT mut.synaptic_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as synaptic_lvl
@@ -59,7 +64,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		var a ActiveAgent
 		err := rows.Scan(
 			&a.UserID, &a.Mode, &a.CampID, &a.CampName, 
-			&a.Scrap, &a.Rations, &a.Energy, &a.Iron, &a.Gold, &a.Silver, &a.Diamond, &a.Dollars,
+			&a.Scrap, &a.Rations, &a.Energy, &a.Steel, &a.Uranium, &a.Hydrogen, &a.Iron, &a.Oil, &a.Gold, &a.Silver, &a.Diamond, &a.Dollars, &a.NeuroCores,
 			&a.TentLvl, &a.EconTechLvl, &a.SynapticLvl,
 		)
 		if err == nil {
@@ -71,8 +76,9 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, a := range agents {
+		// Calculate fuel deductions incorporating Science Tech and Biological Mutations
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
-		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10)
+		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10) // Cap minimum energy upkeep at 10%
 		upkeepEnergy := 0.2 * upkeepMultiplier
 
 		if a.Energy < upkeepEnergy {
@@ -96,11 +102,11 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		case "collector":
 			newScrap := a.Scrap
 			if a.Scrap < storageCap {
-				newScrap = math.Min(a.Scrap+2.00, storageCap)
+				newScrap = math.Min(a.Scrap+5.00, storageCap)
 			}
 			newRations := a.Rations
 			if a.Rations < storageCap {
-				newRations = math.Min(a.Rations+1.00, storageCap)
+				newRations = math.Min(a.Rations+2.00, storageCap)
 			}
 
 			_, err = tx.ExecContext(ctx, `
@@ -112,29 +118,45 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			if err != nil {
 				log.Printf("Agent failed executing collector pass: %v", err)
 			}
-			log.Printf("Agent [Collector] executed action for outpost: %s (+2.0 Scrap, +1.0 Rations capped at %.0f)", a.CampName, storageCap)
+			log.Printf("Agent [Collector] executed action for outpost: %s (+5.0 Scrap, +2.0 Rations capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_omega":
-			newScrap := a.Scrap
-			if a.Scrap < storageCap {
-				newScrap = math.Min(a.Scrap+20.00, storageCap)
-			}
-			newIron := a.Iron + 5.00
-			newGold := a.Gold + 1.00
-			newSilver := a.Silver + 1.00
-			newDiamond := a.Diamond + 0.2
-			newDollars := a.Dollars + 2.00
+			// Autopilot Industrial mode (Steel, Iron, Oil, Hydrogen)
+			newSteel := a.Steel + 10.00
+			newIron := a.Iron + 15.00
+			newOil := a.Oil + 8.00
+			newHydrogen := a.Hydrogen + 5.00
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
-				SET scrap = $1, energy = $2, iron = $3, gold = $4, silver = $5, diamond = $6, dollars = $7 
-				WHERE encampment_id = $8`,
-				newScrap, newEnergy, newIron, newGold, newSilver, newDiamond, newDollars, a.CampID,
+				SET energy = $1, steel = $2, iron = $3, oil = $4, hydrogen = $5 
+				WHERE encampment_id = $6`,
+				newEnergy, newSteel, newIron, newOil, newHydrogen, a.CampID,
 			)
 			if err != nil {
 				log.Printf("Agent failed executing collector_omega pass: %v", err)
 			}
 			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s", a.CampName)
+
+		case "collector_precious":
+			// Autopilot Precious mode (Silver, Gold, Uranium, Diamonds, Dollars, Neuro Cores)
+			newSilver := a.Silver + 5.00
+			newGold := a.Gold + 2.00
+			newUranium := a.Uranium + 1.00
+			newDiamond := a.Diamond + 0.10
+			newDollars := a.Dollars + 2.00
+			newNeuro := a.NeuroCores + 1.00
+
+			_, err = tx.ExecContext(ctx, `
+				UPDATE resources 
+				SET energy = $1, silver = $2, gold = $3, uranium = $4, diamond = $5, dollars = $6, neuro_cores = $7 
+				WHERE encampment_id = $8`,
+				newEnergy, newSilver, newGold, newUranium, newDiamond, newDollars, newNeuro, a.CampID,
+			)
+			if err != nil {
+				log.Printf("Agent failed executing collector_precious pass: %v", err)
+			}
+			log.Printf("Agent [Collector Precious] executed resource extraction pass for outpost: %s", a.CampName)
 
 		case "builder":
 			var isUpgrading bool
