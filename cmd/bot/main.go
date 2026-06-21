@@ -308,13 +308,14 @@ func relocateZeroCoordinates(db *sql.DB) {
 	}
 	rows.Close()
 
+	// Decouple Seeding Loop: Seeding random source exactly once outside of the loop iteration checks
+	rSource := rand.NewSource(time.Now().UnixNano())
+	rGen := rand.New(rSource)
+
 	for _, c := range coords {
 		success := false
 		var x, y int
 		for attempt := 0; attempt < 100; attempt++ {
-			rSource := rand.NewSource(time.Now().UnixNano())
-			rGen := rand.New(rSource)
-			
 			switch c.region {
 			case "Africa":
 				x = rGen.Intn(991) + 10
@@ -445,7 +446,7 @@ func main() {
 	bot.Handle("/research", research.HandleResearchPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
-	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset) // Registered manual database reset command (Secured Admin Controls)
+	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
 	bot.Handle("/admin_broadcast", admin.HandleAdminBroadcast)
 	bot.Handle("/admin_metrics", admin.HandleAdminMetrics)
 	bot.Handle("/admin_give", admin.HandleAdminGive)

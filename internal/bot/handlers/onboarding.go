@@ -206,6 +206,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var x, y int
 	var success bool
 
+	// Decouple Seeding Loop: Seeding random source exactly once outside of the coordinate calculation loop
 	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 	rGen := rand.New(rSource)
 
@@ -279,7 +280,6 @@ case "Africa":
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Resource allocation error."})
 		}
 
-		// Secure Hangar Row Allocation: Automatically allocate default inventory slots on onboarding
 		_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 	}
 
