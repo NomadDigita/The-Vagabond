@@ -162,7 +162,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 					dashboard += "🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\n"
 					hasCoops = true
 				}
-				timeLeft := int(time.Until(resTime.UTC()).Seconds())
+				timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
@@ -220,7 +220,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var rRations, rAmmo float64
 			var resTime time.Time
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
-				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
@@ -532,7 +531,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-
+			
 			attackerUser := &telebot.User{ID: attackerUserID}
 			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
 			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
@@ -633,7 +632,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
 		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
 		raidID, primSoldiers, primMechs,
 	)
 
@@ -692,45 +691,166 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Outpost core not found. Choose faction first."})
 	}
 
-	var soldiers, mechs, buggies int
-	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
+	// Interactive Unit Customizer Draft Dashboard: Load and check if a draft composition exists
+	_, _ = h.DB.ExecContext(ctx, `
+		INSERT INTO campaign_drafts (user_id, target_id) 
+		VALUES ($1, $2) 
+		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`, 
+		sender.ID, defenderCampID,
+	)
 
-	totForce := soldiers + mechs + buggies
-	if totForce <= 0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Empty: Recruit soldiers or craft vehicles first!"})
-	}
+	return h.renderDraftCustomizerHUD(c, sender.ID, defenderCampID, myRegion)
+}
+
+// renderDraftCustomizerHUD outputs an interactive unit incrementer grid
+func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64, targetCampID string, _ string) error {
+	ctx := context.Background()
+
+	var myCampID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", userID).Scan(&myCampID)
+
+	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes int
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes FROM campaign_drafts WHERE user_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"✈️ HANGAR COMMAND EXPEDITION DECK\n"+
+			"✈️ HANGAR CUSTOM CAMPAIGN DRAFT BOARD\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Select an offensive force deployment size and route coordinates:\n\n"+
-			"BARRACKS STOCKPILES:\n"+
-			"🪖 Soldiers: %d | 🤖 Mechs: %d | 🚗 Buggies: %d\n\n"+
-			"TACTICAL ROUTING DECK:\n"+
+			"Select the exact military quantities you want to mobilize:\n\n"+
+			"DRAFTED FORCES STOCKPILES:\n"+
+			"🪖 Soldiers: %d / %d active\n"+
+			"🤖 Mechs: %d / %d active\n"+
+			"🚗 Buggies: %d / %d active\n"+
+			"⛵ Clipper Ships: %d / %d active\n"+
+			"✈️ Cargo Jets: %d / %d active\n"+
+			"☢️ Nukes: %d / %d active\n\n"+
+			"TACTICAL ROUTING PATHS:\n"+
 			"🚀 [Direct Route] — Base travel speed. Alerts defenders.\n"+
 			"🛡️ [Safe Route] — Costs 1.5x Fuel. Travels fast (0.7x duration).\n"+
 			"🛰️ [Stealth Route] — Slow travel (1.5x duration). BYPASSES ALL RADAR WARNINGS!\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		soldiers, mechs, buggies,
+		dSols, availSoldiers, dMechs, availMechs, dBuggies, availBuggies, dShips, availShips, dJets, availJets, dNukes, availNukes,
 	)
 
 	selector := &telebot.ReplyMarkup{}
 
-	btnDirect25 := selector.Data("🚀 Deploy 25% [Direct]", "confirm_launch", defenderCampID, "25", "direct")
-	btnDirect50 := selector.Data("🚀 Deploy 50% [Direct]", "confirm_launch", defenderCampID, "50", "direct")
-	btnDirect100 := selector.Data("🚀 Deploy 100% [Direct]", "confirm_launch", defenderCampID, "100", "direct")
-	btnStealth100 := selector.Data("🛰️ Deploy 100% [Stealth]", "confirm_launch", defenderCampID, "100", "stealth")
-	btnSafe100 := selector.Data("🛡️ Deploy 100% [Safe]", "confirm_launch", defenderCampID, "100", "safe")
+	btnPlusSol := selector.Data("🪖 +Soldier", "adjust_draft", "soldier", "inc")
+	btnMinusSol := selector.Data("🪖 -Soldier", "adjust_draft", "soldier", "dec")
+	btnPlusMech := selector.Data("🤖 +Mech", "adjust_draft", "mech", "inc")
+	btnMinusMech := selector.Data("🤖 -Mech", "adjust_draft", "mech", "dec")
+	btnPlusBuggy := selector.Data("🚗 +Buggy", "adjust_draft", "buggy", "inc")
+	btnMinusBuggy := selector.Data("🚗 -Buggy", "adjust_draft", "buggy", "dec")
+
+	btnPlusShip := selector.Data("⛵ +Ship", "adjust_draft", "ship", "inc")
+	btnMinusShip := selector.Data("⛵ -Ship", "adjust_draft", "ship", "dec")
+	btnPlusJet := selector.Data("✈️ +Jet", "adjust_draft", "jet", "inc")
+	btnMinusJet := selector.Data("✈️ -Jet", "adjust_draft", "jet", "dec")
+	btnPlusNuke := selector.Data("☢️ +Nuke", "adjust_draft", "nuke", "inc")
+	btnMinusNuke := selector.Data("☢️ -Nuke", "adjust_draft", "nuke", "dec")
+
+	btnConfirmDirect := selector.Data("🚀 Launch Direct", "confirm_launch", targetCampID, "direct")
+	btnConfirmStealth := selector.Data("🛰️ Launch Stealth", "confirm_launch", targetCampID, "stealth")
+	btnConfirmSafe := selector.Data("🛡️ Launch Safe", "confirm_launch", targetCampID, "safe")
 
 	selector.Inline(
-		selector.Row(btnDirect25, btnDirect50),
-		selector.Row(btnDirect100),
-		selector.Row(btnStealth100, btnSafe100),
+		selector.Row(btnPlusSol, btnMinusSol),
+		selector.Row(btnPlusMech, btnMinusMech),
+		selector.Row(btnPlusBuggy, btnMinusBuggy),
+		selector.Row(btnPlusShip, btnMinusShip),
+		selector.Row(btnPlusJet, btnMinusJet),
+		selector.Row(btnPlusNuke, btnMinusNuke),
+		selector.Row(btnConfirmDirect),
+		selector.Row(btnConfirmStealth, btnConfirmSafe),
 	)
 
+	// Single-message Editing integration applied to the Draft selection panel (Visual Desync mitigation)
+	if c.Callback() != nil {
+		return c.Edit(panelText, selector)
+	}
 	return c.Send(panelText, selector)
+}
+
+// HandleAdjustDraftCallback handles incrementing or decrementing campaign units on click
+func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	unitType := c.Args()[0]
+	action := c.Args()[1]
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Adjustment failed."})
+	}
+	defer tx.Rollback()
+
+	var campID string
+	var myRegion string
+	_ = tx.QueryRowContext(ctx, "SELECT id, region FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &myRegion)
+
+	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
+	_ = tx.QueryRowContext(ctx, queryInv, campID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes int
+	var targetCampID string
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
+	_ = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &targetCampID)
+
+	var currentVal, maxVal int
+	var dbColumn string
+
+	switch unitType {
+	case "soldier":
+		currentVal = dSols
+		maxVal = availSoldiers
+		dbColumn = "soldiers"
+	case "mech":
+		currentVal = dMechs
+		maxVal = availMechs
+		dbColumn = "mechs"
+	case "buggy":
+		currentVal = dBuggies
+		maxVal = availBuggies
+		dbColumn = "buggies"
+	case "ship":
+		currentVal = dShips
+		maxVal = availShips
+		dbColumn = "ships"
+	case "jet":
+		currentVal = dJets
+		maxVal = availJets
+		dbColumn = "jets"
+	case "nuke":
+		currentVal = dNukes
+		maxVal = availNukes
+		dbColumn = "nukes"
+	}
+
+	newVal := currentVal
+	if action == "inc" {
+		if currentVal >= maxVal {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Warehouse Stock: Deploy limit reached!"})
+		}
+		newVal++
+	} else {
+		if currentVal <= 0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Invalid Value: Already at 0."})
+		}
+		newVal--
+	}
+
+	queryUpdate := fmt.Sprintf("UPDATE campaign_drafts SET %s = $1 WHERE user_id = $2", dbColumn)
+	_, _ = tx.ExecContext(ctx, queryUpdate, newVal, sender.ID)
+
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: "⚙️ Fleet draft configuration modified."})
+
+	return h.renderDraftCustomizerHUD(c, sender.ID, targetCampID, myRegion)
 }
 
 func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) error {
@@ -738,10 +858,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	sender := c.Sender()
 
 	defenderCampID := c.Args()[0]
-	weightPctStr := c.Args()[1]
-	routeType := c.Args()[2]
-
-	weightPct, _ := strconv.Atoi(weightPctStr)
+	routeType := c.Args()[1]
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -765,23 +882,17 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var heroID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
 
-	var soldiers, mechs, buggies int
-	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
-	_ = tx.QueryRowContext(ctx, queryInv, myCampID).Scan(&soldiers, &mechs, &buggies)
+	// Fetch custom user drafted units composition from the drafts table
+	var mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes int
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes FROM campaign_drafts WHERE user_id = $1`
+	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&mobSoldiers, &mobMechs, &mobBuggies, &mobShips, &mobJets, &mobNukes)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Staging Timeout: No active draft session located."})
+	}
 
-	mobRatio := float64(weightPct) / 100.0
-	mobSoldiers := int(float64(soldiers) * mobRatio)
-	mobMechs := int(float64(mechs) * mobRatio)
-	mobBuggies := int(float64(buggies) * mobRatio)
-
-	if mobSoldiers <= 0 && mobMechs <= 0 {
-		if soldiers > 0 {
-			mobSoldiers = 1
-		} else if mechs > 0 {
-			mobMechs = 1
-		} else {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient troops to allocate."})
-		}
+	totMobilized := mobSoldiers + mobMechs + mobBuggies + mobShips + mobJets + mobNukes
+	if totMobilized <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Staging Empty: Allocate at least 1 unit to deploy!"})
 	}
 
 	var energy float64
@@ -796,8 +907,17 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", fuelCost)})
 	}
 
+	// Deduct drafted forces from base workshop_inventory
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
-	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3 WHERE encampment_id = $4", mobSoldiers, mobMechs, mobBuggies, myCampID)
+	_, _ = tx.ExecContext(ctx, `
+		UPDATE workshop_inventory 
+		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6 
+		WHERE encampment_id = $7`, 
+		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID,
+	)
+
+	// Clean up draft row
+	_, _ = tx.ExecContext(ctx, "DELETE FROM campaign_drafts WHERE user_id = $1", sender.ID)
 
 	var marchingMinutes float64
 
@@ -824,32 +944,32 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 		_ = tx.Commit()
 
-		// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
+		// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning trajectory ascends
 		msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
 		if errAnim == nil {
 			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10%% - Allocating flight buffer vectors...")
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
 			time.Sleep(300 * time.Millisecond)
-
+			
 			weatherStatus := "Nominal baseline limits"
 			switch activeWeather {
 case "radiation_storm":
-				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50%% transit delays)"
+				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
 			case "solar_flare":
-				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30%% transit speed)"
+				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
 			}
-
+			
 			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 			time.Sleep(300 * time.Millisecond)
-
+			
 			fleetStatus := "None"
 			if mobBuggies > 0 {
 				fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
 			}
-
+			
 			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100%% - Handshake complete! Dispatching forces...")
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
 			time.Sleep(300 * time.Millisecond)
 			_ = c.Bot().Delete(msg)
 		}
@@ -864,12 +984,10 @@ case "radiation_storm":
 	_ = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
 
 	if defRegion != myRegion {
-		var jets, ships int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(jets, 0), COALESCE(ships, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&jets, &ships)
-		if jets <= 0 && ships <= 0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Build a Clipper Ship or Cargo Jet first to deploy across continents!"})
+		if mobJets <= 0 && mobShips <= 0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: Include Clipper Ships or Cargo Jets in your draft to cross oceans!"})
 		}
-		if jets > 0 {
+		if mobJets > 0 {
 			marchingMinutes = 120.0
 		} else {
 			marchingMinutes = 720.0
@@ -922,7 +1040,7 @@ case "radiation_storm":
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
 		time.Sleep(300 * time.Millisecond)
-
+		
 		weatherStatus := "Nominal baseline limits"
 		switch activeWeather {
 case "radiation_storm":
@@ -930,15 +1048,15 @@ case "radiation_storm":
 		case "solar_flare":
 			weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
 		}
-
+		
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 		time.Sleep(300 * time.Millisecond)
-
+		
 		fleetStatus := "None"
 		if mobBuggies > 0 {
 			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
 		}
-
+		
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
@@ -1037,6 +1155,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", survSoldiers, survMechs, raidID)
 		}
 
+		// Secure Co-Op Helper Retreat & Refunds: Automatically refund all helper forces safely on retreat
 		rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
 		if errCoop == nil {
 			type helperRefund struct {

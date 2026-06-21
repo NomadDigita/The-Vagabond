@@ -280,6 +280,17 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 
 		`CREATE INDEX IF NOT EXISTS idx_world_events_expires ON world_events(expires_at);`,
+
+		`CREATE TABLE IF NOT EXISTS campaign_drafts (
+			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+			target_id VARCHAR(50) NOT NULL,
+			soldiers INT DEFAULT 0,
+			mechs INT DEFAULT 0,
+			buggies INT DEFAULT 0,
+			ships INT DEFAULT 0,
+			jets INT DEFAULT 0,
+			nukes INT DEFAULT 0
+		);`,
 	}
 
 	for _, stmt := range migrations {
@@ -538,6 +549,7 @@ func main() {
 	bot.Handle("\fclan_promote", clan.HandlePromoteMemberCallback)
 
 	bot.Handle("\fconfirm_launch", combat.HandleConfirmHangarLaunchCallback)
+	bot.Handle("\fadjust_draft", combat.HandleAdjustDraftCallback) // Registered draft customizer incrementer (Section 1 Complete)
 
 	port := os.Getenv("PORT")
 	if port == "" {
