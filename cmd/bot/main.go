@@ -288,7 +288,7 @@ func relocateZeroCoordinates(db *sql.DB) {
 	log.Println("Geographical Spawning Self-Healing relocator pass active...")
 	ctx := context.Background()
 
-	// Duplicate Spawning Pool Sweep: locate zero coordinates, hardcoded duplicates, and overlapping spawns
+	// Duplicate Spawning Pool Sweep: Decouple any zero coordinates, hardcoded duplicates, and overlapping spawns
 	queryZeroAndDuplicated := `
 		SELECT DISTINCT c.id, c.region 
 		FROM coordinates c
