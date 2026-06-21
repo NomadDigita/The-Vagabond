@@ -725,11 +725,15 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerBioLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
+		var attackerHeroSuperpower string
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(h.superpower, '') FROM raid_forces rf LEFT JOIN heroes h ON h.id = rf.hero_id WHERE rf.raid_id = $1", r.id).Scan(&attackerHeroSuperpower)
+
 		var defLevel int = 1
 		var defenderShields int = 0
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
+		var defenderHeroSuperpower string
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
 		if !r.defenderID.Valid {
@@ -752,6 +756,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&targetBiome)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
 		}
 
 		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
@@ -809,8 +814,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			reduction = math.Min(reduction, 0.90)
 			attCas = int(float64(attCas) * (1.0 - reduction))
 		}
+
+		// Defender Kinetic Barrier trait integration: Reduces defender round casualties by 15%
 		if defCas > 0 && r.defenderID.Valid {
 			reduction := float64(defenderBioLvl-1) * 0.10
+			if strings.Contains(defenderHeroSuperpower, "Kinetic Barrier") {
+				reduction += 0.15
+			}
 			reduction = math.Min(reduction, 0.90)
 			defCas = int(float64(defCas) * (1.0 - reduction))
 		}
@@ -848,7 +858,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				refundMechs = 0
 			}
 
+			// Persist dynamic helper casualties inside database state row
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
+		}
+
+		var rigs int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(rigs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&rigs)
+
+		if rigs > 0 {
+			lostDefMechs := int(float64(lostAttMechs) * 0.15)
+			newAttMechs = int(math.Min(float64(newAttMechs+lostDefMechs), float64(primaryMechs)))
+			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET mechs_mobilized = $1 WHERE raid_id = $2", newAttMechs, r.id)
 		}
 
 		if r.defenderID.Valid && defCas > 0 {
@@ -863,7 +883,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		attackerStillStanding := (newAttSols + newAttMechs) > 0
+		attackerStillStanding := (newAttSols + int(newAttMechs)) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
@@ -908,6 +928,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			}
 			primaryShare := stolenScrap * primRatio
 
+			// Attacker Scrap Recovery superpower integration: +10% scrap loot bonus
+			if strings.Contains(attackerHeroSuperpower, "Scrap Recovery") {
+				primaryShare *= 1.10
+			}
+
 			var haulers int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&haulers)
 
@@ -928,7 +953,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			winAlert := fmt.Sprintf(
 				"🏆 BATTLE RESOLUTION: VICTORY!\n\n"+
-					"Your forces breached the coordinate gates of [%s]!\n"+
+					"Your forces breached the perimeters of [%s]!\n"+
 					"⚙️ Looted: +%.1f Scrap\n\n"+
 					"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot.",
 				r.defenderName, primaryShare,
@@ -938,7 +963,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if r.defenderID.Valid {
 				loseAlert := fmt.Sprintf(
 					"🚨 BATTLE RESOLUTION: BASE BREACHED!\n\n"+
-						"Our coordinate perimeters were breached by [%s]!\n"+
+						"Our perimeters were breached by [%s]!\n"+
 						"⚙️ Looted: -%.1f Scrap stolen from warehouses.",
 					r.attackerName, stolenScrap,
 				)
