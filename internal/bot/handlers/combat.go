@@ -265,7 +265,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		log.Printf("Inbound radar scan failed: %v", err)
 		inboundText = "📡 Static: Scanner interference detected.\n\n"
 	} else {
-		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 		diff := resolveTime.UTC().Sub(time.Now().UTC())
 		timeLeft := int(diff.Seconds())
 		if timeLeft < 0 {
@@ -450,7 +449,6 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	_ = tx.Commit()
 
-	// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
 	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 ESTABLISHING SECURE COGNITIVE FREQUENCIES...")
 	if errAnim == nil {
 		time.Sleep(300 * time.Millisecond)
@@ -523,7 +521,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
-	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
 	if resolved {
 		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 		rGen := rand.New(rSource)
@@ -614,7 +611,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Troop Requirement: You must have active forces stationed to join co-op raids!"})
 	}
 
-	// Dynamic Rally Points: Helpers first deploy forces to the co-op creator's base (coordinates)
 	var creatorX, creatorY, helperX, helperY int
 	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", attackerCampID).Scan(&creatorX, &creatorY)
 	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", helperCampID).Scan(&helperX, &helperY)
@@ -628,7 +624,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2 WHERE encampment_id = $3", conSoldiers, conMechs, helperCampID)
 
-	// Store helper inside the custom rally table under state 'marching_to_ally'
 	queryJointMember := `
 		INSERT INTO raid_coop_members (raid_id, encampment_id, soldiers_contributed, mechs_contributed, state, arrival_time)
 		VALUES ($1, $2, $3, $4, 'marching_to_ally', $5)`
@@ -637,7 +632,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing helper contribution details."})
 	}
 
-	// Send an instant join/departure alert to the Co-Op lobby creator (Dynamic communication)
 	var creatorUserID int64
 	var targetOutpostName string
 	_ = tx.QueryRowContext(ctx, `
@@ -654,7 +648,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
-	// Broadcast co-op departure alerts to all other helpers currently registered inside lobby
 	rowsHelpers, errHelpers := tx.QueryContext(ctx, "SELECT e.user_id FROM raid_coop_members rcm JOIN encampments e ON e.id = rcm.encampment_id WHERE rcm.raid_id = $1 AND rcm.encampment_id != $2", raidID, helperCampID)
 	if errHelpers == nil {
 		defer rowsHelpers.Close()
@@ -691,7 +684,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Outpost core not found. Choose faction first."})
 	}
 
-	// Interactive Unit Customizer Draft Dashboard: Load and check if a draft composition exists
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
@@ -702,7 +694,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	return h.renderDraftCustomizerHUD(c, sender.ID, defenderCampID, myRegion)
 }
 
-// renderDraftCustomizerHUD outputs an interactive unit incrementer grid
 func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64, targetCampID string, _ string) error {
 	ctx := context.Background()
 
@@ -768,14 +759,12 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 		selector.Row(btnConfirmStealth, btnConfirmSafe),
 	)
 
-	// Single-message Editing integration applied to the Draft selection panel (Visual Desync mitigation)
 	if c.Callback() != nil {
 		return c.Edit(panelText, selector)
 	}
 	return c.Send(panelText, selector)
 }
 
-// HandleAdjustDraftCallback handles incrementing or decrementing campaign units on click
 func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -790,16 +779,34 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 
 	var campID string
 	var myRegion string
-	_ = tx.QueryRowContext(ctx, "SELECT id, region FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &myRegion)
+
+	queryMe := `
+		SELECT e.id, c.region 
+		FROM encampments e 
+		JOIN coordinates c ON c.id = e.coordinate_id 
+		WHERE e.user_id = $1`
+	err = tx.QueryRowContext(ctx, queryMe, sender.ID).Scan(&campID, &myRegion)
+	if err != nil {
+		log.Printf("Failed to scan encampment core attributes: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to resolve outpost profile assets."})
+	}
 
 	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes int
 	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
-	_ = tx.QueryRowContext(ctx, queryInv, campID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+	err = tx.QueryRowContext(ctx, queryInv, campID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+	if err != nil {
+		log.Printf("Failed query warehouse profile values: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Inventory records inaccessible."})
+	}
 
 	var dSols, dMechs, dBuggies, dShips, dJets, dNukes int
 	var targetCampID string
 	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
-	_ = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &targetCampID)
+	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &targetCampID)
+	if err != nil {
+		log.Printf("Draft session select failure: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ No active campaign parameters found."})
+	}
 
 	var currentVal, maxVal int
 	var dbColumn string
@@ -845,7 +852,11 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	}
 
 	queryUpdate := fmt.Sprintf("UPDATE campaign_drafts SET %s = $1 WHERE user_id = $2", dbColumn)
-	_, _ = tx.ExecContext(ctx, queryUpdate, newVal, sender.ID)
+	_, err = tx.ExecContext(ctx, queryUpdate, newVal, sender.ID)
+	if err != nil {
+		log.Printf("Draft update execution failed: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Configuration persist error."})
+	}
 
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "⚙️ Fleet draft configuration modified."})
@@ -882,7 +893,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var heroID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
 
-	// Fetch custom user drafted units composition from the drafts table
 	var mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes int
 	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes FROM campaign_drafts WHERE user_id = $1`
 	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&mobSoldiers, &mobMechs, &mobBuggies, &mobShips, &mobJets, &mobNukes)
@@ -902,7 +912,10 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	var isAI bool = defenderCampID == "ai_drone_nest"
 	if !isAI {
-		_ = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
+		err = tx.QueryRowContext(ctx, "SELECT e.name, e.user_id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", defenderCampID).Scan(&defenderName, &defenderUserID, &defX, &defY, &defRegion)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Target coordinates mismatch."})
+		}
 	} else {
 		defenderName = "Rogue Drone Nest"
 		defX = 1
@@ -910,27 +923,23 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		defRegion = myRegion
 	}
 
-	// Dynamic Terrain Routing and Fleet Enforcement calculations
 	var marchingMinutes float64
 
 	if defRegion != myRegion {
-		// Ocean Crossings: Enforce Cargo Jet or Clipper Ship requirements on cross-continental campaigns
 		if mobJets <= 0 && mobShips <= 0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Ocean Block: You must include at least 1 Clipper Ship or 1 Cargo Jet in your campaign draft to deploy across continents!"})
 		}
 		if mobJets > 0 {
-			marchingMinutes = 120.0 // Air Travel transit speed (flat 2-hour window)
+			marchingMinutes = 120.0
 		} else {
-			marchingMinutes = 720.0 // Sea Travel transit speed (Clipper Ship takes 12 hours)
+			marchingMinutes = 720.0
 		}
 	} else {
-		// Same Continent: Treated as Land Travel
 		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
 		if steps == 0 {
 			steps = 1
 		}
 		marchingMinutes = steps * 10.0
-		// Land Travel Buggy Speed Boosts: Deploying buggies reduces land transit duration by 25%
 		if mobBuggies > 0 {
 			marchingMinutes *= 0.75
 		}
@@ -938,19 +947,18 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	switch routeType {
 	case "safe":
-		marchingMinutes *= 0.7 // Safe route travels fast
+		marchingMinutes *= 0.7
 	case "stealth":
-		marchingMinutes *= 1.5 // Stealth route travels slow to bypass detection
+		marchingMinutes *= 1.5
 	}
 
-	// Apply dynamic weather speed modifiers
 	switch activeWeather {
 	case "radiation_storm":
 		marchingMinutes *= 1.5
 	case "solar_flare":
 		marchingMinutes *= 0.7
 	case "acid_rain":
-		marchingMinutes *= 2.0 // Acid Rain doubles travel times
+		marchingMinutes *= 2.0
 	}
 
 	var energy float64
@@ -965,7 +973,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", fuelCost)})
 	}
 
-	// Deduct drafted forces from base workshop_inventory
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
@@ -974,7 +981,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID,
 	)
 
-	// Clean up draft row
 	_, _ = tx.ExecContext(ctx, "DELETE FROM campaign_drafts WHERE user_id = $1", sender.ID)
 
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
@@ -1003,7 +1009,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_ = tx.Commit()
 
-	// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
 	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
 	if errAnim == nil {
 		time.Sleep(300 * time.Millisecond)
@@ -1090,7 +1095,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
 		}
 
-		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 		diff := resolveTime.UTC().Sub(time.Now().UTC())
 		if diff <= 30*time.Second {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
@@ -1110,7 +1114,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		var createdAt time.Time
 		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
 
-		// Tactical Retreat cover casualties penalty (15%) when aborting under active combat fire
 		if state == "engaged" {
 			var soldiersMob, mechsMob int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", raidID).Scan(&soldiersMob, &mechsMob)
@@ -1131,7 +1134,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", survSoldiers, survMechs, raidID)
 		}
 
-		// Secure Co-Op Helper Retreat & Refunds: Automatically refund all helper forces safely on retreat
 		rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
 		if errCoop == nil {
 			type helperRefund struct {
@@ -1173,7 +1175,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
 
-		// Broadcast retreat news to the live radio feed
 		var attackerName string
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
 		newsHeadline := fmt.Sprintf("↩️ TACTICAL RETREAT: Outpost [%s] has ordered a strategic retreat. Survivors are returning back to hangar.", attackerName)
@@ -1193,7 +1194,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 }
 
 func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
-	// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 	diff := resolveTime.UTC().Sub(time.Now().UTC())
 	timeLeft := int(diff.Seconds())
 	if timeLeft < 0 {
