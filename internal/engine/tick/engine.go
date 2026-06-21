@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/engine/agent"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
@@ -21,6 +22,7 @@ type Engine struct {
 	resourceProcessor *resource.Processor
 	starvationEngine  *starvation.Engine
 	weatherEngine     *world.WeatherEngine
+	agentProcessor    *agent.Processor // Integrated missing agent automation executor
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -31,6 +33,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		resourceProcessor: resource.NewProcessor(db),
 		starvationEngine:  starvation.NewEngine(db),
 		weatherEngine:     world.NewWeatherEngine(db),
+		agentProcessor:    agent.NewProcessor(db), // Initialized cleanly on startup
 	}
 }
 
@@ -76,6 +79,12 @@ func (e *Engine) ProcessTick() {
 
 	if err := e.resourceProcessor.RunResourcePass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Resource Pass execution: %v", err)
+		return
+	}
+
+	// Executing background automation cycles during main clock tick pass
+	if err := e.agentProcessor.RunAgentPass(ctx, tx); err != nil {
+		log.Printf("Error during Tick Agent Pass execution: %v", err)
 		return
 	}
 
@@ -563,9 +572,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var attName, defName, routeType string
 			var defUserID int64
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				// Timezone-Normalized HUD Timers: Compute remaining steps in Go
+				// Timezone Neutralization: Compute remaining steps in Go
 				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
-					timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
+					timeLeft := int(time.Until(resTime.UTC()).Seconds())
 					if timeLeft > 0 {
 						proximityAlert := fmt.Sprintf(
 							"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
@@ -598,17 +607,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	defer rows.Close()
 
 	type activeRaid struct {
-		id             string
-		attackerID     string
-		defenderID     sql.NullString
-		state          string
-		roundNumber    int
-		attackerName   string
-		attackerUserID int64
-		defenderName   string
-		defenderUserID int64
-		resolveTime    time.Time
-		stolenScrap    float64
+		id              string
+		attackerID      string
+		defenderID      sql.NullString
+		state           string
+		roundNumber     int
+		attackerName    string
+		attackerUserID  int64
+		defenderName    string
+		defenderUserID  int64
+		resolveTime     time.Time
+		stolenScrap     float64
+		attackerRations float64
+		attackerAmmo    float64
+		attackerLosses  int
+		defenderLosses  int
 	}
 
 	var raids []activeRaid
@@ -620,7 +633,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
 		)
 		if err == nil {
-			raids = append(raids, r)
+			err = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo, attacker_losses, defender_losses FROM raids WHERE id = $1", r.id).Scan(&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses)
+			if err == nil {
+				raids = append(raids, r)
+			}
 		} else {
 			log.Printf("Error scanning combat raid: %v", err)
 		}
@@ -767,11 +783,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs = int(float64(totMechs) * 0.50)
 		}
 
-		// Read and apply ratios safely
-		var rations, ammo float64
-		_ = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo FROM raids WHERE id = $1", r.id).Scan(&rations, &ammo)
-
-		if rations <= 0 || ammo <= 0 {
+		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {
 			offenseRatingModifier *= 0.50
 		}
 
