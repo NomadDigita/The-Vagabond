@@ -206,7 +206,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var x, y int
 	var success bool
 
-	// Decouple Seeding Loop: Seeding random source exactly once outside of the loop iteration checks
+	// Decouple Seeding Loop: Seeding random source exactly once outside of the coordinate calculation loop
 	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 	rGen := rand.New(rSource)
 

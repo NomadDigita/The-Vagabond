@@ -288,7 +288,21 @@ func relocateZeroCoordinates(db *sql.DB) {
 	log.Println("Geographical Spawning Self-Healing relocator pass active...")
 	ctx := context.Background()
 
-	rows, err := db.QueryContext(ctx, "SELECT c.id, c.region FROM coordinates c WHERE c.x = 0 AND c.y = 0")
+	// Duplicate Spawning Pool Sweep: locate zero coordinates, hardcoded duplicates, and overlapping spawns
+	queryZeroAndDuplicated := `
+		SELECT DISTINCT c.id, c.region 
+		FROM coordinates c
+		JOIN encampments e ON e.coordinate_id = c.id
+		WHERE (c.x = 0 AND c.y = 0) 
+		   OR (c.x = 913 AND c.y = -843)
+		   OR c.id IN (
+		       SELECT coordinate_id 
+		       FROM encampments 
+		       GROUP BY coordinate_id 
+		       HAVING COUNT(*) > 1
+		   )`
+
+	rows, err := db.QueryContext(ctx, queryZeroAndDuplicated)
 	if err != nil {
 		log.Printf("Spawning relocator sweep skipped: %v", err)
 		return
