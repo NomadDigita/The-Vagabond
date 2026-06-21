@@ -19,7 +19,6 @@ func NewExchangeHandler(db *sql.DB) *ExchangeHandler {
 	return &ExchangeHandler{DB: db}
 }
 
-// HandleExchangePanel renders active global user listings
 func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -36,7 +35,6 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Fetch most recent 3 active listings
 	query := `
 		SELECT m.id, e.name, m.item_type, m.quantity, m.price_dollars 
 		FROM market_exchange m
@@ -90,11 +88,9 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
 
-	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
 	return c.Send(panelText, selector)
 }
 
-// HandlePostListingCallback manages creating a marketplace listing
 func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -148,7 +144,6 @@ func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 	return h.HandleExchangePanel(c)
 }
 
-// HandleBuyListingCallback handles buying another user's posted listing
 func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
