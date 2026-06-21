@@ -154,6 +154,9 @@ func executeStartupMigrations(db *sql.DB) {
 			CONSTRAINT unique_raid_coop_member UNIQUE (raid_id, encampment_id)
 		);`,
 
+		`ALTER TABLE raid_coop_members ADD COLUMN IF NOT EXISTS state VARCHAR(50) DEFAULT 'marching_to_ally';`,
+		`ALTER TABLE raid_coop_members ADD COLUMN IF NOT EXISTS arrival_time TIMESTAMP WITH TIME ZONE;`,
+
 		`CREATE TABLE IF NOT EXISTS agent_tasks (
 			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
 			mode VARCHAR(50) DEFAULT 'collector',
@@ -549,7 +552,7 @@ func main() {
 	bot.Handle("\fclan_promote", clan.HandlePromoteMemberCallback)
 
 	bot.Handle("\fconfirm_launch", combat.HandleConfirmHangarLaunchCallback)
-	bot.Handle("\fadjust_draft", combat.HandleAdjustDraftCallback) // Registered draft customizer incrementer (Section 1 Complete)
+	bot.Handle("\fadjust_draft", combat.HandleAdjustDraftCallback)
 
 	port := os.Getenv("PORT")
 	if port == "" {
