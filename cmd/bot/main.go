@@ -103,6 +103,12 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS miners INT DEFAULT 1;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS buggies INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS ships INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS jets INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS haulers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS tankers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS rigs INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS active_mining_queues (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -288,7 +294,7 @@ func relocateZeroCoordinates(db *sql.DB) {
 	log.Println("Geographical Spawning Self-Healing relocator pass active...")
 	ctx := context.Background()
 
-	// Duplicate Spawning Pool Sweep: Decouple any zero coordinates, hardcoded duplicates, and overlapping spawns
+	// Duplicate Spawning Pool Sweep: locate zero coordinates, hardcoded duplicates, and overlapping spawns
 	queryZeroAndDuplicated := `
 		SELECT DISTINCT c.id, c.region 
 		FROM coordinates c
