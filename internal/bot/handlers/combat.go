@@ -220,7 +220,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var rRations, rAmmo float64
 			var resTime time.Time
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
-				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
@@ -524,6 +523,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
+	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
 	if resolved {
 		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 		rGen := rand.New(rSource)
@@ -531,7 +531,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-
+			
 			attackerUser := &telebot.User{ID: attackerUserID}
 			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
 			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
@@ -614,29 +614,28 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Troop Requirement: You must have active forces stationed to join co-op raids!"})
 	}
 
+	// Dynamic Rally Points: Helpers first deploy forces to the co-op creator's base (coordinates)
+	var creatorX, creatorY, helperX, helperY int
+	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", attackerCampID).Scan(&creatorX, &creatorY)
+	_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", helperCampID).Scan(&helperX, &helperY)
+
+	steps := math.Abs(float64(creatorX-helperX)) + math.Abs(float64(creatorY-helperY))
+	if steps == 0 {
+		steps = 1
+	}
+	transitMinutes := steps * 10.0
+	arrivalTime := time.Now().UTC().Add(time.Duration(transitMinutes) * time.Minute)
+
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2 WHERE encampment_id = $3", conSoldiers, conMechs, helperCampID)
 
+	// Store helper inside the custom rally table under state 'marching_to_ally'
 	queryJointMember := `
-		INSERT INTO raid_coop_members (raid_id, encampment_id, soldiers_contributed, mechs_contributed)
-		VALUES ($1, $2, $3, $4)`
-	_, err = tx.ExecContext(ctx, queryJointMember, raidID, helperCampID, conSoldiers, conMechs)
+		INSERT INTO raid_coop_members (raid_id, encampment_id, soldiers_contributed, mechs_contributed, state, arrival_time)
+		VALUES ($1, $2, $3, $4, 'marching_to_ally', $5)`
+	_, err = tx.ExecContext(ctx, queryJointMember, raidID, helperCampID, conSoldiers, conMechs, arrivalTime)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing helper contribution details."})
 	}
-
-	var primSoldiers, primMechs int
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", attackerCampID).Scan(&primSoldiers, &primMechs)
-
-	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = 0, mechs = 0 WHERE encampment_id = $1", attackerCampID)
-
-	_, _ = tx.ExecContext(ctx, `
-		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
-		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
-		raidID, primSoldiers, primMechs,
-	)
-
-	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
 
 	// Send an instant join/departure alert to the Co-Op lobby creator (Dynamic communication)
 	var creatorUserID int64
@@ -649,19 +648,20 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		WHERE r.id = $1`, raidID).Scan(&creatorUserID, &targetOutpostName)
 
 	alertCreatorMsg := fmt.Sprintf(
-		"🤝 CO-OP LOBBY DEPARTURE: Allied Commander @%s has successfully contributed units and joined your staged raid against Outpost [%s]!\n"+
-			"Your joint military forces have permanently departed and are marching towards coordinates.",
-		sender.Username, targetOutpostName,
+		"🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined your raid forces!\n"+
+			"They have departed on Leg 1 and are rallying to your base. Once they arrive, they will be stationed for battle.",
+		sender.Username,
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
+	// Broadcast co-op departure alerts to all other helpers currently registered inside lobby
 	rowsHelpers, errHelpers := tx.QueryContext(ctx, "SELECT e.user_id FROM raid_coop_members rcm JOIN encampments e ON e.id = rcm.encampment_id WHERE rcm.raid_id = $1 AND rcm.encampment_id != $2", raidID, helperCampID)
 	if errHelpers == nil {
 		defer rowsHelpers.Close()
 		for rowsHelpers.Next() {
 			var hUserID int64
 			if err := rowsHelpers.Scan(&hUserID); err == nil {
-				alertMsg := fmt.Sprintf("🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined your raid forces! Campaign has departed marching towards coordinates.", sender.Username)
+				alertMsg := fmt.Sprintf("🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined the raid forces! They are rallying to the lead base.", sender.Username)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hUserID, alertMsg)
 			}
 		}
@@ -669,7 +669,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces bound! Marching towards coordinates."})
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces rally initiated! marching to lead base."})
 	return h.HandleExpeditionRadar(c)
 }
 
@@ -695,7 +695,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
-		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`,
+		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`, 
 		sender.ID, defenderCampID,
 	)
 
@@ -936,7 +936,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		}
 	}
 
-	// Apply Route specific speed multipliers
 	switch routeType {
 	case "safe":
 		marchingMinutes *= 0.7 // Safe route travels fast
@@ -971,7 +970,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
 		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6 
-		WHERE encampment_id = $7`,
+		WHERE encampment_id = $7`, 
 		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID,
 	)
 
@@ -999,7 +998,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
-	// Broadcast campaign departure news wire to the live radio feed
 	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
@@ -1011,7 +1009,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
 		time.Sleep(300 * time.Millisecond)
-
+		
 		weatherStatus := "Nominal baseline limits"
 		switch activeWeather {
 case "radiation_storm":
@@ -1021,10 +1019,10 @@ case "radiation_storm":
 		case "acid_rain":
 			weatherStatus = "🌧️ Acid Rain alert: Corrosive precipitation (+100% transit delays)"
 		}
-
+		
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 		time.Sleep(300 * time.Millisecond)
-
+		
 		fleetStatus := "None"
 		if mobBuggies > 0 {
 			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
@@ -1034,7 +1032,7 @@ case "radiation_storm":
 		} else if mobShips > 0 {
 			fleetStatus = "⛵ Clipper Ships deployed (Sea Travel cross-continent transit enabled)"
 		}
-
+		
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
