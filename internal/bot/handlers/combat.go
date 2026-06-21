@@ -162,7 +162,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 					dashboard += "🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\n"
 					hasCoops = true
 				}
-				timeLeft := int(time.Until(resTime.UTC()).Seconds())
+				timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
@@ -220,7 +220,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var rRations, rAmmo float64
 			var resTime time.Time
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
-				diff := time.Until(resTime.UTC())
+				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
+				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
@@ -265,7 +266,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		log.Printf("Inbound radar scan failed: %v", err)
 		inboundText = "📡 Static: Scanner interference detected.\n\n"
 	} else {
-		diff := time.Until(resolveTime.UTC())
+		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
+		diff := resolveTime.UTC().Sub(time.Now().UTC())
 		timeLeft := int(diff.Seconds())
 		if timeLeft < 0 {
 			timeLeft = 0
@@ -277,18 +279,14 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
-	timeWindow := time.Now().UTC().Add(-30 * time.Second)
 	querySpies := `
 		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
-		WHERE s.is_intercepted = FALSE 
-		  AND (s.spy_id = $1 OR s.target_id = $1) 
-		  AND s.resolved = FALSE
-		  AND s.created_at >= $2`
+		WHERE s.is_intercepted = FALSE AND (s.spy_id = $1 OR s.target_id = $1) AND s.resolved = FALSE`
 
-	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID, timeWindow)
+	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID)
 	spyText := ""
 	if err == nil {
 		defer rowsSpies.Close()
@@ -627,7 +625,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
 
-	// Send an instant join/departure alert to the Co-Op lobby creator (Dynamic communication)
 	var creatorUserID int64
 	var targetOutpostName string
 	_ = tx.QueryRowContext(ctx, `
@@ -644,7 +641,6 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
-	// Broadcast co-op departure alerts to all other helpers currently registered inside lobby
 	rowsHelpers, errHelpers := tx.QueryContext(ctx, "SELECT e.user_id FROM raid_coop_members rcm JOIN encampments e ON e.id = rcm.encampment_id WHERE rcm.raid_id = $1 AND rcm.encampment_id != $2", raidID, helperCampID)
 	if errHelpers == nil {
 		defer rowsHelpers.Close()
@@ -870,7 +866,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
-	// Broadcast campaign departure news wire to the live radio feed
 	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
@@ -926,7 +921,9 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
 		}
 
-		if time.Until(resolveTime.UTC()) <= 30*time.Second {
+		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
+		diff := resolveTime.UTC().Sub(time.Now().UTC())
+		if diff <= 30*time.Second {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
 		}
 
@@ -976,20 +973,18 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			}
 			var refunds []helperRefund
 			for rowsCoop.Next() {
-				var hr helperRefund
-				_ = rowsCoop.Scan(&hr.campID, &hr.soldiers, &hr.mechs)
-				_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", hr.campID).Scan(&hr.userID)
-				refunds = append(refunds, hr)
+				var rVal helperRefund
+				_ = rowsCoop.Scan(&rVal.campID, &rVal.soldiers, &rVal.mechs)
+				_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", rVal.campID).Scan(&rVal.userID)
+				refunds = append(refunds, rVal)
 			}
 			rowsCoop.Close()
 
-			for _, hr := range refunds {
-				// Refund survivors back to base inventory
-				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", hr.soldiers, hr.mechs, hr.campID)
+			for _, rVal := range refunds {
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", rVal.soldiers, rVal.mechs, rVal.campID)
 
-				// Notify helper
 				retreatAlert := "↩️ CO-OP MISSION ABORTED: The raid creator has ordered a strategic retreat. Your contributed survivors have returned safely to base."
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hr.userID, retreatAlert)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", rVal.userID, retreatAlert)
 			}
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", raidID)
 		}
@@ -1005,6 +1000,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			elapsed = 10 * time.Second
 		}
 
+		// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 		returnResolveTime := time.Now().UTC().Add(elapsed)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
@@ -1029,7 +1025,8 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 }
 
 func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
-	diff := time.Until(resolveTime.UTC())
+	// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
+	diff := resolveTime.UTC().Sub(time.Now().UTC())
 	timeLeft := int(diff.Seconds())
 	if timeLeft < 0 {
 		timeLeft = 0

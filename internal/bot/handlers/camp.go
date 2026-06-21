@@ -176,7 +176,8 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 					activeQueuesText += "⚙️ ACTIVE EXTRACTION PROCESSORS:\n"
 					hasQueues = true
 				}
-				timeLeft := int(time.Until(rReady.UTC()).Seconds())
+				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
+				timeLeft := int(rReady.UTC().Sub(time.Now().UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
