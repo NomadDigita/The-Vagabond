@@ -644,6 +644,20 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
+	// Broadcast co-op departure alerts to all other helpers currently registered inside lobby
+	rowsHelpers, errHelpers := tx.QueryContext(ctx, "SELECT e.user_id FROM raid_coop_members rcm JOIN encampments e ON e.id = rcm.encampment_id WHERE rcm.raid_id = $1 AND rcm.encampment_id != $2", raidID, helperCampID)
+	if errHelpers == nil {
+		defer rowsHelpers.Close()
+		for rowsHelpers.Next() {
+			var hUserID int64
+			if err := rowsHelpers.Scan(&hUserID); err == nil {
+				alertMsg := fmt.Sprintf("🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined your raid forces! Campaign has departed marching towards coordinates.", sender.Username)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hUserID, alertMsg)
+			}
+		}
+		rowsHelpers.Close()
+	}
+
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces bound! Marching towards coordinates."})
 	return h.HandleExpeditionRadar(c)
@@ -897,7 +911,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
-	// Updated state check to accept 'engaged' as a valid state for aborting (Tactical Retreat)
 	if state != "marching" && state != "returning" && state != "engaged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
@@ -952,6 +965,35 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", survSoldiers, survMechs, raidID)
 		}
 
+		// Secure Co-Op Helper Retreat & Refunds: Automatically refund all helper forces safely on retreat
+		rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
+		if errCoop == nil {
+			type helperRefund struct {
+				campID   string
+				userID   int64
+				soldiers int
+				mechs    int
+			}
+			var refunds []helperRefund
+			for rowsCoop.Next() {
+				var hr helperRefund
+				_ = rowsCoop.Scan(&hr.campID, &hr.soldiers, &hr.mechs)
+				_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", hr.campID).Scan(&hr.userID)
+				refunds = append(refunds, hr)
+			}
+			rowsCoop.Close()
+
+			for _, hr := range refunds {
+				// Refund survivors back to base inventory
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", hr.soldiers, hr.mechs, hr.campID)
+
+				// Notify helper
+				retreatAlert := "↩️ CO-OP MISSION ABORTED: The raid creator has ordered a strategic retreat. Your contributed survivors have returned safely to base."
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hr.userID, retreatAlert)
+			}
+			_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", raidID)
+		}
+
 		var scrap float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap)
 
@@ -970,7 +1012,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		// Broadcast retreat news to the live radio feed
 		var attackerName string
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
-		newsHeadline := fmt.Sprintf("↩️ TACTICAL RETREAT: Outpost [%s] has ordered a strategic retreat. Surviving forces are returning back to hangar.", attackerName)
+		newsHeadline := fmt.Sprintf("↩️ TACTICAL RETREAT: Outpost [%s] has ordered a strategic retreat. Survivors are returning back to hangar.", attackerName)
 		_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
 		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Tactical retreat engaged! Return march started."})

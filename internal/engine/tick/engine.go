@@ -163,7 +163,6 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 	rows.Close()
 
 	for _, m := range completed {
-		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.readyAt.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -243,7 +242,6 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 	rows.Close()
 
 	for _, m := range missions {
-		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -334,8 +332,16 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		var rations, oil float64
 		_ = tx.QueryRowContext(ctx, "SELECT rations, oil FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&rations, &oil)
 
+		var tankers int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(tankers, 0) FROM workshop_inventory WHERE encampment_id = $1", ex.attackerID).Scan(&tankers)
+
 		deductRations := 3.0
 		deductOil := 1.0
+
+		// Fuel Tanker Upkeep: Tankers reduce fuel (oil) consumption by 20% on all transits
+		if tankers > 0 {
+			deductOil = 0.80
+		}
 
 		newRations := math.Max(rations-deductRations, 0.0)
 		newOil := math.Max(oil-deductOil, 0.0)
@@ -360,8 +366,8 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 	for _, b := range brackets {
 		queryQueue := `
 			SELECT q.user_id, q.entered_at, u.username,
-			       COALESCE((SELECT soldiers FROM workshop_inventory WHERE encampment_id = e.id), 0) as soldiers,
-			       COALESCE((SELECT mechs FROM workshop_inventory WHERE encampment_id = e.id), 0) as mechs
+			       COALESCE((SELECT soldiers FROM workshop_inventory WHERE encampment_id e.id), 0) as soldiers,
+			       COALESCE((SELECT mechs FROM workshop_inventory WHERE encampment_id e.id), 0) as mechs
 			FROM arena_queue q
 			JOIN users u ON u.telegram_id = q.user_id
 			JOIN encampments e ON e.user_id = q.user_id
@@ -529,6 +535,7 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
+	// Standalone warning sub-query for all marching campaigns (Warning Alerts)
 	queryAllMarching := `
 		SELECT r.id, r.resolve_time, ea.name, ed.user_id, ed.name, rf.route_type
 		FROM raids r
@@ -546,8 +553,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var attName, defName, routeType string
 			var defUserID int64
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				// Timezone Neutralization: Compute remaining steps in Go
-				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
+				if routeType != "stealth" {
 					timeLeft := int(time.Until(resTime.UTC()).Seconds())
 					if timeLeft > 0 {
 						proximityAlert := fmt.Sprintf(
@@ -611,7 +617,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, r := range raids {
-		// Timezone Neutralization: Check resolve timestamps in Go
+		// Timezone Normalization: Compare times securely inside Go's native UTC context
 		if r.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -745,9 +751,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs = int(float64(totMechs) * 0.50)
 		}
 
-		// Read and apply ratios safely
 		var rations, ammo float64
-		_ = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo FROM raids WHERE id = $1", r.id).Scan(&rations, &ammo)
+		_ = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo FROM raids WHERE id = $1").Scan(&rations, &ammo)
 
 		if rations <= 0 || ammo <= 0 {
 			offenseRatingModifier *= 0.50
@@ -820,6 +825,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			}
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
+		}
+
+		var rigs int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(rigs, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&rigs)
+
+		// Recovery Rigs fleet logic: Recovery rigs mitigate mechanical (mech) casualties by 15%
+		if rigs > 0 {
+			lostDefMechs := int(float64(lostAttMechs) * 0.15)
+			newAttMechs = int(math.Min(float64(newAttMechs+lostDefMechs), float64(primaryMechs)))
+			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET mechs_mobilized = $1 WHERE raid_id = $2", newAttMechs, r.id)
 		}
 
 		if r.defenderID.Valid && defCas > 0 {
@@ -899,7 +914,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			winAlert := fmt.Sprintf(
 				"🏆 BATTLE RESOLUTION: VICTORY!\n\n"+
-					"Your forces breached the coordinate perimeters of [%s]!\n"+
+					"Your forces breached the perimeters of [%s]!\n"+
 					"⚙️ Looted: +%.1f Scrap\n\n"+
 					"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot.",
 				r.defenderName, primaryShare,
@@ -926,11 +941,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
 
-			drawAlert := "⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home."
+			drawAlert := fmt.Sprintf("⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home.")
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, drawAlert)
 
 			if r.defenderID.Valid {
-				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
+				defDrawAlert := fmt.Sprintf("🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated.")
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
 			}
 
