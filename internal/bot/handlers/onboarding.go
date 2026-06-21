@@ -210,17 +210,16 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	rGen := rand.New(rSource)
 
 	for attempt := 0; attempt < 15; attempt++ {
-		switch spawnedContinent {
-case "Africa":
+		if spawnedContinent == "Africa" {
 			x = rGen.Intn(991) + 10 // [10, 1000]
 			y = rGen.Intn(991) + 10 // [10, 1000]
-		case "Europe":
+		} else if spawnedContinent == "Europe" {
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
 			y = rGen.Intn(991) + 10 // [10, 1000]
-		case "Asia":
+		} else if spawnedContinent == "Asia" {
 			x = rGen.Intn(991) + 10 // [10, 1000]
 			y = -(rGen.Intn(991) + 10) // [-1000, -10]
-		default: // Americas
+		} else { // Americas
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
 			y = -(rGen.Intn(991) + 10) // [-1000, -10]
 		}
@@ -278,6 +277,9 @@ case "Africa":
 			log.Printf("Failed creating resources: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Resource allocation error."})
 		}
+
+		// Secure Hangar Row Allocation: Automatically allocate default inventory slots on onboarding
+		_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 	}
 
 	if err := tx.Commit(); err != nil {

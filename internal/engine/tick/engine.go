@@ -133,10 +133,10 @@ func (e *Engine) ProcessTick() {
 
 func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) error {
 	queryCompleted := `
-		SELECT q.id, q.encampment_id, q.resource_type, q.miners_assigned, e.user_id
+		SELECT q.id, q.encampment_id, q.resource_type, q.miners_assigned, e.user_id, q.ready_at
 		FROM active_mining_queues q
 		JOIN encampments e ON e.id = q.encampment_id
-		WHERE q.is_completed = FALSE AND q.ready_at <= CURRENT_TIMESTAMP`
+		WHERE q.is_completed = FALSE`
 
 	rows, err := tx.QueryContext(ctx, queryCompleted)
 	if err != nil {
@@ -150,18 +150,24 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 		resType      string
 		miners       int
 		userID       int64
+		readyAt      time.Time
 	}
 
 	var completed []completedMine
 	for rows.Next() {
 		var m completedMine
-		if err := rows.Scan(&m.id, &m.encampmentID, &m.resType, &m.miners, &m.userID); err == nil {
+		if err := rows.Scan(&m.id, &m.encampmentID, &m.resType, &m.miners, &m.userID, &m.readyAt); err == nil {
 			completed = append(completed, m)
 		}
 	}
 	rows.Close()
 
 	for _, m := range completed {
+		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
+		if m.readyAt.UTC().After(time.Now().UTC()) {
+			continue
+		}
+
 		var gain float64
 		var column string
 
@@ -207,10 +213,10 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 
 func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx) error {
 	queryPendingSpies := `
-		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id
+		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id, s.resolve_time
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
-		WHERE s.resolved = FALSE AND s.resolve_time <= CURRENT_TIMESTAMP`
+		WHERE s.resolved = FALSE`
 
 	rows, err := tx.QueryContext(ctx, queryPendingSpies)
 	if err != nil {
@@ -224,18 +230,24 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		targetID      string
 		isIntercepted bool
 		spyUserID     int64
+		resolveTime   time.Time
 	}
 
 	var missions []espionageMission
 	for rows.Next() {
 		var m espionageMission
-		if err := rows.Scan(&m.id, &m.spyID, &m.targetID, &m.isIntercepted, &m.spyUserID); err == nil {
+		if err := rows.Scan(&m.id, &m.spyID, &m.targetID, &m.isIntercepted, &m.spyUserID, &m.resolveTime); err == nil {
 			missions = append(missions, m)
 		}
 	}
 	rows.Close()
 
 	for _, m := range missions {
+		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
+		if m.resolveTime.UTC().After(time.Now().UTC()) {
+			continue
+		}
+
 		if m.isIntercepted {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE WHERE id = $1", m.id)
 			continue
@@ -517,14 +529,13 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	// Standalone warning sub-query for all marching campaigns (Warning Alerts)
 	queryAllMarching := `
 		SELECT r.id, r.resolve_time, ea.name, ed.user_id, ed.name, rf.route_type
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		JOIN encampments ed ON ed.id = r.defender_id
 		JOIN raid_forces rf ON rf.raid_id = r.id
-		WHERE r.state = 'marching' AND r.resolve_time > CURRENT_TIMESTAMP`
+		WHERE r.state = 'marching'`
 
 	rowsMarch, errMarch := tx.QueryContext(ctx, queryAllMarching)
 	if errMarch == nil {
@@ -535,7 +546,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var attName, defName, routeType string
 			var defUserID int64
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				if routeType != "stealth" {
+				// Timezone Neutralization: Compute remaining steps in Go
+				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
 					timeLeft := int(time.Until(resTime.UTC()).Seconds())
 					if timeLeft > 0 {
 						proximityAlert := fmt.Sprintf(
@@ -554,14 +566,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
-		       r.attacker_rations, r.attacker_ammo, r.attacker_losses, r.defender_losses,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
 		       COALESCE(ed.name, 'Rogue Drone Nest') as defender_name, 
 		       COALESCE(ed.user_id, 0) as defender_user_id, r.resolve_time, r.stolen_scrap
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning') AND r.resolve_time <= CURRENT_TIMESTAMP`
+		WHERE r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning'`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
@@ -570,21 +581,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	defer rows.Close()
 
 	type activeRaid struct {
-		id              string
-		attackerID      string
-		defenderID      sql.NullString
-		state           string
-		roundNumber     int
-		attackerRations float64
-		attackerAmmo    float64
-		attackerLosses  int
-		defenderLosses  int
-		attackerName    string
-		attackerUserID  int64
-		defenderName    string
-		defenderUserID  int64
-		resolveTime     time.Time
-		stolenScrap     float64
+		id             string
+		attackerID     string
+		defenderID     sql.NullString
+		state          string
+		roundNumber    int
+		attackerName   string
+		attackerUserID int64
+		defenderName   string
+		defenderUserID int64
+		resolveTime    time.Time
+		stolenScrap    float64
 	}
 
 	var raids []activeRaid
@@ -592,15 +599,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var r activeRaid
 		err := rows.Scan(
 			&r.id, &r.attackerID, &r.defenderID, &r.state, &r.roundNumber,
-			&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses,
 			&r.attackerName, &r.attackerUserID,
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
 		)
 		if err == nil {
-			err = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo, attacker_losses, defender_losses FROM raids WHERE id = $1", r.id).Scan(&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses)
-			if err == nil {
-				raids = append(raids, r)
-			}
+			raids = append(raids, r)
 		} else {
 			log.Printf("Error scanning combat raid: %v", err)
 		}
@@ -608,6 +611,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, r := range raids {
+		// Timezone Neutralization: Check resolve timestamps in Go
+		if r.resolveTime.UTC().After(time.Now().UTC()) {
+			continue
+		}
+
 		if r.state == "returning" {
 			var soldiersMob, mechsMob int
 			_ = tx.QueryRowContext(ctx, "SELECT soldiers_mobilized, mechs_mobilized FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob)
@@ -737,7 +745,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs = int(float64(totMechs) * 0.50)
 		}
 
-		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {
+		// Read and apply ratios safely
+		var rations, ammo float64
+		_ = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo FROM raids WHERE id = $1", r.id).Scan(&rations, &ammo)
+
+		if rations <= 0 || ammo <= 0 {
 			offenseRatingModifier *= 0.50
 		}
 
@@ -807,7 +819,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				refundMechs = 0
 			}
 
-			// Persist dynamic helper casualties inside database state row
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
 		}
 
@@ -915,11 +926,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
 
-			drawAlert := "⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home."
+			drawAlert := fmt.Sprintf("⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home.")
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, drawAlert)
 
 			if r.defenderID.Valid {
-				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
+				defDrawAlert := fmt.Sprintf("🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated.")
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
 			}
 

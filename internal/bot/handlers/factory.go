@@ -19,7 +19,6 @@ func NewFactoryHandler(db *sql.DB) *FactoryHandler {
 	return &FactoryHandler{DB: db}
 }
 
-// HandleFactoryPanel renders the heavy workshop menu
 func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -45,7 +44,6 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	return c.Send(panelText, keyboards.WorkshopNavigation())
 }
 
-// HandleRecruitPanel renders barracks forge options with inline buttons
 func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -54,6 +52,9 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	// Secure Hangar Allocator: Upsert row before reading inventory to prevent ErrNoRows defaults
+	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
 	var soldiers, drones, mechs, nukes int
 	queryInv := `SELECT soldiers, drones, mechs, nukes FROM workshop_inventory WHERE encampment_id = $1`
@@ -89,7 +90,6 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleVehiclesPanel renders logistics hangar options (Expanded Logistics Fleet)
 func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 
@@ -98,6 +98,9 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	// Secure Hangar Allocator: Upsert row before reading inventory to prevent ErrNoRows defaults
+	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
 	var buggies, ships, jets, haulers, tankers, rigs int
 	queryInv := `
@@ -120,21 +123,19 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 			"⛵ [Clipper Ship] — Cost: 300 Steel (Required to cross oceans)\n"+
 			"✈️ [Cargo Jet] — Cost: 1000 Steel, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n\n"+
 			"🚛 [Resource Hauler] — Cost: 500 Steel, 50 Oil (+5,000 battle loot cap)\n"+
-			"🛢️ [Fuel Tanker] — Cost: 400 Steel, 100 Hydrogen (-20%% march fuel costs)\n"+
-			"🔧 [Recovery Rig] — Cost: 600 Steel, 50 Iron (-15%% mechanical casualties)\n"+
+			"🛡️ [Fuel Tanker] — Cost: 400 Steel, 100 Hydrogen (-20%% march fuel costs)\n"+
+			"🛠️ [Recovery Rig] — Cost: 600 Steel, 50 Iron (-15%% mechanical casualties)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		buggies, ships, jets, haulers, tankers, rigs,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
-
 	btnCraftBuggy := selector.Data("🚗 Craft Buggy", "craft_item", "buggy")
 	btnCraftShip := selector.Data("⛵ Craft Ship", "craft_item", "ship")
-	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "cargo_jet")
-	
+	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "jet")
 	btnCraftHauler := selector.Data("🚛 Craft Hauler", "craft_item", "hauler")
-	btnCraftTanker := selector.Data("🛢️ Craft Tanker", "craft_item", "tanker")
-	btnCraftRig := selector.Data("🔧 Craft Recovery Rig", "craft_item", "rig")
+	btnCraftTanker := selector.Data("🛡️ Craft Tanker", "craft_item", "tanker")
+	btnCraftRig := selector.Data("🛠️ Craft Recovery Rig", "craft_item", "rig")
 
 	selector.Inline(
 		selector.Row(btnCraftBuggy, btnCraftShip),
@@ -146,7 +147,6 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleCraftCallback processes blueprint executions
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -160,6 +160,9 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Assembly failed."})
 	}
 	defer tx.Rollback()
+
+	// Secure Hangar Allocator: Ensure the workshop row is fully allocated inside active transaction block
+	_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
 	var rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
 	queryRes := `SELECT rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1 FOR UPDATE`
@@ -236,7 +239,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 400.0, hydrogen = hydrogen - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET tankers = tankers + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛢️ Fuel Tanker constructed!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛡️ Fuel Tanker constructed!"})
 
 	case "rig":
 		if steel < 600.0 || iron < 50.0 {
@@ -244,7 +247,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🔧 Recovery Rig constructed successfully!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛠️ Recovery Rig constructed!"})
 	}
 
 	if err := tx.Commit(); err != nil {

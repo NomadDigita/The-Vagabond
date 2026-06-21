@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -282,6 +284,64 @@ func executeStartupMigrations(db *sql.DB) {
 	log.Println("All schema initialization verifications complete.")
 }
 
+func relocateZeroCoordinates(db *sql.DB) {
+	log.Println("Geographical Spawning Self-Healing relocator pass active...")
+	ctx := context.Background()
+
+	rows, err := db.QueryContext(ctx, "SELECT c.id, c.region FROM coordinates c WHERE c.x = 0 AND c.y = 0")
+	if err != nil {
+		log.Printf("Spawning relocator sweep skipped: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type zeroCoord struct {
+		id     string
+		region string
+	}
+	var coords []zeroCoord
+	for rows.Next() {
+		var z zeroCoord
+		if err := rows.Scan(&z.id, &z.region); err == nil {
+			coords = append(coords, z)
+		}
+	}
+	rows.Close()
+
+	for _, c := range coords {
+		success := false
+		var x, y int
+		for attempt := 0; attempt < 100; attempt++ {
+			rSource := rand.NewSource(time.Now().UnixNano())
+			rGen := rand.New(rSource)
+			
+			switch c.region {
+			case "Africa":
+				x = rGen.Intn(991) + 10
+				y = rGen.Intn(991) + 10
+			case "Europe":
+				x = -(rGen.Intn(991) + 10)
+				y = rGen.Intn(991) + 10
+			case "Asia":
+				x = rGen.Intn(991) + 10
+				y = -(rGen.Intn(991) + 10)
+			default: // Americas
+				x = -(rGen.Intn(991) + 10)
+				y = -(rGen.Intn(991) + 10)
+			}
+
+			_, err := db.ExecContext(ctx, "UPDATE coordinates SET x = $1, y = $2 WHERE id = $3 AND NOT EXISTS(SELECT 1 FROM coordinates WHERE x = $1 AND y = $2)", x, y, c.id)
+			if err == nil {
+				success = true
+				break
+			}
+		}
+		if success {
+			log.Printf("Database Healing: Stuck coordinate [%s] redistributed to [%s quadrant: %d, %d]", c.id, c.region, x, y)
+		}
+	}
+}
+
 func main() {
 	log.Println("Starting The Vagabond server initialization sequence...")
 
@@ -328,6 +388,7 @@ func main() {
 	log.Println("Database connection pool established successfully.")
 
 	executeStartupMigrations(db)
+	relocateZeroCoordinates(db)
 
 	pref := telebot.Settings{
 		Token:  botToken,
