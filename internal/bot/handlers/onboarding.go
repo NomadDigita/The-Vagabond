@@ -206,13 +206,14 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var x, y int
 	var success bool
 
-	// Decouple Seeding Loop: Seeding random source exactly once outside of the coordinate calculation loop
+	// Decouple Seeding Loop: Seeding random source exactly once outside of the loop iteration checks
 	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 	rGen := rand.New(rSource)
 
 	for attempt := 0; attempt < 15; attempt++ {
+		// Style Refactor (QF1003): Substituted sequential if-else logic with clean Go switch matching
 		switch spawnedContinent {
-case "Africa":
+		case "Africa":
 			x = rGen.Intn(991) + 10 // [10, 1000]
 			y = rGen.Intn(991) + 10 // [10, 1000]
 		case "Europe":

@@ -162,7 +162,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 					dashboard += "🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\n"
 					hasCoops = true
 				}
-				timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
+				timeLeft := int(time.Until(resTime.UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
@@ -451,6 +451,19 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 
 	_ = tx.Commit()
 
+	// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
+	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 ESTABLISHING SECURE COGNITIVE FREQUENCIES...")
+	if errAnim == nil {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🛰️ DEPLOYING ESPIONAGE SATELLITE...\n[▰▱▱▱▱▱▱▱▱▱] 15% - Rockets fired, ascending to low-orbit...")
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🛰️ DEPLOYING ESPIONAGE SATELLITE...\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating coordinate scanner lenses...")
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🛰️ DEPLOYING ESPIONAGE SATELLITE...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Low-orbit aligned! Commencing telemetry decrypts...")
+		time.Sleep(300 * time.Millisecond)
+		_ = c.Bot().Delete(msg)
+	}
+
 	defenderAlert := fmt.Sprintf(
 		"🛰️ ESPIONAGE INTRUSION DETECTED!\n\n"+
 			"A hostile Spy Satellite launched by Outpost [%s] has breached your wireless perimeter and is transmitting warehouse telemetry!\n\n"+
@@ -511,6 +524,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
+	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
 	if resolved {
 		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 		rGen := rand.New(rSource)
@@ -625,6 +639,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
 
+	// Send an instant join/departure alert to the Co-Op lobby creator (Dynamic communication)
 	var creatorUserID int64
 	var targetOutpostName string
 	_ = tx.QueryRowContext(ctx, `
@@ -808,7 +823,36 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
 		_ = tx.Commit()
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🤖 Skirmish forces deployed!"})
+
+		// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
+		msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
+		if errAnim == nil {
+			time.Sleep(300 * time.Millisecond)
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
+			time.Sleep(300 * time.Millisecond)
+			
+			weatherStatus := "Nominal baseline limits"
+			if activeWeather == "radiation_storm" {
+				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
+			} else if activeWeather == "solar_flare" {
+				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
+			}
+			
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40% - Assessing weather front: %s...", weatherStatus))
+			time.Sleep(300 * time.Millisecond)
+			
+			fleetStatus := "None"
+			if mobBuggies > 0 {
+				fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
+			}
+			
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80% - Checking fleet configurations: %s...", fleetStatus))
+			time.Sleep(300 * time.Millisecond)
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
+			time.Sleep(300 * time.Millisecond)
+			_ = c.Bot().Delete(msg)
+		}
+
 		return c.Send(fmt.Sprintf("🤖 Skirmish launched! Your army of %d Soldiers and %d Mechs is marching on Rogue Drone Nest...", mobSoldiers, mobMechs), keyboards.MainNavigation())
 	}
 
@@ -870,6 +914,35 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
 	_ = tx.Commit()
+
+	// Animated Thinking Terminal: Sequentially edit messages to simulate reasoning satellite trajectory ascends
+	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
+	if errAnim == nil {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
+		time.Sleep(300 * time.Millisecond)
+		
+		weatherStatus := "Nominal baseline limits"
+		if activeWeather == "radiation_storm" {
+			weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
+		} else if activeWeather == "solar_flare" {
+			weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
+		}
+		
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40% - Assessing weather front: %s...", weatherStatus))
+		time.Sleep(300 * time.Millisecond)
+		
+		fleetStatus := "None"
+		if mobBuggies > 0 {
+			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
+		}
+		
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80% - Checking fleet configurations: %s...", fleetStatus))
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
+		time.Sleep(300 * time.Millisecond)
+		_ = c.Bot().Delete(msg)
+	}
 
 	if routeType != "stealth" {
 		defenderAlert := fmt.Sprintf(
@@ -962,7 +1035,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", survSoldiers, survMechs, raidID)
 		}
 
-		// Secure Co-Op Helper Retreat & Refunds: Automatically refund all helper forces safely on retreat
 		rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
 		if errCoop == nil {
 			type helperRefund struct {

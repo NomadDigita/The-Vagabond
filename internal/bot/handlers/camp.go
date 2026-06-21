@@ -329,6 +329,19 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mining task queue."})
 	}
 
+	// Thinking Terminal Miner Animations: sequentially update the worker's drills
+	msg, err := c.Bot().Send(c.Recipient(), "⛏️ COUPLING EXTRACTION DRILLS...")
+	if err == nil {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "⛏️ POSITIONING MINERS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Igniting heavy engine buffers...")
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "⛏️ POSITIONING MINERS...\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...")
+		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "⛏️ POSITIONING MINERS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Miner locked in position! Commencing extraction...")
+		time.Sleep(300 * time.Millisecond)
+		_ = c.Bot().Delete(msg)
+	}
+
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⛏️ Miner deployed! %s extraction in progress (5m)...", mineType)})
 	return h.HandleActiveMining(c)
