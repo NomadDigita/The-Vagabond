@@ -277,14 +277,18 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
+	timeWindow := time.Now().UTC().Add(-30 * time.Second)
 	querySpies := `
 		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
-		WHERE s.is_intercepted = FALSE AND (s.spy_id = $1 OR s.target_id = $1) AND s.resolved = FALSE`
+		WHERE s.is_intercepted = FALSE 
+		  AND (s.spy_id = $1 OR s.target_id = $1) 
+		  AND s.resolved = FALSE
+		  AND s.created_at >= $2`
 
-	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID)
+	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID, timeWindow)
 	spyText := ""
 	if err == nil {
 		defer rowsSpies.Close()
@@ -427,7 +431,6 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		steps = 1
 	}
 
-	// Dynamic Spy satellite travel duration based on cartographic grid steps (Physical voyages)
 	marchingMinutes := steps * 1.5
 	resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 
@@ -510,7 +513,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
-	// Chase Physics: If the satellite has already decrypted telemetry, try a 60% probability catch-up chase
 	if resolved {
 		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
 		rGen := rand.New(rSource)
@@ -518,7 +520,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-
+			
 			attackerUser := &telebot.User{ID: attackerUserID}
 			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
 			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
@@ -619,11 +621,28 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
 		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
 		raidID, primSoldiers, primMechs,
 	)
 
 	_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", time.Now().UTC().Add(15*time.Minute), raidID)
+
+	// Send an instant join/departure alert to the Co-Op lobby creator (Dynamic communication)
+	var creatorUserID int64
+	var targetOutpostName string
+	_ = tx.QueryRowContext(ctx, `
+		SELECT e.user_id, COALESCE(ed.name, 'Rogue Drone Nest') 
+		FROM raids r 
+		JOIN encampments e ON e.id = r.attacker_id 
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
+		WHERE r.id = $1`, raidID).Scan(&creatorUserID, &targetOutpostName)
+
+	alertCreatorMsg := fmt.Sprintf(
+		"🤝 CO-OP LOBBY DEPARTURE: Allied Commander @%s has successfully contributed units and joined your staged raid against Outpost [%s]!\n"+
+			"Your joint military forces have permanently departed and are marching towards coordinates.",
+		sender.Username, targetOutpostName,
+	)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
 	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Joint forces bound! Marching towards coordinates."})
@@ -837,6 +856,10 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
 
+	// Broadcast campaign departure news wire to the live radio feed
+	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
+
 	_ = tx.Commit()
 
 	if routeType != "stealth" {
@@ -874,6 +897,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
+	// Updated state check to accept 'engaged' as a valid state for aborting (Tactical Retreat)
 	if state != "marching" && state != "returning" && state != "engaged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
@@ -907,6 +931,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		var createdAt time.Time
 		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
 
+		// Tactical Retreat cover casualties penalty (15%) when aborting under active combat fire
 		if state == "engaged" {
 			var soldiersMob, mechsMob int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", raidID).Scan(&soldiersMob, &mechsMob)
@@ -941,6 +966,12 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		returnResolveTime := time.Now().UTC().Add(elapsed)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
+
+		// Broadcast retreat news to the live radio feed
+		var attackerName string
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
+		newsHeadline := fmt.Sprintf("↩️ TACTICAL RETREAT: Outpost [%s] has ordered a strategic retreat. Surviving forces are returning back to hangar.", attackerName)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
 		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Tactical retreat engaged! Return march started."})
 		_ = tx.Commit()
