@@ -532,7 +532,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-			
+
 			attackerUser := &telebot.User{ID: attackerUserID}
 			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
 			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
@@ -633,7 +633,7 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO raid_forces (raid_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) 
 		VALUES ($1, $2, $3, 0, 'direct')
-		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`, 
+		ON CONFLICT (raid_id) DO UPDATE SET soldiers_mobilized = $2, mechs_mobilized = $3`,
 		raidID, primSoldiers, primMechs,
 	)
 
@@ -828,27 +828,28 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
 		if errAnim == nil {
 			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10%% - Allocating flight buffer vectors...")
 			time.Sleep(300 * time.Millisecond)
-			
+
 			weatherStatus := "Nominal baseline limits"
-			if activeWeather == "radiation_storm" {
-				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
-			} else if activeWeather == "solar_flare" {
-				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
+			switch activeWeather {
+case "radiation_storm":
+				weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50%% transit delays)"
+			case "solar_flare":
+				weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30%% transit speed)"
 			}
-			
-			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40% - Assessing weather front: %s...", weatherStatus))
+
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 			time.Sleep(300 * time.Millisecond)
-			
+
 			fleetStatus := "None"
 			if mobBuggies > 0 {
 				fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
 			}
-			
-			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80% - Checking fleet configurations: %s...", fleetStatus))
+
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 			time.Sleep(300 * time.Millisecond)
-			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
+			_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100%% - Handshake complete! Dispatching forces...")
 			time.Sleep(300 * time.Millisecond)
 			_ = c.Bot().Delete(msg)
 		}
@@ -921,23 +922,24 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
 		time.Sleep(300 * time.Millisecond)
-		
+
 		weatherStatus := "Nominal baseline limits"
-		if activeWeather == "radiation_storm" {
+		switch activeWeather {
+case "radiation_storm":
 			weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
-		} else if activeWeather == "solar_flare" {
+		case "solar_flare":
 			weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
 		}
-		
-		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40% - Assessing weather front: %s...", weatherStatus))
+
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
 		time.Sleep(300 * time.Millisecond)
-		
+
 		fleetStatus := "None"
 		if mobBuggies > 0 {
 			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
 		}
-		
-		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80% - Checking fleet configurations: %s...", fleetStatus))
+
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
 		time.Sleep(300 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
 		time.Sleep(300 * time.Millisecond)
