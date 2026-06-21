@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings" // Added missing strings package import block
+	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	gopkg "gopkg.in/telebot.v3"
@@ -54,8 +54,16 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Secure Hangar Allocator: Ensure the workshop row is fully allocated
-	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+	// Secure Hangar Allocator: Ensure the workshop row is fully allocated and locked
+	queryUpsert := `
+		INSERT INTO workshop_inventory (encampment_id) 
+		VALUES ($1) 
+		ON CONFLICT (encampment_id) 
+		DO UPDATE SET encampment_id = EXCLUDED.encampment_id`
+	_, err := h.DB.ExecContext(ctx, queryUpsert, campID)
+	if err != nil {
+		log.Printf("Failed to allocate hangar row: %v", err)
+	}
 
 	var soldiers, drones, mechs, nukes int
 	queryInv := `SELECT soldiers, drones, mechs, nukes FROM workshop_inventory WHERE encampment_id = $1`
@@ -100,8 +108,16 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	// Secure Hangar Allocator: Ensure the workshop row is fully allocated
-	_, _ = h.DB.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+	// Secure Hangar Allocator: Ensure the workshop row is fully allocated and locked
+	queryUpsert := `
+		INSERT INTO workshop_inventory (encampment_id) 
+		VALUES ($1) 
+		ON CONFLICT (encampment_id) 
+		DO UPDATE SET encampment_id = EXCLUDED.encampment_id`
+	_, err := h.DB.ExecContext(ctx, queryUpsert, campID)
+	if err != nil {
+		log.Printf("Failed to allocate hangar row: %v", err)
+	}
 
 	var buggies, ships, jets, haulers, tankers, rigs int
 	queryInv := `
@@ -163,7 +179,11 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	defer tx.Rollback()
 
 	// Secure Hangar Allocator: Ensure the workshop row is fully allocated inside active transaction block
-	_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+	queryUpsert := `
+		INSERT INTO workshop_inventory (encampment_id) 
+		VALUES ($1) 
+		ON CONFLICT (encampment_id) DO UPDATE SET encampment_id = EXCLUDED.encampment_id`
+	_, _ = tx.ExecContext(ctx, queryUpsert, campID)
 
 	var rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond float64
 	queryRes := `SELECT rations, steel, uranium, hydrogen, iron, oil, gold, silver, diamond FROM resources WHERE encampment_id = $1 FOR UPDATE`
