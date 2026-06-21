@@ -268,7 +268,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "🔧 Recovery Rig constructed!"})
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "🛠️ Recovery Rig constructed!"})
 	}
 
 	if err := tx.Commit(); err != nil {
