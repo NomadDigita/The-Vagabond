@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/joho/godotenv"
@@ -34,6 +36,8 @@ func executeStartupMigrations(db *sql.DB) {
 			registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS idle_miner_notifications BOOLEAN DEFAULT FALSE;`,
 
 		`CREATE TABLE IF NOT EXISTS coordinates (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -294,6 +298,20 @@ func executeStartupMigrations(db *sql.DB) {
 			jets INT DEFAULT 0,
 			nukes INT DEFAULT 0
 		);`,
+
+		`CREATE OR REPLACE FUNCTION notify_realtime_event() 
+		RETURNS trigger AS $$
+		BEGIN
+			PERFORM pg_notify('realtime_notification_event', NEW.id::text);
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;`,
+
+		`DROP TRIGGER IF EXISTS trg_after_notification_insert ON notifications;`,
+		`CREATE TRIGGER trg_after_notification_insert
+		AFTER INSERT ON notifications
+		FOR EACH ROW
+		EXECUTE FUNCTION notify_realtime_event();`,
 	}
 
 	for _, stmt := range migrations {
@@ -308,7 +326,6 @@ func relocateZeroCoordinates(db *sql.DB) {
 	log.Println("Geographical Spawning Self-Healing relocator pass active...")
 	ctx := context.Background()
 
-	// Duplicate Spawning Pool Sweep: locate zero coordinates, hardcoded duplicates, and overlapping spawns
 	queryZeroAndDuplicated := `
 		SELECT DISTINCT c.id, c.region 
 		FROM coordinates c
@@ -342,7 +359,6 @@ func relocateZeroCoordinates(db *sql.DB) {
 	}
 	rows.Close()
 
-	// Decouple Seeding Loop: Seeding random source exactly once outside of the loop iteration checks
 	rSource := rand.NewSource(time.Now().UnixNano())
 	rGen := rand.New(rSource)
 
@@ -360,7 +376,7 @@ func relocateZeroCoordinates(db *sql.DB) {
 			case "Asia":
 				x = rGen.Intn(991) + 10
 				y = -(rGen.Intn(991) + 10)
-			default: // Americas
+			default:
 				x = -(rGen.Intn(991) + 10)
 				y = -(rGen.Intn(991) + 10)
 			}
@@ -441,6 +457,10 @@ func main() {
 
 	realtimeListener := realtime.NewListener(dbURL, db, bot)
 	realtimeListener.Start()
+
+	// INSTANTIATE AND START THE BACKUP NOTIFICATION DISPATCHER
+	notificationDispatcher := notifications.NewDispatcher(db, bot)
+	notificationDispatcher.Start()
 
 	onboarding := handlers.NewOnboardingHandler(db)
 	camp := handlers.NewCampHandler(db, adminIDs)
@@ -603,6 +623,7 @@ func main() {
 
 	tickEngine.Stop()
 	realtimeListener.Stop()
+	notificationDispatcher.Stop() // Terminate dispatcher cleanly on shutdown
 	db.Close()
 
 	log.Println("System components cleanly dismantled. Server offline.")
