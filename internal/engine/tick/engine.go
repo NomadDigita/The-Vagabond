@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -374,19 +375,71 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 }
 
 func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx) error {
-	queryPendingSpies := `
-		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id, s.resolve_time
+	// Step 1: Process Outbound Spy Satellites reaching target (resolved = FALSE)
+	queryOutbound := `
+		SELECT s.id, s.spy_id, s.target_id, ea.name as spy_name, ed.name as target_name, ed.user_id as target_user_id, s.resolve_time
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
-		WHERE s.resolved = FALSE`
-
-	rows, err := tx.QueryContext(ctx, queryPendingSpies)
+		JOIN encampments ed ON ed.id = s.target_id
+		WHERE s.resolved = FALSE AND s.is_intercepted = FALSE`
+	
+	rows, err := tx.QueryContext(ctx, queryOutbound)
 	if err != nil {
-		return fmt.Errorf("failed querying pending espionage missions: %w", err)
+		return fmt.Errorf("failed querying outbound espionage: %w", err)
 	}
 	defer rows.Close()
 
-	type espionageMission struct {
+	type outboundSpy struct {
+		id           string
+		spyID        string
+		targetID     string
+		spyName      string
+		targetName   string
+		targetUserID int64
+		resolveTime  time.Time
+	}
+	var outSpies []outboundSpy
+	for rows.Next() {
+		var s outboundSpy
+		if err := rows.Scan(&s.id, &s.spyID, &s.targetID, &s.spyName, &s.targetName, &s.targetUserID, &s.resolveTime); err == nil {
+			outSpies = append(outSpies, s)
+		}
+	}
+	rows.Close()
+
+	for _, s := range outSpies {
+		if s.resolveTime.UTC().After(time.Now().UTC()) {
+			continue
+		}
+
+		// Scanning complete. Transition into the return leg.
+		returnDuration := 2 * time.Minute // Simulated return flight time
+		returnResolveTime := time.Now().UTC().Add(returnDuration)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE, resolve_time = $1 WHERE id = $2", returnResolveTime, s.id)
+
+		defenderAlert := fmt.Sprintf(
+			"🛰️ ESPIONAGE BREACH: Outpost [%s] has successfully scanned your warehouse telemetry!\n"+
+				"The spy satellite is now returning to orbit. You have %d seconds left to launch an Interceptor Drone and vaporize the intel before it lands.",
+			s.spyName, int(returnDuration.Seconds()),
+		)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.targetUserID, defenderAlert)
+	}
+
+	// Step 2: Process Returning Spy Satellites landing back at base (resolved = TRUE)
+	queryReturning := `
+		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id, s.resolve_time
+		FROM spy_missions s
+		JOIN encampments ea ON ea.id = s.spy_id
+		WHERE s.resolved = TRUE`
+
+	rowsRet, err := tx.QueryContext(ctx, queryReturning)
+	if err != nil {
+		return fmt.Errorf("failed querying returning espionage: %w", err)
+	}
+	defer rowsRet.Close()
+
+	type returningSpy struct {
 		id            string
 		spyID         string
 		targetID      string
@@ -394,52 +447,40 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		spyUserID     int64
 		resolveTime   time.Time
 	}
-
-	var missions []espionageMission
-	for rows.Next() {
-		var m espionageMission
-		if err := rows.Scan(&m.id, &m.spyID, &m.targetID, &m.isIntercepted, &m.spyUserID, &m.resolveTime); err == nil {
-			missions = append(missions, m)
+	var retSpies []returningSpy
+	for rowsRet.Next() {
+		var s returningSpy
+		if err := rowsRet.Scan(&s.id, &s.spyID, &s.targetID, &s.isIntercepted, &s.spyUserID, &s.resolveTime); err == nil {
+			retSpies = append(retSpies, s)
 		}
 	}
+	rowsRet.Close()
 
-	for _, m := range missions {
-		if m.resolveTime.UTC().After(time.Now().UTC()) {
+	for _, s := range retSpies {
+		if s.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
 
-		if m.isIntercepted {
-			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE WHERE id = $1", m.id)
+		if s.isIntercepted {
+			_, _ = tx.ExecContext(ctx, "DELETE FROM spy_missions WHERE id = $1", s.id)
 			continue
 		}
 
 		var targetName string
-		var targetLvl int = 1
-		_ = tx.QueryRowContext(ctx, "SELECT name, level FROM encampments WHERE id = $1", m.targetID).Scan(&targetName, &targetLvl)
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", s.targetID).Scan(&targetName)
 
 		var tentLvl, heapLvl, genLvl int = 1, 1, 1
 		queryMod := "SELECT level FROM modules WHERE encampment_id = $1 AND type = $2"
-		if err := tx.QueryRowContext(ctx, queryMod, m.targetID, "tent").Scan(&tentLvl); err != nil {
-			tentLvl = 1
-		}
-		if err := tx.QueryRowContext(ctx, queryMod, m.targetID, "scrap_heap").Scan(&heapLvl); err != nil {
-			heapLvl = 1
-		}
-		if err := tx.QueryRowContext(ctx, queryMod, m.targetID, "generator").Scan(&genLvl); err != nil {
-			genLvl = 1
-		}
-
-		var upgradingModule string
-		_ = tx.QueryRowContext(ctx, "SELECT type FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE LIMIT 1", m.targetID).Scan(&upgradingModule)
-		if upgradingModule == "" {
-			upgradingModule = "None"
-		}
+		_ = tx.QueryRowContext(ctx, queryMod, s.targetID, "tent").Scan(&tentLvl)
+		_ = tx.QueryRowContext(ctx, queryMod, s.targetID, "scrap_heap").Scan(&heapLvl)
+		_ = tx.QueryRowContext(ctx, queryMod, s.targetID, "generator").Scan(&genLvl)
 
 		var scrap, rations float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", m.targetID).Scan(&scrap, &rations)
+		_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", s.targetID).Scan(&scrap, &rations)
 
 		spyReport := fmt.Sprintf(
-			"🛰️ SPY SATELLITE DECRYPTOR INDICES\n\n"+
+			"🛰️ ESPIONAGE DOWNLINK COMPLETED!\n\n"+
+				"Your spy satellite has returned safely to hangar. Telemetry fully decrypted:\n\n"+
 				"Target Outpost: %s\n\n"+
 				"DECRYPTED RESOURCES:\n"+
 				"⚙️ Scrap: %.1f\n"+
@@ -447,18 +488,14 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 				"MODULE STATUS GRID:\n"+
 				"⛺ Tent: Level %d\n"+
 				"⚙️ Scrap Heap: Level %d\n"+
-				"⚡ Generator: Level %d\n\n"+
-				"🔧 Active Upgrades Queue: %s",
-			targetName, scrap, rations, tentLvl, heapLvl, genLvl, upgradingModule,
+				"⚡ Generator: Level %d",
+			targetName, scrap, rations, tentLvl, heapLvl, genLvl,
 		)
 
-		queryNotif := `
-			INSERT INTO notifications (user_id, message, is_sent) 
-			VALUES ($1, $2, FALSE)`
-		_, _ = tx.ExecContext(ctx, queryNotif, m.spyUserID, spyReport)
-
-		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE WHERE id = $1", m.id)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.spyUserID, spyReport)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM spy_missions WHERE id = $1", s.id)
 	}
+
 	return nil
 }
 
@@ -703,10 +740,10 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	queryAllMarching := `
-		SELECT r.id, r.resolve_time, ea.name, ed.user_id, ed.name, rf.route_type
+		SELECT r.id, r.resolve_time, ea.name, COALESCE(ed.user_id, 0), COALESCE(ed.name, 'Rogue Drone Nest'), rf.route_type
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
-		JOIN encampments ed ON ed.id = r.defender_id
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		JOIN raid_forces rf ON rf.raid_id = r.id
 		WHERE r.state = 'marching'`
 
@@ -721,7 +758,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
 				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
 					timeLeft := int(time.Until(resTime.UTC()).Seconds())
-					if timeLeft > 0 {
+					if timeLeft > 0 && defUserID != 0 {
 						proximityAlert := fmt.Sprintf(
 							"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
 								"Hostile Force: Outpost [%s]\n"+
@@ -736,7 +773,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		rowsMarch.Close()
 	}
 
-	// Audited SQL Query: Leverages explicit COALESCE filters to safely handle nullable DB columns
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
@@ -804,7 +840,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
-			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your expedition survivors returned to base safely carrying +%.1f Scrap!", r.stolenScrap)
+			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap!", r.stolenScrap)
 			queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
 			_, _ = tx.ExecContext(ctx, queryNotif, r.attackerUserID, alertMsg)
 			continue
@@ -920,11 +956,19 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenseRatingModifier *= 1.30
 		}
 
+		// Dynamic weather combat rating calculations
+		var weatherNotice string = ""
 		switch activeWeather {
+		case "solar_flare":
+			// Solar Flare introduces accuracy/electronic target variance (scrambles telemetry)
+			offenseRatingModifier *= (0.80 + rand.Float64()*0.40)
+			weatherNotice = "\n⚠️ SOLAR FLARE ACTIVE: Scrambling electronic communication and target locks! Offensive variance fluctuated."
 		case "radiation_storm":
 			offenseRatingModifier *= 0.75
+			weatherNotice = "\n⚠️ RADIATION STORM ACTIVE: Fallout morale penalty applied! Base offense rating reduced by 25%."
 		case "acid_rain":
-			totMechs = int(float64(totMechs) * 0.50)
+			totMechs = totMechs / 2
+			weatherNotice = "\n⚠️ ACID RAIN ACTIVE: Corrosive rain detected! Armored Mech defensive structures degraded by 50%."
 		}
 
 		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {
@@ -1042,12 +1086,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap := defenderScrap * lootPercentage
 		primaryShare := stolenScrap
 
+		// Append specific environmental weather details dynamically to round reports
 		roundLog := fmt.Sprintf(
 			"⚔️ BATTLE REPORT: ROUND %d COMPLETE!\n\n"+
 				"💥 Attacker Casualties: %d Soldiers, %d Mechs lost.\n"+
-				"🛡️ Defender Casualties: %d units lost.\n"+
+				"🛡️ Defender Casualties: %d units lost.%s\n"+
 				"⏳ Next skirmish round starting on next clock tick.",
-			r.roundNumber, lostAttSols, lostAttMechs, defCas,
+			r.roundNumber, lostAttSols, lostAttMechs, defCas, weatherNotice,
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)

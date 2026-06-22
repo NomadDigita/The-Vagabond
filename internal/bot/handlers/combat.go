@@ -278,11 +278,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	}
 
 	querySpies := `
-		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound
+		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound, s.resolved
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
-		WHERE s.is_intercepted = FALSE AND (s.spy_id = $1 OR s.target_id = $1) AND s.resolved = FALSE`
+		WHERE s.is_intercepted = FALSE AND (s.spy_id = $1 OR s.target_id = $1)`
 
 	rowsSpies, err := h.DB.QueryContext(ctx, querySpies, campID)
 	spyText := ""
@@ -291,16 +291,24 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		for rowsSpies.Next() {
 			var spyID, eaName, edName string
 			var createdAt time.Time
-			var isOutbound bool
-			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &createdAt, &isOutbound); err == nil {
-				timeLeft := 30 - int(time.Since(createdAt.UTC()).Seconds())
+			var isOutbound, resolved bool
+			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &createdAt, &isOutbound, &resolved); err == nil {
+				timeLeft := 120 - int(time.Since(createdAt.UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
 				if isOutbound {
-					spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%ds remaining)\n\n", edName, timeLeft)
+					if !resolved {
+						spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%ds remaining)\n\n", edName, timeLeft)
+					} else {
+						spyText += fmt.Sprintf("↩️ SATELLITE RETURNING: Carrying Intel from %s\n   Arrival Status: Downlinking (%ds remaining)\n\n", edName, timeLeft)
+					}
 				} else {
-					spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%ds remaining)\n\n", eaName, timeLeft)
+					if !resolved {
+						spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%ds remaining)\n\n", eaName, timeLeft)
+					} else {
+						spyText += fmt.Sprintf("📡 RETREAT INTERCEPT WINDOW: Rival %s\n   Status: Chase Chase Chase! (%ds remaining)\n\n", eaName, timeLeft)
+					}
 					btnIntercept := selector.Data("🛡️ Launch Interceptor Drone", "launch_interceptor", spyID)
 					buttons = append(buttons, selector.Row(btnIntercept))
 				}
@@ -496,6 +504,12 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	var interceptors int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(drones, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&interceptors)
+	if interceptors <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: You must construct an Interceptor Drone inside the workshop first!"})
+	}
+
 	var isIntercepted bool
 	var resolved bool
 	var attackerCampID string
@@ -517,36 +531,44 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 10.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones - 1 WHERE encampment_id = $1", myCampID)
 
 	var attackerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
+	var attackerTechLvl, defenderTechLvl int = 1, 1
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", attackerCampID).Scan(&attackerTechLvl)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(defense_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&defenderTechLvl)
+
+	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10
+
 	if resolved {
-		rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
-		rGen := rand.New(rSource)
-		if rGen.Float64() < 0.60 {
-			_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
-			_ = tx.Commit()
-			_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone chased down and destroyed the returning spy satellite!"})
-			
-			attackerUser := &telebot.User{ID: attackerUserID}
-			_, _ = c.Bot().Send(attackerUser, "💥 CHASE INTERCEPT: Your returning spy satellite was chased down and vaporized by defender Interceptor Drones! Intel was lost.")
-			return c.Send("🛡️ CHASE SUCCESS: Your Interceptor Drone chased down the spy satellite and vaporized the decrypted intel!")
-		} else {
-			_ = tx.Commit()
-			return c.Send("❌ CHASE FAILED: The spy satellite was too fast! Your Interceptor Drone failed to catch it before it exited communications range. Interceptor lost.")
-		}
+		interceptChance -= 0.20
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
+	if interceptChance < 0.05 {
+		interceptChance = 0.05
+	} else if interceptChance > 0.95 {
+		interceptChance = 0.95
+	}
+
+	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
+	rGen := rand.New(rSource)
+
+	if rGen.Float64() < interceptChance {
+		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET is_intercepted = TRUE, resolved = TRUE WHERE id = $1", spyID)
+		_ = tx.Commit()
+
+		attackerUser := &telebot.User{ID: attackerUserID}
+		_, _ = c.Bot().Send(attackerUser, "💥 SPY INTERCEPTED: Your spy satellite was intercepted and destroyed by defender air defense interceptor systems! Telemetry lost.")
+		
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🛡️ SUCCESS: Drone intercepted hostile satellite! (%d%% Success Probability)", int(interceptChance*100))})
+		return c.Send(fmt.Sprintf("🛡️ SUCCESS: Your Interceptor Drone destroyed the spy satellite! (%d%% probability hit). Telemetry was vaporized.", int(interceptChance*100)))
+	}
+
 	_ = tx.Commit()
-
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Interceptor Drone launched! Tracking satellite..."})
-
-	attackerUser := &telebot.User{ID: attackerUserID}
-	_, _ = c.Bot().Send(attackerUser, "💥 SPY INTERCEPTED: Your returning Spy Satellite was intercepted and destroyed by hostile air defense systems! Telemetry lost.")
-
-	return c.Send("🛡️ INTERCEPT SUCCESS: Your Interceptor Drone destroyed the spy satellite! Telemetry was vaporized.")
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ FAILED: The satellite evaded your defense systems! (%d%% Success Probability)", int(interceptChance*100))})
+	return c.Send("❌ CHASE FAILED: The spy satellite evaded your defense systems and continued its route. Interceptor drone was lost.")
 }
 
 func (h *CombatHandler) HandleStageCoopCallback(c telebot.Context) error {
@@ -1011,37 +1033,37 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 
 	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
 	if errAnim == nil {
-		time.Sleep(300 * time.Millisecond)
-		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10% - Allocating flight buffer vectors...")
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10%\n⚡ Thrust vector buffer allocated.")
+		time.Sleep(350 * time.Millisecond)
 		
-		weatherStatus := "Nominal baseline limits"
+		weatherStatus := "Baseline parameters nominal."
 		switch activeWeather {
 case "radiation_storm":
-			weatherStatus = "⚠️ Radiation Storm warning: Fallout interference (+50% transit delays)"
+			weatherStatus = "⚠️ Radiation fallout warnings active over sector grids."
 		case "solar_flare":
-			weatherStatus = "⚡ Solar Flare active: Electromagnetic thrust boost (-30% transit speed)"
+			weatherStatus = "⚡ Electromagnetic solar interference warning. Accuracy variance applied."
 		case "acid_rain":
-			weatherStatus = "🌧️ Acid Rain alert: Corrosive precipitation (+100% transit delays)"
+			weatherStatus = "🌧️ Corrosive precipitation active. Mechs structure structural integrity hazard."
 		}
 		
-		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▱▱▱▱▱▱] 40%% - Assessing weather front: %s...", weatherStatus))
-		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 ANALYSIS ENGINE: WEATHER VECTORS...\n[▰▰▰▰▱▱▱▱▱▱] 40%%\n🌍 Weather Status: %s", weatherStatus))
+		time.Sleep(350 * time.Millisecond)
 		
-		fleetStatus := "None"
+		fleetStatus := "Default land speed"
 		if mobBuggies > 0 {
-			fleetStatus = "🚗 Scrap Buggies integrated (+25% land transit speed boost)"
+			fleetStatus = "🚗 Buggy logistics speed multiplier applied (+25%% speed)."
 		}
 		if mobJets > 0 {
-			fleetStatus = "✈️ Cargo Jets deployed (Air Travel cross-continent transit enabled)"
+			fleetStatus = "✈️ Cargo Jet air transit systems fully engaged."
 		} else if mobShips > 0 {
-			fleetStatus = "⛵ Clipper Ships deployed (Sea Travel cross-continent transit enabled)"
+			fleetStatus = "⛵ Clipper Ship sea transit structures secured."
 		}
 		
-		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▱▱] 80%% - Checking fleet configurations: %s...", fleetStatus))
-		time.Sleep(300 * time.Millisecond)
-		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▰▰▰▰▰▰▰▰▰] 100% - Handshake complete! Dispatching forces...")
-		time.Sleep(300 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 TELEMETRY ENGINE: FLEET ALIGNMENT...\n[▰▰▰▰▰▰▰▰▱▱] 80%%\n⚙️ Engine Sync: %s", fleetStatus))
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "📡 SECURE TRANSMISSION ESTABLISHED...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🚀 Handshake complete! Campaign deployed. Coordinates locked on targeting scanners.")
+		time.Sleep(350 * time.Millisecond)
 		_ = c.Bot().Delete(msg)
 	}
 
@@ -1080,14 +1102,14 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
 
-	if state != "marching" && state != "returning" && state != "engaged" {
+	if state != "marching" && state != "returning" && state != "engaged" && state != "staged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
 	}
 
 	switch action {
 	case "speed":
-		if state == "engaged" {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Active engagements cannot be speed-boosted."})
+		if state == "staged" || state == "engaged" {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Active engagements or staged lobbies cannot be speed-boosted."})
 		}
 		var scrap, dollars float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
@@ -1111,6 +1133,44 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		resolveTime = newResolve
 
 	case "abort":
+		if state == "staged" {
+			var creatorSols, creatorMechs int
+			_ = tx.QueryRowContext(ctx, "SELECT soldiers_mobilized, mechs_mobilized FROM raid_forces WHERE raid_id = $1", raidID).Scan(&creatorSols, &creatorMechs)
+			
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", creatorSols, creatorMechs, attackerID)
+
+			rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
+			if errCoop == nil {
+				type helperRefund struct {
+					campID   string
+					userID   int64
+					soldiers int
+					mechs    int
+				}
+				var refunds []helperRefund
+				for rowsCoop.Next() {
+					var rVal helperRefund
+					_ = rowsCoop.Scan(&rVal.campID, &rVal.soldiers, &rVal.mechs)
+					_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", rVal.campID).Scan(&rVal.userID)
+					refunds = append(refunds, rVal)
+				}
+				rowsCoop.Close()
+
+				for _, rVal := range refunds {
+					_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", rVal.soldiers, rVal.mechs, rVal.campID)
+
+					cancelAlert := "↩️ CO-OP STAGE CANCELLED: The lobby creator has dismantled the campaign. Your contributed forces have returned safely to base."
+					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", rVal.userID, cancelAlert)
+				}
+			}
+
+			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
+			
+			_ = tx.Commit()
+			_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Co-Op lobby cancelled! Mobilized forces refunded."})
+			return c.Send("↩️ Co-Op lobby dismantled. All draft troops and helper contributions have returned safely.", keyboards.MainNavigation())
+		}
+
 		var createdAt time.Time
 		_ = tx.QueryRowContext(ctx, "SELECT created_at FROM raids WHERE id = $1", raidID).Scan(&createdAt)
 

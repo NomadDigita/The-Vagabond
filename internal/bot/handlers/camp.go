@@ -358,6 +358,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mining task queue."})
 	}
 
+	// Cinematic Drilling Telemetry animation loop
 	msg, err := c.Bot().Send(c.Recipient(), "⛏️ COUPLING EXTRACTION DRILLS...")
 	if err == nil {
 		time.Sleep(300 * time.Millisecond)
@@ -474,6 +475,19 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 	queryUpdate := fmt.Sprintf("UPDATE mutation_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, campID)
 
+	// Cinematic Cellular Splicing Animation
+	msg, errAnim := c.Bot().Send(c.Recipient(), "🧬 EXTRACTING CELLULAR NUCLEI FOR MUTATION...")
+	if errAnim == nil {
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🧬 SPLICING GENETIC STRANDS...\n[▰▱▱▱▱▱▱▱▱▱] 20%\n🧠 Neuro-synaptic pathways opened.")
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🧬 SYNTHESIZING CELLULAR ADAPTATIONS...\n[▰▰▰▰▰▱▱▱▱▱] 60%\n☢️ Uranium radiation fallout stabilized.")
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🧬 COMMITTING CELLULAR MUTATIONS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Genetic structure realigned successfully!")
+		time.Sleep(350 * time.Millisecond)
+		_ = c.Bot().Delete(msg)
+	}
+
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing mutations: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mutations state."})
@@ -507,6 +521,9 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
+	var activeWeather string
+	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+
 	isAdmin := h.IsAdmin(sender.ID)
 	
 	if moduleType == "camp_core" {
@@ -525,6 +542,25 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE encampments SET level = level + 1 WHERE id = $1", campID)
+
+		// Cinematic Construction Upgrade Loader
+		msg, errAnim := c.Bot().Send(c.Recipient(), "🏗️ INITIALIZING STRUCTURAL CONVERSION BLUEPRINTS...")
+		if errAnim == nil {
+			time.Sleep(350 * time.Millisecond)
+			_, _ = c.Bot().Edit(msg, "🏗️ ASSEMBLING MATERIALS...\n[▰▱▱▱▱▱▱▱▱▱] 15%\n⚙️ Structural frames aligned.")
+			time.Sleep(350 * time.Millisecond)
+			
+			buildDelay := "Nominal construct speeds."
+			if activeWeather == "acid_rain" {
+				buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
+			}
+			
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🧱 Build modifiers: %s", buildDelay))
+			time.Sleep(350 * time.Millisecond)
+			_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")
+			time.Sleep(350 * time.Millisecond)
+			_ = c.Bot().Delete(msg)
+		}
 
 		_ = tx.Commit()
 		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🏆 Outpost Core upgraded to Level %d!", campLvl+1)})
@@ -571,6 +607,25 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	if err != nil {
 		log.Printf("Failed executing module upgrade: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing building configurations."})
+	}
+
+	// Cinematic Construction Upgrade Loader
+	msg, errAnim := c.Bot().Send(c.Recipient(), "🏗️ INITIALIZING STRUCTURAL CONVERSION BLUEPRINTS...")
+	if errAnim == nil {
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🏗️ ASSEMBLING MATERIALS...\n[▰▱▱▱▱▱▱▱▱▱] 15%\n⚙️ Structural frames aligned.")
+		time.Sleep(350 * time.Millisecond)
+		
+		buildDelay := "Nominal construct speeds."
+		if activeWeather == "acid_rain" {
+			buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
+		}
+		
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🧱 Build modifiers: %s", buildDelay))
+		time.Sleep(350 * time.Millisecond)
+		_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")
+		time.Sleep(350 * time.Millisecond)
+		_ = c.Bot().Delete(msg)
 	}
 
 	_ = tx.Commit()

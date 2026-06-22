@@ -26,24 +26,23 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	var activeCamps int
-	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&activeCamps)
+	var totalSurvivors int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalSurvivors)
 
 	var activeWeather string
 	_ = h.DB.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
-	weatherLabel := "☀️ NOMINAL"
-	weatherDebuff := "All systems are operating within baseline limits."
+	// Explicit climate indicators mapping to explain the precise mechanical penalties
+	var weatherText string
 	switch activeWeather {
 	case "solar_flare":
-		weatherLabel = "⚡ SOLAR FLARE (ACTIVE)"
-		weatherDebuff = "🔋 Solar panels generate 2.0x Energy. 🤖 Agents disabled."
+		weatherText = "⚡ SOLAR FLARE (ACTIVE Spikes)\n   🔋 Outpost Solar Generators: Operating at 200% efficiency.\n   🤖 Targeting Interference: Scrambles radar locking systems (Accuracy fluctuates on battle ticks).\n   ⚠️ Automation: Offline agent tasking suspended."
 	case "radiation_storm":
-		weatherLabel = "☢️ RADIATION STORM (FALLOUT)"
-		weatherDebuff = "💀 Morale decay doubled. 🔋 Solar panels output 50% power."
+		weatherText = "☢️ RADIATION STORM (Fallout Sweep)\n   💀 Biological Decay: Regional morale decay rates doubled.\n   ⚔️ Infantry Morale Penalty: Base troop offense ratings reduced by 25%.\n   🔋 Solar Power Drop: Solar panels output only 50% power."
 	case "acid_rain":
-		weatherLabel = "🌧️ ACID RAIN (CORROSIVE)"
-		weatherDebuff = "🏗️ Structural construction takes 2.0x longer."
+		weatherText = "🌧️ ACID RAIN (Corrosive Precipitation)\n   🏗️ Construction delays: Structural upgrade times doubled (+100% duration).\n   🧱 Mechanical Corrosion: Armored Mech defense structures degraded by 50%."
+	default:
+		weatherText = "☀️ NOMINAL CONDITIONS\n   Planetary atmospheric baselines stable. No active debuffs."
 	}
 
 	currentTime := time.Now().UTC().Format("15:04:05")
@@ -55,52 +54,59 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 		LIMIT 5`
 	
 	rows, err := h.DB.QueryContext(ctx, queryNews)
-	var newsLogText string
+	var newsText string
 	if err != nil {
 		log.Printf("Failed querying world news: %v", err)
-		newsLogText = "📡 Static Interference: News feed offline."
+		newsText = "📡 Static Interference: News feed offline.\n\n"
 	} else {
 		defer rows.Close()
+		hasNews := false
 		for rows.Next() {
 			var headline string
 			var loggedAt time.Time
 			if err := rows.Scan(&headline, &loggedAt); err == nil {
-				newsLogText += fmt.Sprintf("[%s] %s\n", loggedAt.UTC().Format("15:04"), headline)
+				if !hasNews {
+					newsText += "📰 LATEST SECTOR BROADCAST REPORTS:\n"
+					hasNews = true
+				}
+				newsText += fmt.Sprintf("[%s] %s\n", loggedAt.UTC().Format("15:04"), headline)
 			}
 		}
-		if newsLogText == "" {
-			newsLogText = "📡 Sensors Clean: No major events recorded."
+		if hasNews {
+			newsText += "\n"
+		} else {
+			newsText = "📡 Radio Static: No active tactical bulletins registered on regional frequencies.\n\n"
 		}
 	}
 
-	dashboard := fmt.Sprintf(
+	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"📻 WASTELAND BROADCAST RADIO\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Universal Coordinate Time: [%s]\n"+
-			"Active Survivors: %d lines\n\n"+
-			"TACTICAL WEATHER FORECAST:\n"+
-			"🌍 Current Front: %s\n"+
-			"⚠️ Modifiers: %s\n\n"+
-			"LIVE BROADCAST NEWS FEED:\n"+
-			"%s\n"+
+			"Active commanders on local frequencies: %d lines\n\n"+
+			"🌍 DYNAMIC CLIMATE FORECAST:\n"+
+			"%s\n\n"+
+			"%s"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Listen to the static. The wastes are breathing.",
-		currentTime, activeCamps, weatherLabel, weatherDebuff, newsLogText,
+		currentTime, totalSurvivors, weatherText, newsText,
 	)
 
-	return c.Send(dashboard, keyboards.CombatNavigation())
+	return c.Send(panelText, keyboards.CombatNavigation())
 }
 
-// HandleSectorMap displays close coordinates sector maps
+// HandleSectorMap displays close coordinates sector maps and neighboring settlements
 func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
 	sender := c.Sender()
 	ctx := context.Background()
 
+	var campID string
 	var myX, myY int
-	err := h.DB.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&myX, &myY)
+	var myRegion string
+	err := h.DB.QueryRowContext(ctx, "SELECT e.id, c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&campID, &myX, &myY, &myRegion)
 	if err != nil {
 		return c.Send("⚠️ Access Denied: Establish your camp first using /start.")
 	}
@@ -110,6 +116,7 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"Your outpost radar scans the coordinates nearby:\n\n"
 
+	// Render the immediate 3x3 grid around player coordinates
 	for y := myY + 1; y >= myY-1; y-- {
 		rowText := "  "
 		for x := myX - 1; x <= myX+1; x++ {
@@ -131,14 +138,31 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 		mapHUD += rowText + "\n"
 	}
 
-	mapHUD += fmt.Sprintf("\nCURRENT LOCATION: Sector [%d, %d]\n", myX, myY)
-	mapHUD += "LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\n"
+	mapHUD += fmt.Sprintf("\nCURRENT LOCATION: Sector [%d, %d] (%s Territory Quadrant)\n", myX, myY, myRegion)
+	mapHUD += "LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\n\n"
+	mapHUD += "📡 NEIGHBORING SECTOR DISCOVERIES:\n"
+
+	// Fetch regional quadrant neighbor outposts
+	rows, err := h.DB.QueryContext(ctx, "SELECT e.name, u.first_name, c.x, c.y, c.region FROM encampments e JOIN users u ON u.telegram_id = e.user_id JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id != $1 LIMIT 3", campID)
+	if err == nil {
+		defer rows.Close()
+		index := 1
+		for rows.Next() {
+			var name, owner, region string
+			var x, y int
+			if err := rows.Scan(&name, &owner, &x, &y, &region); err == nil {
+				mapHUD += fmt.Sprintf("[%d] Outpost: %s (%s Quadrant)\n    Commander: %s | Location: Sector [%d, %d]\n\n", index, name, region, owner, x, y)
+				index++
+			}
+		}
+	}
+
 	mapHUD += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	return c.Send(mapHUD, keyboards.CombatNavigation())
 }
 
-// HandleSectorBroadcast modulates a high-power wireless signal across neighboring coordinates
+// HandleSectorBroadcast modulates a high-power wireless signal across neighboring coordinates and log bulletins
 func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -154,10 +178,10 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 
 	ctx := context.Background()
 
-	var campID string
+	var campID, campName string
 	var campLvl int
 	var myX, myY int
-	err := h.DB.QueryRowContext(ctx, "SELECT e.id, e.level, c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&campID, &campLvl, &myX, &myY)
+	err := h.DB.QueryRowContext(ctx, "SELECT e.id, e.name, e.level, c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).Scan(&campID, &campName, &campLvl, &myX, &myY)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
@@ -183,7 +207,14 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 50.0 WHERE encampment_id = $1", campID)
 
-	// 3. Find target users within immediate coordinate sectors (3x3 grid)
+	// 3. Write dynamic dispatch to global world_news radio bulletin feed
+	headline := fmt.Sprintf("📻 OUTPOST BROADCAST: Encampment [%s] dispatched message: %q", campName, broadcastMsg)
+	_, err = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline)
+	if err != nil {
+		return c.Send("⚠️ Failed to modulate regional frequencies.")
+	}
+
+	// 4. Find target users within immediate coordinate sectors (3x3 grid)
 	queryTargets := `
 		SELECT e.user_id 
 		FROM encampments e
@@ -206,10 +237,10 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 	}
 	rows.Close()
 
-	// 4. Queue real-time alerts
+	// 5. Queue inbox notifications for nearby outposts
 	formattedMsg := fmt.Sprintf(
-		"📡 SECTOR BROADCAST (CO-ORDINATOR %s):\n\n\"%s\"",
-		sender.FirstName, broadcastMsg,
+		"📡 SECTOR BROADCAST (CO-ORDINATOR @%s from [%s]):\n\n\"%s\"",
+		sender.Username, campName, broadcastMsg,
 	)
 
 	for _, targetID := range targets {
@@ -217,5 +248,5 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	return c.Send(fmt.Sprintf("📡 Broadcast successfully modulated over sector [%d, %d]. Dispatched to %d active lines.", myX, myY, len(targets)), keyboards.MainNavigation())
+	return c.Send(fmt.Sprintf("📡 Broadcast successfully modulated over sector [%d, %d]. Logged to news feeds and dispatched to %d active proximity lines.", myX, myY, len(targets)), keyboards.CombatNavigation())
 }

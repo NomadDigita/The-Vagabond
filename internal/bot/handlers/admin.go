@@ -160,13 +160,13 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Safe Refunding Loop: Identify all active expeditions, return units to respective workshops, and notify parties
+	// Safe Refunding Loop: Refund all active campaigns (and staged co-op lobbies) before erasing states
 	queryActiveRaids := `
 		SELECT r.id, r.attacker_id, r.defender_id, ea.user_id as attacker_user_id, COALESCE(ed.user_id, 0) as defender_user_id, ea.name as attacker_name, COALESCE(ed.name, 'Rogue Drone Nest') as defender_name
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning'`
+		WHERE r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning' OR r.state = 'staged'`
 	
 	rowsActive, errActive := tx.QueryContext(ctx, queryActiveRaids)
 	if errActive == nil {
@@ -189,11 +189,10 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 		rowsActive.Close()
 
 		for _, ar := range active {
-			// Retrieve primary forces
 			var sols, mechs, buggies int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1", ar.id).Scan(&sols, &mechs, &buggies)
 			
-			// Refund attacker workshop
+			// Refund primary forces
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, buggies = buggies + $3 WHERE encampment_id = $4", sols, mechs, buggies, ar.attackerID)
 			
 			// Refund co-op members
@@ -225,7 +224,7 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 		}
 	}
 
-	// Purge tables
+	// Cascading deletes on dependent tables
 	_, _ = tx.ExecContext(ctx, "DELETE FROM raids")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM world_news")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue")

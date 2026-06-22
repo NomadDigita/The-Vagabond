@@ -81,11 +81,11 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🪖 BARRACKS RECRUITMENT FORGE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🪖 Soldiers: %d | 🛰️ Spy Devices: %d\n"+
+			"🪖 Soldiers: %d | 🛰️ Tactical Drones: %d\n"+
 			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🪖 [Soldier] — Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
-			"🛰️ [Spy Device] — Cost: 100 Iron, 10 Silver (+25 Recon)\n"+
+			"🛰️ [Tactical Drone] — Cost: 100 Iron, 10 Silver (Dual-use: Spy Satellite or Interceptor)\n"+
 			"🤖 [Colossus Mech] — Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
 			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 10 Diamonds (+1500 Detonation)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
@@ -95,7 +95,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	selector := &gopkg.ReplyMarkup{}
 
 	btnCraftSoldier := selector.Data("🪖 Recruit Soldier", "craft_item", "soldier")
-	btnCraftDrone := selector.Data("🛰️ Assemble Spy Device", "craft_item", "drone")
+	btnCraftDrone := selector.Data("🛰️ Assemble Drone", "craft_item", "drone")
 	btnCraftMech := selector.Data("🤖 Forge Mech", "craft_item", "mech")
 	btnCraftNuke := selector.Data("☢️ Forge Nuke", "craft_item", "nuke")
 
@@ -214,7 +214,7 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET iron = iron - 100.0, silver = silver - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛰️ Spy Device assembled!"
+		successAlert = "🛰️ Tactical Drone (Spy/Interceptor) assembled successfully!"
 
 	case "mech":
 		if steel < 1000.0 || uranium < 50.0 || gold < 20.0 {
@@ -274,19 +274,19 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 
 	case "rig":
 		if steel < 600.0 || iron < 50.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
+			return gopkg.Context(c).Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 600 Steel, 50 Iron."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 600.0, iron = iron - 50.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
 		successAlert = "🔧 Recovery Rig constructed!"
 	}
 
+	// Dynamic Post-Commit Success Dispatcher: Only sends notification after database safely registers changes
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing craft transaction: %v", err)
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	// Dynamic Post-Commit Success Dispatcher: Only sends notification after database safely registers changes
 	if successAlert != "" {
 		_ = c.Respond(&gopkg.CallbackResponse{Text: successAlert})
 	}
