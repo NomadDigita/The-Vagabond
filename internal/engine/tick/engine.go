@@ -117,6 +117,11 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
+	if err := e.resolveCompletedCoopRallies(ctx, tx); err != nil {
+		log.Printf("Error during Co-Op Rally resolution pass: %v", err)
+		return
+	}
+
 	if err := e.resolveRaidCombats(ctx, tx); err != nil {
 		log.Printf("Error during Combat Resolution Pass: %v", err)
 		return
@@ -137,6 +142,19 @@ func (e *Engine) ProcessTick() {
 	}
 
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+}
+
+func (e *Engine) resolveCompletedCoopRallies(ctx context.Context, tx *sql.Tx) error {
+	queryRallies := `
+		UPDATE raid_coop_members 
+		SET state = 'stationed' 
+		WHERE state = 'marching_to_ally' AND arrival_time <= CURRENT_TIMESTAMP`
+	
+	_, err := tx.ExecContext(ctx, queryRallies)
+	if err != nil {
+		return fmt.Errorf("failed executing co-op rally state transition: %w", err)
+	}
+	return nil
 }
 
 func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) error {
@@ -168,6 +186,7 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 			completed = append(completed, m)
 		}
 	}
+	rows.Close()
 
 	for _, m := range completed {
 		if m.readyAt.UTC().After(time.Now().UTC()) {
@@ -402,8 +421,9 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 		}
 		rows.Close()
 
-		if len(participants) >= requiredMatchCount(b) {
-			requiredCount := requiredMatchCount(b)
+		// Refactored to reference the struct method correctly
+		if len(participants) >= e.requiredMatchCount(b) {
+			requiredCount := e.requiredMatchCount(b)
 			matched := participants[:requiredCount]
 
 			winners := matched[:requiredCount/2]
@@ -470,7 +490,8 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 	return nil
 }
 
-func requiredMatchCount(bracket string) int {
+// Struct-bound helper method
+func (e *Engine) requiredMatchCount(bracket string) int {
 	switch bracket {
 	case "2v2":
 		return 4
@@ -681,7 +702,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		var helpers []coopContributor
-		queryHelpers := "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1"
+		
+		queryHelpers := "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1 AND state = 'stationed'"
 		rowH, errH := tx.QueryContext(ctx, queryHelpers, r.id)
 		if errH == nil {
 			for rowH.Next() {
@@ -828,9 +850,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		for _, h := range helpers {
 			hForce := h.soldiers + h.mechs
 			hRatio := float64(hForce) / float64(totSoldiers+totMechs)
-			if math.IsNaN(hRatio) {
-				hRatio = 1.0
-			}
 			hCas := int(float64(attackerCasualties) * hRatio)
 
 			casSoldiersH := hCas / 2
@@ -895,7 +914,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
 		
-		// Guard: Only insert defender notifications if the defender is a real user (NOT ID = 0 / AI)
 		if r.defenderID.Valid && r.defenderUserID != 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, roundLog)
 		}

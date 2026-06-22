@@ -20,7 +20,6 @@ func NewSiloHandler(db *sql.DB) *SiloHandler {
 	return &SiloHandler{DB: db}
 }
 
-// HandleSiloPanel renders the strategic nuclear weapons panel and target selection
 func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -38,16 +37,13 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// 1. Enforce level requirement (Core level 15+)
 	if campLvl < 15 {
 		return c.Send("❌ Silo Access Locked: Reach Outpost Core Level 15 to open Strategic Nuclear Silos.", keyboards.MainNavigation())
 	}
 
-	// Fetch nuclear warhead stocks
 	var nukes int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE((SELECT nukes FROM workshop_inventory WHERE encampment_id = $1), 0)", campID).Scan(&nukes)
 
-	// Fetch up to 3 potential rival targets
 	queryTargets := `
 		SELECT e.id, e.name, u.first_name 
 		FROM encampments e
@@ -97,7 +93,6 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleLaunchICBMCallback processes the strike, checks defenses, and applies nuclear debuffs
 func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -112,7 +107,6 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Verify stocks
 	var nukes int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&nukes)
 
@@ -127,55 +121,57 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: ICBM launch requires 50.0 Energy Cells."})
 	}
 
-	// Deduct resources
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes - 1 WHERE encampment_id = $1", myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 50.0 WHERE encampment_id = $1", myCampID)
 
-	// Fetch participant details
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", myCampID).Scan(&attackerName)
 
 	var defenderName string
 	var defenderUserID int64
-	_ = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderName, &defenderUserID)
 
-	// 2. Check Defender Shields (Nuclear Shielding)
+	// Handled separately if target is an AI target
+	var isAI bool = targetCampID == "ai_drone_nest"
+	if !isAI {
+		err = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderName, &defenderUserID)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Target encampment not found."})
+		}
+	} else {
+		defenderName = "Rogue Drone Nest"
+		defenderUserID = 0
+	}
+
 	var defenderShields int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(nuclear_shields, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", targetCampID).Scan(&defenderShields)
 
 	if defenderShields > 0 {
-		// Shield successfully intercepts the strike
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nuclear_shields = nuclear_shields - 1 WHERE encampment_id = $1", targetCampID)
-
-		// Commit transaction
 		_ = tx.Commit()
 
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🚨 ICBM INTERCEPTED: Target shielding blocked the strike!"})
 
-		// Notify defender instantly
-		defenderAlert := fmt.Sprintf(
-			"🛡️ DEFENSE ALERT: ICBM SHIELD INTERCEPT!\n\n"+
-				"Our Nuclear Shielding installations have successfully intercepted and destroyed an incoming tactical ICBM strike from Outpost [%s]!\n"+
-				"💀 Casualties: 0 | Structural Damage: None. 1 Shielding charge depleted.",
-			attackerName,
-		)
-		_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+		if defenderUserID != 0 {
+			defenderAlert := fmt.Sprintf(
+				"🛡️ DEFENSE ALERT: ICBM SHIELD INTERCEPT!\n\n"+
+					"Our Nuclear Shielding installations have successfully intercepted and destroyed an incoming tactical ICBM strike from Outpost [%s]!\n"+
+					"💀 Casualties: 0 | Structural Damage: None. 1 Shielding charge depleted.",
+				attackerName,
+			)
+			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+		}
 
 		return h.HandleSiloPanel(c)
 	}
 
-	// 3. No Shields: ICBM Detonation sequence triggers
-	// Vaporize 50% of current workshop_inventory forces
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers / 2, 0), mechs = GREATEST(mechs / 2, 0) WHERE encampment_id = $1", targetCampID)
 
-	// Steal 50% of current Scrap reserves
 	var defenderScrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", targetCampID).Scan(&defenderScrap)
 	stolenScrap := defenderScrap * 0.50
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", stolenScrap, targetCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", stolenScrap, myCampID)
 
-	// Destroy 1 random module level (Tent, Scrap Heap, or Generator drops by 1)
 	modules := []string{"tent", "scrap_heap", "generator"}
 	randomModule := modules[time.Now().UnixNano()%3]
 	_, _ = tx.ExecContext(ctx, "UPDATE modules SET level = GREATEST(level - 1, 1) WHERE encampment_id = $1 AND type = $2", targetCampID, randomModule)
@@ -184,20 +180,20 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "💥 DETONATION: ICBM successfully detonated on target!"})
 
-	// Log global news headline
 	newsHeadline := fmt.Sprintf("💥 DETONATION ALERT: Commander %s launched an ICBM. Outpost %s suffered catastrophic nuclear damage.", sender.FirstName, defenderName)
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
-	// Notify defender
-	defenderAlert := fmt.Sprintf(
-		"💥 CATASTROPHIC NUCLEAR ALERT: DIRECT IMPACT!\n\n"+
-			"An ICBM warhead launched by Outpost [%s] has detonated directly on your base!\n\n"+
-			"💀 Casualties: 50%% of all barracks troops vaporized.\n"+
-			"🛠️ Structural Damage: Your [%s] level dropped by 1.\n"+
-			"⚙️ Resource Looted: -%.1f Scrap stolen from warehouses.",
-		attackerName, randomModule, stolenScrap,
-	)
-	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+	if defenderUserID != 0 {
+		defenderAlert := fmt.Sprintf(
+			"💥 CATASTROPHIC NUCLEAR ALERT: DIRECT IMPACT!\n\n"+
+				"An ICBM warhead launched by Outpost [%s] has detonated directly on your base!\n\n"+
+				"💀 Casualties: 50%% of all barracks troops vaporized.\n"+
+				"🛠️ Structural Damage: Your [%s] level dropped by 1.\n"+
+				"⚙️ Resource Looted: -%.1f Scrap stolen from warehouses.",
+			attackerName, randomModule, stolenScrap,
+		)
+		_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+	}
 
 	return h.HandleSiloPanel(c)
 }

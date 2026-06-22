@@ -29,7 +29,6 @@ func NewListener(dbURL string, db *sql.DB, bot *telebot.Bot) *Listener {
 
 // Start opens the database listener loop
 func (l *Listener) Start() {
-	// Report issues if listener connection drops
 	reportEvent := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
 			log.Printf("Realtime Listener Connection State Change Warning: %v", err)
@@ -71,9 +70,15 @@ func (l *Listener) Stop() {
 }
 
 func (l *Listener) dispatchNotification(notificationID string) {
+	// Defensive UUID length validation to prevent PostgreSQL "invalid input syntax for type uuid" aborts
+	if len(notificationID) != 36 {
+		log.Printf("Realtime dispatcher ignored malformed payload ID: %q (not a valid UUIDv4 format)", notificationID)
+		return
+	}
+
 	ctx := context.Background()
 
-	// Query message contents and mark as sent in a single transaction
+	// Query message contents and mark as sent in a single transaction with FOR UPDATE row locks
 	tx, err := l.DB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Realtime dispatcher failed initiating transaction: %v", err)
@@ -97,8 +102,7 @@ func (l *Listener) dispatchNotification(notificationID string) {
 	}
 
 	if isSent {
-		// Already handled by poll backup
-		return
+		return // Handled successfully by backup polling dispatcher
 	}
 
 	// Dispatch message immediately

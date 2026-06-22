@@ -78,10 +78,8 @@ func (d *Dispatcher) drainQueue() {
 			queue = append(queue, p)
 		}
 	}
-	rows.Close()
 
 	for _, p := range queue {
-		// Target Telegram user structure
 		targetUser := &telebot.User{ID: p.userID}
 
 		// Dispatch message through Telegram API
