@@ -145,9 +145,9 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	var campLvl int
 	_ = h.DB.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 
-	var energy, iron, oil, gold, silver, diamond, uranium, steel float64
-	query := `SELECT energy, iron, oil, gold, silver, diamond, uranium, steel FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy, &iron, &oil, &gold, &silver, &diamond, &uranium, &steel)
+	var energy float64
+	query := `SELECT energy FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy)
 
 	var ownedMiners int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&ownedMiners)
@@ -163,6 +163,17 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 
 	minerCost := ownedMiners * 500
 
+	// Retrieve User alerts subscription settings
+	var alertSubscribed bool
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(idle_miner_notifications, FALSE) FROM users WHERE telegram_id = $1", sender.ID).Scan(&alertSubscribed)
+
+	subStatus := "🔕 Unsubscribed"
+	toggleAlertLabel := "🔔 Subscribe to Idle Alerts"
+	if alertSubscribed {
+		subStatus = "🔔 Subscribed"
+		toggleAlertLabel = "🔕 Unsubscribe from Idle Alerts"
+	}
+
 	var activeQueuesText string = ""
 	rowsActive, errActive := h.DB.QueryContext(ctx, "SELECT resource_type, ready_at FROM active_mining_queues WHERE encampment_id = $1 AND is_completed = FALSE", campID)
 	if errActive == nil {
@@ -176,7 +187,6 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 					activeQueuesText += "⚙️ ACTIVE EXTRACTION PROCESSORS:\n"
 					hasQueues = true
 				}
-				// Timezone-Normalized HUD Timers: Compute countdown strictly inside UTC boundaries
 				timeLeft := int(rReady.UTC().Sub(time.Now().UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
@@ -196,7 +206,8 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"Assign available miners to start resource sweeps:\n\n"+
 			"🔋 Energy Cells: %.1f cells\n"+
 			"👥 Miners Stationed: %d / %d active | Idle: %d miners\n"+
-			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n\n"+
+			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n"+
+			"📡 Idle Alerts Option: %s\n\n"+
 			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
 			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron / miner)\n"+
@@ -209,7 +220,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"🧱 [Forging Steel] — Costs: 10.0 Energy (+20.0 Steel / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
 			"👥 Recruit Miner -> Cost: %d Scrap",
-		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, activeQueuesText, minerCost,
+		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, subStatus, activeQueuesText, minerCost,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -223,6 +234,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	btnSteel := selector.Data("🧱 Steel", "mine_action", "steel")
 	
 	btnBuyMiner := selector.Data(fmt.Sprintf("Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")
+	btnToggleAlert := selector.Data(toggleAlertLabel, "mine_action", "toggle_alerts")
 
 	selector.Inline(
 		selector.Row(btnIron, btnOil),
@@ -230,6 +242,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 		selector.Row(btnDiamond, btnUranium),
 		selector.Row(btnHydrogen, btnSteel),
 		selector.Row(btnBuyMiner),
+		selector.Row(btnToggleAlert),
 	)
 
 	return c.Send(panelText, selector)
@@ -251,6 +264,22 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	err = tx.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Establish outpost camp first using /start"})
+	}
+
+	if mineType == "toggle_alerts" {
+		var currentSub bool
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(idle_miner_notifications, FALSE) FROM users WHERE telegram_id = $1 FOR UPDATE", sender.ID).Scan(&currentSub)
+		
+		_, _ = tx.ExecContext(ctx, "UPDATE users SET idle_miner_notifications = $1 WHERE telegram_id = $2", !currentSub, sender.ID)
+		
+		_ = tx.Commit()
+		
+		text := "🔕 Unsubscribed from idle miner alerts."
+		if !currentSub {
+			text = "🔔 Subscribed to idle miner alerts! You will be warned if workers remain idle."
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: text})
+		return h.HandleActiveMining(c)
 	}
 
 	var ownedMiners int
@@ -329,7 +358,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mining task queue."})
 	}
 
-	// Thinking Terminal Miner Animations: sequentially update the worker's drills
 	msg, err := c.Bot().Send(c.Recipient(), "⛏️ COUPLING EXTRACTION DRILLS...")
 	if err == nil {
 		time.Sleep(300 * time.Millisecond)

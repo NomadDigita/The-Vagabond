@@ -23,6 +23,7 @@ type Engine struct {
 	starvationEngine  *starvation.Engine
 	weatherEngine     *world.WeatherEngine
 	agentProcessor    *agent.Processor
+	lastIdleCheck     time.Time // Tracked timezone-neutrally
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -34,6 +35,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		starvationEngine:  starvation.NewEngine(db),
 		weatherEngine:     world.NewWeatherEngine(db),
 		agentProcessor:    agent.NewProcessor(db),
+		lastIdleCheck:     time.Now().UTC(),
 	}
 }
 
@@ -107,6 +109,15 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
+	// 20-Minute Idle Miner Sweeper Check
+	if time.Now().UTC().Sub(e.lastIdleCheck) >= 20*time.Minute {
+		if err := e.notifyIdleMiners(ctx, tx); err == nil {
+			e.lastIdleCheck = time.Now().UTC()
+		} else {
+			log.Printf("Error during Idle Miner verification check: %v", err)
+		}
+	}
+
 	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Starvation Pass execution: %v", err)
 		return
@@ -142,6 +153,49 @@ func (e *Engine) ProcessTick() {
 	}
 
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+}
+
+// notifyIdleMiners sends a real-time warning notification to opted-in users who have idle workers
+func (e *Engine) notifyIdleMiners(ctx context.Context, tx *sql.Tx) error {
+	query := `
+		SELECT u.telegram_id, e.name, COALESCE(w.miners, 1) as owned,
+		       COALESCE((SELECT SUM(miners_assigned) FROM active_mining_queues WHERE encampment_id = e.id AND is_completed = FALSE), 0) as active
+		FROM users u
+		JOIN encampments e ON e.user_id = u.telegram_id
+		JOIN workshop_inventory w ON w.encampment_id = e.id
+		WHERE u.idle_miner_notifications = TRUE`
+	
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type idleUser struct {
+		userID   int64
+		campName string
+		idle     int
+	}
+
+	var targets []idleUser
+	for rows.Next() {
+		var uID int64
+		var cName string
+		var owned, active int
+		if err := rows.Scan(&uID, &cName, &owned, &active); err == nil {
+			if owned > active {
+				targets = append(targets, idleUser{userID: uID, campName: cName, idle: owned - active})
+			}
+		}
+	}
+	rows.Close()
+
+	for _, t := range targets {
+		alert := fmt.Sprintf("⛏️ WORKSTATION ALERT: Outpost [%s] currently has %d idle miners stationed in the hangar. Open Active Mining on camp deck to deploy them!", t.campName, t.idle)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", t.userID, alert)
+	}
+
+	return nil
 }
 
 func (e *Engine) resolveCompletedCoopRallies(ctx context.Context, tx *sql.Tx) error {
@@ -421,7 +475,6 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 		}
 		rows.Close()
 
-		// Refactored to reference the struct method correctly
 		if len(participants) >= e.requiredMatchCount(b) {
 			requiredCount := e.requiredMatchCount(b)
 			matched := participants[:requiredCount]
@@ -490,7 +543,6 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 	return nil
 }
 
-// Struct-bound helper method
 func (e *Engine) requiredMatchCount(bracket string) int {
 	switch bracket {
 	case "2v2":
