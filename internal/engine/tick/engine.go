@@ -23,7 +23,7 @@ type Engine struct {
 	starvationEngine  *starvation.Engine
 	weatherEngine     *world.WeatherEngine
 	agentProcessor    *agent.Processor
-	lastIdleCheck     time.Time // Tracked timezone-neutrally
+	lastIdleCheck     time.Time
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -128,6 +128,12 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
+	// Automatically launch co-op lobbies whose departure countdown timer has expired
+	if err := e.autoLaunchExpiredStagedRaids(ctx, tx); err != nil {
+		log.Printf("Error during staged Co-Op departure launches: %v", err)
+		return
+	}
+
 	if err := e.resolveCompletedCoopRallies(ctx, tx); err != nil {
 		log.Printf("Error during Co-Op Rally resolution pass: %v", err)
 		return
@@ -153,6 +159,81 @@ func (e *Engine) ProcessTick() {
 	}
 
 	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+}
+
+// autoLaunchExpiredStagedRaids transitions staged co-op lobbies into active marching campaigns at timeout
+func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) error {
+	queryExpiredStaged := `
+		SELECT r.id, r.attacker_id, r.defender_id, r.resolve_time
+		FROM raids r
+		WHERE r.state = 'staged' AND r.resolve_time <= CURRENT_TIMESTAMP`
+	
+	rows, err := tx.QueryContext(ctx, queryExpiredStaged)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type stagedRaid struct {
+		id         string
+		attackerID string
+		defenderID sql.NullString
+	}
+	var expired []stagedRaid
+	for rows.Next() {
+		var sr stagedRaid
+		if err := rows.Scan(&sr.id, &sr.attackerID, &sr.defenderID); err == nil {
+			expired = append(expired, sr)
+		}
+	}
+	rows.Close()
+
+	for _, r := range expired {
+		var totalHelpers int
+		_ = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM raid_coop_members WHERE raid_id = $1", r.id).Scan(&totalHelpers)
+
+		var creatorUserID int64
+		_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", r.attackerID).Scan(&creatorUserID)
+
+		if totalHelpers == 0 {
+			var sols, mechs int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&sols, &mechs)
+			
+			// Refund locked lobby creator forces
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", sols, mechs, r.attackerID)
+			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", r.id)
+
+			cancelMsg := "🤝 CO-OP NOTICE: Your staged lobby was cancelled and initial forces refunded because no ally commanders joined before departure."
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, cancelMsg)
+			continue
+		}
+
+		// Force-complete any partial rallying transits into lead base
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET state = 'stationed' WHERE raid_id = $1", r.id)
+
+		var myX, myY int
+		_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.attackerID).Scan(&myX, &myY)
+
+		var defX, defY int
+		if r.defenderID.Valid {
+			_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&defX, &defY)
+		} else {
+			defX, defY = 1, 1
+		}
+
+		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
+		if steps == 0 {
+			steps = 1
+		}
+		marchingMinutes := steps * 10.0
+		arrival := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", arrival, r.id)
+
+		launchMsg := "🤝 CO-OP LOBBY DEPARTED: The staging window expired. Your joint military forces have successfully departed towards target."
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, launchMsg)
+	}
+	return nil
 }
 
 // notifyIdleMiners sends a real-time warning notification to opted-in users who have idle workers
@@ -655,11 +736,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		rowsMarch.Close()
 	}
 
+	// Audited SQL Query: Leverages explicit COALESCE filters to safely handle nullable DB columns
 	query := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.state, r.round_number,
 		       ea.name as attacker_name, ea.user_id as attacker_user_id,
 		       COALESCE(ed.name, 'Rogue Drone Nest') as defender_name, 
-		       COALESCE(ed.user_id, 0) as defender_user_id, r.resolve_time, r.stolen_scrap
+		       COALESCE(ed.user_id, 0) as defender_user_id, r.resolve_time, 
+		       COALESCE(r.stolen_scrap, 0.0) as stolen_scrap,
+		       COALESCE(r.attacker_rations, 100.0) as attacker_rations,
+		       COALESCE(r.attacker_ammo, 100.0) as attacker_ammo,
+		       COALESCE(r.attacker_losses, 0) as attacker_losses,
+		       COALESCE(r.defender_losses, 0) as defender_losses
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
@@ -696,12 +783,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			&r.id, &r.attackerID, &r.defenderID, &r.state, &r.roundNumber,
 			&r.attackerName, &r.attackerUserID,
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
+			&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses,
 		)
 		if err == nil {
-			err = tx.QueryRowContext(ctx, "SELECT attacker_rations, attacker_ammo, attacker_losses, defender_losses FROM raids WHERE id = $1", r.id).Scan(&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses)
-			if err == nil {
-				raids = append(raids, r)
-			}
+			raids = append(raids, r)
 		}
 	}
 	rows.Close()
@@ -713,7 +798,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		if r.state == "returning" {
 			var soldiersMob, mechsMob int
-			_ = tx.QueryRowContext(ctx, "SELECT soldiers_mobilized, mechs_mobilized FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", soldiersMob, mechsMob, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
@@ -955,6 +1040,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lootPercentage = 0.20
 		}
 		stolenScrap := defenderScrap * lootPercentage
+		primaryShare := stolenScrap
 
 		roundLog := fmt.Sprintf(
 			"⚔️ BATTLE REPORT: ROUND %d COMPLETE!\n\n"+
@@ -984,7 +1070,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if math.IsNaN(primRatio) {
 				primRatio = 1.0
 			}
-			primaryShare := stolenScrap * primRatio
+			primaryShare = stolenScrap * primRatio
 
 			if strings.Contains(attackerHeroSuperpower, "Scrap Recovery") {
 				primaryShare *= 1.10
