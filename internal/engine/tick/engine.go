@@ -22,7 +22,7 @@ type Engine struct {
 	resourceProcessor *resource.Processor
 	starvationEngine  *starvation.Engine
 	weatherEngine     *world.WeatherEngine
-	agentProcessor    *agent.Processor // Integrated missing agent automation executor
+	agentProcessor    *agent.Processor
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -33,7 +33,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		resourceProcessor: resource.NewProcessor(db),
 		starvationEngine:  starvation.NewEngine(db),
 		weatherEngine:     world.NewWeatherEngine(db),
-		agentProcessor:    agent.NewProcessor(db), // Initialized cleanly on startup
+		agentProcessor:    agent.NewProcessor(db),
 	}
 }
 
@@ -82,7 +82,6 @@ func (e *Engine) ProcessTick() {
 		return
 	}
 
-	// Executing background automation cycles during main clock tick pass
 	if err := e.agentProcessor.RunAgentPass(ctx, tx); err != nil {
 		log.Printf("Error during Tick Agent Pass execution: %v", err)
 		return
@@ -169,10 +168,8 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 			completed = append(completed, m)
 		}
 	}
-	rows.Close()
 
 	for _, m := range completed {
-		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.readyAt.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -251,10 +248,8 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 			missions = append(missions, m)
 		}
 	}
-	rows.Close()
 
 	for _, m := range missions {
-		// Timezone Neutralization: Compare timestamps natively inside Go UTC boundaries
 		if m.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -339,7 +334,6 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 			exps = append(exps, ex)
 		}
 	}
-	rows.Close()
 
 	for _, ex := range exps {
 		var rations, oil float64
@@ -351,7 +345,6 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		deductRations := 3.0
 		deductOil := 1.0
 
-		// Fuel Tanker Upkeep: Tankers reduce fuel (oil) consumption by 20% on all transits
 		if tankers > 0 {
 			deductOil = 0.80
 		}
@@ -404,25 +397,17 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			var qu queuedUser
 			var soldiers, mechs int
 			if err := rows.Scan(&qu.userID, &qu.enteredAt, &qu.username, &soldiers, &mechs); err == nil {
-				qu.powerRating = (soldiers * 10) + (mechs * 150)
 				participants = append(participants, qu)
 			}
 		}
 		rows.Close()
 
-		requiredMatchCount := 2
-		switch b {
-		case "2v2":
-			requiredMatchCount = 4
-		case "3v3":
-			requiredMatchCount = 6
-		}
+		if len(participants) >= requiredMatchCount(b) {
+			requiredCount := requiredMatchCount(b)
+			matched := participants[:requiredCount]
 
-		if len(participants) >= requiredMatchCount {
-			matched := participants[:requiredMatchCount]
-
-			winners := matched[:requiredMatchCount/2]
-			losers := matched[requiredMatchCount/2:]
+			winners := matched[:requiredCount/2]
+			losers := matched[requiredCount/2:]
 
 			lootWon := 100.0
 			switch b {
@@ -485,6 +470,17 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 	return nil
 }
 
+func requiredMatchCount(bracket string) int {
+	switch bracket {
+	case "2v2":
+		return 4
+	case "3v3":
+		return 6
+	default:
+		return 2
+	}
+}
+
 func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT m.id, e.user_id, e.name, m.type, m.level, m.upgrade_ready_at
@@ -514,10 +510,8 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 			completed = append(completed, c)
 		}
 	}
-	rows.Close()
 
 	for _, c := range completed {
-		// Timezone-Normalized HUD Timers: Compute countdown strictly inside Go UTC boundaries
 		if c.upgradeReadyAt.Valid && c.upgradeReadyAt.Time.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -554,7 +548,6 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 }
 
 func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	// Standalone warning sub-query for all marching campaigns (Warning Alerts)
 	queryAllMarching := `
 		SELECT r.id, r.resolve_time, ea.name, ed.user_id, ed.name, rf.route_type
 		FROM raids r
@@ -572,7 +565,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var attName, defName, routeType string
 			var defUserID int64
 			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				// Timezone Neutralization: Compute remaining steps in Go
 				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
 					timeLeft := int(time.Until(resTime.UTC()).Seconds())
 					if timeLeft > 0 {
@@ -607,17 +599,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	defer rows.Close()
 
 	type activeRaid struct {
-		id             string
-		attackerID     string
-		defenderID     sql.NullString
-		state          string
-		roundNumber    int
-		attackerName   string
-		attackerUserID int64
-		defenderName   string
-		defenderUserID int64
-		resolveTime    time.Time
-		stolenScrap    float64
+		id              string
+		attackerID      string
+		defenderID      sql.NullString
+		state           string
+		roundNumber     int
+		attackerName    string
+		attackerUserID  int64
+		defenderName    string
+		defenderUserID  int64
+		resolveTime     time.Time
+		stolenScrap     float64
 		attackerRations float64
 		attackerAmmo    float64
 		attackerLosses  int
@@ -637,14 +629,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if err == nil {
 				raids = append(raids, r)
 			}
-		} else {
-			log.Printf("Error scanning combat raid: %v", err)
 		}
 	}
 	rows.Close()
 
 	for _, r := range raids {
-		// Timezone Normalization: Check resolve timestamps in Go
 		if r.resolveTime.UTC().After(time.Now().UTC()) {
 			continue
 		}
@@ -654,9 +643,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT soldiers_mobilized, mechs_mobilized FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", soldiersMob, mechsMob, r.attackerID)
-
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
-
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
 			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your expedition survivors returned to base safely carrying +%.1f Scrap!", r.stolenScrap)
@@ -684,7 +671,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		// PROCESS COMBAT ROUND (Tick-by-Tick Combat Rounds Engine)
 		var primarySoldiers, primaryMechs, primaryBuggies int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies)
 
@@ -746,7 +732,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defLevel = attackerCoreLvl
 		} else {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender)
-
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID.String).Scan(&defLevel)
 			if defLevel == 0 {
 				defLevel = 1
@@ -815,7 +800,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			attCas = int(float64(attCas) * (1.0 - reduction))
 		}
 
-		// Defender Kinetic Barrier trait integration: Reduces defender round casualties by 15%
 		if defCas > 0 && r.defenderID.Valid {
 			reduction := float64(defenderBioLvl-1) * 0.10
 			if strings.Contains(defenderHeroSuperpower, "Kinetic Barrier") {
@@ -844,6 +828,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		for _, h := range helpers {
 			hForce := h.soldiers + h.mechs
 			hRatio := float64(hForce) / float64(totSoldiers+totMechs)
+			if math.IsNaN(hRatio) {
+				hRatio = 1.0
+			}
 			hCas := int(float64(attackerCasualties) * hRatio)
 
 			casSoldiersH := hCas / 2
@@ -858,7 +845,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				refundMechs = 0
 			}
 
-			// Persist dynamic helper casualties inside database state row
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET soldiers_contributed = $1, mechs_contributed = $2 WHERE raid_id = $3 AND encampment_id = $4", refundSoldiers, refundMechs, r.id, h.encampment_id)
 		}
 
@@ -883,7 +869,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		attackerStillStanding := (newAttSols + int(newAttMechs)) > 0
+		attackerStillStanding := (newAttSols + newAttMechs) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
@@ -908,7 +894,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
-		if r.defenderID.Valid {
+		
+		// Guard: Only insert defender notifications if the defender is a real user (NOT ID = 0 / AI)
+		if r.defenderID.Valid && r.defenderUserID != 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, roundLog)
 		}
 
@@ -917,7 +905,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defeatAlert := fmt.Sprintf("❌ BATTLE RESOLUTION: DEFEAT!\n\nYour forces were entirely repelled at Outpost [%s]. All deployed raiders were lost.", r.defenderName)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, defeatAlert)
 
-			if r.defenderID.Valid {
+			if r.defenderID.Valid && r.defenderUserID != 0 {
 				winAlert := fmt.Sprintf("🛡️ BATTLE RESOLUTION: BASE DEFENSED!\n\nHostile forces marching from [%s] were repelled.", r.attackerName)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, winAlert)
 			}
@@ -928,7 +916,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			}
 			primaryShare := stolenScrap * primRatio
 
-			// Attacker Scrap Recovery superpower integration: +10% scrap loot bonus
 			if strings.Contains(attackerHeroSuperpower, "Scrap Recovery") {
 				primaryShare *= 1.10
 			}
@@ -960,7 +947,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, winAlert)
 
-			if r.defenderID.Valid {
+			if r.defenderID.Valid && r.defenderUserID != 0 {
 				loseAlert := fmt.Sprintf(
 					"🚨 BATTLE RESOLUTION: BASE BREACHED!\n\n"+
 						"Our perimeters were breached by [%s]!\n"+
@@ -970,7 +957,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, loseAlert)
 			}
 
-			// Concluding pass co-op helper refunds
 			for _, h := range helpers {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
 			}
@@ -983,12 +969,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			drawAlert := "⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home."
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, drawAlert)
 
-			if r.defenderID.Valid {
+			if r.defenderID.Valid && r.defenderUserID != 0 {
 				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
 			}
 
-			// Concluding pass co-op helper refunds on Timeout Draw
 			for _, h := range helpers {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
 			}

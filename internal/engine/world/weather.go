@@ -17,17 +17,17 @@ func NewWeatherEngine(db *sql.DB) *WeatherEngine {
 	return &WeatherEngine{DB: db}
 }
 
-// RunWeatherPass rolls a 10% chance to cycle the world's active weather front with 2-hour persistence
 func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
-	// --- PERSISTENCE BARRIER (Phase 2): Weather persists for a minimum of 2 hours ---
 	var lastChanged time.Time
 	err := tx.QueryRowContext(ctx, "SELECT last_changed_at FROM world_state WHERE id = 1").Scan(&lastChanged)
-	if err == nil && time.Since(lastChanged) < 2*time.Hour {
-		return nil // Weather holds stable, bypassing the randomized cycle
+	
+	// Enforced UTC timezone comparisons to prevent skewing
+	if err == nil && time.Now().UTC().Sub(lastChanged.UTC()) < 2*time.Hour {
+		return nil 
 	}
 
 	if rand.Float64() >= 0.10 {
-		return nil // Weather remains stable
+		return nil 
 	}
 
 	weatherFronts := []string{"nominal", "solar_flare", "radiation_storm", "acid_rain"}
@@ -43,7 +43,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("failed updating global weather state: %w", err)
 	}
 
-	// Region-specific forecast mapping
 	continents := []string{"Africa", "Europe", "Asia", "Americas"}
 	targetContinent := continents[rand.Intn(len(continents))]
 

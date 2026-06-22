@@ -87,8 +87,8 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 	case "inject":
 		ctx := context.Background()
 		var campID string
-		_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
-		if campID == "" {
+		err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+		if err != nil || campID == "" {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error: Establish outpost first."})
 		}
 		_, _ = h.DB.ExecContext(ctx, `
@@ -160,12 +160,9 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Flush active matchmaking queue and historical testing logs
 	_, _ = tx.ExecContext(ctx, "DELETE FROM world_news")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM spy_missions")
-
-	// Reset player coordinate mappings to zero coordinates to force self-healing relocation sweeps
 	_, _ = tx.ExecContext(ctx, "UPDATE coordinates SET x = 0, y = 0")
 
 	_ = tx.Commit()
@@ -185,7 +182,6 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 				coords = append(coords, z)
 			}
 		}
-		rows.Close()
 
 		for _, cCoord := range coords {
 			rSource := rand.NewSource(time.Now().UnixNano())
@@ -201,7 +197,7 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 			case "Asia":
 				x = rGen.Intn(991) + 10
 				y = -(rGen.Intn(991) + 10)
-			default: // Americas
+			default:
 				x = -(rGen.Intn(991) + 10)
 				y = -(rGen.Intn(991) + 10)
 			}
@@ -411,7 +407,6 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 			targets = append(targets, id)
 		}
 	}
-	rows.Close()
 
 	formattedBroadcast := fmt.Sprintf(
 		"🛰️ SYSTEM BROADCAST (DEVELOPER MSG):\n\n%s",

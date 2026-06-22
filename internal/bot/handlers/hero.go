@@ -19,7 +19,6 @@ func NewHeroHandler(db *sql.DB) *HeroHandler {
 	return &HeroHandler{DB: db}
 }
 
-// HandleHeroPanel displays the commander statistics, level, XP, and injuries with interactive buttons
 func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -39,12 +38,12 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	var faction string
 	_ = h.DB.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
 
-	// Resilient local scan variables to prevent struct validation/NULL field mismatch crashes
 	var heroID, heroName, heroTrait, heroInjuries, heroSuperpower string
 	var battlesSurvived, lvl, xp int
 
+	// Added robust COALESCE filters to safely handle nullable DB fields
 	queryHero := `
-		SELECT id, name, trait, injuries, battles_survived, superpower, level, xp 
+		SELECT id, name, trait, injuries, battles_survived, COALESCE(superpower, ''), COALESCE(level, 1), COALESCE(xp, 0) 
 		FROM heroes 
 		WHERE encampment_id = $1`
 	err = h.DB.QueryRowContext(ctx, queryHero, campID).Scan(&heroID, &heroName, &heroTrait, &heroInjuries, &battlesSurvived, &heroSuperpower, &lvl, &xp)
@@ -65,7 +64,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 		insertHero := `
 			INSERT INTO heroes (encampment_id, name, trait, injuries, battles_survived, superpower, level, xp) 
 			VALUES ($1, $2, $3, $4, 0, $5, 1, 0) 
-			RETURNING id, name, trait, injuries, battles_survived, superpower, level, xp`
+			RETURNING id, name, trait, injuries, battles_survived, COALESCE(superpower, ''), COALESCE(level, 1), COALESCE(xp, 0)`
 		
 		err = h.DB.QueryRowContext(ctx, insertHero, campID, heroName, heroTrait, heroInjuries, heroSuperpower).Scan(&heroID, &heroName, &heroTrait, &heroInjuries, &battlesSurvived, &heroSuperpower, &lvl, &xp)
 		if err != nil {
@@ -107,7 +106,6 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	return c.Send(dashboard, selector)
 }
 
-// HandleHeroCallback processes commander training, XP leveling, and medical healing
 func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -127,7 +125,7 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 
 	var currentLvl int
 	var currentXp int
-	_ = tx.QueryRowContext(ctx, "SELECT level, xp FROM heroes WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&currentLvl, &currentXp)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1), COALESCE(xp, 0) FROM heroes WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&currentLvl, &currentXp)
 
 	switch action {
 	case "train":
@@ -140,7 +138,6 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 		if newXp >= 100 {
 			newLvl++
 			newXp = 0
-			// Queue Level-up alert
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, '🏆 COMMANDER LEVEL UP: Your Hero commander has successfully reached Level ' || $2::text || '!', FALSE)", sender.ID, newLvl)
 		}
 
