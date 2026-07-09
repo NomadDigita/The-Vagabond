@@ -514,13 +514,23 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var resolved bool
 	var attackerCampID string
 	var createdAt time.Time
-	err = tx.QueryRowContext(ctx, "SELECT is_intercepted, resolved, spy_id, created_at FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted, &resolved, &attackerCampID, &createdAt)
+	var resolveTime time.Time
+	err = tx.QueryRowContext(ctx, "SELECT is_intercepted, resolved, spy_id, created_at, resolve_time FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted, &resolved, &attackerCampID, &createdAt, &resolveTime)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Connection Closed: This satellite has already returned to orbit."})
 	}
 
 	if isIntercepted {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already Neutralized."})
+	}
+
+	// Enforce the intercept window: the deadline is whatever resolve_time
+	// currently represents (outbound arrival before the tick engine flips
+	// `resolved`, or the return-to-orbit deadline afterward). Without this
+	// check the satellite stays interceptable indefinitely, even long
+	// after it should have safely landed.
+	if time.Now().UTC().After(resolveTime) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Too Late: The intercept window has closed. The satellite is out of range."})
 	}
 
 	var energy float64
