@@ -62,104 +62,74 @@ func (e *Engine) Stop() {
 	close(e.stopChan)
 }
 
+// tickPhase describes one isolated unit of tick work. Each phase gets its
+// own transaction so that a failure in one subsystem (e.g. arena matchmaking)
+// can never block or roll back unrelated subsystems (e.g. espionage,
+// mining, combat resolution) in the same tick.
+type tickPhase struct {
+	name string
+	run  func(ctx context.Context, tx *sql.Tx) error
+}
+
+// runPhase executes a single phase in its own transaction. It always
+// returns (never aborts the caller's loop) so subsequent phases still run
+// even if this one fails. Errors are logged with the phase name attached
+// for easier diagnosis.
+func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
+	tx, err := e.DB.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("Tick phase [%s] failed to open transaction: %v", p.name, err)
+		return
+	}
+	defer tx.Rollback()
+
+	if err := p.run(ctx, tx); err != nil {
+		log.Printf("Tick phase [%s] failed: %v", p.name, err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Tick phase [%s] failed to commit: %v", p.name, err)
+	}
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
 
 	ctx := context.Background()
 
-	tx, err := e.DB.BeginTx(ctx, nil)
-	if err != nil {
-		log.Printf("Tick Engine failed to initiate database transaction: %v", err)
-		return
-	}
-	defer tx.Rollback()
-
-	if err := e.weatherEngine.RunWeatherPass(ctx, tx); err != nil {
-		log.Printf("Error during Tick Weather Pass: %v", err)
-		return
-	}
-
-	if err := e.resourceProcessor.RunResourcePass(ctx, tx); err != nil {
-		log.Printf("Error during Tick Resource Pass execution: %v", err)
-		return
-	}
-
-	if err := e.agentProcessor.RunAgentPass(ctx, tx); err != nil {
-		log.Printf("Error during Tick Agent Pass execution: %v", err)
-		return
+	phases := []tickPhase{
+		{"weather", func(ctx context.Context, tx *sql.Tx) error { return e.weatherEngine.RunWeatherPass(ctx, tx) }},
+		{"resources", func(ctx context.Context, tx *sql.Tx) error { return e.resourceProcessor.RunResourcePass(ctx, tx) }},
+		{"agents", func(ctx context.Context, tx *sql.Tx) error { return e.agentProcessor.RunAgentPass(ctx, tx) }},
+		{"logistics_consumption", e.applyActiveLogisticsConsumption},
+		{"arena_matchmaking", e.processArenaMatchmaking},
+		{"espionage", e.resolvePendingEspionageMissions},
+		{"mining", e.resolveCompletedMiningQueues},
+		{"starvation", func(ctx context.Context, tx *sql.Tx) error { return e.starvationEngine.RunStarvationPass(ctx, tx) }},
+		{"construction", e.resolveCompletedUpgrades},
+		{"staged_raid_departures", e.autoLaunchExpiredStagedRaids},
+		{"coop_rallies", e.resolveCompletedCoopRallies},
+		{"raid_combat", e.resolveRaidCombats},
+		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
+			return err
+		}},
 	}
 
-	if err := e.applyActiveLogisticsConsumption(ctx, tx); err != nil {
-		log.Printf("Error during Active Logistics Consumption: %v", err)
-		return
+	for _, p := range phases {
+		e.runPhase(ctx, p)
 	}
 
-	if err := e.processArenaMatchmaking(ctx, tx); err != nil {
-		log.Printf("Error during Arena Matchmaker sweep: %v", err)
-		return
-	}
-
-	if err := e.resolvePendingEspionageMissions(ctx, tx); err != nil {
-		log.Printf("Error during Espionage resolution: %v", err)
-		return
-	}
-
-	if err := e.resolveCompletedMiningQueues(ctx, tx); err != nil {
-		log.Printf("Error during Active Mining Resolution: %v", err)
-		return
-	}
-
-	// 20-Minute Idle Miner Sweeper Check
+	// 20-Minute Idle Miner Sweeper Check. Kept isolated from the main phase
+	// list since it's on its own cadence rather than every tick.
 	if time.Now().UTC().Sub(e.lastIdleCheck) >= 20*time.Minute {
-		if err := e.notifyIdleMiners(ctx, tx); err == nil {
-			e.lastIdleCheck = time.Now().UTC()
-		} else {
-			log.Printf("Error during Idle Miner verification check: %v", err)
-		}
+		e.runPhase(ctx, tickPhase{"idle_miner_sweep", e.notifyIdleMiners})
+		e.lastIdleCheck = time.Now().UTC()
 	}
 
-	if err := e.starvationEngine.RunStarvationPass(ctx, tx); err != nil {
-		log.Printf("Error during Tick Starvation Pass execution: %v", err)
-		return
-	}
-
-	if err := e.resolveCompletedUpgrades(ctx, tx); err != nil {
-		log.Printf("Error during Construction Upgrade Pass execution: %v", err)
-		return
-	}
-
-	// Automatically launch co-op lobbies whose departure countdown timer has expired
-	if err := e.autoLaunchExpiredStagedRaids(ctx, tx); err != nil {
-		log.Printf("Error during staged Co-Op departure launches: %v", err)
-		return
-	}
-
-	if err := e.resolveCompletedCoopRallies(ctx, tx); err != nil {
-		log.Printf("Error during Co-Op Rally resolution pass: %v", err)
-		return
-	}
-
-	if err := e.resolveRaidCombats(ctx, tx); err != nil {
-		log.Printf("Error during Combat Resolution Pass: %v", err)
-		return
-	}
-
-	deleteExpiredEvents := `
-		DELETE FROM world_events 
-		WHERE expires_at < CURRENT_TIMESTAMP`
-	_, err = tx.ExecContext(ctx, deleteExpiredEvents)
-	if err != nil {
-		log.Printf("Tick Engine failed cleaning expired world events: %v", err)
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("Tick Engine failed to commit transaction updates: %v", err)
-		return
-	}
-
-	log.Printf("Tick pass successfully calculated and committed. Duration: %s", time.Since(start))
+	log.Printf("Tick pass complete. Duration: %s", time.Since(start))
 }
 
 // autoLaunchExpiredStagedRaids transitions staged co-op lobbies into active marching campaigns at timeout

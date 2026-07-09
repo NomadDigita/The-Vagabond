@@ -178,6 +178,10 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already sold."})
 	}
 
+	if sellerID == myCampID {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ You can't buy your own listing."})
+	}
+
 	var dollars float64
 	_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&dollars)
 
