@@ -436,6 +436,15 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	}
 
 	marchingMinutes := steps * 1.5
+
+	var speedTechLvl int = 1
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(speed_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&speedTechLvl)
+	speedBonus := math.Min(float64(speedTechLvl-1)*0.04, 0.60)
+	marchingMinutes *= (1.0 - speedBonus)
+	if marchingMinutes < 0.5 {
+		marchingMinutes = 0.5
+	}
+
 	resolveTime := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 
 	var attackerName string
@@ -547,8 +556,8 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerCampID).Scan(&attackerUserID)
 
 	var attackerTechLvl, defenderTechLvl int = 1, 1
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", attackerCampID).Scan(&attackerTechLvl)
-	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(defense_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&defenderTechLvl)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(intel_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", attackerCampID).Scan(&attackerTechLvl)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(intel_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&defenderTechLvl)
 
 	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10
 
@@ -991,6 +1000,14 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		marchingMinutes *= 0.7
 	case "acid_rain":
 		marchingMinutes *= 2.0
+	}
+
+	var attackerSpeedTechLvl int = 1
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(speed_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&attackerSpeedTechLvl)
+	speedBonus := math.Min(float64(attackerSpeedTechLvl-1)*0.04, 0.60)
+	marchingMinutes *= (1.0 - speedBonus)
+	if marchingMinutes < 1.0 {
+		marchingMinutes = 1.0
 	}
 
 	var energy float64

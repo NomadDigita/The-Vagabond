@@ -29,8 +29,9 @@ type EncampmentState struct {
 	BuggyCount     int
 	ShipCount      int
 	JetCount       int
-	DefenseTechLvl int
-	SalvageLvl     int
+	DefenseTechLvl    int
+	ProductionTechLvl int
+	SalvageLvl        int
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
@@ -49,6 +50,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT ships FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as ship_count,
 			COALESCE((SELECT jets FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as jet_count,
 			COALESCE((SELECT res.defense_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as defense_tech_lvl,
+			COALESCE((SELECT res.production_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as production_tech_lvl,
 			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl
 		FROM encampments e
 		JOIN resources r ON r.encampment_id = e.id`
@@ -67,7 +69,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
 			&s.TroopCount, &s.LoanAmount, 
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
-			&s.DefenseTechLvl, &s.SalvageLvl,
+			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.SalvageLvl,
 		)
 		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
@@ -77,7 +79,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	for _, s := range states {
-		overclockBonus := float64(s.DefenseTechLvl-1) * 0.20
+		overclockBonus := float64(s.ProductionTechLvl-1) * 0.20
 		salvageBonus := float64(s.SalvageLvl-1) * 0.15
 		
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
