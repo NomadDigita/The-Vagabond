@@ -888,6 +888,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
 		var defenderIntegrityTechLvl int = 1
+		var defenderTurretLevels int = 0
 		var defenderHeroSuperpower string
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
@@ -911,6 +912,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&targetBiome)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(integrity_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderIntegrityTechLvl)
+
+			// Defense Grid: sum all turret levels (Light/Heavy Laser, Gauss
+			// Cannon, Ion Cannon, Plasma Turret) into a single bonus. Each
+			// level of any turret adds a flat slice of defense rating.
+			_ = tx.QueryRowContext(ctx,
+				"SELECT COALESCE(SUM(level), 0) FROM modules WHERE encampment_id = $1 AND type IN ('light_laser', 'heavy_laser', 'gauss_cannon', 'ion_cannon', 'plasma_turret')",
+				r.defenderID.String).Scan(&defenderTurretLevels)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
 		}
 
@@ -920,7 +928,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
 		offenseRatingModifier := 1.0
-		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15)
+		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15) + (float64(defenderTurretLevels) * 0.08)
 
 		switch targetBiome {
 		case "forest":

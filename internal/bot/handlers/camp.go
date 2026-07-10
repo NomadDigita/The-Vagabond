@@ -135,6 +135,60 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
+// defenseModule describes one Defense Grid structure. All of these ride on
+// the same generic `modules` table + HandleUpgradeCallback pipeline used by
+// tent/scrap_heap/generator, so adding a new turret type needs no new
+// schema or upgrade logic - just an entry here.
+type defenseModule struct {
+	moduleType string
+	emoji      string
+	title      string
+	desc       string
+}
+
+var defenseGridModules = []defenseModule{
+	{"light_laser", "🟡", "Light Laser", "Cheap early turret. Small defense rating bonus."},
+	{"heavy_laser", "🔴", "Heavy Laser", "Solid anti-personnel turret. Moderate defense bonus."},
+	{"gauss_cannon", "🎯", "Gauss Cannon", "Heavy anti-armor turret. Strong defense bonus."},
+	{"ion_cannon", "🔵", "Ion Cannon", "Anti-drone/anti-air turret. Strong defense bonus."},
+	{"plasma_turret", "🟣", "Plasma Turret", "Top-tier turret. Massive defense bonus."},
+	{"anti_missile", "🚀🛡️", "Anti-Missile Battery", "Chance to auto-intercept incoming ICBM strikes for free."},
+	{"warehouse", "📦", "Warehouse", "Increases resource storage capacity."},
+}
+
+// HandleDefenseGridPanel renders the turret/defensive structure upgrade panel.
+func (h *CampHandler) HandleDefenseGridPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	var campLvl int
+	_ = h.DB.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
+
+	panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"🛡️ DEFENSE GRID CONTROL\n" +
+		"━━━━━━━━━━━━━━━━━━━━━━\n" +
+		"Fortify your Outpost with turrets and utility structures.\n\n"
+
+	selector := &telebot.ReplyMarkup{}
+	var rows []telebot.Row
+
+	for _, mod := range defenseGridModules {
+		lvl := h.getModuleLevel(ctx, campID, mod.moduleType)
+		cost := lvl * 150
+		panelText += fmt.Sprintf("%s [%s Lvl %d] -> Cost: %d Scrap\n   %s\n\n", mod.emoji, mod.title, lvl, cost, mod.desc)
+		btn := selector.Data(fmt.Sprintf("%s %s (%d)", mod.emoji, mod.title, lvl+1), "upgrade_mod", mod.moduleType)
+		rows = append(rows, selector.Row(btn))
+	}
+
+	panelText += "━━━━━━━━━━━━━━━━━━━━━━"
+	selector.Inline(rows...)
+
+	return renderOrEdit(c, panelText, selector)
+}
+
 func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 

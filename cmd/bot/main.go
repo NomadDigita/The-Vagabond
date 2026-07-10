@@ -504,6 +504,7 @@ func main() {
 	bot.Handle("/mine", camp.HandleActiveMining)
 	bot.Handle("/research", research.HandleResearchPanel)
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
+	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
@@ -543,6 +544,7 @@ func main() {
 	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)
 	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
 	bot.Handle("♻️ Deconstruct Units", deconstruct.HandleDeconstructPanel)
+	bot.Handle("🛡️ Defense Grid", camp.HandleDefenseGridPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	bot.Handle(telebot.OnText, nlp.HandleTextMessage)

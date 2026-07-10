@@ -32,6 +32,7 @@ type EncampmentState struct {
 	DefenseTechLvl    int
 	ProductionTechLvl int
 	SalvageLvl        int
+	WarehouseLvl      int
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
@@ -51,6 +52,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT jets FROM workshop_inventory w WHERE w.encampment_id = e.id), 0) as jet_count,
 			COALESCE((SELECT res.defense_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as defense_tech_lvl,
 			COALESCE((SELECT res.production_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as production_tech_lvl,
+			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'warehouse'), 0) as warehouse_lvl,
 			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl
 		FROM encampments e
 		JOIN resources r ON r.encampment_id = e.id`
@@ -69,7 +71,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
 			&s.TroopCount, &s.LoanAmount, 
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
-			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.SalvageLvl,
+			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.WarehouseLvl, &s.SalvageLvl,
 		)
 		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
@@ -107,7 +109,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		rationsConsumed := float64(s.TroopCount) * 0.05
 		energyConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
-		storageCap := float64(s.TentLvl) * 500.0
+		storageCap := (float64(s.TentLvl) * 500.0) + (float64(s.WarehouseLvl) * 750.0)
 
 		// Surplus Preservation System: Only caps new passive allocations. Pre-existing balances are preserved.
 		newScrap := s.Scrap
