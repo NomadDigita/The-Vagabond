@@ -728,7 +728,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
-		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0`, 
+		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0, destroyers = 0, bombers = 0`, 
 		sender.ID, defenderCampID,
 	)
 
@@ -741,13 +741,13 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	var myCampID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", userID).Scan(&myCampID)
 
-	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes int
-	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes, availDestroyers, availBombers int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0), COALESCE(destroyers, 0), COALESCE(bombers, 0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes, &availDestroyers, &availBombers)
 
-	var dSols, dMechs, dBuggies, dShips, dJets, dNukes int
-	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes FROM campaign_drafts WHERE user_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes)
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers int
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0) FROM campaign_drafts WHERE user_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
@@ -757,6 +757,8 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 			"DRAFTED FORCES STOCKPILES:\n"+
 			"🪖 Soldiers: %d / %d active\n"+
 			"🤖 Mechs: %d / %d active\n"+
+			"💥 Destroyers: %d / %d active\n"+
+			"🛩️ Bombers: %d / %d active\n"+
 			"🚗 Buggies: %d / %d active\n"+
 			"⛵ Clipper Ships: %d / %d active\n"+
 			"✈️ Cargo Jets: %d / %d active\n"+
@@ -766,7 +768,7 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 			"🛡️ [Safe Route] — Costs 1.5x Fuel. Travels fast (0.7x duration).\n"+
 			"🛰️ [Stealth Route] — Slow travel (1.5x duration). BYPASSES ALL RADAR WARNINGS!\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		dSols, availSoldiers, dMechs, availMechs, dBuggies, availBuggies, dShips, availShips, dJets, availJets, dNukes, availNukes,
+		dSols, availSoldiers, dMechs, availMechs, dDestroyers, availDestroyers, dBombers, availBombers, dBuggies, availBuggies, dShips, availShips, dJets, availJets, dNukes, availNukes,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -775,6 +777,10 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	btnMinusSol := selector.Data("🪖 -Soldier", "adjust_draft", "soldier", "dec")
 	btnPlusMech := selector.Data("🤖 +Mech", "adjust_draft", "mech", "inc")
 	btnMinusMech := selector.Data("🤖 -Mech", "adjust_draft", "mech", "dec")
+	btnPlusDestroyer := selector.Data("💥 +Destroyer", "adjust_draft", "destroyer", "inc")
+	btnMinusDestroyer := selector.Data("💥 -Destroyer", "adjust_draft", "destroyer", "dec")
+	btnPlusBomber := selector.Data("🛩️ +Bomber", "adjust_draft", "bomber", "inc")
+	btnMinusBomber := selector.Data("🛩️ -Bomber", "adjust_draft", "bomber", "dec")
 	btnPlusBuggy := selector.Data("🚗 +Buggy", "adjust_draft", "buggy", "inc")
 	btnMinusBuggy := selector.Data("🚗 -Buggy", "adjust_draft", "buggy", "dec")
 
@@ -792,6 +798,8 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	selector.Inline(
 		selector.Row(btnPlusSol, btnMinusSol),
 		selector.Row(btnPlusMech, btnMinusMech),
+		selector.Row(btnPlusDestroyer, btnMinusDestroyer),
+		selector.Row(btnPlusBomber, btnMinusBomber),
 		selector.Row(btnPlusBuggy, btnMinusBuggy),
 		selector.Row(btnPlusShip, btnMinusShip),
 		selector.Row(btnPlusJet, btnMinusJet),
@@ -832,18 +840,18 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to resolve outpost profile assets."})
 	}
 
-	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes int
-	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
-	err = tx.QueryRowContext(ctx, queryInv, campID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes)
+	var availSoldiers, availMechs, availBuggies, availShips, availJets, availNukes, availDestroyers, availBombers int
+	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0), COALESCE(destroyers, 0), COALESCE(bombers, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`
+	err = tx.QueryRowContext(ctx, queryInv, campID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes, &availDestroyers, &availBombers)
 	if err != nil {
 		log.Printf("Failed query warehouse profile values: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Inventory records inaccessible."})
 	}
 
-	var dSols, dMechs, dBuggies, dShips, dJets, dNukes int
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers int
 	var targetCampID string
-	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
-	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &targetCampID)
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
+	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &targetCampID)
 	if err != nil {
 		log.Printf("Draft session select failure: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ No active campaign parameters found."})
@@ -861,6 +869,14 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		currentVal = dMechs
 		maxVal = availMechs
 		dbColumn = "mechs"
+	case "destroyer":
+		currentVal = dDestroyers
+		maxVal = availDestroyers
+		dbColumn = "destroyers"
+	case "bomber":
+		currentVal = dBombers
+		maxVal = availBombers
+		dbColumn = "bombers"
 	case "buggy":
 		currentVal = dBuggies
 		maxVal = availBuggies
@@ -934,14 +950,14 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var heroID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
 
-	var mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes int
-	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes FROM campaign_drafts WHERE user_id = $1`
-	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&mobSoldiers, &mobMechs, &mobBuggies, &mobShips, &mobJets, &mobNukes)
+	var mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, mobDestroyers, mobBombers int
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0) FROM campaign_drafts WHERE user_id = $1`
+	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&mobSoldiers, &mobMechs, &mobBuggies, &mobShips, &mobJets, &mobNukes, &mobDestroyers, &mobBombers)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Staging Timeout: No active draft session located."})
 	}
 
-	totMobilized := mobSoldiers + mobMechs + mobBuggies + mobShips + mobJets + mobNukes
+	totMobilized := mobSoldiers + mobMechs + mobBuggies + mobShips + mobJets + mobNukes + mobDestroyers + mobBombers
 	if totMobilized <= 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Staging Empty: Allocate at least 1 unit to deploy!"})
 	}
@@ -1025,9 +1041,10 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
-		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6 
+		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6,
+		    destroyers = destroyers - $8, bombers = bombers - $9
 		WHERE encampment_id = $7`, 
-		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID,
+		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID, mobDestroyers, mobBombers,
 	)
 
 	_, _ = tx.ExecContext(ctx, "DELETE FROM campaign_drafts WHERE user_id = $1", sender.ID)
@@ -1051,7 +1068,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime).Scan(&raidID)
 	}
 
-	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type) VALUES ($1, $2, $3, $4, $5, $6)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type, destroyers_mobilized, bombers_mobilized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType, mobDestroyers, mobBombers)
 
 	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)

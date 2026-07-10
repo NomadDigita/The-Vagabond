@@ -112,6 +112,8 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS haulers INT DEFAULT 0;`,
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS tankers INT DEFAULT 0;`,
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS rigs INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS destroyers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS bombers INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS active_mining_queues (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -147,6 +149,9 @@ func executeStartupMigrations(db *sql.DB) {
 			buggies_mobilized INT DEFAULT 0,
 			route_type VARCHAR(50) DEFAULT 'direct'
 		);`,
+
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS destroyers_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS bombers_mobilized INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -302,6 +307,9 @@ func executeStartupMigrations(db *sql.DB) {
 			jets INT DEFAULT 0,
 			nukes INT DEFAULT 0
 		);`,
+
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS destroyers INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS bombers INT DEFAULT 0;`,
 
 		`CREATE OR REPLACE FUNCTION notify_realtime_event() 
 		RETURNS trigger AS $$
@@ -504,6 +512,7 @@ func main() {
 	bot.Handle("/mine", camp.HandleActiveMining)
 	bot.Handle("/research", research.HandleResearchPanel)
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
+	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
@@ -543,6 +552,7 @@ func main() {
 	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)
 	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
 	bot.Handle("♻️ Deconstruct Units", deconstruct.HandleDeconstructPanel)
+	bot.Handle("🛡️ Defense Grid", camp.HandleDefenseGridPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	bot.Handle(telebot.OnText, nlp.HandleTextMessage)

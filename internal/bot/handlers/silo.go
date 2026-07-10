@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -140,6 +141,32 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	} else {
 		defenderName = "Rogue Drone Nest"
 		defenderUserID = 0
+	}
+
+	var antiMissileLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'anti_missile'", targetCampID).Scan(&antiMissileLvl)
+
+	if antiMissileLvl > 0 {
+		interceptChance := 0.08 * float64(antiMissileLvl)
+		if interceptChance > 0.80 {
+			interceptChance = 0.80
+		}
+		if rand.Float64() < interceptChance {
+			_ = tx.Commit()
+			_ = c.Respond(&telebot.CallbackResponse{Text: "🚨 ICBM INTERCEPTED: Target's Anti-Missile Battery shot it down!"})
+
+			if defenderUserID != 0 {
+				defenderAlert := fmt.Sprintf(
+					"🛡️ DEFENSE ALERT: ANTI-MISSILE BATTERY INTERCEPT!\n\n"+
+						"Our Anti-Missile Battery successfully shot down an incoming tactical ICBM strike from Outpost [%s]!\n"+
+						"💀 Casualties: 0 | Structural Damage: None.",
+					attackerName,
+				)
+				_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
+			}
+
+			return h.HandleSiloPanel(c)
+		}
 	}
 
 	var defenderShields int
