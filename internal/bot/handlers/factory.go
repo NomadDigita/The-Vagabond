@@ -73,23 +73,26 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		log.Printf("Failed to allocate hangar row: %v", err)
 	}
 
-	var soldiers, drones, mechs, nukes int
-	queryInv := `SELECT soldiers, drones, mechs, nukes FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes)
+	var soldiers, drones, mechs, nukes, destroyers, bombers int
+	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🪖 BARRACKS RECRUITMENT FORGE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🪖 Soldiers: %d | 🛰️ Tactical Drones: %d\n"+
-			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n\n"+
+			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n"+
+			"💥 Destroyers: %d | 🛩️ Bombers: %d\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🪖 [Soldier] — Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
 			"🛰️ [Tactical Drone] — Cost: 100 Iron, 10 Silver (Dual-use: Spy Satellite or Interceptor)\n"+
 			"🤖 [Colossus Mech] — Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
 			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 10 Diamonds (+1500 Detonation)\n"+
+			"💥 [Destroyer] — Cost: 800 Steel, 40 Uranium, 15 Gold (Strong vs enemy Drones/Jets)\n"+
+			"🛩️ [Bomber] — Cost: 1200 Steel, 60 Uranium, 100 Oil (Strong vs enemy Turrets/Buildings)\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		soldiers, drones, mechs, nukes,
+		soldiers, drones, mechs, nukes, destroyers, bombers,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -98,10 +101,13 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	btnCraftDrone := selector.Data("🛰️ Assemble Drone", "craft_item", "drone")
 	btnCraftMech := selector.Data("🤖 Forge Mech", "craft_item", "mech")
 	btnCraftNuke := selector.Data("☢️ Forge Nuke", "craft_item", "nuke")
+	btnCraftDestroyer := selector.Data("💥 Forge Destroyer", "craft_item", "destroyer")
+	btnCraftBomber := selector.Data("🛩️ Forge Bomber", "craft_item", "bomber")
 
 	selector.Inline(
 		selector.Row(btnCraftSoldier, btnCraftDrone),
 		selector.Row(btnCraftMech, btnCraftNuke),
+		selector.Row(btnCraftDestroyer, btnCraftBomber),
 	)
 
 	return renderOrEdit(c, panelText, selector)
@@ -231,6 +237,22 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 2500.0, uranium = uranium - 500.0, gold = gold - 100.0, diamond = diamond - 10.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes + 1 WHERE encampment_id = $1", campID)
 		successAlert = "☢️ Nuclear Device assembled!"
+
+	case "destroyer":
+		if steel < 800.0 || uranium < 40.0 || gold < 15.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 800 Steel, 40 Uranium, 15 Gold."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 800.0, uranium = uranium - 40.0, gold = gold - 15.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET destroyers = destroyers + 1 WHERE encampment_id = $1", campID)
+		successAlert = "💥 Destroyer forged successfully!"
+
+	case "bomber":
+		if steel < 1200.0 || uranium < 60.0 || oil < 100.0 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 1200 Steel, 60 Uranium, 100 Oil."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1200.0, uranium = uranium - 60.0, oil = oil - 100.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET bombers = bombers + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🛩️ Bomber assembled successfully!"
 
 	case "buggy":
 		if steel < 100.0 || oil < 20.0 {

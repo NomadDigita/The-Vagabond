@@ -803,10 +803,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "returning" {
-			var soldiersMob, mechsMob int
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob)
+			var soldiersMob, mechsMob, destroyersMob, bombersMob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", soldiersMob, mechsMob, r.attackerID)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
@@ -835,8 +835,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldiers, primaryMechs, primaryBuggies int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies)
+		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers)
 
 		type coopContributor struct {
 			encampment_id string
@@ -865,7 +865,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs += h.mechs
 		}
 
-		attackForce := totSoldiers + totMechs
+		// Destroyers and Bombers aren't yet draftable into co-op lobbies
+		// (only the raid creator's primary force can bring them), so no
+		// helper contribution to add here - just the primary force.
+		totDestroyers := primaryDestroyers
+		totBombers := primaryBombers
+
+		attackForce := totSoldiers + totMechs + totDestroyers + totBombers
 
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
@@ -961,6 +967,22 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
 
 		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
+
+		// Destroyer: anti-drone/anti-air specialist. Rating scales up the
+		// more drones/jets the defender is fielding - a hard counter unit.
+		if totDestroyers > 0 {
+			destroyerTargets := dronesDefender + jetsDefender
+			destroyerBonus := 1.0 + math.Min(float64(destroyerTargets)*0.02, 1.0)
+			attRating += float64(totDestroyers) * 20.0 * offenseRatingModifier * destroyerBonus
+		}
+
+		// Bomber: siege specialist. Rating scales up the more fortified the
+		// defender's Defense Grid is - a hard counter to turtled bases.
+		if totBombers > 0 {
+			bomberBonus := 1.0 + math.Min(float64(defenderTurretLevels)*0.05, 1.5)
+			attRating += float64(totBombers) * 18.0 * offenseRatingModifier * bomberBonus
+		}
+
 		defRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attCas := 0
@@ -1014,8 +1036,20 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		attCas += bonusAttCasFromDefLosses
 		defCas += bonusDefCasFromAttLosses
 
-		lostAttSols := int(float64(attCas) * 0.70)
-		lostAttMechs := attCas - lostAttSols
+		// Casualty split: preserve the original 70/30 soldier/mech ratio for
+		// that pool, and split whatever share of casualties falls on the
+		// Destroyer/Bomber pool proportional to their relative counts. When
+		// no destroyers/bombers are drafted this reduces to exactly the old
+		// behavior (soldierMechShare = 1.0).
+		soldierMechShare := 0.0
+		if attackForce > 0 {
+			soldierMechShare = float64(totSoldiers+totMechs) / float64(attackForce)
+		}
+		smCas := int(float64(attCas) * soldierMechShare)
+		dbCas := attCas - smCas
+
+		lostAttSols := int(float64(smCas) * 0.70)
+		lostAttMechs := smCas - lostAttSols
 		if lostAttSols > primarySoldiers {
 			lostAttSols = primarySoldiers
 		}
@@ -1023,10 +1057,25 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lostAttMechs = primaryMechs
 		}
 
+		var lostAttDestroyers, lostAttBombers int
+		if totDestroyers+totBombers > 0 {
+			destroyerShare := float64(totDestroyers) / float64(totDestroyers+totBombers)
+			lostAttDestroyers = int(float64(dbCas) * destroyerShare)
+			lostAttBombers = dbCas - lostAttDestroyers
+			if lostAttDestroyers > primaryDestroyers {
+				lostAttDestroyers = primaryDestroyers
+			}
+			if lostAttBombers > primaryBombers {
+				lostAttBombers = primaryBombers
+			}
+		}
+
 		newAttSols := primarySoldiers - lostAttSols
 		newAttMechs := primaryMechs - lostAttMechs
+		newAttDestroyers := primaryDestroyers - lostAttDestroyers
+		newAttBombers := primaryBombers - lostAttBombers
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2 WHERE raid_id = $3", newAttSols, newAttMechs, r.id)
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers)
 
 		attackerCasualties := (totSoldiers + totMechs) - (newAttSols + newAttMechs)
 
@@ -1071,7 +1120,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		attackerStillStanding := (newAttSols + newAttMechs) > 0
+		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
@@ -1091,10 +1140,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		// Append specific environmental weather details dynamically to round reports
 		roundLog := fmt.Sprintf(
 			"⚔️ BATTLE REPORT: ROUND %d COMPLETE!\n\n"+
-				"💥 Attacker Casualties: %d Soldiers, %d Mechs lost.\n"+
+				"💥 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers lost.\n"+
 				"🛡️ Defender Casualties: %d units lost.%s\n"+
 				"⏳ Next skirmish round starting on next clock tick.",
-			r.roundNumber, lostAttSols, lostAttMechs, defCas, weatherNotice,
+			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, defCas, weatherNotice,
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
