@@ -156,6 +156,14 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS bombers_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS battlecruisers_mobilized INT DEFAULT 0;`,
 
+		`CREATE TABLE IF NOT EXISTS tax_law (
+			id INT PRIMARY KEY DEFAULT 1,
+			tax_rate_percent INT DEFAULT 5,
+			last_collected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT single_row CHECK (id = 1)
+		);`,
+		`INSERT INTO tax_law (id, tax_rate_percent) VALUES (1, 5) ON CONFLICT (id) DO NOTHING;`,
+
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
@@ -492,6 +500,7 @@ func main() {
 	silo := handlers.NewSiloHandler(db)
 	research := handlers.NewResearchHandler(db)
 	deconstruct := handlers.NewDeconstructHandler(db)
+	ranking := handlers.NewRankingHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -517,6 +526,8 @@ func main() {
 	bot.Handle("/research", research.HandleResearchPanel)
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
+	bot.Handle("/ranking", ranking.HandleRankingPanel)
+	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)

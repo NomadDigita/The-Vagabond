@@ -15,6 +15,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
+	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 )
 
 type Engine struct {
@@ -94,6 +95,90 @@ func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
 	}
 }
 
+// collectDailyTax implements SpaceHunt's Daily Tax Law: once every 24
+// hours, every player pays tax_rate_percent of their banked Dollars into a
+// shared pool, which is then paid out evenly to the top 3 ranked
+// survivors (by the canonical scoring.ScoreExpr).
+func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
+	var lastCollected time.Time
+	var taxRate int
+	err := tx.QueryRowContext(ctx, "SELECT tax_rate_percent, last_collected_at FROM tax_law WHERE id = 1 FOR UPDATE").Scan(&taxRate, &lastCollected)
+	if err != nil {
+		return err
+	}
+
+	if time.Now().UTC().Sub(lastCollected) < 24*time.Hour {
+		return nil // Not due yet.
+	}
+
+	if taxRate > 0 {
+		var totalCollected float64
+
+		payerRows, err := tx.QueryContext(ctx, "SELECT encampment_id, dollars FROM resources WHERE dollars > 0")
+		if err != nil {
+			return err
+		}
+		type payer struct {
+			campID  string
+			dollars float64
+		}
+		var payers []payer
+		for payerRows.Next() {
+			var p payer
+			if scanErr := payerRows.Scan(&p.campID, &p.dollars); scanErr == nil {
+				payers = append(payers, p)
+			}
+		}
+		payerRows.Close()
+
+		for _, p := range payers {
+			collected := p.dollars * float64(taxRate) / 100.0
+			totalCollected += collected
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", collected, p.campID)
+		}
+
+		if totalCollected > 0 {
+			topQuery := fmt.Sprintf(`
+				SELECT e.user_id, e.id, e.name
+				FROM encampments e
+				ORDER BY %s DESC
+				LIMIT 3`, scoring.ScoreExpr)
+
+			topRows, err := tx.QueryContext(ctx, topQuery)
+			if err == nil {
+				type winner struct {
+					userID int64
+					campID string
+					name   string
+				}
+				var winners []winner
+				for topRows.Next() {
+					var w winner
+					if scanErr := topRows.Scan(&w.userID, &w.campID, &w.name); scanErr == nil {
+						winners = append(winners, w)
+					}
+				}
+				topRows.Close()
+
+				if len(winners) > 0 {
+					share := totalCollected / float64(len(winners))
+					for _, w := range winners {
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, w.campID)
+						alertMsg := fmt.Sprintf(
+							"💰🏆 DAILY TAX PAYOUT! 🏆💰\n\nAs a Top-3 ranked survivor, you received 💵 $%.2f from the Wasteland Tax Law (%d%% rate) collected from all players!",
+							share, taxRate,
+						)
+						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, alertMsg)
+					}
+				}
+			}
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, "UPDATE tax_law SET last_collected_at = CURRENT_TIMESTAMP WHERE id = 1")
+	return err
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
@@ -113,6 +198,7 @@ func (e *Engine) ProcessTick() {
 		{"staged_raid_departures", e.autoLaunchExpiredStagedRaids},
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
+		{"daily_tax", e.collectDailyTax},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
 			return err
