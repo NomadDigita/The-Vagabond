@@ -15,6 +15,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
+	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 )
 
 type Engine struct {
@@ -26,6 +27,7 @@ type Engine struct {
 	weatherEngine     *world.WeatherEngine
 	agentProcessor    *agent.Processor
 	lastIdleCheck     time.Time
+	lastAutoScan      time.Time
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -38,6 +40,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		weatherEngine:     world.NewWeatherEngine(db),
 		agentProcessor:    agent.NewProcessor(db),
 		lastIdleCheck:     time.Now().UTC(),
+		lastAutoScan:      time.Now().UTC(),
 	}
 }
 
@@ -94,6 +97,149 @@ func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
 	}
 }
 
+// collectDailyTax implements SpaceHunt's Daily Tax Law: once every 24
+// hours, every player pays tax_rate_percent of their banked Dollars into a
+// shared pool, which is then paid out evenly to the top 3 ranked
+// survivors (by the canonical scoring.ScoreExpr).
+func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
+	var lastCollected time.Time
+	var taxRate int
+	err := tx.QueryRowContext(ctx, "SELECT tax_rate_percent, last_collected_at FROM tax_law WHERE id = 1 FOR UPDATE").Scan(&taxRate, &lastCollected)
+	if err != nil {
+		return err
+	}
+
+	if time.Now().UTC().Sub(lastCollected) < 24*time.Hour {
+		return nil // Not due yet.
+	}
+
+	if taxRate > 0 {
+		var totalCollected float64
+
+		payerRows, err := tx.QueryContext(ctx, "SELECT encampment_id, dollars FROM resources WHERE dollars > 0")
+		if err != nil {
+			return err
+		}
+		type payer struct {
+			campID  string
+			dollars float64
+		}
+		var payers []payer
+		for payerRows.Next() {
+			var p payer
+			if scanErr := payerRows.Scan(&p.campID, &p.dollars); scanErr == nil {
+				payers = append(payers, p)
+			}
+		}
+		payerRows.Close()
+
+		for _, p := range payers {
+			collected := p.dollars * float64(taxRate) / 100.0
+			totalCollected += collected
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", collected, p.campID)
+		}
+
+		if totalCollected > 0 {
+			topQuery := fmt.Sprintf(`
+				SELECT e.user_id, e.id, e.name
+				FROM encampments e
+				ORDER BY %s DESC
+				LIMIT 3`, scoring.ScoreExpr)
+
+			topRows, err := tx.QueryContext(ctx, topQuery)
+			if err == nil {
+				type winner struct {
+					userID int64
+					campID string
+					name   string
+				}
+				var winners []winner
+				for topRows.Next() {
+					var w winner
+					if scanErr := topRows.Scan(&w.userID, &w.campID, &w.name); scanErr == nil {
+						winners = append(winners, w)
+					}
+				}
+				topRows.Close()
+
+				if len(winners) > 0 {
+					share := totalCollected / float64(len(winners))
+					for _, w := range winners {
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, w.campID)
+						alertMsg := fmt.Sprintf(
+							"💰🏆 DAILY TAX PAYOUT! 🏆💰\n\nAs a Top-3 ranked survivor, you received 💵 $%.2f from the Wasteland Tax Law (%d%% rate) collected from all players!",
+							share, taxRate,
+						)
+						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, alertMsg)
+					}
+				}
+			}
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, "UPDATE tax_law SET last_collected_at = CURRENT_TIMESTAMP WHERE id = 1")
+	return err
+}
+
+// autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
+// encampment with auto_scan_enabled, pick one random rival outpost and
+// send a lightweight scan report - automating what /scout does manually.
+// Runs on its own ~30-minute cadence via the caller, same pattern as the
+// idle miner sweep.
+func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT e.id, e.user_id
+		FROM encampments e
+		WHERE e.auto_scan_enabled = TRUE`)
+	if err != nil {
+		return err
+	}
+
+	type scanner struct {
+		campID string
+		userID int64
+	}
+	var scanners []scanner
+	for rows.Next() {
+		var s scanner
+		if scanErr := rows.Scan(&s.campID, &s.userID); scanErr == nil {
+			scanners = append(scanners, s)
+		}
+	}
+	rows.Close()
+
+	for _, s := range scanners {
+		var targetName, targetOwnerName string
+		var targetX, targetY int
+		var targetScrap float64
+
+		err := tx.QueryRowContext(ctx, `
+			SELECT e.name, u.first_name, c.x, c.y, r.scrap
+			FROM encampments e
+			JOIN users u ON u.telegram_id = e.user_id
+			JOIN coordinates c ON c.id = e.coordinate_id
+			JOIN resources r ON r.encampment_id = e.id
+			WHERE e.id != $1
+			ORDER BY RANDOM()
+			LIMIT 1`, s.campID).Scan(&targetName, &targetOwnerName, &targetX, &targetY, &targetScrap)
+		if err != nil {
+			continue // No other outposts to scan yet, or a transient error - skip silently.
+		}
+
+		reportMsg := fmt.Sprintf(
+			"📡🔄 AUTOMATIC SCAN SWEEP COMPLETE\n\n"+
+				"🎯 Rival Detected: %s (Commander: %s)\n"+
+				"📍 Coordinates: [%d, %d]\n"+
+				"♻️ Estimated Scrap: %.0f\n\n"+
+				"💡 Use /scout %s for a full manual intel report.",
+			targetName, targetOwnerName, targetX, targetY, targetScrap, targetOwnerName,
+		)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.userID, reportMsg)
+	}
+
+	return nil
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
@@ -113,6 +259,7 @@ func (e *Engine) ProcessTick() {
 		{"staged_raid_departures", e.autoLaunchExpiredStagedRaids},
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
+		{"daily_tax", e.collectDailyTax},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
 			return err
@@ -128,6 +275,11 @@ func (e *Engine) ProcessTick() {
 	if time.Now().UTC().Sub(e.lastIdleCheck) >= 20*time.Minute {
 		e.runPhase(ctx, tickPhase{"idle_miner_sweep", e.notifyIdleMiners})
 		e.lastIdleCheck = time.Now().UTC()
+	}
+
+	if time.Now().UTC().Sub(e.lastAutoScan) >= 30*time.Minute {
+		e.runPhase(ctx, tickPhase{"auto_scan_sweep", e.autoScanSweep})
+		e.lastAutoScan = time.Now().UTC()
 	}
 
 	log.Printf("Tick pass complete. Duration: %s", time.Since(start))
@@ -804,10 +956,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "returning" {
-			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob int
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob)
+			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob, dsMob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
@@ -836,8 +988,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC)
+		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS)
 
 		type coopContributor struct {
 			encampment_id string
@@ -872,8 +1024,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		totDestroyers := primaryDestroyers
 		totBombers := primaryBombers
 		totBC := primaryBC
+		totDS := primaryDS
 
-		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC
+		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC + totDS
 
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
@@ -994,6 +1147,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			attRating += float64(totBC) * bcUnit.AttackRating * offenseRatingModifier
 		}
 
+		// Deathstar: the ultimate superweapon. Flat, enormous attack rating -
+		// a single Doomsday Rig can single-handedly decide a battle.
+		if totDS > 0 {
+			dsUnit := content.MustFindUnit("deathstar")
+			attRating += float64(totDS) * dsUnit.AttackRating * offenseRatingModifier
+		}
+
 		defRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attCas := 0
@@ -1068,12 +1228,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lostAttMechs = primaryMechs
 		}
 
-		var lostAttDestroyers, lostAttBombers, lostAttBC int
-		specialistPool := totDestroyers + totBombers + totBC
+		var lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS int
+		specialistPool := totDestroyers + totBombers + totBC + totDS
 		if specialistPool > 0 {
 			lostAttDestroyers = int(float64(dbCas) * float64(totDestroyers) / float64(specialistPool))
 			lostAttBombers = int(float64(dbCas) * float64(totBombers) / float64(specialistPool))
-			lostAttBC = dbCas - lostAttDestroyers - lostAttBombers
+			lostAttBC = int(float64(dbCas) * float64(totBC) / float64(specialistPool))
+			lostAttDS = dbCas - lostAttDestroyers - lostAttBombers - lostAttBC
 			if lostAttDestroyers > primaryDestroyers {
 				lostAttDestroyers = primaryDestroyers
 			}
@@ -1083,6 +1244,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if lostAttBC > primaryBC {
 				lostAttBC = primaryBC
 			}
+			if lostAttDS > primaryDS {
+				lostAttDS = primaryDS
+			}
 		}
 
 		newAttSols := primarySoldiers - lostAttSols
@@ -1090,8 +1254,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		newAttDestroyers := primaryDestroyers - lostAttDestroyers
 		newAttBombers := primaryBombers - lostAttBombers
 		newAttBC := primaryBC - lostAttBC
+		newAttDS := primaryDS - lostAttDS
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC)
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6, deathstars_mobilized = $7 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC, newAttDS)
 
 		attackerCasualties := (totSoldiers + totMechs) - (newAttSols + newAttMechs)
 
@@ -1136,7 +1301,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC) > 0
+		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC + newAttDS) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
@@ -1156,10 +1321,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		// Append specific environmental weather details dynamically to round reports
 		roundLog := fmt.Sprintf(
 			"⚔️💥 BATTLE REPORT: ROUND %d COMPLETE! 💥⚔️\n\n"+
-				"💀 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers, 🚢👑 %d Battlecruisers lost.\n"+
+				"💀 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers, 🚢👑 %d Battlecruisers, 🌑💀 %d Doomsday Rigs lost.\n"+
 				"🛡️ Defender Casualties: %d units lost.%s\n"+
 				"⏳ Next skirmish round starting on next clock tick.",
-			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, lostAttBC, defCas, weatherNotice,
+			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS, defCas, weatherNotice,
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)

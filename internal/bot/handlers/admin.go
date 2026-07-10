@@ -412,6 +412,36 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	return c.Send("⚡ ADMIN OVERRIDE: Injected 5,000 of ALL Resources into your camp.")
 }
 
+func (h *AdminHandler) HandleAdminSetTaxRate(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("⚠️ Usage: /settaxrate [0-10]")
+	}
+
+	rate, err := strconv.Atoi(args[0])
+	if err != nil || rate < 0 || rate > 10 {
+		return c.Send("⚠️ Tax rate must be a whole number between 0 and 10 (percent).")
+	}
+
+	ctx := context.Background()
+	_, err = h.DB.ExecContext(ctx, "UPDATE tax_law SET tax_rate_percent = $1 WHERE id = 1", rate)
+	if err != nil {
+		log.Printf("Failed updating tax rate: %v", err)
+		return c.Send("⚠️ Error updating tax law.")
+	}
+
+	return c.Send(fmt.Sprintf("💰 WASTELAND TAX LAW UPDATED: Daily rate is now %d%%.", rate))
+}
+
 func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

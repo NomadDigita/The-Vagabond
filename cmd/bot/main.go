@@ -60,6 +60,8 @@ func executeStartupMigrations(db *sql.DB) {
 			established_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
 
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS auto_scan_enabled BOOLEAN DEFAULT FALSE;`,
+
 		`CREATE TABLE IF NOT EXISTS resources (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			scrap DOUBLE PRECISION DEFAULT 0.00,
@@ -116,6 +118,7 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS bombers INT DEFAULT 0;`,
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS scouts INT DEFAULT 0;`,
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS battlecruisers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS deathstars INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS active_mining_queues (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -155,6 +158,37 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS destroyers_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS bombers_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS battlecruisers_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS deathstars_mobilized INT DEFAULT 0;`,
+
+		`CREATE TABLE IF NOT EXISTS tax_law (
+			id INT PRIMARY KEY DEFAULT 1,
+			tax_rate_percent INT DEFAULT 5,
+			last_collected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT single_row CHECK (id = 1)
+		);`,
+		`INSERT INTO tax_law (id, tax_rate_percent) VALUES (1, 5) ON CONFLICT (id) DO NOTHING;`,
+
+		`CREATE TABLE IF NOT EXISTS world_bosses (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(255) UNIQUE NOT NULL,
+			emoji VARCHAR(10) DEFAULT '👹',
+			max_hp DOUBLE PRECISION NOT NULL,
+			current_hp DOUBLE PRECISION NOT NULL,
+			loot_pool_dollars DOUBLE PRECISION DEFAULT 0,
+			last_defeated_at TIMESTAMP WITH TIME ZONE
+		);`,
+		`CREATE TABLE IF NOT EXISTS world_boss_contributions (
+			boss_id UUID NOT NULL REFERENCES world_bosses(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			damage_dealt DOUBLE PRECISION DEFAULT 0,
+			PRIMARY KEY (boss_id, user_id)
+		);`,
+		`INSERT INTO world_bosses (name, emoji, max_hp, current_hp, loot_pool_dollars) VALUES
+			('The Rustlord', '🤖👹', 500000, 500000, 5000),
+			('Scrap Titan', '⚙️👹', 1200000, 1200000, 12000),
+			('Apex Wraith', '☠️👹', 3000000, 3000000, 30000)
+			ON CONFLICT (name) DO NOTHING;`,
 
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -314,6 +348,7 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS destroyers INT DEFAULT 0;`,
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS bombers INT DEFAULT 0;`,
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS battlecruisers INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS deathstars INT DEFAULT 0;`,
 
 		`CREATE OR REPLACE FUNCTION notify_realtime_event() 
 		RETURNS trigger AS $$
@@ -492,6 +527,8 @@ func main() {
 	silo := handlers.NewSiloHandler(db)
 	research := handlers.NewResearchHandler(db)
 	deconstruct := handlers.NewDeconstructHandler(db)
+	ranking := handlers.NewRankingHandler(db)
+	boss := handlers.NewBossHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -517,6 +554,12 @@ func main() {
 	bot.Handle("/research", research.HandleResearchPanel)
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
+	bot.Handle("/ranking", ranking.HandleRankingPanel)
+	bot.Handle("/bosses", boss.HandleBossPanel)
+	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
+	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
+	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
+	bot.Handle("🏆 Global Ranking", ranking.HandleRankingPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
@@ -574,6 +617,7 @@ func main() {
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
+	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)
