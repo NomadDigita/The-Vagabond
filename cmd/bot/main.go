@@ -60,6 +60,8 @@ func executeStartupMigrations(db *sql.DB) {
 			established_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
 
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS auto_scan_enabled BOOLEAN DEFAULT FALSE;`,
+
 		`CREATE TABLE IF NOT EXISTS resources (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			scrap DOUBLE PRECISION DEFAULT 0.00,
@@ -551,6 +553,7 @@ func main() {
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
 	bot.Handle("/bosses", boss.HandleBossPanel)
+	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
 	bot.Handle("🏆 Global Ranking", ranking.HandleRankingPanel)

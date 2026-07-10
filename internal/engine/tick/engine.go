@@ -27,6 +27,7 @@ type Engine struct {
 	weatherEngine     *world.WeatherEngine
 	agentProcessor    *agent.Processor
 	lastIdleCheck     time.Time
+	lastAutoScan      time.Time
 }
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
@@ -39,6 +40,7 @@ func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 		weatherEngine:     world.NewWeatherEngine(db),
 		agentProcessor:    agent.NewProcessor(db),
 		lastIdleCheck:     time.Now().UTC(),
+		lastAutoScan:      time.Now().UTC(),
 	}
 }
 
@@ -179,6 +181,65 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
+// autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
+// encampment with auto_scan_enabled, pick one random rival outpost and
+// send a lightweight scan report - automating what /scout does manually.
+// Runs on its own ~30-minute cadence via the caller, same pattern as the
+// idle miner sweep.
+func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT e.id, e.user_id
+		FROM encampments e
+		WHERE e.auto_scan_enabled = TRUE`)
+	if err != nil {
+		return err
+	}
+
+	type scanner struct {
+		campID string
+		userID int64
+	}
+	var scanners []scanner
+	for rows.Next() {
+		var s scanner
+		if scanErr := rows.Scan(&s.campID, &s.userID); scanErr == nil {
+			scanners = append(scanners, s)
+		}
+	}
+	rows.Close()
+
+	for _, s := range scanners {
+		var targetName, targetOwnerName string
+		var targetX, targetY int
+		var targetScrap float64
+
+		err := tx.QueryRowContext(ctx, `
+			SELECT e.name, u.first_name, c.x, c.y, r.scrap
+			FROM encampments e
+			JOIN users u ON u.telegram_id = e.user_id
+			JOIN coordinates c ON c.id = e.coordinate_id
+			JOIN resources r ON r.encampment_id = e.id
+			WHERE e.id != $1
+			ORDER BY RANDOM()
+			LIMIT 1`, s.campID).Scan(&targetName, &targetOwnerName, &targetX, &targetY, &targetScrap)
+		if err != nil {
+			continue // No other outposts to scan yet, or a transient error - skip silently.
+		}
+
+		reportMsg := fmt.Sprintf(
+			"📡🔄 AUTOMATIC SCAN SWEEP COMPLETE\n\n"+
+				"🎯 Rival Detected: %s (Commander: %s)\n"+
+				"📍 Coordinates: [%d, %d]\n"+
+				"♻️ Estimated Scrap: %.0f\n\n"+
+				"💡 Use /scout %s for a full manual intel report.",
+			targetName, targetOwnerName, targetX, targetY, targetScrap, targetOwnerName,
+		)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.userID, reportMsg)
+	}
+
+	return nil
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
@@ -214,6 +275,11 @@ func (e *Engine) ProcessTick() {
 	if time.Now().UTC().Sub(e.lastIdleCheck) >= 20*time.Minute {
 		e.runPhase(ctx, tickPhase{"idle_miner_sweep", e.notifyIdleMiners})
 		e.lastIdleCheck = time.Now().UTC()
+	}
+
+	if time.Now().UTC().Sub(e.lastAutoScan) >= 30*time.Minute {
+		e.runPhase(ctx, tickPhase{"auto_scan_sweep", e.autoScanSweep})
+		e.lastAutoScan = time.Now().UTC()
 	}
 
 	log.Printf("Tick pass complete. Duration: %s", time.Since(start))

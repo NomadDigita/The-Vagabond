@@ -336,6 +336,37 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
+// HandleAutoScanToggle toggles the SpaceHunt-style "Automatic Scan" job:
+// when enabled, the tick engine periodically runs a lightweight scan
+// against a random rival outpost and reports it directly to the player,
+// without them needing to manually run /scout each time.
+func (h *CombatHandler) HandleAutoScanToggle(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	ctx := context.Background()
+
+	var campID string
+	var currentlyEnabled bool
+	err := h.DB.QueryRowContext(ctx, "SELECT id, auto_scan_enabled FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &currentlyEnabled)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	newState := !currentlyEnabled
+	_, err = h.DB.ExecContext(ctx, "UPDATE encampments SET auto_scan_enabled = $1 WHERE id = $2", newState, campID)
+	if err != nil {
+		return c.Send("⚠️ Error updating Automatic Scan job.")
+	}
+
+	if newState {
+		return c.Send("📡✅ AUTOMATIC SCAN ENGAGED: Your Radar will now periodically sweep the Wasteland and report on nearby rivals automatically.")
+	}
+	return c.Send("📡❌ AUTOMATIC SCAN DISENGAGED: Radar sweeps paused. Run /autoscan again to re-enable.")
+}
+
 func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
