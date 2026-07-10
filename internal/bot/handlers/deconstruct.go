@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"gopkg.in/telebot.v3"
 )
 
@@ -36,6 +37,8 @@ var deconstructTable = []deconstructRefund{
 	{"nuke", "☢️", "Nuclear Device", "nukes", map[string]float64{"steel": 1000.0, "uranium": 200.0, "gold": 40.0, "diamond": 4.0}},
 	{"destroyer", "💥", "Destroyer", "destroyers", map[string]float64{"steel": 320.0, "uranium": 16.0, "gold": 6.0}},
 	{"bomber", "🛩️", "Bomber", "bombers", map[string]float64{"steel": 480.0, "uranium": 24.0, "oil": 40.0}},
+	{"scout", "🛵", "Scout Walker", "scouts", content.MustFindUnit("scout").DeconstructRefund()},
+	{"battlecruiser", "🚢👑", "Battlecruiser", "battlecruisers", content.MustFindUnit("battlecruiser").DeconstructRefund()},
 	{"buggy", "🚗", "Scrap Buggy", "buggies", map[string]float64{"steel": 40.0, "oil": 8.0}},
 	{"ship", "⛵", "Clipper Ship", "ships", map[string]float64{"steel": 120.0}},
 	{"jet", "✈️", "Cargo Jet", "jets", map[string]float64{"steel": 400.0, "hydrogen": 80.0, "oil": 40.0}},
@@ -98,13 +101,13 @@ func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {
 func (h *DeconstructHandler) fetchInventory(ctx context.Context, campID string) (map[string]int, error) {
 	inventory := make(map[string]int)
 
-	var soldiers, drones, mechs, nukes, buggies, ships, jets, haulers, tankers, rigs, destroyers, bombers int
+	var soldiers, drones, mechs, nukes, buggies, ships, jets, haulers, tankers, rigs, destroyers, bombers, scouts, battlecruisers int
 	query := `SELECT COALESCE(soldiers,0), COALESCE(drones,0), COALESCE(mechs,0), COALESCE(nukes,0), 
 	          COALESCE(buggies,0), COALESCE(ships,0), COALESCE(jets,0), 
 	          COALESCE(haulers,0), COALESCE(tankers,0), COALESCE(rigs,0),
-	          COALESCE(destroyers,0), COALESCE(bombers,0)
+	          COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0)
 	          FROM workshop_inventory WHERE encampment_id = $1`
-	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers)
+	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers, &scouts, &battlecruisers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inventory, nil
 	} else if err != nil {
@@ -123,6 +126,8 @@ func (h *DeconstructHandler) fetchInventory(ctx context.Context, campID string) 
 	inventory["rigs"] = rigs
 	inventory["destroyers"] = destroyers
 	inventory["bombers"] = bombers
+	inventory["scouts"] = scouts
+	inventory["battlecruisers"] = battlecruisers
 
 	return inventory, nil
 }
