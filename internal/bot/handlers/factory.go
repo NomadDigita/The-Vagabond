@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	gopkg "gopkg.in/telebot.v3"
 )
 
@@ -73,26 +74,35 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		log.Printf("Failed to allocate hangar row: %v", err)
 	}
 
-	var soldiers, drones, mechs, nukes, destroyers, bombers int
-	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0) FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers)
+	var soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers int
+	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers, &scouts, &battlecruisers)
+
+	scoutUnit, _ := content.FindUnit("scout")
+	bcUnit, _ := content.FindUnit("battlecruiser")
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🪖 BARRACKS RECRUITMENT FORGE\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🪖 Soldiers: %d | 🛰️ Tactical Drones: %d\n"+
-			"🤖 Mechs: %d | ☢️ Nuclear Weapons: %d\n"+
-			"💥 Destroyers: %d | 🛩️ Bombers: %d\n\n"+
-			"MANUFACTURING BLUEPRINTS:\n"+
-			"🪖 [Soldier] — Cost: 50 Rations, 10 Iron (+10 Offense)\n"+
-			"🛰️ [Tactical Drone] — Cost: 100 Iron, 10 Silver (Dual-use: Spy Satellite or Interceptor)\n"+
-			"🤖 [Colossus Mech] — Cost: 1000 Steel, 50 Uranium, 20 Gold (+350 Offense)\n"+
-			"☢️ [Nuclear Device] — Cost: 2500 Steel, 500 Uranium, 10 Diamonds (+1500 Detonation)\n"+
-			"💥 [Destroyer] — Cost: 800 Steel, 40 Uranium, 15 Gold (Strong vs enemy Drones/Jets)\n"+
-			"🛩️ [Bomber] — Cost: 1200 Steel, 60 Uranium, 100 Oil (Strong vs enemy Turrets/Buildings)\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		soldiers, drones, mechs, nukes, destroyers, bombers,
+		"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\n"+
+			"🪖⚙️ BARRACKS RECRUITMENT FORGE ⚙️🪖\n"+
+			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\n\n"+
+			"📦 CURRENT GARRISON:\n"+
+			"🪖 Soldiers: %d  |  🛰️ Tactical Drones: %d\n"+
+			"🤖 Mechs: %d  |  ☢️ Nuclear Weapons: %d\n"+
+			"💥 Destroyers: %d  |  🛩️ Bombers: %d\n"+
+			"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\n\n"+
+			"⚒️ MANUFACTURING BLUEPRINTS ⚒️\n"+
+			"🪖 [Soldier] ➜ 💰50 Rations, 🔩10 Iron ➜ ⚔️ +10 Offense\n"+
+			"🛰️ [Tactical Drone] ➜ 🔩100 Iron, 🥈10 Silver ➜ 🕵️ Spy Satellite / 🚨 Interceptor\n"+
+			"🤖 [Colossus Mech] ➜ 🧱1000 Steel, ☢️50 Uranium, 🥇20 Gold ➜ ⚔️ +350 Offense\n"+
+			"☢️ [Nuclear Device] ➜ 🧱2500 Steel, ☢️500 Uranium, 💎10 Diamonds ➜ 💥 +1500 Detonation\n"+
+			"💥 [Destroyer] ➜ 🧱800 Steel, ☢️40 Uranium, 🥇15 Gold ➜ 🎯 Hard-counters Drones/Jets\n"+
+			"🛩️ [Bomber] ➜ 🧱1200 Steel, ☢️60 Uranium, 🛢️100 Oil ➜ 🏰 Hard-counters Turrets\n"+
+			"🛵 [%s] ➜ 🔩%.0f Iron, 🛢️%.0f Oil ➜ %s\n"+
+			"🚢👑 [%s] ➜ 🧱%.0f Steel, ☢️%.0f Uranium, 🥇%.0f Gold, 💎%.0f Diamonds ➜ %s\n"+
+			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭",
+		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers,
+		scoutUnit.Title, scoutUnit.Cost["iron"], scoutUnit.Cost["oil"], scoutUnit.Flavor,
+		bcUnit.Title, bcUnit.Cost["steel"], bcUnit.Cost["uranium"], bcUnit.Cost["gold"], bcUnit.Cost["diamond"], bcUnit.Flavor,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -103,11 +113,14 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	btnCraftNuke := selector.Data("☢️ Forge Nuke", "craft_item", "nuke")
 	btnCraftDestroyer := selector.Data("💥 Forge Destroyer", "craft_item", "destroyer")
 	btnCraftBomber := selector.Data("🛩️ Forge Bomber", "craft_item", "bomber")
+	btnCraftScout := selector.Data("🛵 Build Scout", "craft_item", "scout")
+	btnCraftBC := selector.Data("🚢👑 Forge Battlecruiser", "craft_item", "battlecruiser")
 
 	selector.Inline(
 		selector.Row(btnCraftSoldier, btnCraftDrone),
 		selector.Row(btnCraftMech, btnCraftNuke),
 		selector.Row(btnCraftDestroyer, btnCraftBomber),
+		selector.Row(btnCraftScout, btnCraftBC),
 	)
 
 	return renderOrEdit(c, panelText, selector)
@@ -253,6 +266,24 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 1200.0, uranium = uranium - 60.0, oil = oil - 100.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET bombers = bombers + 1 WHERE encampment_id = $1", campID)
 		successAlert = "🛩️ Bomber assembled successfully!"
+
+	case "scout":
+		scoutUnit, _ := content.FindUnit("scout")
+		if iron < scoutUnit.Cost["iron"] || oil < scoutUnit.Cost["oil"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Iron, %.0f Oil.", scoutUnit.Cost["iron"], scoutUnit.Cost["oil"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET iron = iron - $1, oil = oil - $2 WHERE encampment_id = $3", scoutUnit.Cost["iron"], scoutUnit.Cost["oil"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET scouts = scouts + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🛵 Scout Walker rolled off the assembly line!"
+
+	case "battlecruiser":
+		bcUnit, _ := content.FindUnit("battlecruiser")
+		if steel < bcUnit.Cost["steel"] || uranium < bcUnit.Cost["uranium"] || gold < bcUnit.Cost["gold"] || diamond < bcUnit.Cost["diamond"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Steel, %.0f Uranium, %.0f Gold, %.0f Diamonds.", bcUnit.Cost["steel"], bcUnit.Cost["uranium"], bcUnit.Cost["gold"], bcUnit.Cost["diamond"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - $1, uranium = uranium - $2, gold = gold - $3, diamond = diamond - $4 WHERE encampment_id = $5", bcUnit.Cost["steel"], bcUnit.Cost["uranium"], bcUnit.Cost["gold"], bcUnit.Cost["diamond"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET battlecruisers = battlecruisers + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🚢👑 BATTLECRUISER LAUNCHED! The pride of your fleet stands ready!"
 
 	case "buggy":
 		if steel < 100.0 || oil < 20.0 {
