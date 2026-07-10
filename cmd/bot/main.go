@@ -180,6 +180,11 @@ func executeStartupMigrations(db *sql.DB) {
 			military_tech_lvl INT DEFAULT 1
 		);`,
 
+		`ALTER TABLE research_states ADD COLUMN IF NOT EXISTS production_tech_lvl INT DEFAULT 1;`,
+		`ALTER TABLE research_states ADD COLUMN IF NOT EXISTS integrity_tech_lvl INT DEFAULT 1;`,
+		`ALTER TABLE research_states ADD COLUMN IF NOT EXISTS intel_tech_lvl INT DEFAULT 1;`,
+		`ALTER TABLE research_states ADD COLUMN IF NOT EXISTS speed_tech_lvl INT DEFAULT 1;`,
+
 		`CREATE TABLE IF NOT EXISTS bank_accounts (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			balance DOUBLE PRECISION DEFAULT 0.00,
@@ -474,6 +479,7 @@ func main() {
 	arena := handlers.NewArenaHandler(db)
 	silo := handlers.NewSiloHandler(db)
 	research := handlers.NewResearchHandler(db)
+	deconstruct := handlers.NewDeconstructHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -497,6 +503,7 @@ func main() {
 	bot.Handle("/silo", silo.HandleSiloPanel)
 	bot.Handle("/mine", camp.HandleActiveMining)
 	bot.Handle("/research", research.HandleResearchPanel)
+	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
@@ -535,6 +542,7 @@ func main() {
 	bot.Handle("💱 Market Exchange", exchange.HandleExchangePanel)
 	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)
 	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
+	bot.Handle("♻️ Deconstruct Units", deconstruct.HandleDeconstructPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	bot.Handle(telebot.OnText, nlp.HandleTextMessage)
@@ -551,6 +559,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
+	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)

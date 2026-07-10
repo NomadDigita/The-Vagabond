@@ -19,6 +19,65 @@ func NewResearchHandler(db *sql.DB) *ResearchHandler {
 	return &ResearchHandler{DB: db}
 }
 
+// MaxResearchLevel caps every tech node. Raised from the old 5-level cap to
+// give the tree real long-term progression depth.
+const MaxResearchLevel = 20
+
+// researchNode describes one branch of the tree. dbColumn must match a real
+// column on research_states.
+type researchNode struct {
+	key      string // used in callback data
+	dbColumn string
+	emoji    string
+	title    string
+	desc     string
+}
+
+var researchTree = []researchNode{
+	{"econ", "econ_tech_lvl", "🔋", "Technology", "Reduces Automated Agent energy consumption."},
+	{"production", "production_tech_lvl", "⚙️", "Production", "Increases passive Scrap Heap mining speed."},
+	{"integrity", "integrity_tech_lvl", "🩹", "Integrity", "Reduces casualties suffered by your units in combat."},
+	{"defense", "defense_tech_lvl", "🛡️", "Shields", "Strengthens your Outpost's defensive rating against raids."},
+	{"intel", "intel_tech_lvl", "🧠", "Intelligence", "Improves spy satellite intercept odds & counter-intel."},
+	{"speed", "speed_tech_lvl", "🚀", "Thrusters", "Reduces march/travel time for raids and scouts."},
+	{"military", "military_tech_lvl", "🦾", "Weapons", "Multiplies Mech and offensive unit combat ratings."},
+}
+
+// researchCost returns the Neuro Core cost to advance from currentLvl to currentLvl+1.
+func researchCost(currentLvl int) int {
+	return currentLvl * 8
+}
+
+// fetchResearchLevels reads all 7 tech levels for an encampment, initializing
+// the row if it doesn't exist yet.
+func (h *ResearchHandler) fetchResearchLevels(ctx context.Context, campID string) (map[string]int, error) {
+	levels := make(map[string]int)
+
+	row := h.DB.QueryRowContext(ctx, `
+		SELECT econ_tech_lvl, production_tech_lvl, integrity_tech_lvl, 
+		       defense_tech_lvl, intel_tech_lvl, speed_tech_lvl, military_tech_lvl 
+		FROM research_states WHERE encampment_id = $1`, campID)
+
+	var econ, production, integrity, defense, intel, speed, military int
+	err := row.Scan(&econ, &production, &integrity, &defense, &intel, &speed, &military)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, _ = h.DB.ExecContext(ctx, "INSERT INTO research_states (encampment_id) VALUES ($1) ON CONFLICT (encampment_id) DO NOTHING", campID)
+		econ, production, integrity, defense, intel, speed, military = 1, 1, 1, 1, 1, 1, 1
+	} else if err != nil {
+		return nil, err
+	}
+
+	levels["econ"] = econ
+	levels["production"] = production
+	levels["integrity"] = integrity
+	levels["defense"] = defense
+	levels["intel"] = intel
+	levels["speed"] = speed
+	levels["military"] = military
+
+	return levels, nil
+}
+
 // HandleResearchPanel renders the science research status
 func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
@@ -36,15 +95,9 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	// Fetch or Initialize Research State
-	var econLvl, defenseLvl, militaryLvl int
-	query := `SELECT econ_tech_lvl, defense_tech_lvl, military_tech_lvl FROM research_states WHERE encampment_id = $1`
-	err = h.DB.QueryRowContext(ctx, query, campID).Scan(&econLvl, &defenseLvl, &militaryLvl)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, _ = h.DB.ExecContext(ctx, "INSERT INTO research_states (encampment_id) VALUES ($1)", campID)
-		econLvl = 1
-		defenseLvl = 1
-		militaryLvl = 1
+	levels, err := h.fetchResearchLevels(ctx, campID)
+	if err != nil {
+		return c.Send("⚠️ System connection error reading research database.")
 	}
 
 	var neuro float64
@@ -55,40 +108,49 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 			"🧪 COGNITIVE RESEARCH WORKSTATION\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Unlock lost technology blueprints by analyzing valuable Neuro Cores.\n\n"+
-			"RESEARCH RESERVES:\n"+
 			"🧠 Neuro Cores Stock: %.0f cores\n\n"+
-			"TECHNOLOGY UPGRADE TREES:\n"+
-			"🔋 [Neuro-Efficiency Lvl %d / 5] (Cost: %d Neuro Cores)\n"+
-			"   Reduces Automated Agent energy consumption by 15%% per level.\n\n"+
-			"⚙️ [Scrap Overclock Lvl %d / 5] (Cost: %d Neuro Cores)\n"+
-			"   Increases passive Scrap Heap mining speed by 20%% per level.\n\n"+
-			"🦾 [Mech Armor Plating Lvl %d / 5] (Cost: %d Neuro Cores)\n"+
-			"   Multiplies Colossus Mech offensive ratings by 25%% per level.\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		neuro, econLvl, econLvl*5, defenseLvl, defenseLvl*5, militaryLvl, militaryLvl*5,
+			"TECHNOLOGY UPGRADE TREES:\n",
+		neuro,
 	)
 
 	selector := &telebot.ReplyMarkup{}
+	var rows []telebot.Row
 
-	btnUpgradeEcon := selector.Data(fmt.Sprintf("🔋 Neuro-Efficiency (%d)", econLvl+1), "upgrade_tech", "econ")
-	btnUpgradeDef := selector.Data(fmt.Sprintf("⚙️ Scrap Overclock (%d)", defenseLvl+1), "upgrade_tech", "defense")
-	btnUpgradeMil := selector.Data(fmt.Sprintf("🦾 Mech Plating (%d)", militaryLvl+1), "upgrade_tech", "military")
+	for _, node := range researchTree {
+		lvl := levels[node.key]
+		if lvl >= MaxResearchLevel {
+			panelText += fmt.Sprintf("%s [%s Lvl %d/%d] MAX\n   %s\n\n", node.emoji, node.title, lvl, MaxResearchLevel, node.desc)
+			continue
+		}
+		cost := researchCost(lvl)
+		panelText += fmt.Sprintf("%s [%s Lvl %d/%d] (Cost: %d Neuro Cores)\n   %s\n\n", node.emoji, node.title, lvl, MaxResearchLevel, cost, node.desc)
+		btn := selector.Data(fmt.Sprintf("%s %s (Lvl %d)", node.emoji, node.title, lvl+1), "upgrade_tech", node.key)
+		rows = append(rows, selector.Row(btn))
+	}
 
-	selector.Inline(
-		selector.Row(btnUpgradeEcon),
-		selector.Row(btnUpgradeDef),
-		selector.Row(btnUpgradeMil),
-	)
+	panelText += "━━━━━━━━━━━━━━━━━━━━━━"
+	selector.Inline(rows...)
 
 	return c.Send(panelText, selector)
 }
 
-// HandleUpgradeTechCallback manages spending neuro cores to level up science structures
+// HandleUpgradeTechCallback manages spending neuro cores to level up research nodes
 func (h *ResearchHandler) HandleUpgradeTechCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 
-	techType := c.Args()[0]
+	techKey := c.Args()[0]
+
+	var targetNode *researchNode
+	for i := range researchTree {
+		if researchTree[i].key == techKey {
+			targetNode = &researchTree[i]
+			break
+		}
+	}
+	if targetNode == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Unknown research node."})
+	}
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
@@ -99,42 +161,27 @@ func (h *ResearchHandler) HandleUpgradeTechCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	var econLvl, defenseLvl, militaryLvl int
-	_ = tx.QueryRowContext(ctx, "SELECT econ_tech_lvl, defense_tech_lvl, military_tech_lvl FROM research_states WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&econLvl, &defenseLvl, &militaryLvl)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO research_states (encampment_id) VALUES ($1) ON CONFLICT (encampment_id) DO NOTHING", campID)
+
+	var currentLvl int
+	queryLvl := fmt.Sprintf("SELECT %s FROM research_states WHERE encampment_id = $1 FOR UPDATE", targetNode.dbColumn)
+	_ = tx.QueryRowContext(ctx, queryLvl, campID).Scan(&currentLvl)
+
+	if currentLvl >= MaxResearchLevel {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level: This tech node is already fully researched."})
+	}
+
+	cost := researchCost(currentLvl)
 
 	var neuro float64
 	_ = tx.QueryRowContext(ctx, "SELECT neuro_cores FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&neuro)
-
-	var cost int
-	var currentLvl int
-	var dbColumn string
-
-	switch techType {
-	case "econ":
-		currentLvl = econLvl
-		cost = econLvl * 5
-		dbColumn = "econ_tech_lvl"
-	case "defense":
-		currentLvl = defenseLvl
-		cost = defenseLvl * 5
-		dbColumn = "defense_tech_lvl"
-	case "military":
-		currentLvl = militaryLvl
-		cost = militaryLvl * 5
-		dbColumn = "military_tech_lvl"
-	}
-
-	if currentLvl >= 5 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level: This tech node is already fully researched."})
-	}
 
 	if neuro < float64(cost) {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Cores! Need %d.", cost)})
 	}
 
-	// Deduct and increment level
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET neuro_cores = neuro_cores - $1 WHERE encampment_id = $2", cost, campID)
-	queryUpdate := fmt.Sprintf("UPDATE research_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
+	queryUpdate := fmt.Sprintf("UPDATE research_states SET %s = %s + 1 WHERE encampment_id = $1", targetNode.dbColumn, targetNode.dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, campID)
 
 	if err := tx.Commit(); err != nil {
@@ -142,6 +189,6 @@ func (h *ResearchHandler) HandleUpgradeTechCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing research state."})
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🧪 Technology node upgraded successfully!"})
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🧪 %s upgraded to Level %d!", targetNode.title, currentLvl+1)})
 	return h.HandleResearchPanel(c)
 }

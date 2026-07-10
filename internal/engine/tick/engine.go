@@ -873,6 +873,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerMilitaryTechLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerMilitaryTechLvl)
 
+		var attackerIntegrityTechLvl int = 1
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(integrity_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerIntegrityTechLvl)
+
 		var attackerBioLvl int = 1
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.attackerID).Scan(&attackerBioLvl)
 
@@ -884,6 +887,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var defenderAgentActive bool = false
 		var targetBiome string = "wasteland"
 		var defenderBioLvl int = 1
+		var defenderIntegrityTechLvl int = 1
 		var defenderHeroSuperpower string
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender int
 
@@ -906,6 +910,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT is_active FROM agent_tasks WHERE user_id = $1", r.defenderUserID).Scan(&defenderAgentActive)
 			_ = tx.QueryRowContext(ctx, "SELECT c.biome FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&targetBiome)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(integrity_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderIntegrityTechLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
 		}
 
@@ -968,19 +973,38 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if attCas > 0 {
-			reduction := float64(attackerBioLvl-1) * 0.10
+			reduction := float64(attackerBioLvl-1)*0.10 + float64(attackerIntegrityTechLvl-1)*0.04
 			reduction = math.Min(reduction, 0.90)
 			attCas = int(float64(attCas) * (1.0 - reduction))
 		}
 
 		if defCas > 0 && r.defenderID.Valid {
-			reduction := float64(defenderBioLvl-1) * 0.10
+			reduction := float64(defenderBioLvl-1)*0.10 + float64(defenderIntegrityTechLvl-1)*0.04
 			if strings.Contains(defenderHeroSuperpower, "Kinetic Barrier") {
 				reduction += 0.15
 			}
 			reduction = math.Min(reduction, 0.90)
 			defCas = int(float64(defCas) * (1.0 - reduction))
 		}
+
+		// SpaceHunt-style "Exploding Units": each destroyed unit has a chance
+		// to blow up and take a unit from the opposing side down with it.
+		// This keeps lopsided wins from being entirely free for the winner.
+		const explodeChance = 0.15
+		bonusAttCasFromDefLosses := 0
+		for i := 0; i < defCas; i++ {
+			if rand.Float64() < explodeChance {
+				bonusAttCasFromDefLosses++
+			}
+		}
+		bonusDefCasFromAttLosses := 0
+		for i := 0; i < attCas; i++ {
+			if rand.Float64() < explodeChance {
+				bonusDefCasFromAttLosses++
+			}
+		}
+		attCas += bonusAttCasFromDefLosses
+		defCas += bonusDefCasFromAttLosses
 
 		lostAttSols := int(float64(attCas) * 0.70)
 		lostAttMechs := attCas - lostAttSols

@@ -86,10 +86,12 @@ func WorkshopNavigation() *telebot.ReplyMarkup {
 
 	btnRecruit := menu.Text("🪖 Recruit Troops")
 	btnVehicles := menu.Text("🚗 Logistics Vehicles")
+	btnDeconstruct := menu.Text("♻️ Deconstruct Units")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnRecruit, btnVehicles),
+		menu.Row(btnDeconstruct),
 		menu.Row(btnBack),
 	)
 
