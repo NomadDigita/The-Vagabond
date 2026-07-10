@@ -528,6 +528,7 @@ func main() {
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
+	bot.Handle("🏆 Global Ranking", ranking.HandleRankingPanel)
 
 	bot.Handle("/admin_tick", admin.HandleAdminTick)
 	bot.Handle("/admin_db_reset", admin.HandleAdminDBReset)
