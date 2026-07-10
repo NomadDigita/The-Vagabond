@@ -164,6 +164,28 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 		`INSERT INTO tax_law (id, tax_rate_percent) VALUES (1, 5) ON CONFLICT (id) DO NOTHING;`,
 
+		`CREATE TABLE IF NOT EXISTS world_bosses (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(255) UNIQUE NOT NULL,
+			emoji VARCHAR(10) DEFAULT '👹',
+			max_hp DOUBLE PRECISION NOT NULL,
+			current_hp DOUBLE PRECISION NOT NULL,
+			loot_pool_dollars DOUBLE PRECISION DEFAULT 0,
+			last_defeated_at TIMESTAMP WITH TIME ZONE
+		);`,
+		`CREATE TABLE IF NOT EXISTS world_boss_contributions (
+			boss_id UUID NOT NULL REFERENCES world_bosses(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			damage_dealt DOUBLE PRECISION DEFAULT 0,
+			PRIMARY KEY (boss_id, user_id)
+		);`,
+		`INSERT INTO world_bosses (name, emoji, max_hp, current_hp, loot_pool_dollars) VALUES
+			('The Rustlord', '🤖👹', 500000, 500000, 5000),
+			('Scrap Titan', '⚙️👹', 1200000, 1200000, 12000),
+			('Apex Wraith', '☠️👹', 3000000, 3000000, 30000)
+			ON CONFLICT (name) DO NOTHING;`,
+
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
@@ -501,6 +523,7 @@ func main() {
 	research := handlers.NewResearchHandler(db)
 	deconstruct := handlers.NewDeconstructHandler(db)
 	ranking := handlers.NewRankingHandler(db)
+	boss := handlers.NewBossHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -527,6 +550,8 @@ func main() {
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
+	bot.Handle("/bosses", boss.HandleBossPanel)
+	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
 	bot.Handle("🏆 Global Ranking", ranking.HandleRankingPanel)
 
@@ -586,6 +611,7 @@ func main() {
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
+	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)
