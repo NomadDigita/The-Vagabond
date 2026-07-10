@@ -74,12 +74,13 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		log.Printf("Failed to allocate hangar row: %v", err)
 	}
 
-	var soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers int
-	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0) FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers, &scouts, &battlecruisers)
+	var soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars int
+	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars)
 
 	scoutUnit, _ := content.FindUnit("scout")
 	bcUnit, _ := content.FindUnit("battlecruiser")
+	dsUnit, _ := content.FindUnit("deathstar")
 
 	panelText := fmt.Sprintf(
 		"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\n"+
@@ -89,7 +90,8 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🪖 Soldiers: %d  |  🛰️ Tactical Drones: %d\n"+
 			"🤖 Mechs: %d  |  ☢️ Nuclear Weapons: %d\n"+
 			"💥 Destroyers: %d  |  🛩️ Bombers: %d\n"+
-			"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\n\n"+
+			"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\n"+
+			"🌑💀 Doomsday Rigs: %d\n\n"+
 			"⚒️ MANUFACTURING BLUEPRINTS ⚒️\n"+
 			"🪖 [Soldier] ➜ 💰50 Rations, 🔩10 Iron ➜ ⚔️ +10 Offense\n"+
 			"🛰️ [Tactical Drone] ➜ 🔩100 Iron, 🥈10 Silver ➜ 🕵️ Spy Satellite / 🚨 Interceptor\n"+
@@ -99,10 +101,12 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🛩️ [Bomber] ➜ 🧱1200 Steel, ☢️60 Uranium, 🛢️100 Oil ➜ 🏰 Hard-counters Turrets\n"+
 			"🛵 [%s] ➜ 🔩%.0f Iron, 🛢️%.0f Oil ➜ %s\n"+
 			"🚢👑 [%s] ➜ 🧱%.0f Steel, ☢️%.0f Uranium, 🥇%.0f Gold, 💎%.0f Diamonds ➜ %s\n"+
+			"🌑💀 [%s] ➜ 🧱%.0f Steel, ☢️%.0f Uranium, 🥇%.0f Gold, 💎%.0f Diamonds, 🧠%.0f Neuro Cores ➜ %s\n"+
 			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭",
-		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers,
+		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars,
 		scoutUnit.Title, scoutUnit.Cost["iron"], scoutUnit.Cost["oil"], scoutUnit.Flavor,
 		bcUnit.Title, bcUnit.Cost["steel"], bcUnit.Cost["uranium"], bcUnit.Cost["gold"], bcUnit.Cost["diamond"], bcUnit.Flavor,
+		dsUnit.Title, dsUnit.Cost["steel"], dsUnit.Cost["uranium"], dsUnit.Cost["gold"], dsUnit.Cost["diamond"], dsUnit.Cost["neuro_cores"], dsUnit.Flavor,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -115,12 +119,14 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	btnCraftBomber := selector.Data("🛩️ Forge Bomber", "craft_item", "bomber")
 	btnCraftScout := selector.Data("🛵 Build Scout", "craft_item", "scout")
 	btnCraftBC := selector.Data("🚢👑 Forge Battlecruiser", "craft_item", "battlecruiser")
+	btnCraftDS := selector.Data("🌑💀 Forge Doomsday Rig", "craft_item", "deathstar")
 
 	selector.Inline(
 		selector.Row(btnCraftSoldier, btnCraftDrone),
 		selector.Row(btnCraftMech, btnCraftNuke),
 		selector.Row(btnCraftDestroyer, btnCraftBomber),
 		selector.Row(btnCraftScout, btnCraftBC),
+		selector.Row(btnCraftDS),
 	)
 
 	return renderOrEdit(c, panelText, selector)
@@ -284,6 +290,20 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - $1, uranium = uranium - $2, gold = gold - $3, diamond = diamond - $4 WHERE encampment_id = $5", bcUnit.Cost["steel"], bcUnit.Cost["uranium"], bcUnit.Cost["gold"], bcUnit.Cost["diamond"], campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET battlecruisers = battlecruisers + 1 WHERE encampment_id = $1", campID)
 		successAlert = "🚢👑 BATTLECRUISER LAUNCHED! The pride of your fleet stands ready!"
+
+	case "deathstar":
+		var currentDS int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(deathstars, 0) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&currentDS)
+		if currentDS >= 1 {
+			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Limit Reached: Only ONE Doomsday Rig can be commanded at a time."})
+		}
+		dsUnit, _ := content.FindUnit("deathstar")
+		if steel < dsUnit.Cost["steel"] || uranium < dsUnit.Cost["uranium"] || gold < dsUnit.Cost["gold"] || diamond < dsUnit.Cost["diamond"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Steel, %.0f Uranium, %.0f Gold, %.0f Diamonds, %.0f Neuro Cores.", dsUnit.Cost["steel"], dsUnit.Cost["uranium"], dsUnit.Cost["gold"], dsUnit.Cost["diamond"], dsUnit.Cost["neuro_cores"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - $1, uranium = uranium - $2, gold = gold - $3, diamond = diamond - $4, neuro_cores = neuro_cores - $5 WHERE encampment_id = $6", dsUnit.Cost["steel"], dsUnit.Cost["uranium"], dsUnit.Cost["gold"], dsUnit.Cost["diamond"], dsUnit.Cost["neuro_cores"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET deathstars = deathstars + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🌑💀👑 THE DOOMSDAY RIG IS OPERATIONAL! The Wasteland trembles at its shadow!"
 
 	case "buggy":
 		if steel < 100.0 || oil < 20.0 {

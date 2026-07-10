@@ -75,6 +75,17 @@ var Units = []Unit{
 		DeconstructRate: 0.40,
 		Flavor:          "👑 Top-tier capital warship. Massive raw attack rating, but painfully expensive - the Deathstar-tier flex unit.",
 	},
+	{
+		Key:             "deathstar",
+		Column:          "deathstars",
+		Emoji:           "🌑💀",
+		Title:           "Doomsday Rig",
+		Role:            RoleCapital,
+		AttackRating:    500.0,
+		Cost:            map[string]float64{"steel": 25000.0, "uranium": 5000.0, "gold": 2000.0, "diamond": 200.0, "neuro_cores": 500.0},
+		DeconstructRate: 0.25,
+		Flavor:          "☠️👑 THE ultimate superweapon. A single Doomsday Rig outweighs an entire fleet - but the cost is catastrophic, and losing one in a failed raid is devastating.",
+	},
 }
 
 // FindUnit looks up a unit by its Key. Returns (Unit{}, false) if not found.

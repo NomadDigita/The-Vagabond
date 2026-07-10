@@ -956,10 +956,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "returning" {
-			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob int
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob)
+			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob, dsMob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1 WHERE encampment_id = $2", r.stolenScrap, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
@@ -988,8 +988,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC)
+		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS)
 
 		type coopContributor struct {
 			encampment_id string
@@ -1024,8 +1024,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		totDestroyers := primaryDestroyers
 		totBombers := primaryBombers
 		totBC := primaryBC
+		totDS := primaryDS
 
-		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC
+		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC + totDS
 
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
@@ -1146,6 +1147,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			attRating += float64(totBC) * bcUnit.AttackRating * offenseRatingModifier
 		}
 
+		// Deathstar: the ultimate superweapon. Flat, enormous attack rating -
+		// a single Doomsday Rig can single-handedly decide a battle.
+		if totDS > 0 {
+			dsUnit := content.MustFindUnit("deathstar")
+			attRating += float64(totDS) * dsUnit.AttackRating * offenseRatingModifier
+		}
+
 		defRating := float64(defenseForce) * 10.0 * defenseRatingModifier
 
 		attCas := 0
@@ -1220,12 +1228,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lostAttMechs = primaryMechs
 		}
 
-		var lostAttDestroyers, lostAttBombers, lostAttBC int
-		specialistPool := totDestroyers + totBombers + totBC
+		var lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS int
+		specialistPool := totDestroyers + totBombers + totBC + totDS
 		if specialistPool > 0 {
 			lostAttDestroyers = int(float64(dbCas) * float64(totDestroyers) / float64(specialistPool))
 			lostAttBombers = int(float64(dbCas) * float64(totBombers) / float64(specialistPool))
-			lostAttBC = dbCas - lostAttDestroyers - lostAttBombers
+			lostAttBC = int(float64(dbCas) * float64(totBC) / float64(specialistPool))
+			lostAttDS = dbCas - lostAttDestroyers - lostAttBombers - lostAttBC
 			if lostAttDestroyers > primaryDestroyers {
 				lostAttDestroyers = primaryDestroyers
 			}
@@ -1235,6 +1244,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if lostAttBC > primaryBC {
 				lostAttBC = primaryBC
 			}
+			if lostAttDS > primaryDS {
+				lostAttDS = primaryDS
+			}
 		}
 
 		newAttSols := primarySoldiers - lostAttSols
@@ -1242,8 +1254,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		newAttDestroyers := primaryDestroyers - lostAttDestroyers
 		newAttBombers := primaryBombers - lostAttBombers
 		newAttBC := primaryBC - lostAttBC
+		newAttDS := primaryDS - lostAttDS
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC)
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6, deathstars_mobilized = $7 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC, newAttDS)
 
 		attackerCasualties := (totSoldiers + totMechs) - (newAttSols + newAttMechs)
 
@@ -1288,7 +1301,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
 		}
 
-		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC) > 0
+		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC + newAttDS) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
 		var defenderScrap float64
@@ -1308,10 +1321,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		// Append specific environmental weather details dynamically to round reports
 		roundLog := fmt.Sprintf(
 			"⚔️💥 BATTLE REPORT: ROUND %d COMPLETE! 💥⚔️\n\n"+
-				"💀 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers, 🚢👑 %d Battlecruisers lost.\n"+
+				"💀 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers, 🚢👑 %d Battlecruisers, 🌑💀 %d Doomsday Rigs lost.\n"+
 				"🛡️ Defender Casualties: %d units lost.%s\n"+
 				"⏳ Next skirmish round starting on next clock tick.",
-			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, lostAttBC, defCas, weatherNotice,
+			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS, defCas, weatherNotice,
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
