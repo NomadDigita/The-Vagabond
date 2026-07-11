@@ -14,6 +14,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
+	"github.com/NomadDigita/The-Vagabond/internal/game/battlereport"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 )
@@ -1289,16 +1290,32 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET mechs_mobilized = $1 WHERE raid_id = $2", newAttMechs, r.id)
 		}
 
+		var lostDefSols, lostDefMechs, lostDefDrones, lostDefJets int
 		if r.defenderID.Valid && defCas > 0 {
-			lostDefSols := int(float64(defCas) * 0.60)
-			lostDefMechs := int(float64(defCas) * 0.20)
+			lostDefSols = int(float64(defCas) * 0.60)
+			lostDefMechs = int(float64(defCas) * 0.20)
 			if lostDefSols > soldiersDefender {
 				lostDefSols = soldiersDefender
 			}
 			if lostDefMechs > mechsDefender {
 				lostDefMechs = mechsDefender
 			}
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0) WHERE encampment_id = $3", lostDefSols, lostDefMechs, r.defenderID.String)
+
+			remainingDefCas := defCas - lostDefSols - lostDefMechs
+			if remainingDefCas > 0 && dronesDefender+jetsDefender > 0 {
+				lostDefDrones = int(float64(remainingDefCas) * float64(dronesDefender) / float64(dronesDefender+jetsDefender))
+				lostDefJets = remainingDefCas - lostDefDrones
+				if lostDefDrones > dronesDefender {
+					lostDefDrones = dronesDefender
+				}
+				if lostDefJets > jetsDefender {
+					lostDefJets = jetsDefender
+				}
+			}
+
+			_, _ = tx.ExecContext(ctx,
+				"UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - $1, 0), mechs = GREATEST(mechs - $2, 0), drones = GREATEST(drones - $3, 0), jets = GREATEST(jets - $4, 0) WHERE encampment_id = $5",
+				lostDefSols, lostDefMechs, lostDefDrones, lostDefJets, r.defenderID.String)
 		}
 
 		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC + newAttDS) > 0
@@ -1318,30 +1335,68 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap := defenderScrap * lootPercentage
 		primaryShare := stolenScrap
 
-		// Append specific environmental weather details dynamically to round reports
-		roundLog := fmt.Sprintf(
-			"⚔️💥 BATTLE REPORT: ROUND %d COMPLETE! 💥⚔️\n\n"+
-				"💀 Attacker Casualties: 🪖 %d Soldiers, 🤖 %d Mechs, 💥 %d Destroyers, 🛩️ %d Bombers, 🚢👑 %d Battlecruisers, 🌑💀 %d Doomsday Rigs lost.\n"+
-				"🛡️ Defender Casualties: %d units lost.%s\n"+
-				"⏳ Next skirmish round starting on next clock tick.",
-			r.roundNumber, lostAttSols, lostAttMechs, lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS, defCas, weatherNotice,
-		)
+		// Build the SpaceHunt-style battle report. Composition reflects
+		// forces standing AT THE START of this round (before losses); loss
+		// tallies are what fell THIS round specifically.
+		report := battlereport.Round{
+			Number:       r.roundNumber,
+			AttackerName: r.attackerName,
+			DefenderName: r.defenderName,
+			AttackerComposition: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: totSoldiers},
+				{Emoji: "🤖", Label: "Mechs", Count: totMechs},
+				{Emoji: "💥", Label: "Destroyers", Count: totDestroyers},
+				{Emoji: "🛩️", Label: "Bombers", Count: totBombers},
+				{Emoji: "🚢👑", Label: "Battlecruisers", Count: totBC},
+				{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: totDS},
+			},
+			DefenderComposition: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: soldiersDefender},
+				{Emoji: "🛰️", Label: "Drones", Count: dronesDefender},
+				{Emoji: "✈️", Label: "Jets", Count: jetsDefender},
+				{Emoji: "🤖", Label: "Mechs", Count: mechsDefender},
+			},
+			AttackerLosses: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: lostAttSols},
+				{Emoji: "🤖", Label: "Mechs", Count: lostAttMechs},
+				{Emoji: "💥", Label: "Destroyers", Count: lostAttDestroyers},
+				{Emoji: "🛩️", Label: "Bombers", Count: lostAttBombers},
+				{Emoji: "🚢👑", Label: "Battlecruisers", Count: lostAttBC},
+				{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: lostAttDS},
+			},
+			DefenderLosses: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: lostDefSols},
+				{Emoji: "🛰️", Label: "Drones", Count: lostDefDrones},
+				{Emoji: "✈️", Label: "Jets", Count: lostDefJets},
+				{Emoji: "🤖", Label: "Mechs", Count: lostDefMechs},
+			},
+		}
 
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, roundLog)
-		
+		switch {
+		case !attackerStillStanding:
+			report.Outcome = battlereport.OutcomeDefenderWon
+		case !defenderStillStanding:
+			report.Outcome = battlereport.OutcomeAttackerWon
+			report.LootLines = []string{fmt.Sprintf("♻️ %.0f Scrap", primaryShare)}
+			report.LootCollector = r.attackerName
+		case r.roundNumber >= 5:
+			report.Outcome = battlereport.OutcomeDraw
+		default:
+			report.Outcome = battlereport.OutcomeOngoing
+		}
+
+		reportText := battlereport.Render(report)
+		if weatherNotice != "" {
+			reportText += "\n\n" + strings.TrimSpace(weatherNotice)
+		}
+
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, reportText)
 		if r.defenderID.Valid && r.defenderUserID != 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, roundLog)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, reportText)
 		}
 
 		if !attackerStillStanding {
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
-			defeatAlert := fmt.Sprintf("❌ BATTLE RESOLUTION: DEFEAT!\n\nYour forces were entirely repelled at Outpost [%s]. All deployed raiders were lost.", r.defenderName)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, defeatAlert)
-
-			if r.defenderID.Valid && r.defenderUserID != 0 {
-				winAlert := fmt.Sprintf("🛡️ BATTLE RESOLUTION: BASE DEFENSED!\n\nHostile forces marching from [%s] were repelled.", r.attackerName)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, winAlert)
-			}
 		} else if !defenderStillStanding {
 			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
@@ -1371,25 +1426,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0) WHERE encampment_id = $2", stolenScrap, r.defenderID.String)
 			}
 
-			winAlert := fmt.Sprintf(
-				"🏆 BATTLE RESOLUTION: VICTORY!\n\n"+
-					"Your forces breached the perimeters of [%s]!\n"+
-					"⚙️ Looted: +%.1f Scrap\n\n"+
-					"🚀 RETURN MARCH ENGAGED: Your survivors are marching back home with the loot.",
-				r.defenderName, primaryShare,
-			)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, winAlert)
-
-			if r.defenderID.Valid && r.defenderUserID != 0 {
-				loseAlert := fmt.Sprintf(
-					"🚨 BATTLE RESOLUTION: BASE BREACHED!\n\n"+
-						"Our perimeters were breached by [%s]!\n"+
-						"⚙️ Looted: -%.1f Scrap stolen from warehouses.",
-					r.attackerName, stolenScrap,
-				)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, loseAlert)
-			}
-
 			for _, h := range helpers {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
 			}
@@ -1398,14 +1434,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			resolveTime := time.Now().UTC().Add(time.Duration(returnMinutes) * time.Minute)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
-
-			drawAlert := "⚔️ BATTLE TIMEOUT: RETREAT ENGAGED!\n\nNo decisive victory was achieved after 5 rounds. Your remaining forces have retreated and are returning home."
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, drawAlert)
-
-			if r.defenderID.Valid && r.defenderUserID != 0 {
-				defDrawAlert := "🛡️ BATTLE TIMEOUT: SHIELD HELD!\n\nDefenses held for 5 rounds. Hostile raiders retreated."
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defDrawAlert)
-			}
 
 			for _, h := range helpers {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)

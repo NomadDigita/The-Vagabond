@@ -15,13 +15,15 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnFactory := menu.Text("🏭 Heavy Workshop")
 	btnRanking := menu.Text("🏆 Global Ranking")
 	btnBosses := menu.Text("👹 World Bosses")
+	btnRebellion := menu.Text("✊ The Rebellion")
 	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
 	menu.Reply(
 		menu.Row(btnHQ, btnCamp),
 		menu.Row(btnCombat, btnEcon),
 		menu.Row(btnFactory, btnRanking),
-		menu.Row(btnBosses, btnAdmin),
+		menu.Row(btnBosses, btnRebellion),
+		menu.Row(btnAdmin),
 	)
 
 	return menu

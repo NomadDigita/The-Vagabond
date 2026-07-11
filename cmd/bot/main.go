@@ -190,6 +190,11 @@ func executeStartupMigrations(db *sql.DB) {
 			('Apex Wraith', '☠️👹', 3000000, 3000000, 30000)
 			ON CONFLICT (name) DO NOTHING;`,
 
+		`CREATE TABLE IF NOT EXISTS rebellion_support (
+			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			total_contributed DOUBLE PRECISION DEFAULT 0
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS raid_coop_members (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
@@ -529,6 +534,7 @@ func main() {
 	deconstruct := handlers.NewDeconstructHandler(db)
 	ranking := handlers.NewRankingHandler(db)
 	boss := handlers.NewBossHandler(db)
+	rebellion := handlers.NewRebellionHandler(db)
 	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -557,7 +563,9 @@ func main() {
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
+	bot.Handle("/rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
+	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
 	bot.Handle("🏆 Global Ranking", ranking.HandleRankingPanel)
 
@@ -618,6 +626,7 @@ func main() {
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
+	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)
