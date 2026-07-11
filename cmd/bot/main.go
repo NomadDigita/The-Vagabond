@@ -180,6 +180,7 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_metal DOUBLE PRECISION DEFAULT 0.00;`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_crystal DOUBLE PRECISION DEFAULT 0.00;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS base_march_minutes DOUBLE PRECISION DEFAULT 15.0;`,
 
 		`CREATE TABLE IF NOT EXISTS raid_forces (
 			raid_id UUID PRIMARY KEY REFERENCES raids(id) ON DELETE CASCADE,
@@ -560,7 +561,8 @@ func main() {
 	admin := handlers.NewAdminHandler(db, tickEngine, adminIDs)
 	hero := handlers.NewHeroHandler(db)
 	world := handlers.NewWorldHandler(db)
-	econ := handlers.NewEconomyHandler(db)
+	exchange := handlers.NewExchangeHandler(db)
+	econ := handlers.NewEconomyHandler(db, exchange)
 	clan := handlers.NewClanHandler(db)
 	factory := handlers.NewFactoryHandler(db)
 	arena := handlers.NewArenaHandler(db)
@@ -570,7 +572,6 @@ func main() {
 	ranking := handlers.NewRankingHandler(db)
 	boss := handlers.NewBossHandler(db)
 	rebellion := handlers.NewRebellionHandler(db)
-	exchange := handlers.NewExchangeHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -663,6 +664,7 @@ func main() {
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)
+	bot.Handle("\ftrade_hub_nav", econ.HandleTradeHubNavCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)

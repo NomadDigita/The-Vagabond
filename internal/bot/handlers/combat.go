@@ -1103,16 +1103,16 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var insertRaid string
 	if isAI {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-			VALUES ($1, NULL, 'marching', $2)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes) 
+			VALUES ($1, NULL, 'marching', $2, $3)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime).Scan(&raidID)
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes).Scan(&raidID)
 	} else {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time) 
-			VALUES ($1, $2, 'marching', $3)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes) 
+			VALUES ($1, $2, 'marching', $3, $4)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime).Scan(&raidID)
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes).Scan(&raidID)
 	}
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type, destroyers_mobilized, bombers_mobilized, battlecruisers_mobilized, deathstars_mobilized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType, mobDestroyers, mobBombers, mobBC, mobDS)

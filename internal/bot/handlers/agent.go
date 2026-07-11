@@ -94,7 +94,7 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"🤖 Agent Status: %s\n"+
 			"🏷️ License: %s\n"+
 			"⚙️ Operational Mode: %s\n"+
-			"🔋 Fuel Reserve: %.1f Electricity Cells\n\n"+
+			"⚡ Fuel Reserve: %.1f Electricity Cells\n\n"+
 			"UPKEEP REQUIREMENTS:\n"+
 			"⚡ Consumes 0.2 Electricity Cells per tick.\n"+
 			"⚠️ Agent auto-shuts down if reserves hit 0.\n\n"+

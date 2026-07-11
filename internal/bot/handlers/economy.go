@@ -11,11 +11,12 @@ import (
 )
 
 type EconomyHandler struct {
-	DB *sql.DB
+	DB              *sql.DB
+	exchangeHandler *ExchangeHandler
 }
 
-func NewEconomyHandler(db *sql.DB) *EconomyHandler {
-	return &EconomyHandler{DB: db}
+func NewEconomyHandler(db *sql.DB, exchangeHandler *ExchangeHandler) *EconomyHandler {
+	return &EconomyHandler{DB: db, exchangeHandler: exchangeHandler}
 }
 
 func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
@@ -48,25 +49,51 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 		loanCash = 0.0
 	}
 
-	var scrap, dollars float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
+	var scrap, metal, crystal, dollars float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, metal, crystal, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &metal, &crystal, &dollars)
+
+	var activeListings int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM market_exchange WHERE is_sold = FALSE").Scan(&activeListings)
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🏦 SYSTEM ECONOMY & FINANCIAL CENTER\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Outpost Name: Encampment Ledger\n\n"+
-			"LEDGER SUMMARIES:\n"+
-			"⚙️ Scrap Reserves: %.1f\n"+
-			"💵 Cash Reserves: $%.1f\n\n"+
-			"FINANCIAL VAULT SAVINGS:\n"+
-			"🏦 Vault Savings: %.1f Scrap | $%.1f Cash\n"+
-			"💳 Credit Debt: %.1f Scrap | $%.1f Cash\n\n"+
-			"Select options on your bottom menu deck to access the Vault, Alliances, or Heavy Workshop.",
-		scrap, dollars, bankBalance, bankBalanceCash, loanAmount, loanCash,
+		"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\n"+
+			"💱 THE TRADE HUB 💱\n"+
+			"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\n\n"+
+			"💰 YOUR WALLET:\n"+
+			"⚙️ Scrap: %.1f  |  🔩 Metal: %.1f\n"+
+			"💎 Crystal: %.1f  |  💵 Cash: $%.1f\n\n"+
+			"🏦 BANK VAULT SNAPSHOT:\n"+
+			"💰 Savings: %.1f Scrap | $%.1f Cash\n"+
+			"💳 Debt: %.1f Scrap | $%.1f Cash\n\n"+
+			"🛒 PLAYER MARKET SNAPSHOT:\n"+
+			"📋 Active Listings: %d\n\n"+
+			"Choose where to trade:\n"+
+			"🏦 [Financial Vault] — Deposit, borrow, repay, and convert Scrap/Metal/Crystal into Cash\n"+
+			"🛒 [Market Exchange] — Buy and sell directly with other survivors\n"+
+			"🏪━━━━━━━━━━━━━━━━━━━━━━🏪",
+		scrap, metal, crystal, dollars,
+		bankBalance, bankBalanceCash, loanAmount, loanCash,
+		activeListings,
 	)
 
-	return c.Send(panelText, keyboards.EconomyNavigation())
+	selector := &telebot.ReplyMarkup{}
+	btnVault := selector.Data("🏦 Financial Vault", "trade_hub_nav", "vault")
+	btnMarket := selector.Data("🛒 Market Exchange", "trade_hub_nav", "market")
+
+	selector.Inline(selector.Row(btnVault, btnMarket))
+
+	return c.Send(panelText, selector)
+}
+
+// HandleTradeHubNavCallback routes the Trade Hub's inline navigation
+// buttons directly into the Vault or Market sub-panels, so players don't
+// have to hunt through the bottom reply-keyboard menu to get there.
+func (h *EconomyHandler) HandleTradeHubNavCallback(c telebot.Context) error {
+	dest := c.Args()[0]
+	if dest == "vault" {
+		return h.HandleFinancialVault(c)
+	}
+	return h.exchangeHandler.HandleExchangePanel(c)
 }
 
 func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
@@ -143,9 +170,9 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 			"🥫 SURVIVAL MATERIALS:\n"+
 			"⚙️ Scrap: %.1f\n"+
 			"🥫 Food Rations: %.1f\n"+
-			"🔋 Electricity: %.1f cells\n\n"+
+			"⚡ Electricity: %.1f cells\n\n"+
 			"🏗️ CORE SPACEHUNT RESOURCES:\n"+
-			"🧱 Metal: %.1f tons\n"+
+			"🔩 Metal: %.1f tons\n"+
 			"💎 Crystal: %.1f kg\n"+
 			"🎈 Hydrogen: %.1f L\n"+
 			"📦━━━━━━━━━━━━━━━━━━━━━━📦",
@@ -281,7 +308,7 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = metal + 50.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🧱 Purchased 50 tons of Metal!"})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🔩 Purchased 50 tons of Metal!"})
 
 	case "buy_uranium":
 		if dollars < 200.0 {
