@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -144,6 +146,80 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 		"━━━━━━━━━━━━━━━━━━━━━━"
 
 	return c.Send(welcomeText, selector)
+}
+
+// nameChangeCostCrystal and nameChangeCostDollars are deliberately steep -
+// SpaceHunt's /name command is a rare, deliberate vanity purchase, not
+// something players do casually.
+const nameChangeCostCrystal = 1000.0
+const nameChangeCostDollars = 500.0
+
+// HandleRenameOutpost implements SpaceHunt's "Change your username"
+// feature. The new name applies everywhere the player is identified:
+// battle reports, the Global Ranking board, World Boss/Rebellion
+// leaderboards, and raid targeting.
+func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	ctx := context.Background()
+	newName := strings.TrimSpace(c.Message().Payload)
+
+	if newName == "" {
+		return c.Send(fmt.Sprintf(
+			"✏️ RENAME OUTPOST\n\nUsage: /name [new name]\n\n💰 Cost: %.0f Crystal + $%.0f\n📏 3-20 characters, letters/numbers/spaces/hyphens only.\n\n⚠️ This changes your public display name everywhere - battle reports, rankings, and leaderboards.",
+			nameChangeCostCrystal, nameChangeCostDollars,
+		))
+	}
+
+	if len(newName) < 3 || len(newName) > 20 {
+		return c.Send("❌ Invalid Length: Name must be 3-20 characters.")
+	}
+
+	validName := regexp.MustCompile(`^[a-zA-Z0-9 \-]+$`)
+	if !validName.MatchString(newName) {
+		return c.Send("❌ Invalid Characters: Only letters, numbers, spaces, and hyphens are allowed.")
+	}
+
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	var existing string
+	err = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE LOWER(name) = LOWER($1) AND id != $2", newName, campID).Scan(&existing)
+	if err == nil {
+		return c.Send("❌ Name Taken: Another survivor already claims that name.")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Send("⚠️ Rename transaction failed.")
+	}
+	defer tx.Rollback()
+
+	var crystal, dollars float64
+	_ = tx.QueryRowContext(ctx, "SELECT crystal, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&crystal, &dollars)
+
+	if crystal < nameChangeCostCrystal || dollars < nameChangeCostDollars {
+		return c.Send(fmt.Sprintf("❌ Insufficient Funds: Need %.0f Crystal + $%.0f. You have %.0f Crystal + $%.0f.", nameChangeCostCrystal, nameChangeCostDollars, crystal, dollars))
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1, dollars = dollars - $2 WHERE encampment_id = $3", nameChangeCostCrystal, nameChangeCostDollars, campID)
+	_, err = tx.ExecContext(ctx, "UPDATE encampments SET name = $1 WHERE id = $2", newName, campID)
+	if err != nil {
+		return c.Send("⚠️ Error writing new outpost name.")
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed committing outpost rename: %v", err)
+		return c.Send("⚠️ Error saving changes.")
+	}
+
+	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName))
 }
 
 func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {

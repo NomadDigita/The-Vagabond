@@ -178,6 +178,8 @@ func executeStartupMigrations(db *sql.DB) {
 
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_scrap DOUBLE PRECISION DEFAULT 0.00;`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_metal DOUBLE PRECISION DEFAULT 0.00;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS stolen_crystal DOUBLE PRECISION DEFAULT 0.00;`,
 
 		`CREATE TABLE IF NOT EXISTS raid_forces (
 			raid_id UUID PRIMARY KEY REFERENCES raids(id) ON DELETE CASCADE,
@@ -572,6 +574,7 @@ func main() {
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
+	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
