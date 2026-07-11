@@ -42,16 +42,11 @@ type Resources struct {
 	EncampmentID string    `json:"encampment_id"`
 	Scrap        float64   `json:"scrap"`
 	Rations      float64   `json:"rations"`
-	Energy       float64   `json:"energy"`
+	Electricity  float64   `json:"electricity"`
 	NeuroCores   float64   `json:"neuro_cores"`
-	Steel        float64   `json:"steel"`
-	Uranium      float64   `json:"uranium"`
+	Metal        float64   `json:"metal"`
+	Crystal      float64   `json:"crystal"`
 	Hydrogen     float64   `json:"hydrogen"`
-	Iron         float64   `json:"iron"`
-	Oil          float64   `json:"oil"`
-	Gold         float64   `json:"gold"`
-	Silver       float64   `json:"silver"`
-	Diamond      float64   `json:"diamond"`
 	Dollars      float64   `json:"dollars"`
 	LastTickedAt time.Time `json:"last_ticked_at"`
 }
@@ -64,7 +59,7 @@ type Hero struct {
 	Trait           string `json:"trait"`    // e.g. "Never Retreat", "Resource Finder"
 	Injuries        string `json:"injuries"` // e.g. "Cybernetic Leg", "Scarred Eye"
 	BattlesSurvived int    `json:"battles_survived"`
-	Superpower      string `json:"superpower"` // e.g. "Energy Shielding", "Scrap Recovery"
+	Superpower      string `json:"superpower"` // e.g. "Electricity Shielding", "Scrap Recovery"
 }
 
 // WorkshopInventory tracks constructed high-tech military assets

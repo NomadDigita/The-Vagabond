@@ -48,13 +48,13 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 		var myX, myY int
 
 		queryCamp := `
-			SELECT e.id, e.name, r.scrap, r.rations, r.energy, c.region, c.x, c.y 
+			SELECT e.id, e.name, r.scrap, r.rations, r.electricity, c.region, c.x, c.y 
 			FROM encampments e
 			JOIN resources r ON r.encampment_id = e.id
 			JOIN coordinates c ON c.id = e.coordinate_id
 			WHERE e.user_id = $1`
 		
-		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.ID, &camp.Name, &res.Scrap, &res.Rations, &res.Energy, &region, &myX, &myY)
+		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.ID, &camp.Name, &res.Scrap, &res.Rations, &res.Electricity, &region, &myX, &myY)
 		if err != nil {
 			log.Printf("Failed to query existing player details: %v", err)
 			return c.Send("⚠️ System error reclaiming session database.", keyboards.MainNavigation())
@@ -95,11 +95,11 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"CURRENT RESOURCE BALANCES:\n"+
 				"⚙️ Scrap: %.1f\n"+
 				"🥫 Rations: %.1f\n"+
-				"🔋 Energy Cells: %.1f\n"+
+				"🔋 Electricity Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Use the command manual below to learn terminal shortcuts.",
 			user.FirstName, systemState, activeMiners, ownedMiners, ownedMiners-activeMiners, outboundCount,
-			formatFactionLabel(user.Faction), region, camp.Name, myX, myY, res.Scrap, res.Rations, res.Energy,
+			formatFactionLabel(user.Faction), region, camp.Name, myX, myY, res.Scrap, res.Rations, res.Electricity,
 		)
 
 		selector := &telebot.ReplyMarkup{}
@@ -123,7 +123,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 
 func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int64) error {
 	selector := &telebot.ReplyMarkup{}
-	btnVanguard := selector.Data("🛡️ Steel Vanguard", "join_faction", "steel_vanguard", fmt.Sprintf("%d", senderID))
+	btnVanguard := selector.Data("🛡️ Metal Vanguard", "join_faction", "steel_vanguard", fmt.Sprintf("%d", senderID))
 	btnNomads := selector.Data("⚙️ Rust Nomads", "join_faction", "rust_nomads", fmt.Sprintf("%d", senderID))
 
 	selector.Inline(
@@ -135,9 +135,9 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 		"⚠️ SYSTEM INTRUSION DETECTED\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━\n" +
 		"WARNING: Faction registration required. Deploy your core systems:\n\n" +
-		"🛡️ [Steel Vanguard]\n" +
-		"High-Tech remnant order. Focuses on energy conservation.\n" +
-		"Starting Bonus: +50.0 Energy Cells\n\n" +
+		"🛡️ [Metal Vanguard]\n" +
+		"High-Tech remnant order. Focuses on electricity conservation.\n" +
+		"Starting Bonus: +50.0 Electricity Cells\n\n" +
 		"⚙️ [Rust Nomads]\n" +
 		"Scrappy survival coalition. Focuses on resource collection.\n" +
 		"Starting Bonus: +150.0 Scrap\n" +
@@ -162,7 +162,7 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 		"🏦 [🏦 System Economy Menu]\n" +
 		"• Financial Vault: Deposit Scrap to earn interest or secure emergency credit lines.\n" +
 		"• Clan Alliances: Establish or join forces (capped at 15 members). Trigger alliance wars.\n" +
-		"• Heavy Workshop: Spend heavy resources (Steel, Uranium, Hydrogen) to assemble Fusion Tanks.\n\n" +
+		"• Heavy Workshop: Spend heavy resources (Metal, Crystal, Hydrogen) to assemble Fusion Tanks.\n\n" +
 		"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -273,7 +273,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		}
 
 		insertRes := `
-			INSERT INTO resources (encampment_id, scrap, rations, energy, neuro_cores) 
+			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores) 
 			VALUES ($1, $2, 50.00, $3, 0.00)`
 		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy)
 		if err != nil {
@@ -307,7 +307,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 
 func formatFactionLabel(f string) string {
 	if f == "steel_vanguard" {
-		return "🛡️ Steel Vanguard"
+		return "🛡️ Metal Vanguard"
 	}
 	return "⚙️ Rust Nomads"
 }

@@ -457,30 +457,15 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 		var column string
 
 		switch m.resType {
-		case "iron":
+		case "metal":
 			gain = float64(m.miners * 20)
-			column = "iron"
-		case "oil":
-			gain = float64(m.miners * 10)
-			column = "oil"
-		case "gold":
+			column = "metal"
+		case "crystal":
 			gain = float64(m.miners * 5)
-			column = "gold"
-		case "silver":
-			gain = float64(m.miners * 10)
-			column = "silver"
-		case "diamond":
-			gain = float64(m.miners * 1)
-			column = "diamond"
-		case "uranium":
-			gain = float64(m.miners * 5)
-			column = "uranium"
+			column = "crystal"
 		case "hydrogen":
 			gain = float64(m.miners * 10)
 			column = "hydrogen"
-		case "steel":
-			gain = float64(m.miners * 20)
-			column = "steel"
 		}
 
 		if column != "" {
@@ -651,25 +636,25 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 	}
 
 	for _, ex := range exps {
-		var rations, oil float64
-		_ = tx.QueryRowContext(ctx, "SELECT rations, oil FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&rations, &oil)
+		var rations, metalFuel float64
+		_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&rations, &metalFuel)
 
 		var tankers int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(tankers, 0) FROM workshop_inventory WHERE encampment_id = $1", ex.attackerID).Scan(&tankers)
 
 		deductRations := 3.0
-		deductOil := 1.0
+		deductMetalFuel := 1.0
 
 		if tankers > 0 {
-			deductOil = 0.80
+			deductMetalFuel = 0.80
 		}
 
 		newRations := math.Max(rations-deductRations, 0.0)
-		newOil := math.Max(oil-deductOil, 0.0)
+		newMetalFuel := math.Max(metalFuel-deductMetalFuel, 0.0)
 
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, oil = $2 WHERE encampment_id = $3", newRations, newOil, ex.attackerID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2 WHERE encampment_id = $3", newRations, newMetalFuel, ex.attackerID)
 
-		if newOil <= 0 {
+		if newMetalFuel <= 0 {
 			delayedResolve := ex.resolveTime.UTC().Add(3 * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
 		}

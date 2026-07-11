@@ -24,15 +24,11 @@ type ActiveAgent struct {
 	CampName    string
 	Scrap       float64
 	Rations     float64
-	Energy      float64
-	Steel       float64
-	Uranium     float64
+	Electricity      float64
+	Metal       float64
+	Crystal     float64
 	Hydrogen    float64
-	Iron        float64
-	Oil         float64
-	Gold        float64
-	Silver      float64
-	Diamond     float64
+
 	Dollars     float64
 	NeuroCores  float64
 	TentLvl     int
@@ -44,7 +40,7 @@ type ActiveAgent struct {
 func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT t.user_id, t.mode, e.id, e.name, 
-		       r.scrap, r.rations, r.energy, r.steel, r.uranium, r.hydrogen, r.iron, r.oil, r.gold, r.silver, r.diamond, r.dollars, r.neuro_cores,
+		       r.scrap, r.rations, r.electricity, r.metal, r.crystal, r.hydrogen, r.dollars, r.neuro_cores,
 		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
 		       COALESCE((SELECT res.econ_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as econ_tech_lvl,
 		       COALESCE((SELECT mut.synaptic_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as synaptic_lvl
@@ -64,7 +60,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		var a ActiveAgent
 		err := rows.Scan(
 			&a.UserID, &a.Mode, &a.CampID, &a.CampName, 
-			&a.Scrap, &a.Rations, &a.Energy, &a.Steel, &a.Uranium, &a.Hydrogen, &a.Iron, &a.Oil, &a.Gold, &a.Silver, &a.Diamond, &a.Dollars, &a.NeuroCores,
+			&a.Scrap, &a.Rations, &a.Electricity, &a.Metal, &a.Crystal, &a.Hydrogen, &a.Dollars, &a.NeuroCores,
 			&a.TentLvl, &a.EconTechLvl, &a.SynapticLvl,
 		)
 		if err == nil {
@@ -78,24 +74,24 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	for _, a := range agents {
 		// Calculate fuel deductions incorporating Science Tech and Biological Mutations
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
-		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10) // Cap minimum energy upkeep at 10%
+		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10) // Cap minimum electricity upkeep at 10%
 		upkeepEnergy := 0.2 * upkeepMultiplier
 
-		if a.Energy < upkeepEnergy {
+		if a.Electricity < upkeepEnergy {
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)
 
 			alertMsg := fmt.Sprintf(
 				"🔌 AGENT DEACTIVATED\n\n"+
 					"Outpost: %s\n"+
-					"Your automation agent has shut down due to complete depletion of Energy Cells.",
+					"Your automation agent has shut down due to complete depletion of Electricity Cells.",
 				a.CampName,
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
-			log.Printf("Agent auto-shut down for user %d: lack of energy.", a.UserID)
+			log.Printf("Agent auto-shut down for user %d: lack of electricity.", a.UserID)
 			continue
 		}
 
-		newEnergy := math.Max(a.Energy-upkeepEnergy, 0.0)
+		newEnergy := math.Max(a.Electricity-upkeepEnergy, 0.0)
 		storageCap := float64(a.TentLvl) * 500.0
 
 		switch a.Mode {
@@ -111,7 +107,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
-				SET scrap = $1, rations = $2, energy = $3 
+				SET scrap = $1, rations = $2, electricity = $3 
 				WHERE encampment_id = $4`,
 				newScrap, newRations, newEnergy, a.CampID,
 			)
@@ -121,17 +117,16 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector] executed action for outpost: %s (+5.0 Scrap, +2.0 Rations capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_omega":
-			// Autopilot Industrial mode (Steel, Iron, Oil, Hydrogen)
-			newSteel := a.Steel + 10.00
-			newIron := a.Iron + 15.00
-			newOil := a.Oil + 8.00
+			// Autopilot Industrial mode (Metal, Hydrogen). Former separate
+			// Iron/Oil gains are now folded directly into Metal.
+			newMetal := a.Metal + 33.00
 			newHydrogen := a.Hydrogen + 5.00
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
-				SET energy = $1, steel = $2, iron = $3, oil = $4, hydrogen = $5 
-				WHERE encampment_id = $6`,
-				newEnergy, newSteel, newIron, newOil, newHydrogen, a.CampID,
+				SET electricity = $1, metal = $2, hydrogen = $3 
+				WHERE encampment_id = $4`,
+				newEnergy, newMetal, newHydrogen, a.CampID,
 			)
 			if err != nil {
 				log.Printf("Agent failed executing collector_omega pass: %v", err)
@@ -139,19 +134,18 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s", a.CampName)
 
 		case "collector_precious":
-			// Autopilot Precious mode (Silver, Gold, Uranium, Diamonds, Dollars, Neuro Cores)
-			newSilver := a.Silver + 5.00
-			newGold := a.Gold + 2.00
-			newUranium := a.Uranium + 1.00
-			newDiamond := a.Diamond + 0.10
+			// Autopilot Precious mode (Crystal, Dollars, Neuro Cores).
+			// Former separate Silver/Gold/Diamond gains are now folded
+			// directly into Crystal.
+			newCrystal := a.Crystal + 8.10
 			newDollars := a.Dollars + 2.00
 			newNeuro := a.NeuroCores + 1.00
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
-				SET energy = $1, silver = $2, gold = $3, uranium = $4, diamond = $5, dollars = $6, neuro_cores = $7 
-				WHERE encampment_id = $8`,
-				newEnergy, newSilver, newGold, newUranium, newDiamond, newDollars, newNeuro, a.CampID,
+				SET electricity = $1, crystal = $2, dollars = $3, neuro_cores = $4 
+				WHERE encampment_id = $5`,
+				newEnergy, newCrystal, newDollars, newNeuro, a.CampID,
 			)
 			if err != nil {
 				log.Printf("Agent failed executing collector_precious pass: %v", err)
@@ -162,7 +156,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			var isUpgrading bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE)", a.CampID).Scan(&isUpgrading)
 			if isUpgrading {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 				continue
 			}
 
@@ -178,14 +172,14 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			err = tx.QueryRowContext(ctx, queryEligible, a.CampID).Scan(&modType, &lvl)
 			if err != nil {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, 'tent', 1) ON CONFLICT DO NOTHING", a.CampID)
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 				continue
 			}
 
 			cost := lvl * 150
 			if a.Scrap >= float64(cost) {
 				newScrap := a.Scrap - float64(cost)
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, energy = $2 WHERE encampment_id = $3", newScrap, newEnergy, a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, electricity = $2 WHERE encampment_id = $3", newScrap, newEnergy, a.CampID)
 
 				readyAt := time.Now().Add(20 * time.Second)
 				upsertModule := `
@@ -208,22 +202,22 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
 				log.Printf("Agent [Builder] auto-triggered upgrade for module %s level %d on camp %s", modType, lvl+1, a.CampName)
 			} else {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 			}
 
 		case "military":
-			var rations, iron float64
-			_ = tx.QueryRowContext(ctx, "SELECT rations, iron FROM resources WHERE encampment_id = $1", a.CampID).Scan(&rations, &iron)
+			var rations, metal float64
+			_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1", a.CampID).Scan(&rations, &metal)
 
-			if rations >= 50.0 && iron >= 10.0 {
+			if rations >= 50.0 && metal >= 10.0 {
 				newRations := rations - 50.0
-				newIron := iron - 10.0
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, iron = $2, energy = $3 WHERE encampment_id = $4", newRations, newIron, newEnergy, a.CampID)
+				newMetal := metal - 10.0
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2, electricity = $3 WHERE encampment_id = $4", newRations, newMetal, newEnergy, a.CampID)
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", a.CampID)
 				
 				log.Printf("Agent [Military] auto-recruited 1 Soldier for outpost: %s", a.CampName)
 			} else {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 			}
 		}
 	}

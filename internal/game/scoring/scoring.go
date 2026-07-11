@@ -10,16 +10,14 @@ package scoring
 // Composed of:
 //   - Base: outpost level * 1000
 //   - Structures: sum of all Defense Grid / utility module levels * 500
-//   - Economy: total banked resource value (precious resources weighted
-//     higher: gold x10, silver x5, diamond x50, dollars x2) * 0.05
+//   - Economy: total banked resource value (Dollars weighted higher) * 0.05
 //   - Military: weighted workshop inventory value (pure combat units and
 //     capital ships weighted far higher than transport/utility units)
 const ScoreExpr = `(
 	(e.level * 1000)
 	+ COALESCE((SELECT SUM(level) FROM modules m WHERE m.encampment_id = e.id), 0) * 500
 	+ COALESCE((
-		SELECT (scrap + rations + energy + neuro_cores + steel + uranium + hydrogen + iron + oil
-		        + (gold * 10) + (silver * 5) + (diamond * 50) + (dollars * 2))
+		SELECT (scrap + rations + electricity + neuro_cores + metal + crystal + hydrogen + (dollars * 2))
 		FROM resources r WHERE r.encampment_id = e.id
 	), 0) * 0.05
 	+ COALESCE((

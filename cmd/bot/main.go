@@ -66,20 +66,53 @@ func executeStartupMigrations(db *sql.DB) {
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			scrap DOUBLE PRECISION DEFAULT 0.00,
 			rations DOUBLE PRECISION DEFAULT 0.00,
-			energy DOUBLE PRECISION DEFAULT 0.00,
+			electricity DOUBLE PRECISION DEFAULT 0.00,
 			neuro_cores DOUBLE PRECISION DEFAULT 0.00,
-			steel DOUBLE PRECISION DEFAULT 0.00,
-			uranium DOUBLE PRECISION DEFAULT 0.00,
+			metal DOUBLE PRECISION DEFAULT 0.00,
+			crystal DOUBLE PRECISION DEFAULT 0.00,
 			hydrogen DOUBLE PRECISION DEFAULT 0.00,
-			iron DOUBLE PRECISION DEFAULT 0.00,
-			oil DOUBLE PRECISION DEFAULT 0.00,
-			gold DOUBLE PRECISION DEFAULT 0.00,
-			silver DOUBLE PRECISION DEFAULT 0.00,
-			diamond DOUBLE PRECISION DEFAULT 0.00,
 			dollars DOUBLE PRECISION DEFAULT 0.00,
 			last_mined_at TIMESTAMP WITH TIME ZONE,
 			last_ticked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		// --- SpaceHunt resource revival migration ---
+		// Renames energy/steel/uranium -> electricity/metal/crystal on any
+		// pre-existing database (no-op on a fresh install, since the CREATE
+		// TABLE above already uses the new names directly).
+		`DO $$
+		BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='energy')
+			   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='electricity') THEN
+				ALTER TABLE resources RENAME COLUMN energy TO electricity;
+			END IF;
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='steel')
+			   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='metal') THEN
+				ALTER TABLE resources RENAME COLUMN steel TO metal;
+			END IF;
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='uranium')
+			   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='crystal') THEN
+				ALTER TABLE resources RENAME COLUMN uranium TO crystal;
+			END IF;
+		END $$;`,
+
+		// Folds iron+oil into metal, and diamond+gold+silver into crystal,
+		// then drops the now-redundant columns. Guarded so it only runs
+		// once (columns won't exist on subsequent boots).
+		`DO $$
+		BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='iron') THEN
+				UPDATE resources SET metal = metal + COALESCE(iron, 0) + COALESCE(oil, 0);
+				ALTER TABLE resources DROP COLUMN IF EXISTS iron;
+				ALTER TABLE resources DROP COLUMN IF EXISTS oil;
+			END IF;
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='resources' AND column_name='diamond') THEN
+				UPDATE resources SET crystal = crystal + COALESCE(diamond, 0) + COALESCE(gold, 0) + COALESCE(silver, 0);
+				ALTER TABLE resources DROP COLUMN IF EXISTS diamond;
+				ALTER TABLE resources DROP COLUMN IF EXISTS gold;
+				ALTER TABLE resources DROP COLUMN IF EXISTS silver;
+			END IF;
+		END $$;`,
 
 		`CREATE TABLE IF NOT EXISTS modules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

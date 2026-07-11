@@ -69,8 +69,8 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		return c.Send("⚠️ System connection error reading agent configuration.", keyboards.CampNavigation())
 	}
 
-	var energy float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.energy, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", sender.ID).Scan(&energy)
+	var electricity float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.electricity, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", sender.ID).Scan(&electricity)
 
 	statusLabel := "🔴 STANDBY (OFFLINE)"
 	if isActive {
@@ -94,18 +94,18 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"🤖 Agent Status: %s\n"+
 			"🏷️ License: %s\n"+
 			"⚙️ Operational Mode: %s\n"+
-			"🔋 Fuel Reserve: %.1f Energy Cells\n\n"+
+			"🔋 Fuel Reserve: %.1f Electricity Cells\n\n"+
 			"UPKEEP REQUIREMENTS:\n"+
-			"⚡ Consumes 0.2 Energy Cells per tick.\n"+
+			"⚡ Consumes 0.2 Electricity Cells per tick.\n"+
 			"⚠️ Agent auto-shuts down if reserves hit 0.\n\n"+
 			"BEHAVIOR MODES:\n"+
 			"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\n"+
-			"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Steel, +5.0 Hydrogen.\n"+
-			"💎 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Uranium, +0.1 Diamonds, +1.0 Neuro.\n"+
+			"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Metal, +5.0 Hydrogen.\n"+
+			"💎 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\n"+
 			"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\n"+
 			"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		statusLabel, licenseText, mode, energy,
+		statusLabel, licenseText, mode, electricity,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -157,10 +157,10 @@ func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {
 	newActive := !currentActive
 
 	if newActive {
-		var energy float64
-		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.energy, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", userID).Scan(&energy)
-		if energy < 0.2 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Boot Failed: Insufficient Energy."})
+		var electricity float64
+		_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(r.electricity, 0) FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", userID).Scan(&electricity)
+		if electricity < 0.2 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Boot Failed: Insufficient Electricity."})
 		}
 	}
 

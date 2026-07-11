@@ -111,19 +111,19 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	var nukes int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(nukes, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&nukes)
 
-	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+	var electricity float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity)
 
 	if nukes <= 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: You must forge a Nuclear Device in the Workshop first."})
 	}
 
-	if energy < 50.0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: ICBM launch requires 50.0 Energy Cells."})
+	if electricity < 50.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Electricity: ICBM launch requires 50.0 Electricity Cells."})
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes - 1 WHERE encampment_id = $1", myCampID)
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 50.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - 50.0 WHERE encampment_id = $1", myCampID)
 
 	var attackerName string
 	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", myCampID).Scan(&attackerName)
