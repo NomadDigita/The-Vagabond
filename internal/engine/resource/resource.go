@@ -20,7 +20,7 @@ type EncampmentState struct {
 	ID             string
 	Scrap          float64
 	Rations        float64
-	Energy         float64
+	Electricity         float64
 	TentLvl        int
 	ScrapHeapLvl   int
 	GeneratorLvl   int
@@ -41,7 +41,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 
 	query := `
 		SELECT 
-			e.id, r.scrap, r.rations, r.energy,
+			e.id, r.scrap, r.rations, r.electricity,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'scrap_heap'), 1) as heap_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'generator'), 1) as gen_lvl,
@@ -67,7 +67,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var s EncampmentState
 		err := rows.Scan(
-			&s.ID, &s.Scrap, &s.Rations, &s.Energy, 
+			&s.ID, &s.Scrap, &s.Rations, &s.Electricity, 
 			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
 			&s.TroopCount, &s.LoanAmount, 
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
@@ -86,13 +86,13 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
-		energyGenerated := 0.05 * float64(s.GeneratorLvl)
+		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
 
 		switch activeWeather {
 		case "solar_flare":
-			energyGenerated *= 2.0
+			electricityGenerated *= 2.0
 		case "radiation_storm":
-			energyGenerated *= 0.5
+			electricityGenerated *= 0.5
 		}
 
 		var taxDeducted float64
@@ -107,7 +107,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		rationsConsumed := float64(s.TroopCount) * 0.05
-		energyConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
+		electricityConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
 		storageCap := (float64(s.TentLvl) * 500.0) + (float64(s.WarehouseLvl) * 750.0)
 
@@ -127,22 +127,22 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			newRations = math.Max(s.Rations+rationsDiff, 0.0)
 		}
 
-		newEnergy := s.Energy
-		energyDiff := energyGenerated - energyConsumed
-		if energyDiff > 0 {
-			if s.Energy < storageCap {
-				newEnergy = math.Min(s.Energy+energyDiff, storageCap)
+		newElectricity := s.Electricity
+		electricityDiff := electricityGenerated - electricityConsumed
+		if electricityDiff > 0 {
+			if s.Electricity < storageCap {
+				newElectricity = math.Min(s.Electricity+electricityDiff, storageCap)
 			}
 		} else {
-			newEnergy = math.Max(s.Energy+energyDiff, 0.0)
+			newElectricity = math.Max(s.Electricity+electricityDiff, 0.0)
 		}
 
 		updateQuery := `
 			UPDATE resources 
-			SET scrap = $1, rations = $2, energy = $3, last_ticked_at = CURRENT_TIMESTAMP 
+			SET scrap = $1, rations = $2, electricity = $3, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
 		
-		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newEnergy, s.ID)
+		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
 		}

@@ -126,36 +126,30 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	var scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars float64
+	var scrap, rations, electricity, metal, crystal, hydrogen, dollars float64
 	query := `
-		SELECT scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars 
+		SELECT scrap, rations, electricity, metal, crystal, hydrogen, dollars 
 		FROM resources 
 		WHERE encampment_id = $1`
 
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &energy, &steel, &uranium, &hydrogen, &iron, &oil, &gold, &silver, &diamond, &dollars)
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &electricity, &metal, &crystal, &hydrogen, &dollars)
 
 	inventoryText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"📦 WAREHOUSE RESERVES GRID\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"FINANCIAL STOCK:\n"+
+		"📦━━━━━━━━━━━━━━━━━━━━━━📦\n"+
+			"📦 WAREHOUSE RESERVES GRID 📦\n"+
+			"📦━━━━━━━━━━━━━━━━━━━━━━📦\n\n"+
+			"💰 FINANCIAL STOCK:\n"+
 			"💵 Available Cash: $%.1f\n\n"+
-			"SURVIVAL MATERIALS:\n"+
-			"⚙️ Scrap Metal: %.1f\n"+
+			"🥫 SURVIVAL MATERIALS:\n"+
+			"⚙️ Scrap: %.1f\n"+
 			"🥫 Food Rations: %.1f\n"+
-			"🔋 Energy Cells: %.1f\n\n"+
-			"HEAVY WAR METALS:\n"+
-			"🧱 Steel Stock: %.1f tons\n"+
-			"☢️ Uranium Stock: %.1f kg\n"+
-			"🎈 Hydrogen Stock: %.1f L\n\n"+
-			"HIGH-TECH PRECIOUS METALS:\n"+
-			"🪨 Iron Stock: %.1f\n"+
-			"🛢️ Oil Reserves: %.1f\n"+
-			"🪙 Gold Stock: %.1f\n"+
-			"🥈 Silver Stock: %.1f\n"+
-			"💎 Diamonds Stock: %.1f\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		dollars, scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond,
+			"🔋 Electricity: %.1f cells\n\n"+
+			"🏗️ CORE SPACEHUNT RESOURCES:\n"+
+			"🧱 Metal: %.1f tons\n"+
+			"💎 Crystal: %.1f kg\n"+
+			"🎈 Hydrogen: %.1f L\n"+
+			"📦━━━━━━━━━━━━━━━━━━━━━━📦",
+		dollars, scrap, rations, electricity, metal, crystal, hydrogen,
 	)
 
 	return c.Send(inventoryText)
@@ -286,15 +280,15 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		if dollars < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, steel = steel + 50.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🧱 Purchased 50 tons of Steel!"})
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = metal + 50.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🧱 Purchased 50 tons of Metal!"})
 
 	case "buy_uranium":
 		if dollars < 200.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, uranium = uranium + 20.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "☢️ Purchased 20 kg of Uranium!"})
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, crystal = crystal + 20.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "☢️ Purchased 20 kg of Crystal!"})
 
 	case "buy_hydrogen":
 		if dollars < 150.0 {

@@ -445,14 +445,14 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: You must assemble a Spy Device in the Heavy Workshop first!"})
 	}
 
-	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+	var electricity float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity)
 
-	if energy < 30.0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Satellite scans require 30.0 Energy Cells."})
+	if electricity < 30.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Electricity: Satellite scans require 30.0 Electricity Cells."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 30.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - 30.0 WHERE encampment_id = $1", myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones - 1 WHERE encampment_id = $1", myCampID)
 
 	var myX, myY int
@@ -512,7 +512,7 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	defenderAlert := fmt.Sprintf(
 		"🛰️ ESPIONAGE INTRUSION DETECTED!\n\n"+
 			"A hostile Spy Satellite launched by Outpost [%s] has breached your wireless perimeter and is transmitting warehouse telemetry!\n\n"+
-			"⚠️ Intercept Window: 30 seconds. Spend 10.0 Energy Cells to vaporize the uplink.",
+			"⚠️ Intercept Window: 30 seconds. Spend 10.0 Electricity Cells to vaporize the uplink.",
 		attackerName,
 	)
 
@@ -573,14 +573,14 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Too Late: The intercept window has closed. The satellite is out of range."})
 	}
 
-	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+	var electricity float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity)
 
-	if energy < 10.0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Energy: Drones require 10.0 Energy Cells."})
+	if electricity < 10.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Electricity: Drones require 10.0 Electricity Cells."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 10.0 WHERE encampment_id = $1", myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - 10.0 WHERE encampment_id = $1", myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones - 1 WHERE encampment_id = $1", myCampID)
 
 	var attackerUserID int64
@@ -1073,19 +1073,19 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		marchingMinutes = 1.0
 	}
 
-	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&energy)
+	var electricity float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity)
 
 	fuelCost := 30.0
 	if routeType == "safe" {
 		fuelCost = 45.0
 	}
 
-	if energy < fuelCost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", fuelCost)})
+	if electricity < fuelCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Electricity: Required %.1f cells.", fuelCost)})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", fuelCost, myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", fuelCost, myCampID)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
 		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6,

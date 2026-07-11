@@ -31,21 +31,21 @@ type deconstructRefund struct {
 }
 
 var deconstructTable = []deconstructRefund{
-	{"soldier", "🪖", "Soldier", "soldiers", map[string]float64{"rations": 20.0, "iron": 4.0}},
-	{"drone", "🛰️", "Tactical Drone", "drones", map[string]float64{"iron": 40.0, "silver": 4.0}},
-	{"mech", "🤖", "Colossus Mech", "mechs", map[string]float64{"steel": 400.0, "uranium": 20.0, "gold": 8.0}},
-	{"nuke", "☢️", "Nuclear Device", "nukes", map[string]float64{"steel": 1000.0, "uranium": 200.0, "gold": 40.0, "diamond": 4.0}},
-	{"destroyer", "💥", "Destroyer", "destroyers", map[string]float64{"steel": 320.0, "uranium": 16.0, "gold": 6.0}},
-	{"bomber", "🛩️", "Bomber", "bombers", map[string]float64{"steel": 480.0, "uranium": 24.0, "oil": 40.0}},
+	{"soldier", "🪖", "Soldier", "soldiers", map[string]float64{"rations": 20.0, "metal": 4.0}},
+	{"drone", "🛰️", "Tactical Drone", "drones", map[string]float64{"metal": 40.0, "crystal": 4.0}},
+	{"mech", "🤖", "Colossus Mech", "mechs", map[string]float64{"metal": 400.0, "crystal": 28.0}},
+	{"nuke", "☢️", "Nuclear Device", "nukes", map[string]float64{"metal": 1000.0, "crystal": 244.0}},
+	{"destroyer", "💥", "Destroyer", "destroyers", map[string]float64{"metal": 320.0, "crystal": 22.0}},
+	{"bomber", "🛩️", "Bomber", "bombers", map[string]float64{"metal": 520.0, "crystal": 24.0}},
 	{"scout", "🛵", "Scout Walker", "scouts", content.MustFindUnit("scout").DeconstructRefund()},
 	{"battlecruiser", "🚢👑", "Battlecruiser", "battlecruisers", content.MustFindUnit("battlecruiser").DeconstructRefund()},
 	{"deathstar", "🌑💀", "Doomsday Rig", "deathstars", content.MustFindUnit("deathstar").DeconstructRefund()},
-	{"buggy", "🚗", "Scrap Buggy", "buggies", map[string]float64{"steel": 40.0, "oil": 8.0}},
-	{"ship", "⛵", "Clipper Ship", "ships", map[string]float64{"steel": 120.0}},
-	{"jet", "✈️", "Cargo Jet", "jets", map[string]float64{"steel": 400.0, "hydrogen": 80.0, "oil": 40.0}},
-	{"hauler", "🚛", "Resource Hauler", "haulers", map[string]float64{"steel": 200.0, "oil": 20.0}},
-	{"tanker", "🛡️", "Fuel Tanker", "tankers", map[string]float64{"steel": 160.0, "hydrogen": 40.0}},
-	{"rig", "🔧", "Recovery Rig", "rigs", map[string]float64{"steel": 240.0, "iron": 20.0}},
+	{"buggy", "🚗", "Scrap Buggy", "buggies", map[string]float64{"metal": 48.0}},
+	{"ship", "⛵", "Clipper Ship", "ships", map[string]float64{"metal": 120.0}},
+	{"jet", "✈️", "Cargo Jet", "jets", map[string]float64{"metal": 440.0, "hydrogen": 80.0}},
+	{"hauler", "🚛", "Resource Hauler", "haulers", map[string]float64{"metal": 220.0}},
+	{"tanker", "🛡️", "Fuel Tanker", "tankers", map[string]float64{"metal": 160.0, "hydrogen": 40.0}},
+	{"rig", "🔧", "Recovery Rig", "rigs", map[string]float64{"metal": 260.0}},
 }
 
 func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {

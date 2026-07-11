@@ -93,9 +93,8 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		}
 		_, _ = h.DB.ExecContext(ctx, `
 			UPDATE resources 
-			SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00,
-			    steel = steel + 5000.00, uranium = uranium + 5000.00, hydrogen = hydrogen + 5000.00, iron = iron + 5000.00,
-			    oil = oil + 5000.00, gold = gold + 5000.00, silver = silver + 5000.00, diamond = diamond + 5000.00
+			SET scrap = scrap + 5000.00, rations = rations + 5000.00, electricity = electricity + 5000.00, dollars = dollars + 5000.00,
+			    metal = metal + 5000.00, crystal = crystal + 5000.00, hydrogen = hydrogen + 5000.00
 			WHERE encampment_id = $1`, campID)
 		return c.Respond(&telebot.CallbackResponse{Text: "🪙 5,000 of ALL resources permanently injected!"})
 	case "gift":
@@ -335,7 +334,7 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	payload := c.Message().Payload
 	args := strings.Split(payload, " ")
 	if len(args) < 3 {
-		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [resource_type] [amount]`\nTypes: scrap, rations, energy, steel, uranium, hydrogen, iron, oil, gold, silver, diamond, dollars, neuro_cores")
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [resource_type] [amount]`\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores")
 	}
 
 	targetUser := args[0]
@@ -346,9 +345,8 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	}
 
 	validColumns := map[string]string{
-		"scrap": "scrap", "rations": "rations", "energy": "energy", "steel": "steel",
-		"uranium": "uranium", "hydrogen": "hydrogen", "iron": "iron", "oil": "oil",
-		"gold": "gold", "silver": "silver", "diamond": "diamond", "dollars": "dollars",
+		"scrap": "scrap", "rations": "rations", "electricity": "electricity", "metal": "metal",
+		"crystal": "crystal", "hydrogen": "hydrogen", "dollars": "dollars",
 		"neuro_cores": "neuro_cores",
 	}
 
@@ -398,9 +396,8 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 
 	query := `
 		UPDATE resources 
-		SET scrap = scrap + 5000.00, rations = rations + 5000.00, energy = energy + 5000.00, dollars = dollars + 5000.00,
-		    steel = steel + 5000.00, uranium = uranium + 5000.00, hydrogen = hydrogen + 5000.00, iron = iron + 5000.00,
-		    oil = oil + 5000.00, gold = gold + 5000.00, silver = silver + 5000.00, diamond = diamond + 5000.00, neuro_cores = neuro_cores + 5000.00
+		SET scrap = scrap + 5000.00, rations = rations + 5000.00, electricity = electricity + 5000.00, dollars = dollars + 5000.00,
+		    metal = metal + 5000.00, crystal = crystal + 5000.00, hydrogen = hydrogen + 5000.00, neuro_cores = neuro_cores + 5000.00
 		WHERE encampment_id = $1`
 
 	_, err = h.DB.ExecContext(ctx, query, campID)

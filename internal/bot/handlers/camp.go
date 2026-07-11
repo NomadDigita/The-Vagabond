@@ -199,9 +199,9 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	var campLvl int
 	_ = h.DB.QueryRowContext(ctx, "SELECT id, level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campLvl)
 
-	var energy float64
-	query := `SELECT energy FROM resources WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&energy)
+	var electricity float64
+	query := `SELECT electricity FROM resources WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&electricity)
 
 	var ownedMiners int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(miners, 1) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&ownedMiners)
@@ -258,43 +258,31 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"⛏️ HEAVY EXTRACTION WORKSTATION [PRO]\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Assign available miners to start resource sweeps:\n\n"+
-			"🔋 Energy Cells: %.1f cells\n"+
+			"🔋 Electricity Cells: %.1f cells\n"+
 			"👥 Miners Stationed: %d / %d active | Idle: %d miners\n"+
 			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n"+
 			"📡 Idle Alerts Option: %s\n\n"+
 			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
-			"🪨 [Extract Iron] — Costs: 5.0 Energy (+20.0 Iron / miner)\n"+
-			"🛢️ [Pump Oil] — Costs: 5.0 Energy (+10.0 Oil / miner)\n"+
-			"🪙 [Mine Gold] — Costs: 10.0 Energy (+5.0 Gold / miner)\n"+
-			"🥈 [Mine Silver] — Costs: 5.0 Energy (+10.0 Silver / miner)\n"+
-			"💎 [Mine Diamonds] — Costs: 15.0 Energy (+1.0 Diamond / miner)\n"+
-			"☢️ [Mine Uranium] — Costs: 20.0 Energy (+5.0 Uranium / miner)\n"+
-			"🎈 [Pump Hydrogen] — Costs: 15.0 Energy (+10.0 Hydrogen / miner)\n"+
-			"🧱 [Forging Steel] — Costs: 10.0 Energy (+20.0 Steel / miner)\n\n"+
+			"🧱 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\n"+
+			"💎 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
+			"🎈 [Pump Hydrogen] — Costs: 15.0 Electricity (+10.0 Hydrogen / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
 			"👥 Recruit Miner -> Cost: %d Scrap",
-		energy, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, subStatus, activeQueuesText, minerCost,
+		electricity, activeMiners, ownedMiners, idleMiners, maxMiners, campLvl, subStatus, activeQueuesText, minerCost,
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	btnIron := selector.Data("🪨 Iron", "mine_action", "iron")
-	btnOil := selector.Data("🛢️ Oil", "mine_action", "oil")
-	btnGold := selector.Data("🪙 Gold", "mine_action", "gold")
-	btnSilver := selector.Data("🥈 Silver", "mine_action", "silver")
-	btnDiamond := selector.Data("💎 Diamond", "mine_action", "diamond")
-	btnUranium := selector.Data("☢️ Uranium", "mine_action", "uranium")
+	btnMetal := selector.Data("🧱 Metal", "mine_action", "metal")
+	btnCrystal := selector.Data("💎 Crystal", "mine_action", "crystal")
 	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
-	btnSteel := selector.Data("🧱 Steel", "mine_action", "steel")
-	
+
 	btnBuyMiner := selector.Data(fmt.Sprintf("Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")
 	btnToggleAlert := selector.Data(toggleAlertLabel, "mine_action", "toggle_alerts")
 
 	selector.Inline(
-		selector.Row(btnIron, btnOil),
-		selector.Row(btnGold, btnSilver),
-		selector.Row(btnDiamond, btnUranium),
-		selector.Row(btnHydrogen, btnSteel),
+		selector.Row(btnMetal, btnCrystal),
+		selector.Row(btnHydrogen),
 		selector.Row(btnBuyMiner),
 		selector.Row(btnToggleAlert),
 	)
@@ -374,32 +362,28 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: All miners are currently engaged in active queues!"})
 	}
 
-	var energy float64
-	err = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+	var electricity float64
+	err = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if err != nil {
-		log.Printf("Failed scanning energy cells inside active transaction: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database error querying energy reserves."})
+		log.Printf("Failed scanning electricity cells inside active transaction: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database error querying electricity reserves."})
 	}
 
 	var cost float64
 	switch mineType {
-	case "iron", "oil", "silver":
-		cost = 5.0
-	case "gold", "steel":
+	case "metal":
 		cost = 10.0
-	case "diamond":
-		cost = 15.0
+	case "crystal":
+		cost = 20.0
 	case "hydrogen":
 		cost = 15.0
-	case "uranium":
-		cost = 20.0
 	}
 
-	if energy < cost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Energy: Required %.1f cells.", cost)})
+	if electricity < cost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Electricity: Required %.1f cells.", cost)})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - $1 WHERE encampment_id = $2", cost, campID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID)
 
 	readyAt := time.Now().UTC().Add(5 * time.Minute)
 	queryInsertQueue := `
@@ -449,25 +433,25 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 		bio = 1
 	}
 
-	var uranium, neuro float64
-	_ = h.DB.QueryRowContext(ctx, "SELECT uranium, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&uranium, &neuro)
+	var crystal, neuro float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT crystal, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&crystal, &neuro)
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🧬 GENETIC MUTATION CORE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Spend radioactive Uranium and Neuro Cores to mutate cellular properties:\n\n"+
+			"Spend radioactive Crystal and Neuro Cores to mutate cellular properties:\n\n"+
 			"RADIOACTIVE STOCKS:\n"+
-			"☢️ Uranium Stock: %.1f kg | 🧠 Neuro Cores: %.0f\n\n"+
+			"☢️ Crystal Stock: %.1f kg | 🧠 Neuro Cores: %.0f\n\n"+
 			"MUTATION INDEXES:\n"+
-			"🧠 [Synaptic Accel Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
-			"   Reduces Automated Agent energy use by 10%% per level.\n\n"+
-			"🦾 [Cybernetic Salvage Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
+			"🧠 [Synaptic Accel Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\n"+
+			"   Reduces Automated Agent electricity use by 10%% per level.\n\n"+
+			"🦾 [Cybernetic Salvage Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\n"+
 			"   Boosts passive Scrap mining yield by 15%% per level.\n\n"+
-			"🧬 [Biospheric Adaptation Lvl %d / 5] (Cost: 20 Uranium, 5 Neuro)\n"+
+			"🧬 [Biospheric Adaptation Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\n"+
 			"   Reduces battle casualties by 10%% per level.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		uranium, neuro, synaptic, salvage, bio,
+		crystal, neuro, synaptic, salvage, bio,
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -500,8 +484,8 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 	var synaptic, salvage, bio int
 	_ = tx.QueryRowContext(ctx, "SELECT synaptic_lvl, salvage_lvl, bio_lvl FROM mutation_states WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&synaptic, &salvage, &bio)
 
-	var uranium, neuro float64
-	_ = tx.QueryRowContext(ctx, "SELECT uranium, neuro_cores FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&uranium, &neuro)
+	var crystal, neuro float64
+	_ = tx.QueryRowContext(ctx, "SELECT crystal, neuro_cores FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&crystal, &neuro)
 
 	var currentLvl int
 	var dbColumn string
@@ -521,11 +505,11 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Mutation: Cellular adaptions are fully optimized."})
 	}
 
-	if uranium < 20.0 || neuro < 5.0 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets! Need 20 Uranium, 5 Neuro Cores."})
+	if crystal < 20.0 || neuro < 5.0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets! Need 20 Crystal, 5 Neuro Cores."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET uranium = uranium - 20.0, neuro_cores = neuro_cores - 5.0 WHERE encampment_id = $1", campID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 20.0, neuro_cores = neuro_cores - 5.0 WHERE encampment_id = $1", campID)
 	queryUpdate := fmt.Sprintf("UPDATE mutation_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, campID)
 
@@ -535,7 +519,7 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "🧬 SPLICING GENETIC STRANDS...\n[▰▱▱▱▱▱▱▱▱▱] 20%\n🧠 Neuro-synaptic pathways opened.")
 		time.Sleep(350 * time.Millisecond)
-		_, _ = c.Bot().Edit(msg, "🧬 SYNTHESIZING CELLULAR ADAPTATIONS...\n[▰▰▰▰▰▱▱▱▱▱] 60%\n☢️ Uranium radiation fallout stabilized.")
+		_, _ = c.Bot().Edit(msg, "🧬 SYNTHESIZING CELLULAR ADAPTATIONS...\n[▰▰▰▰▰▱▱▱▱▱] 60%\n☢️ Crystal radiation fallout stabilized.")
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "🧬 COMMITTING CELLULAR MUTATIONS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Genetic structure realigned successfully!")
 		time.Sleep(350 * time.Millisecond)

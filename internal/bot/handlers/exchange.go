@@ -76,14 +76,14 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 			"Buy raw tactical stockpiles listed by other active outposts:\n\n"+
 			"%s"+
 			"POST NEW LISTING:\n"+
-			"🧱 [Sell 50 Steel] — List on exchange for $150 Cash\n"+
-			"☢️ [Sell 20 Uranium] — List on exchange for $300 Cash\n"+
+			"🧱 [Sell 50 Metal] — List on exchange for $150 Cash\n"+
+			"☢️ [Sell 20 Crystal] — List on exchange for $300 Cash\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		listingsText,
 	)
 
-	btnPostSteel := selector.Data("🧱 List 50 Steel ($150)", "post_listing", "steel")
-	btnPostUranium := selector.Data("☢️ List 20 Uranium ($300)", "post_listing", "uranium")
+	btnPostSteel := selector.Data("🧱 List 50 Metal ($150)", "post_listing", "metal")
+	btnPostUranium := selector.Data("☢️ List 20 Crystal ($300)", "post_listing", "crystal")
 
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
@@ -106,26 +106,26 @@ func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	var steel, uranium float64
-	_ = tx.QueryRowContext(ctx, "SELECT steel, uranium FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&steel, &uranium)
+	var metal, crystal float64
+	_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&metal, &crystal)
 
 	qty := 50
 	price := 150.0
 
 	switch item {
-	case "steel":
-		if steel < 50.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Steel! Need 50 tons to list."})
+	case "metal":
+		if metal < 50.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Metal! Need 50 tons to list."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET steel = steel - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 50.0 WHERE encampment_id = $1", campID)
 		qty = 50
 		price = 150.0
 
-	case "uranium":
-		if uranium < 20.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Uranium! Need 20 kg to list."})
+	case "crystal":
+		if crystal < 20.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Crystal! Need 20 kg to list."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET uranium = uranium - 20.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 20.0 WHERE encampment_id = $1", campID)
 		qty = 20
 		price = 300.0
 	}
@@ -192,9 +192,9 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", price, myCampID)
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", price, sellerID)
 
-	columnName := "steel"
-	if itemType == "uranium" {
-		columnName = "uranium"
+	columnName := "metal"
+	if itemType == "crystal" {
+		columnName = "crystal"
 	}
 	queryTransfer := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", columnName, columnName)
 	_, _ = tx.ExecContext(ctx, queryTransfer, qty, myCampID)

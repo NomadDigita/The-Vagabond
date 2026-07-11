@@ -197,15 +197,15 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 2. Spend 50 Energy Cells as fuel
-	var energy float64
-	_ = tx.QueryRowContext(ctx, "SELECT energy FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&energy)
+	// 2. Spend 50 Electricity Cells as fuel
+	var electricity float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 
-	if energy < 50.0 {
-		return c.Send("❌ Insufficient Energy: Sector broadcasts require 50.0 Energy Cells.")
+	if electricity < 50.0 {
+		return c.Send("❌ Insufficient Electricity: Sector broadcasts require 50.0 Electricity Cells.")
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET energy = energy - 50.0 WHERE encampment_id = $1", campID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - 50.0 WHERE encampment_id = $1", campID)
 
 	// 3. Write dynamic dispatch to global world_news radio bulletin feed
 	headline := fmt.Sprintf("📻 OUTPOST BROADCAST: Encampment [%s] dispatched message: %q", campName, broadcastMsg)
