@@ -76,13 +76,13 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 			"Buy raw tactical stockpiles listed by other active outposts:\n\n"+
 			"%s"+
 			"POST NEW LISTING:\n"+
-			"🧱 [Sell 50 Metal] — List on exchange for $150 Cash\n"+
+			"🔩 [Sell 50 Metal] — List on exchange for $150 Cash\n"+
 			"☢️ [Sell 20 Crystal] — List on exchange for $300 Cash\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		listingsText,
 	)
 
-	btnPostSteel := selector.Data("🧱 List 50 Metal ($150)", "post_listing", "metal")
+	btnPostSteel := selector.Data("🔩 List 50 Metal ($150)", "post_listing", "metal")
 	btnPostUranium := selector.Data("☢️ List 20 Crystal ($300)", "post_listing", "crystal")
 
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))

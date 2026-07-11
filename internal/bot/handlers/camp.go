@@ -258,13 +258,13 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"⛏️ HEAVY EXTRACTION WORKSTATION [PRO]\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Assign available miners to start resource sweeps:\n\n"+
-			"🔋 Electricity Cells: %.1f cells\n"+
+			"⚡ Electricity Cells: %.1f cells\n"+
 			"👥 Miners Stationed: %d / %d active | Idle: %d miners\n"+
 			"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\n"+
 			"📡 Idle Alerts Option: %s\n\n"+
 			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
-			"🧱 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\n"+
+			"🔩 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\n"+
 			"💎 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
 			"🎈 [Pump Hydrogen] — Costs: 15.0 Electricity (+10.0 Hydrogen / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
@@ -273,7 +273,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	btnMetal := selector.Data("🧱 Metal", "mine_action", "metal")
+	btnMetal := selector.Data("🔩 Metal", "mine_action", "metal")
 	btnCrystal := selector.Data("💎 Crystal", "mine_action", "crystal")
 	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
 
@@ -593,7 +593,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 				buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
 			}
 			
-			_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🧱 Build modifiers: %s", buildDelay))
+			_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🔩 Build modifiers: %s", buildDelay))
 			time.Sleep(350 * time.Millisecond)
 			_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")
 			time.Sleep(350 * time.Millisecond)
@@ -659,7 +659,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 			buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
 		}
 		
-		_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🧱 Build modifiers: %s", buildDelay))
+		_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🔩 Build modifiers: %s", buildDelay))
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")
 		time.Sleep(350 * time.Millisecond)

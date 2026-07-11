@@ -36,11 +36,11 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	var weatherText string
 	switch activeWeather {
 	case "solar_flare":
-		weatherText = "⚡ SOLAR FLARE (ACTIVE Spikes)\n   🔋 Outpost Solar Generators: Operating at 200% efficiency.\n   🤖 Targeting Interference: Scrambles radar locking systems (Accuracy fluctuates on battle ticks).\n   ⚠️ Automation: Offline agent tasking suspended."
+		weatherText = "⚡ SOLAR FLARE (ACTIVE Spikes)\n   ⚡ Outpost Solar Generators: Operating at 200% efficiency.\n   🤖 Targeting Interference: Scrambles radar locking systems (Accuracy fluctuates on battle ticks).\n   ⚠️ Automation: Offline agent tasking suspended."
 	case "radiation_storm":
-		weatherText = "☢️ RADIATION STORM (Fallout Sweep)\n   💀 Biological Decay: Regional morale decay rates doubled.\n   ⚔️ Infantry Morale Penalty: Base troop offense ratings reduced by 25%.\n   🔋 Solar Power Drop: Solar panels output only 50% power."
+		weatherText = "☢️ RADIATION STORM (Fallout Sweep)\n   💀 Biological Decay: Regional morale decay rates doubled.\n   ⚔️ Infantry Morale Penalty: Base troop offense ratings reduced by 25%.\n   ⚡ Solar Power Drop: Solar panels output only 50% power."
 	case "acid_rain":
-		weatherText = "🌧️ ACID RAIN (Corrosive Precipitation)\n   🏗️ Construction delays: Structural upgrade times doubled (+100% duration).\n   🧱 Mechanical Corrosion: Armored Mech defense structures degraded by 50%."
+		weatherText = "🌧️ ACID RAIN (Corrosive Precipitation)\n   🏗️ Construction delays: Structural upgrade times doubled (+100% duration).\n   🔩 Mechanical Corrosion: Armored Mech defense structures degraded by 50%."
 	default:
 		weatherText = "☀️ NOMINAL CONDITIONS\n   Planetary atmospheric baselines stable. No active debuffs."
 	}

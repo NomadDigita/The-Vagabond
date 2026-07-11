@@ -890,6 +890,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		       COALESCE(r.stolen_scrap, 0.0) as stolen_scrap,
 		       COALESCE(r.stolen_metal, 0.0) as stolen_metal,
 		       COALESCE(r.stolen_crystal, 0.0) as stolen_crystal,
+		       COALESCE(r.base_march_minutes, 15.0) as base_march_minutes,
 		       COALESCE(r.attacker_rations, 100.0) as attacker_rations,
 		       COALESCE(r.attacker_ammo, 100.0) as attacker_ammo,
 		       COALESCE(r.attacker_losses, 0) as attacker_losses,
@@ -919,6 +920,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		stolenScrap     float64
 		stolenMetal     float64
 		stolenCrystal   float64
+		baseMarchMinutes float64
 		attackerRations float64
 		attackerAmmo    float64
 		attackerLosses  int
@@ -932,7 +934,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			&r.id, &r.attackerID, &r.defenderID, &r.state, &r.roundNumber,
 			&r.attackerName, &r.attackerUserID,
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
-			&r.stolenMetal, &r.stolenCrystal,
+			&r.stolenMetal, &r.stolenCrystal, &r.baseMarchMinutes,
 			&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses,
 		)
 		if err == nil {
@@ -976,6 +978,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				r.defenderName,
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
+
+			if r.defenderID.Valid && r.defenderUserID != 0 {
+				defenderEngagedAlert := fmt.Sprintf(
+					"⚔️ UNDER ATTACK: ENGAGEMENT ACTIVATED!\n\n"+
+						"Hostile forces from Outpost [%s] have arrived and are actively engaging your defenses!\n"+
+						"Decisive Resolution progress starting next tick cycle.",
+					r.attackerName,
+				)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderEngagedAlert)
+			}
 			continue
 		}
 
@@ -1219,13 +1231,36 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lostAttMechs = primaryMechs
 		}
 
+		// Toughness-weighted specialist casualties. The OLD model split
+		// dbCas purely by headcount, which meant a lone Deathstar (the
+		// only specialist unit in the fleet) absorbed 100% of ANY
+		// specialist-pool casualty - i.e. even a single stray loss killed
+		// it outright, making the most expensive unit in the game the
+		// easiest to lose. Toughness now scales down how many of those
+		// casualties actually translate into a destroyed unit at all
+		// (representing armor/hull soaking hits), before splitting
+		// whatever's left by headcount among the pool.
+		const (
+			destroyerToughness = 4.0
+			bomberToughness    = 4.0
+			bcToughness        = 20.0
+			dsToughness        = 150.0
+		)
+
 		var lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS int
 		specialistPool := totDestroyers + totBombers + totBC + totDS
 		if specialistPool > 0 {
-			lostAttDestroyers = int(float64(dbCas) * float64(totDestroyers) / float64(specialistPool))
-			lostAttBombers = int(float64(dbCas) * float64(totBombers) / float64(specialistPool))
-			lostAttBC = int(float64(dbCas) * float64(totBC) / float64(specialistPool))
-			lostAttDS = dbCas - lostAttDestroyers - lostAttBombers - lostAttBC
+			weightedToughness := (float64(totDestroyers)*destroyerToughness +
+				float64(totBombers)*bomberToughness +
+				float64(totBC)*bcToughness +
+				float64(totDS)*dsToughness) / float64(specialistPool)
+
+			effectiveDbCas := int(float64(dbCas) / weightedToughness)
+
+			lostAttDestroyers = int(float64(effectiveDbCas) * float64(totDestroyers) / float64(specialistPool))
+			lostAttBombers = int(float64(effectiveDbCas) * float64(totBombers) / float64(specialistPool))
+			lostAttBC = int(float64(effectiveDbCas) * float64(totBC) / float64(specialistPool))
+			lostAttDS = effectiveDbCas - lostAttDestroyers - lostAttBombers - lostAttBC
 			if lostAttDestroyers > primaryDestroyers {
 				lostAttDestroyers = primaryDestroyers
 			}
@@ -1234,6 +1269,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			}
 			if lostAttBC > primaryBC {
 				lostAttBC = primaryBC
+			}
+			if lostAttDS < 0 {
+				lostAttDS = 0
 			}
 			if lostAttDS > primaryDS {
 				lostAttDS = primaryDS
@@ -1374,7 +1412,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		case !defenderStillStanding:
 			report.Outcome = battlereport.OutcomeAttackerWon
 			report.LootLines = []string{
-				fmt.Sprintf("🧱 %.0f Metal", primaryMetalShare),
+				fmt.Sprintf("🔩 %.0f Metal", primaryMetalShare),
 				fmt.Sprintf("💎 %.0f Crystal", primaryCrystalShare),
 				fmt.Sprintf("♻️ %.0f Scrap", primaryShare),
 			}
@@ -1420,11 +1458,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				weightFactor *= 0.50
 			}
 
-			returnMinutes := 15.0 * (1.0 + weightFactor)
+			// The return trip is anchored to the SAME distance as the
+			// outbound march (r.baseMarchMinutes), not some disconnected
+			// flat number - carrying looted resources back only ever adds
+			// time on top of that, it never makes the trip home shorter
+			// than the trip out.
+			returnMinutes := r.baseMarchMinutes * (1.0 + weightFactor)
 			returnDuration := time.Duration(returnMinutes) * time.Minute
 			resolveTime := time.Now().UTC().Add(returnDuration)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, stolen_metal = $4, stolen_crystal = $5, resolve_time = $2 WHERE id = $3", primaryShare, resolveTime, r.id, primaryMetalShare, primaryCrystalShare)
+
+			etaAlert := fmt.Sprintf(
+				"🚚 SALVAGE COMPLETE, RETURN MARCH ENGAGED\n\n"+
+					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 💎 %.0f Crystal home.\n"+
+					"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).",
+				primaryShare, primaryMetalShare, primaryCrystalShare, returnMinutes, r.baseMarchMinutes,
+			)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, etaAlert)
 
 			if r.defenderID.Valid {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String)
@@ -1434,10 +1485,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)
 			}
 		} else if r.roundNumber >= 5 {
-			returnMinutes := 15.0
+			returnMinutes := r.baseMarchMinutes
 			resolveTime := time.Now().UTC().Add(time.Duration(returnMinutes) * time.Minute)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = 0, stolen_metal = 0, stolen_crystal = 0, resolve_time = $1 WHERE id = $2", resolveTime, r.id)
 
 			for _, h := range helpers {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", h.soldiers, h.mechs, h.encampment_id)

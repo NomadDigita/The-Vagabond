@@ -34,7 +34,7 @@ type researchNode struct {
 }
 
 var researchTree = []researchNode{
-	{"econ", "econ_tech_lvl", "🔋", "Technology", "Reduces Automated Agent electricity consumption."},
+	{"econ", "econ_tech_lvl", "⚡", "Technology", "Reduces Automated Agent electricity consumption."},
 	{"production", "production_tech_lvl", "⚙️", "Production", "Increases passive Scrap Heap mining speed."},
 	{"integrity", "integrity_tech_lvl", "🩹", "Integrity", "Reduces casualties suffered by your units in combat."},
 	{"defense", "defense_tech_lvl", "🛡️", "Shields", "Strengthens your Outpost's defensive rating against raids."},

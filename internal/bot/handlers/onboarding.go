@@ -97,7 +97,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"CURRENT RESOURCE BALANCES:\n"+
 				"⚙️ Scrap: %.1f\n"+
 				"🥫 Rations: %.1f\n"+
-				"🔋 Electricity Cells: %.1f\n"+
+				"⚡ Electricity Cells: %.1f\n"+
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Use the command manual below to learn terminal shortcuts.",
 			user.FirstName, systemState, activeMiners, ownedMiners, ownedMiners-activeMiners, outboundCount,
