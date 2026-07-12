@@ -1271,8 +1271,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if attackerCoreLvl <= 0 {
 				attackerCoreLvl = 1
 			}
-			soldiersDefender = attackerCoreLvl * 18
+			nest := content.RogueNestComposition(attackerCoreLvl)
+			soldiersDefender = nest.Soldiers
+			mechsDefender = nest.Mechs
+			dronesDefender = nest.Drones
+			jetsDefender = nest.Jets
 			defLevel = attackerCoreLvl
+			defenderTurretLevels = int(nest.TurretBonus / 0.08) // reuses the existing turret-bonus-per-level multiplier below
 		} else {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(scouts, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender, &scoutsDefender)
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID.String).Scan(&defLevel)
@@ -1643,7 +1648,40 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if !attackerStillStanding {
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+			if primaryBuggies > 0 {
+				// Total wipeout of combat units, but Buggies aren't part of
+				// the combat casualty pool - if any were committed, they
+				// survive the rout and can still scavenge a little before
+				// retreating. Nowhere near a real win's take, but not
+				// nothing either - matches how transport crews would
+				// realistically grab whatever's within reach and flee.
+				const salvagePercent = 0.08
+				salvageScrap := defenderScrap * salvagePercent
+				salvageMetal := defenderMetal * salvagePercent
+				salvageCrystal := defenderCrystal * salvagePercent
+
+				returnMinutes := r.baseMarchMinutes
+				resolveTime := time.Now().UTC().Add(time.Duration(returnMinutes) * time.Minute)
+
+				_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, stolen_metal = $2, stolen_crystal = $3, resolve_time = $4 WHERE id = $5",
+					salvageScrap, salvageMetal, salvageCrystal, resolveTime, r.id)
+
+				if r.defenderID.Valid {
+					_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0) WHERE encampment_id = $4",
+						salvageScrap, salvageMetal, salvageCrystal, r.defenderID.String)
+				}
+
+				salvageAlert := fmt.Sprintf(
+					"💀 ASSAULT FORCE WIPED OUT - BUT NOT EMPTY-HANDED\n\n"+
+						"Your combat units were destroyed, but %d surviving Buggy crew(s) grabbed what they could before retreating.\n"+
+						"⚙️ Salvaged: %.0f Scrap, %.0f Metal, %.0f Crystal.\n"+
+						"⏳ Return march engaged, arriving in %.0f minutes.",
+					primaryBuggies, salvageScrap, salvageMetal, salvageCrystal, returnMinutes,
+				)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, salvageAlert)
+			} else {
+				_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+			}
 		} else if !defenderStillStanding {
 			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)
 			if math.IsNaN(primRatio) {
