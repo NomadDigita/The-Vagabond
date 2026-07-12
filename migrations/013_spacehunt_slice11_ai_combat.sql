@@ -1,0 +1,24 @@
+-- ==============================================================================
+-- THE VAGABOND — SPACEHUNT REVIVAL: LEVEL-SCALED AI COMBAT + RECON + PARTIAL SALVAGE
+-- (013_spacehunt_slice11_ai_combat.sql)
+-- DB Engine: PostgreSQL (Supabase)
+-- ==============================================================================
+
+-- No new schema for this slice - it's entirely application logic:
+--
+-- 1. Rogue Drone Nest (AI exploration target) defense composition is now
+--    level-scaled and unit-varied (Soldiers/Mechs/Drones/Jets + an elite
+--    guard defense bonus at level 15+) instead of a flat soldier count,
+--    computed by internal/game/content/roguenest.go
+--
+-- 2. New /recon_ai scouting preview (combat.go HandleReconAICallback)
+--    reveals the exact composition before commitment - since it's
+--    deterministic (scaled to the player's own level), what you scout is
+--    exactly what you'll fight
+--
+-- 3. Partial salvage loot on total defeat: if any Buggies were committed
+--    to a raid that otherwise wiped out (Buggies were never part of the
+--    combat casualty pool to begin with), survivors now salvage a small
+--    amount (8% of a full win's take) instead of the old all-or-nothing
+--    model where any defeat meant zero loot regardless of surviving
+--    transport capacity

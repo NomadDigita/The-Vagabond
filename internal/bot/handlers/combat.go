@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"gopkg.in/telebot.v3"
 )
 
@@ -175,10 +176,12 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 
 	dashboard += "🤖 AI TRAINING SKIRMISH TARGETS:\n" +
 		"[AI] Rogue Drone Nest (Sector 1,1)\n" +
-		"    Loot Yield: +50 Scrap | Journey Time: Dynamic\n\n"
+		"    Loot Yield: Metal/Crystal/Scrap | Journey Time: Dynamic\n" +
+		"    🔍 Recon first to see exactly what you're facing!\n\n"
 
+	btnReconAI := selector.Data("🔍 Recon Rogue Drone Nest", "recon_ai", "ai_drone_nest")
 	btnAI := selector.Data("🤖 Skirmish Rogue Drones", "launch_raid", "ai_drone_nest")
-	buttons = append(buttons, selector.Row(btnAI))
+	buttons = append(buttons, selector.Row(btnReconAI), selector.Row(btnAI))
 
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -340,6 +343,52 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 // when enabled, the tick engine periodically runs a lightweight scan
 // against a random rival outpost and reports it directly to the player,
 // without them needing to manually run /scout each time.
+// HandleReconAICallback lets a player scout the Rogue Drone Nest before
+// committing forces. Since the nest's composition is deterministic (scaled
+// to the player's own level via content.RogueNestComposition), this
+// reveals EXACTLY what they'll face - no surprises, no wasted losses from
+// blind attacks, matching a real scouting report rather than a guess.
+func (h *CombatHandler) HandleReconAICallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campLevel int
+	err := h.DB.QueryRowContext(ctx, "SELECT level FROM encampments WHERE user_id = $1", sender.ID).Scan(&campLevel)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	nest := content.RogueNestComposition(campLevel)
+	threat := content.ThreatTier(campLevel)
+
+	reportText := fmt.Sprintf(
+		"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\n"+
+			"🛰️ RECON REPORT: ROGUE DRONE NEST\n"+
+			"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\n\n"+
+			"⚔️ Threat Tier: %s (scales to YOUR level %d)\n\n"+
+			"📋 GARRISON DETECTED:\n"+
+			"🪖 Soldiers: %d\n"+
+			"🤖 Mechs: %d\n"+
+			"🛰️ Drones: %d\n"+
+			"✈️ Jets: %d\n",
+		threat, campLevel, nest.Soldiers, nest.Mechs, nest.Drones, nest.Jets,
+	)
+
+	if nest.TurretBonus > 0 {
+		reportText += fmt.Sprintf("🏰 Dug-in Elite Guard Bonus: +%.0f%% defense rating\n", nest.TurretBonus*100)
+	}
+
+	reportText += "\n💰 Loot Yield: Metal + Crystal + Scrap (defeat scales the amount)\n" +
+		"💡 This composition is fixed to your current level - grow stronger, and the Nest grows with you.\n" +
+		"🔍━━━━━━━━━━━━━━━━━━━━━━🔍"
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Recon complete - report incoming."})
+	return c.Send(reportText)
+}
+
 func (h *CombatHandler) HandleAutoScanToggle(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

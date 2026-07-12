@@ -684,6 +684,7 @@ func main() {
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)
 	bot.Handle("\ftrade_hub_nav", econ.HandleTradeHubNavCallback)
+	bot.Handle("\frecon_ai", combat.HandleReconAICallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)
