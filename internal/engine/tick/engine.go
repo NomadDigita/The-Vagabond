@@ -241,6 +241,214 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+// resolveWorldBossAttacks handles both stages of a real World Boss
+// engagement: marching parties arriving deal damage AND take real
+// retaliation casualties (the boss fights back), then survivors begin an
+// actual return march instead of the old instant-resolve model. On a
+// killing blow, loot is split by cumulative damage share exactly as
+// before, just deferred until the engagement actually happens.
+func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error {
+	// --- Stage 1: marching -> engage (retaliation happens here) ---
+	marchingRows, err := tx.QueryContext(ctx, `
+		SELECT a.id, a.boss_id, a.user_id, a.encampment_id, a.soldiers_committed, a.mechs_committed, a.march_minutes,
+		       b.name, b.emoji, b.current_hp, b.max_hp, b.loot_pool_dollars, b.retaliation_rating
+		FROM world_boss_attacks a
+		JOIN world_bosses b ON b.id = a.boss_id
+		WHERE a.state = 'marching' AND a.resolve_time <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return err
+	}
+
+	type marchingAttack struct {
+		id, bossID, encampmentID          string
+		userID                             int64
+		soldiers, mechs                   int
+		marchMinutes                       float64
+		bossName, bossEmoji                string
+		bossCurHP, bossMaxHP, lootPool     float64
+		retaliation                        float64
+	}
+	var marching []marchingAttack
+	for marchingRows.Next() {
+		var m marchingAttack
+		if scanErr := marchingRows.Scan(&m.id, &m.bossID, &m.userID, &m.encampmentID, &m.soldiers, &m.mechs, &m.marchMinutes,
+			&m.bossName, &m.bossEmoji, &m.bossCurHP, &m.bossMaxHP, &m.lootPool, &m.retaliation); scanErr == nil {
+			marching = append(marching, m)
+		}
+	}
+	marchingRows.Close()
+
+	for _, m := range marching {
+		if m.bossCurHP <= 0 {
+			// Someone else already killed it between launch and arrival -
+			// no fight happens, survivors just turn back immediately.
+			_, _ = tx.ExecContext(ctx, "UPDATE world_boss_attacks SET state = 'returning', resolve_time = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 minute') WHERE id = $2", m.marchMinutes, m.id)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.userID,
+				fmt.Sprintf("🏳️ %s was already defeated by another survivor before your forces arrived. Turning back - no fight, no losses.", m.bossName))
+			continue
+		}
+
+		damage := float64(m.soldiers)*10.0 + float64(m.mechs)*400.0
+		newHP := m.bossCurHP - damage
+		killingBlow := newHP <= 0
+		if newHP < 0 {
+			newHP = 0
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE world_bosses SET current_hp = $1 WHERE id = $2", newHP, m.bossID)
+		_, _ = tx.ExecContext(ctx, `
+			INSERT INTO world_boss_contributions (boss_id, user_id, encampment_id, damage_dealt)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (boss_id, user_id) DO UPDATE SET damage_dealt = world_boss_contributions.damage_dealt + $4`,
+			m.bossID, m.userID, m.encampmentID, damage)
+
+		// Real retaliation: the boss hits back. Danger scales per boss
+		// (retaliation_rating), and mechs are tankier than soldiers in the
+		// losses split (mirroring the standard 70/30 raid pattern).
+		totalCommitted := m.soldiers + m.mechs
+		casualties := int(float64(totalCommitted) * m.retaliation / 100.0)
+		if casualties > totalCommitted {
+			casualties = totalCommitted
+		}
+		lostSoldiers := int(float64(casualties) * 0.75)
+		lostMechs := casualties - lostSoldiers
+		if lostSoldiers > m.soldiers {
+			lostSoldiers = m.soldiers
+		}
+		if lostMechs > m.mechs {
+			lostMechs = m.mechs
+		}
+		survivingSoldiers := m.soldiers - lostSoldiers
+		survivingMechs := m.mechs - lostMechs
+
+		report := battlereport.Round{
+			Number:       1,
+			AttackerName: "Your Strike Force",
+			DefenderName: m.bossName,
+			AttackerComposition: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: m.soldiers},
+				{Emoji: "🤖", Label: "Mechs", Count: m.mechs},
+			},
+			DefenderComposition: []battlereport.UnitTally{
+				{Emoji: m.bossEmoji, Label: m.bossName, Count: 1},
+			},
+			AttackerLosses: []battlereport.UnitTally{
+				{Emoji: "🪖", Label: "Soldiers", Count: lostSoldiers},
+				{Emoji: "🤖", Label: "Mechs", Count: lostMechs},
+			},
+			DefenderLosses: []battlereport.UnitTally{
+				{Emoji: "💥", Label: fmt.Sprintf("Damage (%.0f/%.0f HP left)", newHP, m.bossMaxHP), Count: 1},
+			},
+		}
+
+		if killingBlow {
+			report.Outcome = battlereport.OutcomeAttackerWon
+			report.LootLines = []string{fmt.Sprintf("💵 $%.0f (Boss Loot Pool - split by damage contribution)", m.lootPool)}
+			report.LootCollector = "All contributors"
+		} else {
+			report.Outcome = battlereport.OutcomeDraw
+		}
+		reportText := battlereport.Render(report)
+
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.userID, reportText)
+
+		if killingBlow {
+			if err := e.payoutWorldBossLoot(ctx, tx, m.bossID, m.bossName, m.lootPool); err != nil {
+				log.Printf("World Boss loot payout failed: %v", err)
+			}
+		}
+
+		// Survivors begin the real return march - same duration as the
+		// trip out, exactly like a real raid, not an instant reset.
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE world_boss_attacks 
+			SET state = 'returning', soldiers_committed = $1, mechs_committed = $2, 
+			    resolve_time = CURRENT_TIMESTAMP + ($3 * INTERVAL '1 minute')
+			WHERE id = $4`,
+			survivingSoldiers, survivingMechs, m.marchMinutes, m.id)
+	}
+
+	// --- Stage 2: returning -> home (restock survivors) ---
+	returningRows, err := tx.QueryContext(ctx, `
+		SELECT id, user_id, encampment_id, soldiers_committed, mechs_committed 
+		FROM world_boss_attacks 
+		WHERE state = 'returning' AND resolve_time <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return err
+	}
+
+	type returningAttack struct {
+		id, encampmentID string
+		userID           int64
+		soldiers, mechs  int
+	}
+	var returning []returningAttack
+	for returningRows.Next() {
+		var r returningAttack
+		if scanErr := returningRows.Scan(&r.id, &r.userID, &r.encampmentID, &r.soldiers, &r.mechs); scanErr == nil {
+			returning = append(returning, r)
+		}
+	}
+	returningRows.Close()
+
+	for _, r := range returning {
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", r.soldiers, r.mechs, r.encampmentID)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM world_boss_attacks WHERE id = $1", r.id)
+
+		if r.soldiers+r.mechs > 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.userID,
+				fmt.Sprintf("🚚 SURVIVORS RETURNED HOME: 🪖 %d Soldiers, 🤖 %d Mechs made it back from the World Boss engagement.", r.soldiers, r.mechs))
+		} else {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.userID,
+				"💀 No survivors returned from that World Boss engagement.")
+		}
+	}
+
+	return nil
+}
+
+// payoutWorldBossLoot splits a defeated boss's loot pool proportional to
+// each contributor's total damage dealt, then resets the boss to full HP
+// with a 10% larger pool for long-term grinding incentive.
+func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bossName string, lootPool float64) error {
+	rows, err := tx.QueryContext(ctx, "SELECT user_id, encampment_id, damage_dealt FROM world_boss_contributions WHERE boss_id = $1", bossID)
+	if err != nil {
+		return err
+	}
+
+	type contributor struct {
+		userID int64
+		campID string
+		damage float64
+	}
+	var contributors []contributor
+	var totalDamage float64
+	for rows.Next() {
+		var ct contributor
+		if scanErr := rows.Scan(&ct.userID, &ct.campID, &ct.damage); scanErr == nil {
+			contributors = append(contributors, ct)
+			totalDamage += ct.damage
+		}
+	}
+	rows.Close()
+
+	if totalDamage > 0 {
+		for _, ct := range contributors {
+			share := lootPool * (ct.damage / totalDamage)
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, ct.campID)
+			alertMsg := fmt.Sprintf("☠️🎉 BOSS SLAIN: %s\n\nYour cumulative %.0f damage earned you 💵 $%.2f from the loot pool.", bossName, ct.damage, share)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ct.userID, alertMsg)
+		}
+	}
+
+	_, _ = tx.ExecContext(ctx, "DELETE FROM world_boss_contributions WHERE boss_id = $1", bossID)
+	_, _ = tx.ExecContext(ctx, `
+		UPDATE world_bosses 
+		SET current_hp = max_hp, loot_pool_dollars = loot_pool_dollars * 1.10, last_defeated_at = CURRENT_TIMESTAMP 
+		WHERE id = $1`, bossID)
+
+	return nil
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
@@ -260,6 +468,7 @@ func (e *Engine) ProcessTick() {
 		{"staged_raid_departures", e.autoLaunchExpiredStagedRaids},
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
+		{"world_boss_attacks", e.resolveWorldBossAttacks},
 		{"daily_tax", e.collectDailyTax},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")

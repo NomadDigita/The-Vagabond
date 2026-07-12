@@ -112,15 +112,21 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🪙 BANK VAULT & CREDIT PAYBACK\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+		"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\n"+
+			"🪙 BANK VAULT & CREDIT PAYBACK 🪙\n"+
+			"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\n"+
 			"💵 Available Cash: $%.1f\n"+
 			"⚙️ Scrap Reserves: %.1f\n\n"+
 			"🏦 Vault Savings: %.1f Scrap | $%.1f Cash\n"+
 			"💳 Credit Debt: %.1f Scrap | $%.1f Cash\n\n"+
-			"Convert rate: Sell 100 Scrap -> Get $50.0\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
+			"💱 CONVERSION RATES:\n"+
+			"⚙️ 100 Scrap ➜ $50\n"+
+			"🔩 100 Metal ➜ $80\n"+
+			"💎 50 Crystal ➜ $120\n"+
+			"$100 ➜ 🔩 50 Metal\n"+
+			"$200 ➜ 💎 20 Crystal\n"+
+			"$150 ➜ 🎈 40 Hydrogen\n"+
+			"🏦━━━━━━━━━━━━━━━━━━━━━━🏦",
 		dollars, scrap, bankBalance, bankBalanceCash, loanAmount, loanCash,
 	)
 
@@ -133,12 +139,19 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	btnRepayScrap := selector.Data("💳 Repay 100 Scrap", "bank_action", "repay_scrap")
 	btnRepayCash := selector.Data("💳 Repay $100 Cash", "bank_action", "repay_cash")
 	btnSellScrap := selector.Data("💵 Sell 100 Scrap", "market_buy", "sell_scrap")
+	btnSellMetal := selector.Data("💵 Sell 100 Metal", "market_buy", "sell_metal")
+	btnSellCrystal := selector.Data("💵 Sell 50 Crystal", "market_buy", "sell_crystal")
+	btnBuyMetal := selector.Data("🔩 Buy 50 Metal ($100)", "market_buy", "buy_metal")
+	btnBuyCrystal := selector.Data("💎 Buy 20 Crystal ($200)", "market_buy", "buy_crystal")
+	btnBuyHydrogen := selector.Data("🎈 Buy 40 Hydrogen ($150)", "market_buy", "buy_hydrogen")
 
 	selector.Inline(
 		selector.Row(btnDepositScrap, btnDepositCash),
 		selector.Row(btnBorrowScrap, btnBorrowCash),
 		selector.Row(btnRepayScrap, btnRepayCash),
-		selector.Row(btnSellScrap),
+		selector.Row(btnSellScrap, btnSellMetal, btnSellCrystal),
+		selector.Row(btnBuyMetal, btnBuyCrystal),
+		selector.Row(btnBuyHydrogen),
 	)
 
 	return c.Send(panelText, selector)
@@ -303,19 +316,37 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = dollars + 50.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Scrap for $50.0 Cash!"})
 
-	case "buy_steel":
+	case "sell_metal":
+		var metal float64
+		_ = tx.QueryRowContext(ctx, "SELECT metal FROM resources WHERE encampment_id = $1", campID).Scan(&metal)
+		if metal < 100.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Metal to convert."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 100.0, dollars = dollars + 80.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Metal for $80.0 Cash!"})
+
+	case "sell_crystal":
+		var crystal float64
+		_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1", campID).Scan(&crystal)
+		if crystal < 50.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Crystal to convert."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 50.0, dollars = dollars + 120.0 WHERE encampment_id = $1", campID)
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 50 Crystal for $120.0 Cash!"})
+
+	case "buy_metal":
 		if dollars < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = metal + 50.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🔩 Purchased 50 tons of Metal!"})
 
-	case "buy_uranium":
+	case "buy_crystal":
 		if dollars < 200.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, crystal = crystal + 20.0 WHERE encampment_id = $1", campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "☢️ Purchased 20 kg of Crystal!"})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "💎 Purchased 20 kg of Crystal!"})
 
 	case "buy_hydrogen":
 		if dollars < 150.0 {
