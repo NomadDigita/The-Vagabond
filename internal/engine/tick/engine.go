@@ -449,6 +449,140 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 	return nil
 }
 
+// applyClanWarScore checks whether the attacker and defender encampments
+// belong to two clans currently at war with each other, and if so, adds
+// the raid's loot value to the attacker's clan war score. This is what
+// makes Clan Wars a real, live-scored mechanic instead of a one-time
+// notification with no lasting effect.
+func (e *Engine) applyClanWarScore(ctx context.Context, tx *sql.Tx, attackerCampID, defenderCampID string, lootValue float64) {
+	var attackerClanID, defenderClanID sql.NullString
+	_ = tx.QueryRowContext(ctx, "SELECT uc.clan_id FROM user_clans uc JOIN encampments e ON e.user_id = uc.user_id WHERE e.id = $1", attackerCampID).Scan(&attackerClanID)
+	_ = tx.QueryRowContext(ctx, "SELECT uc.clan_id FROM user_clans uc JOIN encampments e ON e.user_id = uc.user_id WHERE e.id = $1", defenderCampID).Scan(&defenderClanID)
+
+	if !attackerClanID.Valid || !defenderClanID.Valid || attackerClanID.String == defenderClanID.String {
+		return
+	}
+
+	var warID string
+	var isClanA bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, clan_a_id = $1
+		FROM clan_wars
+		WHERE status = 'active'
+		AND ((clan_a_id = $1 AND clan_b_id = $2) OR (clan_a_id = $2 AND clan_b_id = $1))`,
+		attackerClanID.String, defenderClanID.String).Scan(&warID, &isClanA)
+	if err != nil {
+		return // Not at war with each other - no war score change.
+	}
+
+	if isClanA {
+		_, _ = tx.ExecContext(ctx, "UPDATE clan_wars SET score_a = score_a + $1 WHERE id = $2", lootValue, warID)
+	} else {
+		_, _ = tx.ExecContext(ctx, "UPDATE clan_wars SET score_b = score_b + $1 WHERE id = $2", lootValue, warID)
+	}
+}
+
+// resolveClanWars closes out wars whose 48h window has expired, declares
+// the higher-scoring clan the winner, and pays a shared Dollars spoils
+// reward split evenly among the winning clan's members.
+func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, clan_a_id, clan_b_id, score_a, score_b
+		FROM clan_wars
+		WHERE status = 'active' AND ends_at <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return err
+	}
+
+	type expiredWar struct {
+		id, clanA, clanB string
+		scoreA, scoreB   float64
+	}
+	var wars []expiredWar
+	for rows.Next() {
+		var w expiredWar
+		if scanErr := rows.Scan(&w.id, &w.clanA, &w.clanB, &w.scoreA, &w.scoreB); scanErr == nil {
+			wars = append(wars, w)
+		}
+	}
+	rows.Close()
+
+	const spoilsPool = 10000.0 // Dollars, split evenly among the winning clan's members
+
+	for _, w := range wars {
+		_, _ = tx.ExecContext(ctx, "UPDATE clan_wars SET status = 'completed' WHERE id = $1", w.id)
+
+		var winnerClanID, loserClanID string
+		var winnerScore, loserScore float64
+		isDraw := w.scoreA == w.scoreB
+
+		if w.scoreA >= w.scoreB {
+			winnerClanID, loserClanID = w.clanA, w.clanB
+			winnerScore, loserScore = w.scoreA, w.scoreB
+		} else {
+			winnerClanID, loserClanID = w.clanB, w.clanA
+			winnerScore, loserScore = w.scoreB, w.scoreA
+		}
+
+		var winnerName, loserName string
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", winnerClanID).Scan(&winnerName)
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", loserClanID).Scan(&loserName)
+
+		if isDraw {
+			drawMsg := fmt.Sprintf("🤝 CLAN WAR ENDED IN A DRAW!\n\n%s vs %s: %.0f - %.0f. Neither side prevailed.", winnerName, loserName, winnerScore, loserScore)
+			e.notifyClanMembers(ctx, tx, w.clanA, drawMsg)
+			e.notifyClanMembers(ctx, tx, w.clanB, drawMsg)
+			continue
+		}
+
+		var winnerMembers []int64
+		var winnerCamps []string
+		memberRows, _ := tx.QueryContext(ctx, "SELECT uc.user_id, e.id FROM user_clans uc JOIN encampments e ON e.user_id = uc.user_id WHERE uc.clan_id = $1", winnerClanID)
+		if memberRows != nil {
+			for memberRows.Next() {
+				var uid int64
+				var campID string
+				if memberRows.Scan(&uid, &campID) == nil {
+					winnerMembers = append(winnerMembers, uid)
+					winnerCamps = append(winnerCamps, campID)
+				}
+			}
+			memberRows.Close()
+		}
+
+		if len(winnerCamps) > 0 {
+			share := spoilsPool / float64(len(winnerCamps))
+			for _, campID := range winnerCamps {
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, campID)
+			}
+
+			winMsg := fmt.Sprintf("🏆⚔️ CLAN WAR VICTORY!\n\nYour Clan defeated %s! Final score: %.0f - %.0f.\n💵 Your share of the spoils: $%.2f", loserName, winnerScore, loserScore, share)
+			for _, uid := range winnerMembers {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, winMsg)
+			}
+		}
+
+		loseMsg := fmt.Sprintf("💀⚔️ CLAN WAR DEFEAT\n\nYour Clan lost to %s. Final score: %.0f - %.0f.", winnerName, winnerScore, loserScore)
+		e.notifyClanMembers(ctx, tx, loserClanID, loseMsg)
+	}
+
+	return nil
+}
+
+func (e *Engine) notifyClanMembers(ctx context.Context, tx *sql.Tx, clanID, message string) {
+	rows, err := tx.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1", clanID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		if rows.Scan(&uid) == nil {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, message)
+		}
+	}
+}
+
 func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
@@ -469,6 +603,7 @@ func (e *Engine) ProcessTick() {
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
+		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
@@ -1726,6 +1861,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			if r.defenderID.Valid {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String)
+
+				// Clan War score: if the attacker and defender belong to
+				// two clans with an active war between them, this victory
+				// counts toward the attacker's clan war score - real
+				// combat outcomes drive the war, not a one-time stub.
+				e.applyClanWarScore(ctx, tx, r.attackerID, r.defenderID.String, primaryShare+primaryMetalShare+primaryCrystalShare)
 			}
 
 			for _, h := range helpers {

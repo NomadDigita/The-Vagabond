@@ -320,6 +320,26 @@ func executeStartupMigrations(db *sql.DB) {
 			role VARCHAR(50) NOT NULL
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS clan_applications (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			clan_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			status VARCHAR(50) DEFAULT 'pending',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(clan_id, user_id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS clan_wars (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			clan_a_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			clan_b_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			score_a DOUBLE PRECISION DEFAULT 0,
+			score_b DOUBLE PRECISION DEFAULT 0,
+			status VARCHAR(50) DEFAULT 'active',
+			started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			ends_at TIMESTAMP WITH TIME ZONE NOT NULL
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS market_exchange (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			seller_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
@@ -613,6 +633,9 @@ func main() {
 	bot.Handle("/world", world.HandleWorldFeed)
 	bot.Handle("/econ", econ.HandleEconPanel)
 	bot.Handle("/clan", clan.HandleClanPanel)
+	bot.Handle("/clans", clan.HandleBrowseClans)
+	bot.Handle("/clan_create", clan.HandleCreateClanCommand)
+	bot.Handle("/clan_rename", clan.HandleRenameClanCommand)
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
@@ -691,7 +714,11 @@ func main() {
 	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
-	bot.Handle("\fcreate_clan", clan.HandleCreateClanCallback)
+	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)
+	bot.Handle("\fclan_apply", clan.HandleApplyToClanCallback)
+	bot.Handle("\fclan_apps", clan.HandleApplicationsInboxCallback)
+	bot.Handle("\fclan_app_accept", clan.HandleAcceptApplicationCallback)
+	bot.Handle("\fclan_app_reject", clan.HandleRejectApplicationCallback)
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
