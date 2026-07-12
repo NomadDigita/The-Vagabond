@@ -304,6 +304,16 @@ func executeStartupMigrations(db *sql.DB) {
 			leader_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS federations (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(255) UNIQUE NOT NULL,
+			icon VARCHAR(10) DEFAULT '🌐',
+			description TEXT DEFAULT '',
+			founder_clan_id UUID REFERENCES clans(id) ON DELETE SET NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`ALTER TABLE clans ADD COLUMN IF NOT EXISTS federation_id UUID REFERENCES federations(id) ON DELETE SET NULL;`,
+
 		`CREATE TABLE IF NOT EXISTS user_clans (
 			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
 			clan_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
@@ -591,6 +601,7 @@ func main() {
 	ranking := handlers.NewRankingHandler(db)
 	boss := handlers.NewBossHandler(db)
 	rebellion := handlers.NewRebellionHandler(db)
+	federation := handlers.NewFederationHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -620,6 +631,11 @@ func main() {
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("/rebellion", rebellion.HandleRebellionPanel)
+	bot.Handle("/federations", federation.HandleFederationsPanel)
+	bot.Handle("/federation", federation.HandleMyFederationPanel)
+	bot.Handle("/fed_found", federation.HandleFoundFederation)
+	bot.Handle("/fed_join", federation.HandleJoinFederation)
+	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
