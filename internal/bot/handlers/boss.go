@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"gopkg.in/telebot.v3"
 )
@@ -46,9 +47,9 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	panelText := "👹━━━━━━━━━━━━━━━━━━━━━━👹\n" +
 		"☠️ WASTELAND WORLD BOSSES ☠️\n" +
 		"👹━━━━━━━━━━━━━━━━━━━━━━👹\n\n" +
-		"Rally your Soldiers and Mechs against these roaming colossi. Damage is shared - defeat one to split its loot pool by contribution!\n\n"
+		"⚠️ REAL ENGAGEMENT: committing Soldiers/Mechs sends them MARCHING - they're at risk for real. The boss retaliates on arrival, and only survivors march home. Damage is shared - defeat one to split its loot pool by contribution!\n\n"
 
-	rows, err := h.DB.QueryContext(ctx, "SELECT id, name, emoji, max_hp, current_hp, loot_pool_dollars FROM world_bosses ORDER BY max_hp ASC")
+	rows, err := h.DB.QueryContext(ctx, "SELECT id, name, emoji, max_hp, current_hp, loot_pool_dollars, retaliation_rating FROM world_bosses ORDER BY max_hp ASC")
 	if err != nil {
 		return c.Send("⚠️ Unable to reach the World Boss tracking satellite.")
 	}
@@ -59,8 +60,8 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 
 	for rows.Next() {
 		var id, name, emoji string
-		var maxHP, curHP, lootPool float64
-		if err := rows.Scan(&id, &name, &emoji, &maxHP, &curHP, &lootPool); err != nil {
+		var maxHP, curHP, lootPool, retaliation float64
+		if err := rows.Scan(&id, &name, &emoji, &maxHP, &curHP, &lootPool, &retaliation); err != nil {
 			continue
 		}
 
@@ -70,8 +71,8 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 		}
 
 		panelText += fmt.Sprintf(
-			"%s %s\n%s  %.0f / %.0f HP\n💰 Loot Pool: $%.0f  |  %s\n\n",
-			emoji, name, hpBar(curHP, maxHP), curHP, maxHP, lootPool, status,
+			"%s %s\n%s  %.0f / %.0f HP\n💰 Loot Pool: $%.0f  |  ⚔️ Danger: %.0f%%  |  %s\n\n",
+			emoji, name, hpBar(curHP, maxHP), curHP, maxHP, lootPool, retaliation, status,
 		)
 
 		if curHP > 0 {
@@ -118,88 +119,38 @@ func (h *BossHandler) HandleAttackBossCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ You have no Soldiers or Mechs garrisoned to commit to the strike!"})
 	}
 
-	damage := float64(soldiers)*10.0 + float64(mechs)*400.0
-
-	var curHP, maxHP, lootPool float64
+	var bossCurHP, bossMaxHP float64
 	var bossName string
-	err = tx.QueryRowContext(ctx, "SELECT current_hp, max_hp, loot_pool_dollars, name FROM world_bosses WHERE id = $1 FOR UPDATE", bossID).Scan(&curHP, &maxHP, &lootPool, &bossName)
+	err = tx.QueryRowContext(ctx, "SELECT current_hp, max_hp, name FROM world_bosses WHERE id = $1", bossID).Scan(&bossCurHP, &bossMaxHP, &bossName)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ That boss is no longer tracked."})
 	}
-	if curHP <= 0 {
+	if bossCurHP <= 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "💀 This boss has already been defeated and is respawning!"})
 	}
 
-	newHP := curHP - damage
-	killingBlow := newHP <= 0
-	if newHP < 0 {
-		newHP = 0
-	}
-	_, _ = tx.ExecContext(ctx, "UPDATE world_bosses SET current_hp = $1 WHERE id = $2", newHP, bossID)
+	// Committed troops are actually at risk now - deduct them from the
+	// garrison immediately, exactly like drafting into a real raid. The
+	// boss retaliates on arrival, and only survivors march home.
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2 WHERE encampment_id = $3", soldiers, mechs, campID)
 
-	_, _ = tx.ExecContext(ctx, `
-		INSERT INTO world_boss_contributions (boss_id, user_id, encampment_id, damage_dealt)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (boss_id, user_id) DO UPDATE SET damage_dealt = world_boss_contributions.damage_dealt + $4`,
-		bossID, sender.ID, campID, damage)
+	const marchMinutes = 8.0
+	resolveTime := time.Now().UTC().Add(marchMinutes * time.Minute)
 
-	respMsg := fmt.Sprintf("💥 STRIKE LANDED: %.0f damage dealt to %s! (%.0f/%.0f HP remaining)", damage, bossName, newHP, maxHP)
-
-	if killingBlow {
-		if err := h.payoutBossLoot(ctx, tx, bossID, bossName, lootPool); err != nil {
-			log.Printf("Boss loot payout failed: %v", err)
-		}
-		respMsg = fmt.Sprintf("☠️🎉 %s HAS BEEN SLAIN! Loot pool of $%.0f split among all contributors!", bossName, lootPool)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO world_boss_attacks (boss_id, user_id, encampment_id, soldiers_committed, mechs_committed, state, resolve_time, march_minutes)
+		VALUES ($1, $2, $3, $4, $5, 'marching', $6, $7)`,
+		bossID, sender.ID, campID, soldiers, mechs, resolveTime, marchMinutes)
+	if err != nil {
+		log.Printf("Failed creating world boss attack: %v", err)
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error deploying strike force."})
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("Failed committing boss attack: %v", err)
+		log.Printf("Failed committing boss attack launch: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error recording strike."})
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: respMsg})
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.", soldiers, mechs, bossName, marchMinutes)})
 	return h.HandleBossPanel(c)
-}
-
-// payoutBossLoot splits the loot pool proportional to each contributor's
-// total damage dealt, resets the boss to full HP with a refreshed loot
-// pool (10% larger, for long-term progression), and clears contributions.
-func (h *BossHandler) payoutBossLoot(ctx context.Context, tx *sql.Tx, bossID, bossName string, lootPool float64) error {
-	rows, err := tx.QueryContext(ctx, "SELECT user_id, encampment_id, damage_dealt FROM world_boss_contributions WHERE boss_id = $1", bossID)
-	if err != nil {
-		return err
-	}
-
-	type contributor struct {
-		userID int64
-		campID string
-		damage float64
-	}
-	var contributors []contributor
-	var totalDamage float64
-	for rows.Next() {
-		var ct contributor
-		if scanErr := rows.Scan(&ct.userID, &ct.campID, &ct.damage); scanErr == nil {
-			contributors = append(contributors, ct)
-			totalDamage += ct.damage
-		}
-	}
-	rows.Close()
-
-	if totalDamage > 0 {
-		for _, ct := range contributors {
-			share := lootPool * (ct.damage / totalDamage)
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, ct.campID)
-			alertMsg := fmt.Sprintf("☠️🎉 BOSS SLAIN: %s\n\nYour squad dealt %.0f damage! You received 💵 $%.2f from the loot pool.", bossName, ct.damage, share)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ct.userID, alertMsg)
-		}
-	}
-
-	_, _ = tx.ExecContext(ctx, "DELETE FROM world_boss_contributions WHERE boss_id = $1", bossID)
-	_, _ = tx.ExecContext(ctx, `
-		UPDATE world_bosses 
-		SET current_hp = max_hp, loot_pool_dollars = loot_pool_dollars * 1.10, last_defeated_at = CURRENT_TIMESTAMP 
-		WHERE id = $1`, bossID)
-
-	return nil
 }
