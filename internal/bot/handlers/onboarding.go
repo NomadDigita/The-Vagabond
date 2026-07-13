@@ -120,6 +120,18 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 		return c.Send("⚠️ Database reading failure.", keyboards.MainNavigation())
 	}
 
+	// Brand new user - capture a referral code from the /start payload if
+	// present (e.g. /start REF123456), before the faction picker.
+	if refCode := strings.TrimSpace(c.Message().Payload); refCode != "" {
+		var referrerID int64
+		if refErr := h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE referral_code = $1", refCode).Scan(&referrerID); refErr == nil && referrerID != sender.ID {
+			_, _ = h.DB.ExecContext(ctx, `
+				INSERT INTO users (telegram_id, username, first_name, state, referred_by) 
+				VALUES ($1, $2, $3, 'onboarding', $4)
+				ON CONFLICT (telegram_id) DO NOTHING`, sender.ID, sender.Username, sender.FirstName, referrerID)
+		}
+	}
+
 	return h.renderFactionChoice(c, sender.ID)
 }
 
@@ -362,6 +374,23 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 
 	if err := tx.Commit(); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Ledger completion error."})
+	}
+
+	// Referral reward: if this new survivor arrived via a referral code,
+	// grant both them and their referrer a resource bonus now that their
+	// outpost actually exists.
+	var referrerID sql.NullInt64
+	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
+	if referrerID.Valid {
+		const refMetal, refCrystal, refNeuro = 500.0, 200.0, 100.0
+		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2, neuro_cores = neuro_cores + $3 WHERE encampment_id = $4", refMetal, refCrystal, refNeuro, campID)
+
+		var referrerCampID string
+		if refErr := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", referrerID.Int64).Scan(&referrerCampID); refErr == nil {
+			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2, neuro_cores = neuro_cores + $3 WHERE encampment_id = $4", refMetal, refCrystal, refNeuro, referrerCampID)
+			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
+				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 500 Metal, 200 Crystal, 100 Neuro Cores.", sender.FirstName))
+		}
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})

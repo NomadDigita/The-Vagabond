@@ -36,6 +36,32 @@ func executeStartupMigrations(db *sql.DB) {
 			last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
 
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_on_raid BOOLEAN DEFAULT TRUE;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_on_storage_full BOOLEAN DEFAULT TRUE;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20);`,
+
+		`CREATE TABLE IF NOT EXISTS user_mutes (
+			muter_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			muted_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (muter_id, muted_id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS event_log (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			message TEXT NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS feedback_submissions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			message TEXT NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS idle_miner_notifications BOOLEAN DEFAULT FALSE;`,
 
 		`CREATE TABLE IF NOT EXISTS coordinates (
@@ -622,6 +648,7 @@ func main() {
 	boss := handlers.NewBossHandler(db)
 	rebellion := handlers.NewRebellionHandler(db)
 	federation := handlers.NewFederationHandler(db)
+	profile := handlers.NewProfileHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -659,6 +686,17 @@ func main() {
 	bot.Handle("/fed_found", federation.HandleFoundFederation)
 	bot.Handle("/fed_join", federation.HandleJoinFederation)
 	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
+	bot.Handle("/description", profile.HandleDescription)
+	bot.Handle("/settings", profile.HandleSettings)
+	bot.Handle("/refer", profile.HandleRefer)
+	bot.Handle("/feedback", profile.HandleFeedback)
+	bot.Handle("/msg", profile.HandleMsg)
+	bot.Handle("/mute", profile.HandleMute)
+	bot.Handle("/unmute", profile.HandleUnmute)
+	bot.Handle("/mutes", profile.HandleMutesList)
+	bot.Handle("/log", profile.HandleLog)
+	bot.Handle("/stats", profile.HandleStats)
+	bot.Handle("/units", profile.HandleUnits)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
@@ -728,6 +766,7 @@ func main() {
 	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)
 	bot.Handle("\ftrade_hub_nav", econ.HandleTradeHubNavCallback)
 	bot.Handle("\frecon_ai", combat.HandleReconAICallback)
+	bot.Handle("\fsettings_toggle", profile.HandleSettingsToggleCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)
