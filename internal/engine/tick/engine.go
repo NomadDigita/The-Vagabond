@@ -1399,6 +1399,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var defenderTurretLevels int = 0
 		var defenderHeroSuperpower string
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender, scoutsDefender int
+		var defenderOrbitalBuffActive bool
 
 		if !r.defenderID.Valid {
 			var attackerCoreLvl int
@@ -1433,6 +1434,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				"SELECT COALESCE(SUM(level), 0) FROM modules WHERE encampment_id = $1 AND type IN ('light_laser', 'heavy_laser', 'gauss_cannon', 'ion_cannon', 'plasma_turret')",
 				r.defenderID.String).Scan(&defenderTurretLevels)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
+			_ = tx.QueryRowContext(ctx, "SELECT (orbital_buff_until IS NOT NULL AND orbital_buff_until > CURRENT_TIMESTAMP) FROM encampments WHERE id = $1", r.defenderID.String).Scan(&defenderOrbitalBuffActive)
 		}
 
 		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
@@ -1440,8 +1442,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var activeWeather string
 		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
 
+		orbitalBonus := 0.0
+		if defenderOrbitalBuffActive {
+			orbitalBonus = 0.30 // Orbital Maneuver: +30% defense rating while active
+		}
+
 		offenseRatingModifier := 1.0
-		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15) + (float64(defenderTurretLevels) * 0.08) + math.Min(float64(scoutsDefender)*0.01, 0.20)
+		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15) + (float64(defenderTurretLevels) * 0.08) + math.Min(float64(scoutsDefender)*0.01, 0.20) + orbitalBonus
 
 		switch targetBiome {
 		case "forest":
