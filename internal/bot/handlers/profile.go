@@ -338,6 +338,140 @@ func (h *ProfileHandler) HandleStats(c telebot.Context) error {
 	return c.Send(panelText)
 }
 
+// ── /missions ─────────────────────────────────────────────────────────
+
+// HandleMissions consolidates every active operation the player has in
+// flight: raids, World Boss engagements, and active mining queues.
+func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	panelText := "🚀━━━━━━━━━━━━━━━━━━━━━━🚀\n" +
+		"📋 YOUR ACTIVE MISSIONS 📋\n" +
+		"🚀━━━━━━━━━━━━━━━━━━━━━━🚀\n\n"
+
+	any := false
+
+	raidRows, err := h.DB.QueryContext(ctx, `
+		SELECT COALESCE(ed.name, 'Rogue Drone Nest'), r.state, r.resolve_time
+		FROM raids r
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
+		WHERE r.attacker_id = $1 AND r.state IN ('marching', 'engaged', 'returning')
+		ORDER BY r.resolve_time ASC`, campID)
+	if err == nil {
+		for raidRows.Next() {
+			var target, state string
+			var resolveTime interface{}
+			if raidRows.Scan(&target, &state, &resolveTime) == nil {
+				any = true
+				panelText += fmt.Sprintf("⚔️ Raid ➜ %s [%s]\n", target, state)
+			}
+		}
+		raidRows.Close()
+	}
+
+	bossRows, err := h.DB.QueryContext(ctx, `
+		SELECT b.name, a.state
+		FROM world_boss_attacks a
+		JOIN world_bosses b ON b.id = a.boss_id
+		WHERE a.encampment_id = $1`, campID)
+	if err == nil {
+		for bossRows.Next() {
+			var bossName, state string
+			if bossRows.Scan(&bossName, &state) == nil {
+				any = true
+				panelText += fmt.Sprintf("👹 Boss Strike ➜ %s [%s]\n", bossName, state)
+			}
+		}
+		bossRows.Close()
+	}
+
+	miningRows, err := h.DB.QueryContext(ctx, `
+		SELECT resource_type, miners_assigned, ready_at 
+		FROM active_mining_queues 
+		WHERE encampment_id = $1 AND is_completed = FALSE`, campID)
+	if err == nil {
+		for miningRows.Next() {
+			var resType string
+			var miners int
+			var readyAt interface{}
+			if miningRows.Scan(&resType, &miners, &readyAt) == nil {
+				any = true
+				panelText += fmt.Sprintf("⛏️ Mining %s (%d miners)\n", resType, miners)
+			}
+		}
+		miningRows.Close()
+	}
+
+	if !any {
+		panelText += "No active missions. Launch a raid, attack a boss, or start mining!\n"
+	}
+
+	panelText += "🚀━━━━━━━━━━━━━━━━━━━━━━🚀"
+	return c.Send(panelText)
+}
+
+// ── /destinations ─────────────────────────────────────────────────────
+
+// HandleDestinations lists every rival outpost the player has previously
+// scouted (via /scout or /autoscan), plus the always-available Rogue
+// Drone Nest - matching SpaceHunt's 'map of discovered planets', where
+// only previously-discovered targets show up.
+func (h *ProfileHandler) HandleDestinations(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	panelText := "🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\n" +
+		"🌍 DISCOVERED DESTINATIONS 🌍\n" +
+		"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\n\n" +
+		"🤖 [AI] Rogue Drone Nest - always available (use /recon_ai to scout)\n\n" +
+		"👁️ PREVIOUSLY SCOUTED RIVALS:\n"
+
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT DISTINCT ed.name, c.x, c.y
+		FROM spy_missions sm
+		JOIN encampments ed ON ed.id = sm.target_id
+		JOIN coordinates c ON c.id = ed.coordinate_id
+		WHERE sm.spy_id = $1
+		LIMIT 15`, campID)
+	if err == nil {
+		any := false
+		for rows.Next() {
+			var name string
+			var x, y int
+			if rows.Scan(&name, &x, &y) == nil {
+				any = true
+				panelText += fmt.Sprintf("📍 %s [%d, %d]\n", name, x, y)
+			}
+		}
+		rows.Close()
+		if !any {
+			panelText += "None yet - use /scout [username] to discover rival outposts!\n"
+		}
+	}
+
+	panelText += "🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️"
+	return c.Send(panelText)
+}
+
 // ── /units ────────────────────────────────────────────────────────────
 
 func (h *ProfileHandler) HandleUnits(c telebot.Context) error {

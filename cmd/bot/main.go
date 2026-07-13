@@ -98,6 +98,7 @@ func executeStartupMigrations(db *sql.DB) {
 			crystal DOUBLE PRECISION DEFAULT 0.00,
 			hydrogen DOUBLE PRECISION DEFAULT 0.00,
 			dollars DOUBLE PRECISION DEFAULT 0.00,
+			ether DOUBLE PRECISION DEFAULT 0.00,
 			last_mined_at TIMESTAMP WITH TIME ZONE,
 			last_ticked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
@@ -652,6 +653,7 @@ func main() {
 	rebellion := handlers.NewRebellionHandler(db)
 	federation := handlers.NewFederationHandler(db)
 	profile := handlers.NewProfileHandler(db)
+	ether := handlers.NewEtherHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -705,6 +707,9 @@ func main() {
 	bot.Handle("/log", profile.HandleLog)
 	bot.Handle("/stats", profile.HandleStats)
 	bot.Handle("/units", profile.HandleUnits)
+	bot.Handle("/ether", ether.HandleEtherShop)
+	bot.Handle("/missions", profile.HandleMissions)
+	bot.Handle("/destinations", profile.HandleDestinations)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
@@ -775,6 +780,7 @@ func main() {
 	bot.Handle("\ftrade_hub_nav", econ.HandleTradeHubNavCallback)
 	bot.Handle("\frecon_ai", combat.HandleReconAICallback)
 	bot.Handle("\fsettings_toggle", profile.HandleSettingsToggleCallback)
+	bot.Handle("\fether_convert", ether.HandleEtherConvertCallback)
 	bot.Handle("\fspy_action", combat.HandleSpyCallback)
 	bot.Handle("\fupgrade_tech", research.HandleUpgradeTechCallback)
 	bot.Handle("\fpost_listing", exchange.HandlePostListingCallback)

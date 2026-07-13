@@ -137,12 +137,18 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			newElectricity = math.Max(s.Electricity+electricityDiff, 0.0)
 		}
 
+		// Ether trickles in slowly, scaled by Technology research -
+		// matches SpaceHunt's Ether generation formula being tied to
+		// research progress rather than a dedicated building (until the
+		// Technology Center building lands in a later phase).
+		etherGenerated := 0.02 * float64(s.ProductionTechLvl)
+
 		updateQuery := `
 			UPDATE resources 
-			SET scrap = $1, rations = $2, electricity = $3, last_ticked_at = CURRENT_TIMESTAMP 
+			SET scrap = $1, rations = $2, electricity = $3, ether = ether + $5, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
 		
-		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID)
+		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID, etherGenerated)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
 		}
