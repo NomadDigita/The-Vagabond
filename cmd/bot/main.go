@@ -329,6 +329,9 @@ func executeStartupMigrations(db *sql.DB) {
 			name VARCHAR(255) UNIQUE NOT NULL,
 			leader_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE
 		);`,
+		`ALTER TABLE clans ADD COLUMN IF NOT EXISTS icon VARCHAR(10) DEFAULT '🏴';`,
+		`ALTER TABLE clans ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';`,
+		`ALTER TABLE clans ADD COLUMN IF NOT EXISTS recruiting BOOLEAN DEFAULT TRUE;`,
 
 		`CREATE TABLE IF NOT EXISTS federations (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -663,6 +666,11 @@ func main() {
 	bot.Handle("/clans", clan.HandleBrowseClans)
 	bot.Handle("/clan_create", clan.HandleCreateClanCommand)
 	bot.Handle("/clan_rename", clan.HandleRenameClanCommand)
+	bot.Handle("/guild_missions", clan.HandleGuildMissions)
+	bot.Handle("/guildmsg", clan.HandleGuildMsg)
+	bot.Handle("/guild_icon", clan.HandleGuildIcon)
+	bot.Handle("/guild_description", clan.HandleGuildDescription)
+	bot.Handle("/board", clan.HandleBoard)
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)

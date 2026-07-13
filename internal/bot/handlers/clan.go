@@ -485,6 +485,209 @@ func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 	return c.Send(report, keyboards.EconomyNavigation())
 }
 
+// randomAnimalIcons is the pool /guild_icon draws from, matching
+// SpaceHunt's "change your guild icon to another random animal" feature.
+var randomAnimalIcons = []string{"🦅", "🐺", "🐻", "🦁", "🐯", "🦂", "🐍", "🦇", "🦉", "🐗", "🦖", "🦍", "🐉", "🦌", "🦊"}
+
+// HandleGuildMissions (/guild_missions) shows recent raids and transfers
+// involving any member of the caller's clan.
+func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var clanID, clanName string
+	err := h.DB.QueryRowContext(ctx, "SELECT c.id, c.name FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &clanName)
+	if err != nil {
+		return c.Send("⚠️ You're not in a Clan. Use /clans to browse or /clan_create [name] to found one.")
+	}
+
+	panelText := fmt.Sprintf(
+		"📜━━━━━━━━━━━━━━━━━━━━━━📜\n"+
+			"🏴 %s: RAIDS & TRANSFERS 🏴\n"+
+			"📜━━━━━━━━━━━━━━━━━━━━━━📜\n\n",
+		clanName,
+	)
+
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT ea.name, COALESCE(ed.name, 'Rogue Drone Nest'), r.state, r.stolen_scrap, r.stolen_metal, r.stolen_crystal
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
+		WHERE ea.user_id IN (SELECT user_id FROM user_clans WHERE clan_id = $1)
+		   OR ed.user_id IN (SELECT user_id FROM user_clans WHERE clan_id = $1)
+		ORDER BY r.id DESC
+		LIMIT 12`, clanID)
+	if err == nil {
+		any := false
+		for rows.Next() {
+			var attName, defName, state string
+			var stolenScrap, stolenMetal, stolenCrystal float64
+			if scanErr := rows.Scan(&attName, &defName, &state, &stolenScrap, &stolenMetal, &stolenCrystal); scanErr == nil {
+				any = true
+				panelText += fmt.Sprintf("⚔️ %s ➜ %s [%s]\n   Loot: ⚙️%.0f 🔩%.0f 💎%.0f\n\n", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)
+			}
+		}
+		rows.Close()
+		if !any {
+			panelText += "No recent Clan activity.\n"
+		}
+	}
+
+	panelText += "📜━━━━━━━━━━━━━━━━━━━━━━📜"
+	return c.Send(panelText)
+}
+
+// HandleGuildMsg (/guildmsg [message]) broadcasts to every clan member.
+func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	msg := c.Message().Payload
+	if msg == "" {
+		return c.Send("⚠️ Usage: /guildmsg [message]")
+	}
+
+	var clanID, clanName string
+	err := h.DB.QueryRowContext(ctx, "SELECT c.id, c.name FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &clanName)
+	if err != nil {
+		return c.Send("⚠️ You're not in a Clan.")
+	}
+
+	broadcast := fmt.Sprintf("📢 %s [%s]:\n\n%s", clanName, sender.FirstName, msg)
+
+	rows, err := h.DB.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1 AND user_id != $2", clanID, sender.ID)
+	if err != nil {
+		return c.Send("⚠️ Error broadcasting message.")
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var uid int64
+		if rows.Scan(&uid) == nil {
+			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, broadcast)
+			count++
+		}
+	}
+
+	return c.Send(fmt.Sprintf("📢 Message broadcast to %d Clan member(s)!", count))
+}
+
+// HandleGuildIcon (/guild_icon) randomly changes the clan's icon.
+func (h *ClanHandler) HandleGuildIcon(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var clanID, role string
+	err := h.DB.QueryRowContext(ctx, "SELECT c.id, uc.role FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &role)
+	if err != nil {
+		return c.Send("⚠️ You're not in a Clan.")
+	}
+	if role != "Leader" {
+		return c.Send("❌ Access Denied: Only the Clan Leader can change the icon.")
+	}
+
+	newIcon := randomAnimalIcons[int(sender.ID+time.Now().Unix())%len(randomAnimalIcons)]
+	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET icon = $1 WHERE id = $2", newIcon, clanID)
+	if err != nil {
+		return c.Send("⚠️ Error updating icon.")
+	}
+
+	return c.Send(fmt.Sprintf("%s Your Clan's icon is now %s!", newIcon, newIcon))
+}
+
+// HandleGuildDescription (/guild_description [text]) sets the clan's
+// description, shown on the recruitment /board.
+func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	desc := c.Message().Payload
+	if desc == "" {
+		return c.Send("⚠️ Usage: /guild_description [text] (max 200 characters)")
+	}
+	if len(desc) > 200 {
+		return c.Send("❌ Too Long: Max 200 characters.")
+	}
+
+	var clanID, role string
+	err := h.DB.QueryRowContext(ctx, "SELECT c.id, uc.role FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &role)
+	if err != nil {
+		return c.Send("⚠️ You're not in a Clan.")
+	}
+	if role != "Leader" {
+		return c.Send("❌ Access Denied: Only the Clan Leader can set the description.")
+	}
+
+	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET description = $1 WHERE id = $2", desc, clanID)
+	if err != nil {
+		return c.Send("⚠️ Error updating description.")
+	}
+
+	return c.Send("✅ Clan description updated!")
+}
+
+// HandleBoard (/board) is the recruitment post board - clans currently
+// open to recruiting, with their icon and description, distinct from
+// /clans (which is the pure ranking list).
+func (h *ClanHandler) HandleBoard(c telebot.Context) error {
+	ctx := context.Background()
+
+	panelText := "📋━━━━━━━━━━━━━━━━━━━━━━📋\n" +
+		"🏴 CLAN RECRUITMENT BOARD 🏴\n" +
+		"📋━━━━━━━━━━━━━━━━━━━━━━📋\n\n"
+
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT c.id, c.name, c.icon, c.description, COUNT(uc.user_id) as members
+		FROM clans c
+		LEFT JOIN user_clans uc ON uc.clan_id = c.id
+		WHERE c.recruiting = TRUE
+		GROUP BY c.id, c.name, c.icon, c.description
+		HAVING COUNT(uc.user_id) < 15
+		ORDER BY RANDOM()
+		LIMIT 10`)
+
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
+
+	if err == nil {
+		any := false
+		for rows.Next() {
+			var clanID, name, icon, desc string
+			var members int
+			if scanErr := rows.Scan(&clanID, &name, &icon, &desc, &members); scanErr == nil {
+				any = true
+				if desc == "" {
+					desc = "(no description set)"
+				}
+				panelText += fmt.Sprintf("%s %s (%d/15)\n📜 %s\n\n", icon, name, members, desc)
+				btn := selector.Data(fmt.Sprintf("📨 Apply to %s", name), "clan_apply", clanID)
+				buttons = append(buttons, selector.Row(btn))
+			}
+		}
+		rows.Close()
+		if !any {
+			panelText += "No Clans are actively recruiting right now. Check /clans for the full list.\n"
+		}
+	}
+
+	panelText += "\n📋━━━━━━━━━━━━━━━━━━━━━━📋"
+	selector.Inline(buttons...)
+	return c.Send(panelText, selector)
+}
+
 // HandleCreateClanCommand establishes a clan with a REAL custom name
 // (payload), matching SpaceHunt's naming freedom instead of an
 // auto-generated placeholder.
