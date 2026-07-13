@@ -87,6 +87,10 @@ func executeStartupMigrations(db *sql.DB) {
 		);`,
 
 		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS auto_scan_enabled BOOLEAN DEFAULT FALSE;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS extension_lvl INT DEFAULT 0;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS orbital_buff_until TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS last_teleport_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS last_sunlight_at TIMESTAMP WITH TIME ZONE;`,
 
 		`CREATE TABLE IF NOT EXISTS resources (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
@@ -654,6 +658,7 @@ func main() {
 	federation := handlers.NewFederationHandler(db)
 	profile := handlers.NewProfileHandler(db)
 	ether := handlers.NewEtherHandler(db)
+	jobs := handlers.NewJobsHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	bot.Handle("/start", onboarding.HandleStart)
@@ -710,6 +715,17 @@ func main() {
 	bot.Handle("/ether", ether.HandleEtherShop)
 	bot.Handle("/missions", profile.HandleMissions)
 	bot.Handle("/destinations", profile.HandleDestinations)
+	bot.Handle("/newjobhyperspeed", jobs.HandleHyperSpeed)
+	bot.Handle("/newjobextendplanet", jobs.HandleExtendPlanet)
+	bot.Handle("/newjobteleport", jobs.HandleTeleport)
+	bot.Handle("/newjoborbitalmaneuver", jobs.HandleOrbitalManeuver)
+	bot.Handle("/newjobrepairunits", jobs.HandleRepairUnits)
+	bot.Handle("/newjobrepairbuildings", jobs.HandleRepairBuildings)
+	bot.Handle("/newjobgathersunlight", jobs.HandleGatherSunlight)
+	bot.Handle("/newjobmanualscan", jobs.HandleManualScanAlias)
+	bot.Handle("/newjobautoscan", jobs.HandleAutoScanAlias)
+	bot.Handle("/newjobadvancedscan", jobs.HandleAdvancedScanAlias)
+	bot.Handle("/newjobpublishtrade", jobs.HandlePublishTradeAlias)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
