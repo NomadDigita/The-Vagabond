@@ -40,13 +40,14 @@ func CampNavigation() *telebot.ReplyMarkup {
 	btnMine := menu.Text("⛏️ Active Mining")
 	btnResearch := menu.Text("🧪 Research Lab") // Added for Research Lab access
 	btnDefense := menu.Text("🛡️ Defense Grid")
+	btnInfra := menu.Text("🏗️ Infrastructure Grid")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnUpgrade, btnHero),
 		menu.Row(btnAgent, btnMutation),
 		menu.Row(btnMine, btnResearch),
-		menu.Row(btnDefense),
+		menu.Row(btnDefense, btnInfra),
 		menu.Row(btnBack),
 	)
 

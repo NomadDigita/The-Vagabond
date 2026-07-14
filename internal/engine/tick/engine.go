@@ -1714,10 +1714,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenderCrystal = 60.0
 		}
 
+		var smallShieldLvl, largeShieldLvl int
+		if r.defenderID.Valid {
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'small_shield'", r.defenderID.String).Scan(&smallShieldLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'large_shield'", r.defenderID.String).Scan(&largeShieldLvl)
+		}
+
 		lootPercentage := 0.40
 		if defenderShields > 0 {
 			lootPercentage = 0.20
 		}
+		shieldReduction := math.Min(float64(smallShieldLvl)*0.02+float64(largeShieldLvl)*0.05, 0.30)
+		lootPercentage *= (1.0 - shieldReduction)
 		stolenScrap := defenderScrap * lootPercentage
 		stolenMetal := defenderMetal * lootPercentage
 		stolenCrystal := defenderCrystal * lootPercentage

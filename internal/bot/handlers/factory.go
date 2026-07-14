@@ -222,6 +222,24 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	queryRes := `SELECT rations, metal, crystal, hydrogen FROM resources WHERE encampment_id = $1 FOR UPDATE`
 	_ = tx.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &metal, &crystal, &hydrogen)
 
+	// Hangar capacity check: total units (all types) can't exceed the
+	// Hangar-scaled cap. Deconstructing units (see deconstruct.go) frees
+	// space back up.
+	var hangarLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", campID).Scan(&hangarLvl)
+	maxCapacity := 50 + hangarLvl*20
+
+	var totalUnits int
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(soldiers,0)+COALESCE(drones,0)+COALESCE(mechs,0)+COALESCE(nukes,0)+COALESCE(buggies,0)+COALESCE(ships,0)+COALESCE(jets,0)+
+		       COALESCE(haulers,0)+COALESCE(tankers,0)+COALESCE(rigs,0)+COALESCE(destroyers,0)+COALESCE(bombers,0)+COALESCE(scouts,0)+
+		       COALESCE(battlecruisers,0)+COALESCE(deathstars,0)
+		FROM workshop_inventory WHERE encampment_id = $1`, campID).Scan(&totalUnits)
+
+	if totalUnits >= maxCapacity {
+		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used. Upgrade your Hangar (Infrastructure Grid) or /deconstruct unused units.", totalUnits, maxCapacity)})
+	}
+
 	var successAlert string
 
 	switch item {
@@ -352,6 +370,17 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 650.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
 		successAlert = "🔧 Recovery Rig constructed!"
+	}
+
+	// Engineering Bay: reduces effective material waste on any successful
+	// craft, refunding a flat amount scaled by building level rather than
+	// rewriting every craft case's cost check individually.
+	if successAlert != "" {
+		var engineeringBayLvl int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'engineering_bay'", campID).Scan(&engineeringBayLvl)
+		if engineeringBayLvl > 0 {
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2 WHERE encampment_id = $3", float64(engineeringBayLvl)*5.0, float64(engineeringBayLvl)*1.0, campID)
+		}
 	}
 
 	// Dynamic Post-Commit Success Dispatcher: Only sends notification after database safely registers changes

@@ -639,7 +639,10 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(intel_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", attackerCampID).Scan(&attackerTechLvl)
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(intel_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", myCampID).Scan(&defenderTechLvl)
 
-	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10
+	var radarLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'radar'", myCampID).Scan(&radarLvl)
+
+	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10 + float64(radarLvl)*0.02
 
 	if resolved {
 		interceptChance -= 0.20
@@ -1129,6 +1132,11 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	if routeType == "safe" {
 		fuelCost = 45.0
 	}
+
+	var starportLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'starport'", myCampID).Scan(&starportLvl)
+	fuelDiscount := math.Min(float64(starportLvl)*0.03, 0.50)
+	fuelCost *= (1.0 - fuelDiscount)
 
 	if electricity < fuelCost {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Electricity: Required %.1f cells.", fuelCost)})

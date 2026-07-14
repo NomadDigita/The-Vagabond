@@ -111,17 +111,25 @@ func (h *EtherHandler) HandleEtherConvertCallback(c telebot.Context) error {
 	var ether float64
 	_ = tx.QueryRowContext(ctx, "SELECT ether FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&ether)
 
-	if ether < deal.cost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Ether! Need %.0f, you have %.2f.", deal.cost, ether)})
+	var tradeBeaconLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'trade_beacon'", campID).Scan(&tradeBeaconLvl)
+	discount := 1.0 - (float64(tradeBeaconLvl) * 0.03)
+	if discount < 0.5 {
+		discount = 0.5
+	}
+	effectiveCost := deal.cost * discount
+
+	if ether < effectiveCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Ether! Need %.1f, you have %.2f.", effectiveCost, ether)})
 	}
 
 	query := fmt.Sprintf("UPDATE resources SET ether = ether - $1, %s = %s + $2 WHERE encampment_id = $3", deal.resource, deal.resource)
-	_, _ = tx.ExecContext(ctx, query, deal.cost, deal.amount, campID)
+	_, _ = tx.ExecContext(ctx, query, effectiveCost, deal.amount, campID)
 
 	if err := tx.Commit(); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error saving conversion."})
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("✨ Converted %.0f Ether into %.0f %s!", deal.cost, deal.amount, deal.title)})
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("✨ Converted %.1f Ether into %.0f %s!", effectiveCost, deal.amount, deal.title)})
 	return h.HandleEtherShop(c)
 }
