@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
+	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/anthropic"
+	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/mock"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
@@ -487,6 +490,63 @@ func executeStartupMigrations(db *sql.DB) {
 		AFTER INSERT ON notifications
 		FOR EACH ROW
 		EXECUTE FUNCTION notify_realtime_event();`,
+
+		// --- AI Foundation (Phase A, independent AI roadmap branch) ---
+		// See migrations/020_vagabond_ai_foundation.sql for the annotated
+		// standalone copy of this schema and internal/ai for the Go layer
+		// that reads/writes it.
+		`CREATE TABLE IF NOT EXISTS ai_feature_flags (
+			feature     VARCHAR(50) PRIMARY KEY,
+			enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+			updated_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS ai_permissions (
+			user_id     BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			feature     VARCHAR(50) NOT NULL,
+			enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+			updated_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, feature)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS ai_memory (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id      BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			scope        VARCHAR(100) NOT NULL,
+			role         VARCHAR(20) NOT NULL,
+			content      TEXT NOT NULL,
+			tool_call_id VARCHAR(100),
+			created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE INDEX IF NOT EXISTS idx_ai_memory_user_scope_time ON ai_memory (user_id, scope, created_at);`,
+
+		`CREATE TABLE IF NOT EXISTS ai_cost_log (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id        BIGINT REFERENCES users(telegram_id) ON DELETE SET NULL,
+			feature        VARCHAR(50) NOT NULL,
+			provider       VARCHAR(50) NOT NULL,
+			model          VARCHAR(100) NOT NULL,
+			input_tokens   INT NOT NULL DEFAULT 0,
+			output_tokens  INT NOT NULL DEFAULT 0,
+			cost_usd       DOUBLE PRECISION NOT NULL DEFAULT 0,
+			created_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+
+		`CREATE INDEX IF NOT EXISTS idx_ai_cost_log_user_time ON ai_cost_log (user_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_cost_log_time ON ai_cost_log (created_at);`,
+
+		`INSERT INTO ai_feature_flags (feature, enabled) VALUES
+			('ai_planet_governor', TRUE),
+			('ai_fleet_commander', TRUE),
+			('ai_economy_advisor', TRUE),
+			('ai_research_planner', TRUE),
+			('ai_battle_analyst', TRUE),
+			('ai_guild_assistant', TRUE),
+			('ai_dynamic_galaxy', TRUE),
+			('ai_npc_intelligence', TRUE),
+			('ai_developer_console', TRUE)
+		ON CONFLICT (feature) DO NOTHING;`,
 	}
 
 	for _, stmt := range migrations {
@@ -661,6 +721,24 @@ func main() {
 	jobs := handlers.NewJobsHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
+	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
+	// Provider-agnostic by design: register additional providers here
+	// (OpenAI, Gemini, Qwen, Grok, DeepSeek, Ollama, ...) without
+	// touching internal/ai itself. Mock is always registered last so
+	// the bot degrades gracefully instead of failing when no real
+	// provider key is configured.
+	aiConfig := ai.LoadConfig()
+	aiRegistry := ai.NewRegistry()
+	aiRegistry.Register(anthropic.New(aiConfig.AnthropicAPIKey, aiConfig.AnthropicModel))
+	aiRegistry.Register(mock.New())
+	aiCostTracker := ai.NewPostgresCostTracker(db)
+	aiPermissions := ai.NewPermissionManager(db)
+	aiMemory := ai.NewPostgresMemoryStore(db)
+	aiService := ai.NewService(aiConfig, aiRegistry, aiCostTracker, aiPermissions, aiMemory)
+	aiStatus := handlers.NewAIStatusHandler(aiService, adminIDs)
+	log.Printf("AI Foundation initialized. Default provider: %s | Fallback order: %v | Enabled: %v",
+		aiConfig.DefaultProvider, aiConfig.FallbackOrder, aiConfig.Enabled)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -726,6 +804,9 @@ func main() {
 	bot.Handle("/newjobautoscan", jobs.HandleAutoScanAlias)
 	bot.Handle("/newjobadvancedscan", jobs.HandleAdvancedScanAlias)
 	bot.Handle("/newjobpublishtrade", jobs.HandlePublishTradeAlias)
+	bot.Handle("/ai_status", aiStatus.HandleAIStatus)
+	bot.Handle("/ai_status_toggle", aiStatus.HandleAIStatusToggle)
+	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
