@@ -174,12 +174,22 @@ without human approval; Developer Console might loop several times).
 
 ---
 
+**ADR-007: Phase B stores an `autopilot_enabled` preference but does
+not act on it.** The roadmap implies an eventual autonomous-execution
+mode ("automation is explicitly enabled"). Rather than wire a
+half-tested "AI upgrades your buildings for you" path into the same
+session that built the recommend flow, the data model and player-facing
+toggle were built now (so nothing later needs a schema migration to add
+them), while actual execution — which needs its own safety design
+(rate limits, dry-run/rollback, abuse prevention, cost implications of
+running unattended) — is explicitly deferred. See §4/§1 Phase B notes.
+
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
 | Phase | Name | Status | Depends on |
 |---|---|---|---|
 | A | AI Foundation | Done | — |
-| B | AI Planet Governor | Not started | A |
+| B | AI Planet Governor | Done (advisory-only; autopilot execution deferred, see §4) | A |
 | C | AI Fleet Commander | Not started | A |
 | D | AI Economy Advisor | Not started | A |
 | E | AI Research Planner | Not started | A |
@@ -189,27 +199,63 @@ without human approval; Developer Console might loop several times).
 | I | AI NPC Intelligence | Not started | A, ideally after G |
 | J | AI Developer Console | Not started | A |
 
-**Progress by subsystem:** Foundation 100%. All gameplay-facing AI
-phases (B–J): 0%.
+**Progress by subsystem:** Foundation 100%. Planet Governor: recommend
+flow 100%, autopilot execution 0% (intentionally deferred). Remaining
+gameplay-facing AI phases (C–J): 0%.
+
+### What Phase B built
+
+```
+internal/game/governor/
+├── prompt.go        Pure logic: Snapshot type, SystemPrompt, BuildUserPrompt
+│                     (deterministic — sorts modules so cache keys are stable),
+│                     ParseRecommendation (JSON with markdown-fence tolerance
+│                     and raw-text fallback), FormatForTelegram.
+├── prompt_test.go    7 passing unit tests, zero DB/network dependency.
+└── governor.go       Governor: BuildSnapshot (reads encampments/resources/
+                       modules/workshop_inventory/research_states — mirrors
+                       internal/engine/resource's COALESCE defaults so the
+                       Governor's view of "not built yet" agrees with the
+                       tick engine's), Recommend (calls ai.Service.Complete,
+                       stores both turns in ai_memory under scope
+                       "planet_governor"), AutopilotSetting/SetAutopilot
+                       (preference storage only — see below).
+```
+
+New table: `governor_settings` (encampment_id PK, autopilot_enabled).
+New commands: `/governor` (any player — read-only recommendation),
+`/governor_autopilot [on|off]` (any player — preference only).
+
+**Deliberately NOT built in Phase B: autopilot execution.** The
+roadmap's Phase B spec says "the player always has final approval
+unless automation is explicitly enabled," implying an eventual
+autonomous-action mode. `SetAutopilot`/`AutopilotSetting` exist and are
+wired to a command, but **no code path acts on `autopilot_enabled` —
+it is inert.** Building "the AI decides to upgrade a mine and it
+actually happens" safely requires its own validation, rate-limiting,
+and rollback-safety design that deserves a dedicated pass rather than
+being rushed into the same session as the recommend flow. This is
+flagged, not hidden — see §4.
 
 ### Recommended next task
 
-**Phase B — AI Planet Governor**, because:
-1. It's the simplest Phase B–J feature to scope (single-planet
-   optimization, no multi-agent coordination, no combat math).
-2. It will be the first real consumer of `ai.Service`, `MemoryStore`,
-   and `PermissionManager` together, and will surface any Phase A
-   rough edges before more complex phases (Fleet Commander, Battle
-   Analyst) build on top of the same foundation.
-3. It naturally needs a "player approval" UX pattern (recommend now,
-   act only if the player confirms or has enabled autopilot) that
-   every later phase (C, D, G) will reuse — worth getting right once.
+**Phase C — AI Fleet Commander**, or, if the project owner would
+rather de-risk Phase B's deferred item first, **"Governor Autopilot
+Execution Engine"** as a standalone follow-up to Phase B before moving
+on. Either is reasonable; picking Fleet Commander next because:
+1. Phase B proved the `ai.Service` + `MemoryStore` + advisory-only
+   pattern works end-to-end — Fleet Commander can reuse that shape
+   (snapshot → prompt → structured recommendation → format) almost
+   exactly, this time over fleet/combat data instead of base data.
+2. It's still recommend-only by roadmap design ("Recommend: attack /
+   retreat / reinforce / scout / wait / split fleets. Explain every
+   recommendation."), so it doesn't inherit Phase B's
+   deferred-execution complexity.
 
-**Before writing Phase B code:** read `internal/game/content` and the
-`camp.go` / `agent.go` handlers to understand the existing building
-and automation-agent data model. Phase B should almost certainly reuse
-the existing `agent_tasks` table's on/off pattern rather than
-inventing a parallel automation toggle.
+**Before writing Phase C code:** read `internal/bot/handlers/combat.go`
+and `internal/game/battlereport` to understand the existing raid/fleet
+data model, the same way Phase B first read `camp.go`/`agent.go` and
+`internal/engine/resource`.
 
 ---
 
@@ -274,6 +320,12 @@ inventing a parallel automation toggle.
   Postgres-backed permission system, Postgres-backed memory store,
   unifying `Service`, 3 new bot commands, DB schema, 6 passing unit
   tests. This file created.
+- **This session (continued):** Phase B (AI Planet Governor)
+  implemented: pure prompt-building/parsing logic (`prompt.go`, 7
+  passing unit tests), DB-backed orchestration (`governor.go`), 2 new
+  bot commands (`/governor`, `/governor_autopilot`), 1 new table
+  (`governor_settings`). Autopilot execution explicitly deferred —
+  see ADR-007. Recommended next task updated to Phase C.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 

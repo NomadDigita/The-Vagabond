@@ -19,6 +19,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
+	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"gopkg.in/telebot.v3"
@@ -547,6 +548,15 @@ func executeStartupMigrations(db *sql.DB) {
 			('ai_npc_intelligence', TRUE),
 			('ai_developer_console', TRUE)
 		ON CONFLICT (feature) DO NOTHING;`,
+
+		// --- AI Planet Governor (Phase B, independent AI roadmap branch) ---
+		// See migrations/021_vagabond_ai_governor.sql for the annotated
+		// standalone copy and internal/game/governor for the Go layer.
+		`CREATE TABLE IF NOT EXISTS governor_settings (
+			encampment_id      UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
+			autopilot_enabled  BOOLEAN NOT NULL DEFAULT FALSE,
+			updated_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
 	}
 
 	for _, stmt := range migrations {
@@ -739,6 +749,10 @@ func main() {
 	log.Printf("AI Foundation initialized. Default provider: %s | Fallback order: %v | Enabled: %v",
 		aiConfig.DefaultProvider, aiConfig.FallbackOrder, aiConfig.Enabled)
 
+	// --- AI Planet Governor wiring (Phase B, independent AI roadmap branch) ---
+	aiGovernor := governor.New(db, aiService)
+	governorHandler := handlers.NewGovernorHandler(aiGovernor)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -807,6 +821,8 @@ func main() {
 	bot.Handle("/ai_status", aiStatus.HandleAIStatus)
 	bot.Handle("/ai_status_toggle", aiStatus.HandleAIStatusToggle)
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
+	bot.Handle("/governor", governorHandler.HandleGovernor)
+	bot.Handle("/governor_autopilot", governorHandler.HandleGovernorAutopilot)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
