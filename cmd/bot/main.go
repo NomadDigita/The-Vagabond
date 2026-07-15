@@ -19,6 +19,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
+	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -753,6 +754,10 @@ func main() {
 	aiGovernor := governor.New(db, aiService)
 	governorHandler := handlers.NewGovernorHandler(aiGovernor)
 
+	// --- AI Fleet Commander wiring (Phase C, independent AI roadmap branch) ---
+	aiFleetCommander := fleetcommander.New(db, aiService)
+	fleetCommanderHandler := handlers.NewFleetCommanderHandler(aiFleetCommander)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -823,6 +828,7 @@ func main() {
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
 	bot.Handle("/governor", governorHandler.HandleGovernor)
 	bot.Handle("/governor_autopilot", governorHandler.HandleGovernorAutopilot)
+	bot.Handle("/fleet_commander", fleetCommanderHandler.HandleFleetCommander)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

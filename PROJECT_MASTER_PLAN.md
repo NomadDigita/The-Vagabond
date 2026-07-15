@@ -184,13 +184,32 @@ them), while actual execution — which needs its own safety design
 (rate limits, dry-run/rollback, abuse prevention, cost implications of
 running unattended) — is explicitly deferred. See §4/§1 Phase B notes.
 
+**ADR-008: Fleet Commander's combat-history "win rate" is a heuristic,
+not authoritative.** The `raids` table has no explicit outcome column;
+`fleetcommander.BuildCombatHistory` counts a completed raid as an
+"apparent win" if any resources were stolen. This is a reasonable
+proxy but can misclassify edge cases (e.g. a costly Pyrrhic raid that
+still stole a small amount of loot). Flagged as technical debt in §4 —
+replace with an authoritative outcome column if/when the SpaceHunt
+combat branch adds one.
+
+**ADR-009: Fleet Commander analyzes only the PvE rogue-nest target in
+this version, not arbitrary rival players.** Looking up a real
+player's live `workshop_inventory` from a raw chat command would
+either (a) require the AI Fleet Commander to expose fresh military
+intelligence the game's actual `/scout` mechanic is supposed to gate,
+undercutting that gameplay loop, or (b) need its own
+scouted-data-only lookup layer. Neither was designed carefully enough
+in this session to ship responsibly, so PvP targeting is deferred —
+see §4 and the Phase C notes in §1.
+
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
 | Phase | Name | Status | Depends on |
 |---|---|---|---|
 | A | AI Foundation | Done | — |
 | B | AI Planet Governor | Done (advisory-only; autopilot execution deferred, see §4) | A |
-| C | AI Fleet Commander | Not started | A |
+| C | AI Fleet Commander | Done (PvE rogue-nest target only; PvP target lookup deferred, see §4) | A |
 | D | AI Economy Advisor | Not started | A |
 | E | AI Research Planner | Not started | A |
 | F | AI Battle Analyst | Not started | A |
@@ -200,62 +219,68 @@ running unattended) — is explicitly deferred. See §4/§1 Phase B notes.
 | J | AI Developer Console | Not started | A |
 
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
-flow 100%, autopilot execution 0% (intentionally deferred). Remaining
-gameplay-facing AI phases (C–J): 0%.
+flow 100%, autopilot execution 0% (intentionally deferred). Fleet
+Commander: PvE recommend flow 100%, PvP target lookup 0% (deferred).
+Remaining gameplay-facing AI phases (D–J): 0%.
 
-### What Phase B built
+### What Phase C built
 
 ```
-internal/game/governor/
-├── prompt.go        Pure logic: Snapshot type, SystemPrompt, BuildUserPrompt
-│                     (deterministic — sorts modules so cache keys are stable),
-│                     ParseRecommendation (JSON with markdown-fence tolerance
-│                     and raw-text fallback), FormatForTelegram.
-├── prompt_test.go    7 passing unit tests, zero DB/network dependency.
-└── governor.go       Governor: BuildSnapshot (reads encampments/resources/
-                       modules/workshop_inventory/research_states — mirrors
-                       internal/engine/resource's COALESCE defaults so the
-                       Governor's view of "not built yet" agrees with the
-                       tick engine's), Recommend (calls ai.Service.Complete,
-                       stores both turns in ai_memory under scope
-                       "planet_governor"), AutopilotSetting/SetAutopilot
-                       (preference storage only — see below).
+internal/game/fleetcommander/
+├── prompt.go         Pure logic: FleetComposition (generic unit-name→count
+│                      map, not hardcoded per-unit fields, so new
+│                      workshop_inventory columns never require a code
+│                      change here), TargetProfile, CombatHistorySummary,
+│                      SystemPrompt, deterministic BuildUserPrompt,
+│                      ParseRecommendation (same markdown-fence tolerance +
+│                      raw-text fallback pattern as governor), FormatForTelegram.
+├── prompt_test.go     7 passing unit tests, zero DB/network dependency.
+└── commander.go       Commander: BuildOwnFleet (explicit workshop_inventory
+                        column list, not SELECT *, so schema changes are a
+                        deliberate one-line addition), BuildRogueNestTarget
+                        (reuses internal/game/content.RogueNestComposition —
+                        the exact same PvE data already shown via the
+                        existing static /recon-style report, so the two
+                        never disagree), BuildCombatHistory (heuristic
+                        win/loss proxy off the raids table — see ADR-008),
+                        Recommend (ties it together via ai.Service.Complete,
+                        persists both turns to ai_memory under scope
+                        "fleet_commander").
 ```
 
-New table: `governor_settings` (encampment_id PK, autopilot_enabled).
-New commands: `/governor` (any player — read-only recommendation),
-`/governor_autopilot [on|off]` (any player — preference only).
+New command: `/fleet_commander` (any player — read-only recommendation:
+attack / retreat / reinforce / scout / wait / split_fleet, with
+reasoning). No new DB table — Phase C only reads existing data
+(encampments, workshop_inventory, raids).
 
-**Deliberately NOT built in Phase B: autopilot execution.** The
-roadmap's Phase B spec says "the player always has final approval
-unless automation is explicitly enabled," implying an eventual
-autonomous-action mode. `SetAutopilot`/`AutopilotSetting` exist and are
-wired to a command, but **no code path acts on `autopilot_enabled` —
-it is inert.** Building "the AI decides to upgrade a mine and it
-actually happens" safely requires its own validation, rate-limiting,
-and rollback-safety design that deserves a dedicated pass rather than
-being rushed into the same session as the recommend flow. This is
-flagged, not hidden — see §4.
+**Deliberately PvE-only in this version.** The roadmap asks for
+analysis of "enemy strength" generally, which could mean a rival
+player's base. Resolving a safe, abuse-resistant way to look up an
+arbitrary rival's `workshop_inventory` (a real player's live military
+strength) from a raw chat command needs its own design pass — should
+it require the player to have scouted them first? Should it use the
+same stale-snapshot data /scout already produces, to avoid this
+becoming a fresher, cheaper recon tool than the game's real recon
+mechanic? Shipping that carelessly could quietly undercut the existing
+scouting gameplay loop, so it's deferred rather than rushed. See §4.
 
 ### Recommended next task
 
-**Phase C — AI Fleet Commander**, or, if the project owner would
-rather de-risk Phase B's deferred item first, **"Governor Autopilot
-Execution Engine"** as a standalone follow-up to Phase B before moving
-on. Either is reasonable; picking Fleet Commander next because:
-1. Phase B proved the `ai.Service` + `MemoryStore` + advisory-only
-   pattern works end-to-end — Fleet Commander can reuse that shape
-   (snapshot → prompt → structured recommendation → format) almost
-   exactly, this time over fleet/combat data instead of base data.
-2. It's still recommend-only by roadmap design ("Recommend: attack /
-   retreat / reinforce / scout / wait / split fleets. Explain every
-   recommendation."), so it doesn't inherit Phase B's
-   deferred-execution complexity.
+**Phase D — AI Economy Advisor**, because:
+1. Like Phases B and C, it's fully recommend-only by roadmap design —
+   no execution-safety design needed, continuing the pattern that's
+   now proven twice.
+2. It naturally reuses `governor.Snapshot`-shaped data (resources,
+   modules) that Phase B already knows how to gather — Phase D is
+   mostly a different system prompt and a different structured output
+   shape over largely the same underlying data, plus market data from
+   `market_exchange`.
+3. Deferring the PvP-target question in Phase C longer gives more
+   time to think it through properly rather than needing an answer
+   under this session's momentum.
 
-**Before writing Phase C code:** read `internal/bot/handlers/combat.go`
-and `internal/game/battlereport` to understand the existing raid/fleet
-data model, the same way Phase B first read `camp.go`/`agent.go` and
-`internal/engine/resource`.
+**Before writing Phase D code:** read `internal/bot/handlers/exchange.go`
+and the `market_exchange` table for the existing trading data model.
 
 ---
 
@@ -290,6 +315,11 @@ data model, the same way Phase B first read `camp.go`/`agent.go` and
   proper `tool_result` blocks before Phase B or later builds an actual
   tool-calling agent loop**, or multi-turn tool conversations will
   silently lose structure.
+- **Fleet Commander's win/loss history is a heuristic** (any stolen
+  resources = "apparent win"). See ADR-008.
+- **Fleet Commander has no PvP target support.** See ADR-009. A player
+  can currently only get a recommendation against the scaled PvE rogue
+  nest, not a specific rival.
 
 ## 5. Risks / Blockers
 
@@ -326,6 +356,13 @@ data model, the same way Phase B first read `camp.go`/`agent.go` and
   bot commands (`/governor`, `/governor_autopilot`), 1 new table
   (`governor_settings`). Autopilot execution explicitly deferred —
   see ADR-007. Recommended next task updated to Phase C.
+- **This session (continued):** Phase C (AI Fleet Commander)
+  implemented: pure prompt/parsing logic (`prompt.go`, 7 passing unit
+  tests), DB-backed orchestration (`commander.go`) reusing
+  `internal/game/content`'s existing rogue-nest PvE data, 1 new bot
+  command (`/fleet_commander`), no new tables. PvP target lookup and
+  authoritative win/loss tracking explicitly deferred — see ADR-008,
+  ADR-009. Recommended next task updated to Phase D.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
