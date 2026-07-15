@@ -189,6 +189,55 @@ func (h *CampHandler) HandleDefenseGridPanel(c telebot.Context) error {
 	return renderOrEdit(c, panelText, selector)
 }
 
+// infrastructureModules mirrors defenseGridModules but for economy/utility
+// buildings. Same generic modules table + HandleUpgradeCallback pipeline -
+// no new upgrade logic needed, just new type strings.
+var infrastructureModules = []defenseModule{
+	{"hangar", "🛬", "Hangar", "Increases maximum unit capacity (+20 per level)."},
+	{"radar", "📡", "Radar", "Improves early-warning intel and counter-espionage odds."},
+	{"solar_panel", "☀️", "Solar Panel", "Generates bonus Electricity independent of your Generator."},
+	{"starport", "🚀", "Starport", "Reduces fuel cost for launching raids."},
+	{"technology_center", "🧪", "Technology Center", "Boosts passive Ether generation rate."},
+	{"trade_beacon", "📶", "Trade Beacon", "Discounts Ether Shop conversion costs."},
+	{"small_shield", "🛡️", "Small Planetary Shield", "Reduces loot taken when raided (stacks with Nuclear Shields)."},
+	{"large_shield", "🛡️🛡️", "Large Planetary Shield", "Major reduction of loot taken when raided."},
+	{"engineering_bay", "⚙️", "Engineering Bay", "Reduces unit crafting material costs."},
+	{"metal_mine", "🔩", "Metal Mine", "Passive Metal generation every tick."},
+	{"crystal_mine", "💎", "Crystal Mine", "Passive Crystal generation every tick."},
+}
+
+// HandleInfrastructureGridPanel renders the economy/utility building panel.
+func (h *CampHandler) HandleInfrastructureGridPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+
+	sender := c.Sender()
+	ctx := context.Background()
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	panelText := "🏗️━━━━━━━━━━━━━━━━━━━━━━🏗️\n" +
+		"🏗️ INFRASTRUCTURE GRID 🏗️\n" +
+		"🏗️━━━━━━━━━━━━━━━━━━━━━━🏗️\n" +
+		"Economy & utility buildings that keep your Outpost running.\n\n"
+
+	selector := &telebot.ReplyMarkup{}
+	var rows []telebot.Row
+
+	for _, mod := range infrastructureModules {
+		lvl := h.getModuleLevel(ctx, campID, mod.moduleType)
+		cost := lvl * 150
+		panelText += fmt.Sprintf("%s [%s Lvl %d] -> Cost: %d Scrap\n   %s\n\n", mod.emoji, mod.title, lvl, cost, mod.desc)
+		btn := selector.Data(fmt.Sprintf("%s %s (%d)", mod.emoji, mod.title, lvl+1), "upgrade_mod", mod.moduleType)
+		rows = append(rows, selector.Row(btn))
+	}
+
+	panelText += "🏗️━━━━━━━━━━━━━━━━━━━━━━🏗️"
+	selector.Inline(rows...)
+
+	return renderOrEdit(c, panelText, selector)
+}
+
 func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 

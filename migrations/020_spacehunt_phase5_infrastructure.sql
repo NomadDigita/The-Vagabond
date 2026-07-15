@@ -1,0 +1,25 @@
+-- ==============================================================================
+-- THE VAGABOND — SPACEHUNT REVIVAL: PHASE 5 - INFRASTRUCTURE BUILDINGS
+-- (020_spacehunt_phase5_infrastructure.sql)
+-- DB Engine: PostgreSQL (Supabase)
+--
+-- NOTE: main.go already runs everything automatically on every bot
+-- startup. This file is a readable reference only.
+-- ==============================================================================
+
+-- No new tables needed - all 11 new buildings ride on the existing
+-- generic `modules` table (encampment_id, type, level) that already
+-- powered Defense Grid turrets. New /infrastructure panel + menu button.
+--
+-- New building types (each with a REAL mechanical effect, not cosmetic):
+--   hangar            - unit capacity cap (50 + 20/level); crafting blocks at cap
+--   radar             - +2% intercept odds per level vs incoming spy satellites
+--   solar_panel       - +0.04 Electricity/tick per level, independent of Generator
+--   starport          - raid launch fuel cost -3%/level (cap 50%)
+--   technology_center - +0.03 Ether/tick per level
+--   trade_beacon      - Ether Shop conversion cost -3%/level (floor 50%)
+--   small_shield       - raid loot taken -2%/level (stacks with large_shield)
+--   large_shield       - raid loot taken -5%/level
+--   engineering_bay   - flat Metal+Crystal refund on every successful craft
+--   metal_mine        - +2.0 Metal/tick per level (passive, stacks with active mining)
+--   crystal_mine      - +0.8 Crystal/tick per level (passive, stacks with active mining)

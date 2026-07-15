@@ -692,6 +692,7 @@ func main() {
 	bot.Handle("/research", research.HandleResearchPanel)
 	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
+	bot.Handle("/infrastructure", camp.HandleInfrastructureGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
@@ -770,6 +771,7 @@ func main() {
 	bot.Handle("🚗 Logistics Vehicles", factory.HandleVehiclesPanel)
 	bot.Handle("♻️ Deconstruct Units", deconstruct.HandleDeconstructPanel)
 	bot.Handle("🛡️ Defense Grid", camp.HandleDefenseGridPanel)
+	bot.Handle("🏗️ Infrastructure Grid", camp.HandleInfrastructureGridPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
 	bot.Handle(telebot.OnText, nlp.HandleTextMessage)

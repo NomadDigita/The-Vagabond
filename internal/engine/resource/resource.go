@@ -34,6 +34,10 @@ type EncampmentState struct {
 	SalvageLvl        int
 	WarehouseLvl      int
 	ExtensionLvl      int
+	SolarPanelLvl     int
+	TechCenterLvl     int
+	MetalMineLvl      int
+	CrystalMineLvl    int
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
@@ -55,6 +59,10 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT res.production_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as production_tech_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'warehouse'), 0) as warehouse_lvl,
 			COALESCE(e.extension_lvl, 0) as extension_lvl,
+			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'solar_panel'), 0) as solar_panel_lvl,
+			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'technology_center'), 0) as tech_center_lvl,
+			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'metal_mine'), 0) as metal_mine_lvl,
+			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'crystal_mine'), 0) as crystal_mine_lvl,
 			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl
 		FROM encampments e
 		JOIN resources r ON r.encampment_id = e.id`
@@ -73,7 +81,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
 			&s.TroopCount, &s.LoanAmount, 
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
-			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.WarehouseLvl, &s.ExtensionLvl, &s.SalvageLvl,
+			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.WarehouseLvl, &s.ExtensionLvl, &s.SolarPanelLvl, &s.TechCenterLvl, &s.MetalMineLvl, &s.CrystalMineLvl, &s.SalvageLvl,
 		)
 		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
@@ -89,6 +97,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
 		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
+		electricityGenerated += 0.04 * float64(s.SolarPanelLvl) // Solar Panel: independent bonus generation
 
 		switch activeWeather {
 		case "solar_flare":
@@ -139,18 +148,22 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			newElectricity = math.Max(s.Electricity+electricityDiff, 0.0)
 		}
 
-		// Ether trickles in slowly, scaled by Technology research -
-		// matches SpaceHunt's Ether generation formula being tied to
-		// research progress rather than a dedicated building (until the
-		// Technology Center building lands in a later phase).
+		// Ether trickles in slowly, scaled by Technology research and
+		// boosted further by the Technology Center building.
 		etherGenerated := 0.02 * float64(s.ProductionTechLvl)
+		etherGenerated += 0.03 * float64(s.TechCenterLvl)
+
+		// Metal Mine / Crystal Mine: passive building-based generation,
+		// distinct from (and stacking with) the active miner-queue system.
+		metalGenerated := 2.0 * float64(s.MetalMineLvl)
+		crystalGenerated := 0.8 * float64(s.CrystalMineLvl)
 
 		updateQuery := `
 			UPDATE resources 
-			SET scrap = $1, rations = $2, electricity = $3, ether = ether + $5, last_ticked_at = CURRENT_TIMESTAMP 
+			SET scrap = $1, rations = $2, electricity = $3, ether = ether + $5, metal = metal + $6, crystal = crystal + $7, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
 		
-		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID, etherGenerated)
+		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID, etherGenerated, metalGenerated, crystalGenerated)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
 		}
