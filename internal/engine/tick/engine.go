@@ -1293,10 +1293,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "returning" {
-			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob, dsMob int
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob)
+			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob, dsMob, liberatorsMob, wraithsMob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob, &liberatorsMob, &wraithsMob)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7, liberators = liberators + $8, wraiths = wraiths + $9 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob, liberatorsMob, wraithsMob)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1, metal = metal + $2, crystal = crystal + $3 WHERE encampment_id = $4", r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
@@ -1335,8 +1335,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS)
+		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS, primaryLiberators, primaryWraiths int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS, &primaryLiberators, &primaryWraiths)
 
 		type coopContributor struct {
 			encampment_id string
@@ -1365,15 +1365,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs += h.mechs
 		}
 
-		// Destroyers and Bombers aren't yet draftable into co-op lobbies
-		// (only the raid creator's primary force can bring them), so no
-		// helper contribution to add here - just the primary force.
+		// Destroyers, Bombers, Liberators and Wraiths aren't yet draftable
+		// into co-op lobbies (only the raid creator's primary force can
+		// bring them), so no helper contribution to add here - just the
+		// primary force.
 		totDestroyers := primaryDestroyers
 		totBombers := primaryBombers
 		totBC := primaryBC
 		totDS := primaryDS
+		totLiberators := primaryLiberators
+		totWraiths := primaryWraiths
 
-		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC + totDS
+		attackForce := totSoldiers + totMechs + totDestroyers + totBombers + totBC + totDS + totLiberators + totWraiths
 
 		var attackerTanks int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(fusion_tanks, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&attackerTanks)
@@ -1397,6 +1400,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var defenderBioLvl int = 1
 		var defenderIntegrityTechLvl int = 1
 		var defenderTurretLevels int = 0
+		var defenderLightLaserLvl, defenderHeavyLaserLvl, defenderGaussCannonLvl, defenderIonCannonLvl, defenderPlasmaTurretLvl int
+		var defenderGuardians, defenderObservers int
 		var defenderHeroSuperpower string
 		var soldiersDefender, dronesDefender, jetsDefender, mechsDefender, scoutsDefender int
 		var defenderOrbitalBuffActive bool
@@ -1433,6 +1438,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx,
 				"SELECT COALESCE(SUM(level), 0) FROM modules WHERE encampment_id = $1 AND type IN ('light_laser', 'heavy_laser', 'gauss_cannon', 'ion_cannon', 'plasma_turret')",
 				r.defenderID.String).Scan(&defenderTurretLevels)
+
+			// Phase 6 "engage-weapon" mechanics: pull each turret type's
+			// level individually so each one can apply its own situational
+			// bonus below, instead of contributing to just one flat sum.
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'light_laser'", r.defenderID.String).Scan(&defenderLightLaserLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'heavy_laser'", r.defenderID.String).Scan(&defenderHeavyLaserLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'gauss_cannon'", r.defenderID.String).Scan(&defenderGaussCannonLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'ion_cannon'", r.defenderID.String).Scan(&defenderIonCannonLvl)
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'plasma_turret'", r.defenderID.String).Scan(&defenderPlasmaTurretLvl)
+
+			// Guardian/Observer: garrison-only units that never leave the
+			// base, so they're read straight from workshop_inventory rather
+			// than mobilized like Liberators/Wraiths.
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(guardians, 0), COALESCE(observers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderGuardians, &defenderObservers)
+
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
 			_ = tx.QueryRowContext(ctx, "SELECT (orbital_buff_until IS NOT NULL AND orbital_buff_until > CURRENT_TIMESTAMP) FROM encampments WHERE id = $1", r.defenderID.String).Scan(&defenderOrbitalBuffActive)
 		}
@@ -1448,7 +1468,39 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		offenseRatingModifier := 1.0
-		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15) + (float64(defenderTurretLevels) * 0.08) + math.Min(float64(scoutsDefender)*0.01, 0.20) + orbitalBonus
+
+		// Phase 6 "engage-weapon" mechanics: each of the 6 turret types now
+		// contributes its own differentiated slice of defense rating
+		// instead of one flat sum, and each situationally scales up
+		// against the attacker composition it's meant to counter. Rogue
+		// AI nests (no real defenderID) don't have individually-typed
+		// turrets, so they fall back to the original flat aggregate.
+		var turretDefenseBonus float64
+		if r.defenderID.Valid {
+			lightLaserBonus := float64(defenderLightLaserLvl) * 0.02 // cheap, flat anti-infantry baseline
+			heavyLaserBonus := float64(defenderHeavyLaserLvl) * 0.03 * (1.0 + math.Min(float64(totSoldiers)*0.005, 0.5))
+			gaussCannonBonus := float64(defenderGaussCannonLvl) * 0.05 * (1.0 + math.Min(float64(totMechs+totLiberators)*0.02, 1.0))
+			ionCannonBonus := float64(defenderIonCannonLvl) * 0.05 * (1.0 + math.Min(float64(totDestroyers+totWraiths)*0.03, 1.0))
+			plasmaTurretBonus := float64(defenderPlasmaTurretLvl) * 0.08 // top-tier, no counter needed
+			turretDefenseBonus = lightLaserBonus + heavyLaserBonus + gaussCannonBonus + ionCannonBonus + plasmaTurretBonus
+
+			// Wraith: stealth strike fighter. Its cloaking field partially
+			// blinds the target's Defense Grid before the engagement,
+			// shaving a chunk off the combined turret bonus.
+			if totWraiths > 0 {
+				turretDefenseBonus *= 1.0 - math.Min(float64(totWraiths)*0.03, 0.40)
+			}
+		} else {
+			turretDefenseBonus = float64(defenderTurretLevels) * 0.08
+		}
+
+		// Guardian: garrison-only heavy defense walker, adds directly to
+		// defense rating. Observer: garrison-only recon satellite, a
+		// smaller early-warning-flavored defense bonus (mirrors Scouts).
+		guardianBonus := math.Min(float64(defenderGuardians)*0.03, 1.0)
+		observerBonus := math.Min(float64(defenderObservers)*0.01, 0.15)
+
+		defenseRatingModifier := 1.0 + (float64(defLevel) * 0.15) + turretDefenseBonus + guardianBonus + observerBonus + math.Min(float64(scoutsDefender)*0.01, 0.20) + orbitalBonus
 
 		switch targetBiome {
 		case "forest":
@@ -1492,9 +1544,31 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		// Bomber: siege specialist. Rating scales up the more fortified the
 		// defender's Defense Grid is - a hard counter to turtled bases.
+		// Guardian is Bomber's own hard counter: the more Guardians a
+		// defender fields, the less a Bomber-heavy raid gains from this.
 		if totBombers > 0 {
 			bomberBonus := 1.0 + math.Min(float64(defenderTurretLevels)*0.05, 1.5)
-			attRating += float64(totBombers) * 18.0 * offenseRatingModifier * bomberBonus
+			guardianCounter := 1.0 - math.Min(float64(defenderGuardians)*0.03, 0.60)
+			attRating += float64(totBombers) * 18.0 * offenseRatingModifier * bomberBonus * guardianCounter
+		}
+
+		// Liberator: mid-tier capital gunship, flat attack rating with no
+		// situational bonus - the accessible stepping stone between
+		// Bombers and the Battlecruiser.
+		if totLiberators > 0 {
+			libUnit := content.MustFindUnit("liberator")
+			attRating += float64(totLiberators) * libUnit.AttackRating * offenseRatingModifier
+		}
+
+		// Wraith: stealth anti-air fighter. Rating scales up the more
+		// drones/jets the defender is fielding, same hard-counter shape
+		// as Destroyer, on top of the Defense-Grid-blinding effect it
+		// already applied to turretDefenseBonus above.
+		if totWraiths > 0 {
+			wrUnit := content.MustFindUnit("wraith")
+			wraithTargets := dronesDefender + jetsDefender
+			wraithBonus := 1.0 + math.Min(float64(wraithTargets)*0.02, 1.0)
+			attRating += float64(totWraiths) * wrUnit.AttackRating * offenseRatingModifier * wraithBonus
 		}
 
 		// Battlecruiser: top-tier capital ship, flat massive attack rating
@@ -1601,22 +1675,28 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			bomberToughness    = 4.0
 			bcToughness        = 20.0
 			dsToughness        = 150.0
+			liberatorToughness = 8.0
+			wraithToughness    = 3.0
 		)
 
-		var lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS int
-		specialistPool := totDestroyers + totBombers + totBC + totDS
+		var lostAttDestroyers, lostAttBombers, lostAttBC, lostAttDS, lostAttLiberators, lostAttWraiths int
+		specialistPool := totDestroyers + totBombers + totBC + totDS + totLiberators + totWraiths
 		if specialistPool > 0 {
 			weightedToughness := (float64(totDestroyers)*destroyerToughness +
 				float64(totBombers)*bomberToughness +
 				float64(totBC)*bcToughness +
-				float64(totDS)*dsToughness) / float64(specialistPool)
+				float64(totDS)*dsToughness +
+				float64(totLiberators)*liberatorToughness +
+				float64(totWraiths)*wraithToughness) / float64(specialistPool)
 
 			effectiveDbCas := int(float64(dbCas) / weightedToughness)
 
 			lostAttDestroyers = int(float64(effectiveDbCas) * float64(totDestroyers) / float64(specialistPool))
 			lostAttBombers = int(float64(effectiveDbCas) * float64(totBombers) / float64(specialistPool))
 			lostAttBC = int(float64(effectiveDbCas) * float64(totBC) / float64(specialistPool))
-			lostAttDS = effectiveDbCas - lostAttDestroyers - lostAttBombers - lostAttBC
+			lostAttLiberators = int(float64(effectiveDbCas) * float64(totLiberators) / float64(specialistPool))
+			lostAttWraiths = int(float64(effectiveDbCas) * float64(totWraiths) / float64(specialistPool))
+			lostAttDS = effectiveDbCas - lostAttDestroyers - lostAttBombers - lostAttBC - lostAttLiberators - lostAttWraiths
 			if lostAttDestroyers > primaryDestroyers {
 				lostAttDestroyers = primaryDestroyers
 			}
@@ -1625,6 +1705,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			}
 			if lostAttBC > primaryBC {
 				lostAttBC = primaryBC
+			}
+			if lostAttLiberators > primaryLiberators {
+				lostAttLiberators = primaryLiberators
+			}
+			if lostAttWraiths > primaryWraiths {
+				lostAttWraiths = primaryWraiths
 			}
 			if lostAttDS < 0 {
 				lostAttDS = 0
@@ -1640,8 +1726,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		newAttBombers := primaryBombers - lostAttBombers
 		newAttBC := primaryBC - lostAttBC
 		newAttDS := primaryDS - lostAttDS
+		newAttLiberators := primaryLiberators - lostAttLiberators
+		newAttWraiths := primaryWraiths - lostAttWraiths
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6, deathstars_mobilized = $7 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC, newAttDS)
+		_, _ = tx.ExecContext(ctx, "UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $4, bombers_mobilized = $5, battlecruisers_mobilized = $6, deathstars_mobilized = $7, liberators_mobilized = $8, wraiths_mobilized = $9 WHERE raid_id = $3", newAttSols, newAttMechs, r.id, newAttDestroyers, newAttBombers, newAttBC, newAttDS, newAttLiberators, newAttWraiths)
 
 		attackerCasualties := (totSoldiers + totMechs) - (newAttSols + newAttMechs)
 
@@ -1745,6 +1833,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				{Emoji: "🤖", Label: "Mechs", Count: totMechs},
 				{Emoji: "💥", Label: "Destroyers", Count: totDestroyers},
 				{Emoji: "🛩️", Label: "Bombers", Count: totBombers},
+				{Emoji: "🦅", Label: "Liberators", Count: totLiberators},
+				{Emoji: "👻", Label: "Wraiths", Count: totWraiths},
 				{Emoji: "🚢👑", Label: "Battlecruisers", Count: totBC},
 				{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: totDS},
 			},
@@ -1759,6 +1849,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				{Emoji: "🤖", Label: "Mechs", Count: lostAttMechs},
 				{Emoji: "💥", Label: "Destroyers", Count: lostAttDestroyers},
 				{Emoji: "🛩️", Label: "Bombers", Count: lostAttBombers},
+				{Emoji: "🦅", Label: "Liberators", Count: lostAttLiberators},
+				{Emoji: "👻", Label: "Wraiths", Count: lostAttWraiths},
 				{Emoji: "🚢👑", Label: "Battlecruisers", Count: lostAttBC},
 				{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: lostAttDS},
 			},
@@ -1850,9 +1942,23 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var haulers int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&haulers)
 
+			var cargoMk1, cargoMk2, cargoMk3 int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(cargo_mk1, 0), COALESCE(cargo_mk2, 0), COALESCE(cargo_mk3, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&cargoMk1, &cargoMk2, &cargoMk3)
+
 			weightFactor := (primaryShare + primaryMetalShare + primaryCrystalShare) / 5000.0
 			if haulers > 0 {
 				weightFactor *= 0.50
+			}
+			// Cargo Ship tiers stack on top of a Hauler's base reduction,
+			// each tier cutting further into the return-march loot penalty.
+			if cargoMk1 > 0 {
+				weightFactor *= 0.90
+			}
+			if cargoMk2 > 0 {
+				weightFactor *= 0.80
+			}
+			if cargoMk3 > 0 {
+				weightFactor *= 0.65
 			}
 
 			// The return trip is anchored to the SAME distance as the

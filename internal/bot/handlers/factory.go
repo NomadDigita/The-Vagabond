@@ -75,12 +75,18 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	}
 
 	var soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars int
-	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0) FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars)
+	var liberators, wraiths, observers, guardians, piercingMissiles int
+	queryInv := `SELECT soldiers, drones, mechs, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0), COALESCE(observers,0), COALESCE(guardians,0), COALESCE(piercing_missiles,0) FROM workshop_inventory WHERE encampment_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&soldiers, &drones, &mechs, &nukes, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars, &liberators, &wraiths, &observers, &guardians, &piercingMissiles)
 
 	scoutUnit, _ := content.FindUnit("scout")
 	bcUnit, _ := content.FindUnit("battlecruiser")
 	dsUnit, _ := content.FindUnit("deathstar")
+	libUnit, _ := content.FindUnit("liberator")
+	wrUnit, _ := content.FindUnit("wraith")
+	obsUnit, _ := content.FindUnit("observer")
+	gdUnit, _ := content.FindUnit("guardian")
+	pmUnit, _ := content.FindUnit("piercing_missile")
 
 	panelText := fmt.Sprintf(
 		"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\n"+
@@ -91,7 +97,10 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🤖 Mechs: %d  |  ☢️ Nuclear Weapons: %d\n"+
 			"💥 Destroyers: %d  |  🛩️ Bombers: %d\n"+
 			"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\n"+
-			"🌑💀 Doomsday Rigs: %d\n\n"+
+			"🌑💀 Doomsday Rigs: %d\n"+
+			"🦅 Liberators: %d  |  👻 Wraiths: %d\n"+
+			"👁️ Observers: %d  |  🛡️🤖 Guardians: %d\n"+
+			"🎯☢️ Piercing Missiles: %d\n\n"+
 			"⚒️ MANUFACTURING BLUEPRINTS ⚒️\n"+
 			"🪖 [Soldier] ➜ 💰50 Rations, 🔩10 Metal ➜ ⚔️ +10 Offense\n"+
 			"🛰️ [Tactical Drone] ➜ 🔩100 Metal, 💎10 Crystal ➜ 🕵️ Spy Satellite / 🚨 Interceptor\n"+
@@ -102,11 +111,21 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🛵 [%s] ➜ 🔩%.0f Metal ➜ %s\n"+
 			"🚢👑 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
 			"🌑💀 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal, 🧠%.0f Neuro Cores ➜ %s\n"+
+			"🦅 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
+			"👻 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
+			"👁️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
+			"🛡️🤖 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
+			"🎯☢️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
 			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭",
-		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars,
+		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars, liberators, wraiths, observers, guardians, piercingMissiles,
 		scoutUnit.Title, scoutUnit.Cost["metal"], scoutUnit.Flavor,
 		bcUnit.Title, bcUnit.Cost["metal"], bcUnit.Cost["crystal"], bcUnit.Flavor,
 		dsUnit.Title, dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"], dsUnit.Flavor,
+		libUnit.Title, libUnit.Cost["metal"], libUnit.Cost["crystal"], libUnit.Flavor,
+		wrUnit.Title, wrUnit.Cost["metal"], wrUnit.Cost["crystal"], wrUnit.Flavor,
+		obsUnit.Title, obsUnit.Cost["metal"], obsUnit.Cost["crystal"], obsUnit.Flavor,
+		gdUnit.Title, gdUnit.Cost["metal"], gdUnit.Cost["crystal"], gdUnit.Flavor,
+		pmUnit.Title, pmUnit.Cost["metal"], pmUnit.Cost["crystal"], pmUnit.Flavor,
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -120,6 +139,11 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	btnCraftScout := selector.Data("🛵 Build Scout", "craft_item", "scout")
 	btnCraftBC := selector.Data("🚢👑 Forge Battlecruiser", "craft_item", "battlecruiser")
 	btnCraftDS := selector.Data("🌑💀 Forge Doomsday Rig", "craft_item", "deathstar")
+	btnCraftLiberator := selector.Data("🦅 Forge Liberator", "craft_item", "liberator")
+	btnCraftWraith := selector.Data("👻 Forge Wraith", "craft_item", "wraith")
+	btnCraftObserver := selector.Data("👁️ Build Observer", "craft_item", "observer")
+	btnCraftGuardian := selector.Data("🛡️🤖 Forge Guardian", "craft_item", "guardian")
+	btnCraftPiercing := selector.Data("🎯☢️ Forge Piercing Missile", "craft_item", "piercing_missile")
 
 	selector.Inline(
 		selector.Row(btnCraftSoldier, btnCraftDrone),
@@ -127,6 +151,9 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		selector.Row(btnCraftDestroyer, btnCraftBomber),
 		selector.Row(btnCraftScout, btnCraftBC),
 		selector.Row(btnCraftDS),
+		selector.Row(btnCraftLiberator, btnCraftWraith),
+		selector.Row(btnCraftObserver, btnCraftGuardian),
+		selector.Row(btnCraftPiercing),
 	)
 
 	return renderOrEdit(c, panelText, selector)
@@ -153,30 +180,43 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	}
 
 	var buggies, ships, jets, haulers, tankers, rigs int
+	var cargoMk1, cargoMk2, cargoMk3 int
 	queryInv := `
 		SELECT 
 			COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), 
-			COALESCE(haulers, 0), COALESCE(tankers, 0), COALESCE(rigs, 0) 
+			COALESCE(haulers, 0), COALESCE(tankers, 0), COALESCE(rigs, 0),
+			COALESCE(cargo_mk1, 0), COALESCE(cargo_mk2, 0), COALESCE(cargo_mk3, 0)
 		FROM workshop_inventory 
 		WHERE encampment_id = $1`
 	
-	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&buggies, &ships, &jets, &haulers, &tankers, &rigs)
+	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&buggies, &ships, &jets, &haulers, &tankers, &rigs, &cargoMk1, &cargoMk2, &cargoMk3)
+
+	cm1Unit, _ := content.FindUnit("cargo_mk1")
+	cm2Unit, _ := content.FindUnit("cargo_mk2")
+	cm3Unit, _ := content.FindUnit("cargo_mk3")
 
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🚗 LOGISTICS HANGAR FORGE\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"🚗 Scrap Buggies: %d | ⛵ Clipper Ships: %d | ✈️ Cargo Jets: %d\n"+
-			"🚛 Resource Haulers: %d | 🛢️ Fuel Tankers: %d | 🔧 Recovery Rigs: %d\n\n"+
+			"🚛 Resource Haulers: %d | 🛢️ Fuel Tankers: %d | 🔧 Recovery Rigs: %d\n"+
+			"🚚 Cargo Mk I: %d | 🚚🚚 Cargo Mk II: %d | 🚚🚚🚚 Cargo Mk III: %d\n\n"+
 			"MANUFACTURING BLUEPRINTS:\n"+
 			"🚗 [Scrap Buggy] — Cost: 100 Metal, 20 Oil (Land travel +25%% speed)\n"+
 			"⛵ [Clipper Ship] — Cost: 300 Metal (Required to cross oceans)\n"+
 			"✈️ [Cargo Jet] — Cost: 1000 Metal, 200 Hydrogen, 100 Oil (Reduces travel to flat 2h)\n\n"+
 			"🚛 [Resource Hauler] — Cost: 500 Metal, 50 Oil (+5,000 battle loot cap)\n"+
 			"🛡️ [Fuel Tanker] — Cost: 400 Metal, 100 Hydrogen (-20%% march fuel costs)\n"+
-			"🛠️ [Recovery Rig] — Cost: 600 Metal, 50 Iron (-15%% mechanical casualties)\n"+
+			"🛠️ [Recovery Rig] — Cost: 600 Metal, 50 Iron (-15%% mechanical casualties)\n\n"+
+			"🚚 [%s] ➜ 🔩%.0f Metal ➜ Further reduces return-march loot weight penalty\n"+
+			"🚚🚚 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ Substantially reduces return-march loot weight penalty\n"+
+			"🚚🚚🚚 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ Massively reduces return-march loot weight penalty\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		buggies, ships, jets, haulers, tankers, rigs,
+		buggies, ships, jets, haulers, tankers, rigs, cargoMk1, cargoMk2, cargoMk3,
+		cm1Unit.Title, cm1Unit.Cost["metal"],
+		cm2Unit.Title, cm2Unit.Cost["metal"], cm2Unit.Cost["crystal"],
+		cm3Unit.Title, cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"],
 	)
 
 	selector := &gopkg.ReplyMarkup{}
@@ -186,12 +226,16 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	btnCraftHauler := selector.Data("🚛 Craft Hauler", "craft_item", "hauler")
 	btnCraftTanker := selector.Data("🛡️ Craft Tanker", "craft_item", "tanker")
 	btnCraftRig := selector.Data("🛠️ Craft Recovery Rig", "craft_item", "rig")
+	btnCraftCargo1 := selector.Data("🚚 Craft Cargo Mk I", "craft_item", "cargo_mk1")
+	btnCraftCargo2 := selector.Data("🚚🚚 Craft Cargo Mk II", "craft_item", "cargo_mk2")
+	btnCraftCargo3 := selector.Data("🚚🚚🚚 Craft Cargo Mk III", "craft_item", "cargo_mk3")
 
 	selector.Inline(
 		selector.Row(btnCraftBuggy, btnCraftShip),
 		selector.Row(btnCraftJet),
 		selector.Row(btnCraftHauler, btnCraftTanker),
 		selector.Row(btnCraftRig),
+		selector.Row(btnCraftCargo1, btnCraftCargo2, btnCraftCargo3),
 	)
 
 	return renderOrEdit(c, panelText, selector)
@@ -233,7 +277,8 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	_ = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(soldiers,0)+COALESCE(drones,0)+COALESCE(mechs,0)+COALESCE(nukes,0)+COALESCE(buggies,0)+COALESCE(ships,0)+COALESCE(jets,0)+
 		       COALESCE(haulers,0)+COALESCE(tankers,0)+COALESCE(rigs,0)+COALESCE(destroyers,0)+COALESCE(bombers,0)+COALESCE(scouts,0)+
-		       COALESCE(battlecruisers,0)+COALESCE(deathstars,0)
+		       COALESCE(battlecruisers,0)+COALESCE(deathstars,0)+COALESCE(liberators,0)+COALESCE(wraiths,0)+COALESCE(observers,0)+
+		       COALESCE(guardians,0)+COALESCE(piercing_missiles,0)+COALESCE(cargo_mk1,0)+COALESCE(cargo_mk2,0)+COALESCE(cargo_mk3,0)
 		FROM workshop_inventory WHERE encampment_id = $1`, campID).Scan(&totalUnits)
 
 	if totalUnits >= maxCapacity {
@@ -370,6 +415,78 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 650.0 WHERE encampment_id = $1", campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
 		successAlert = "🔧 Recovery Rig constructed!"
+
+	case "liberator":
+		libUnit, _ := content.FindUnit("liberator")
+		if metal < libUnit.Cost["metal"] || crystal < libUnit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", libUnit.Cost["metal"], libUnit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", libUnit.Cost["metal"], libUnit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET liberators = liberators + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🦅 Liberator forged successfully!"
+
+	case "wraith":
+		wrUnit, _ := content.FindUnit("wraith")
+		if metal < wrUnit.Cost["metal"] || crystal < wrUnit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", wrUnit.Cost["metal"], wrUnit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", wrUnit.Cost["metal"], wrUnit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET wraiths = wraiths + 1 WHERE encampment_id = $1", campID)
+		successAlert = "👻 Wraith forged successfully - cloaking field online!"
+
+	case "observer":
+		obsUnit, _ := content.FindUnit("observer")
+		if metal < obsUnit.Cost["metal"] || crystal < obsUnit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", obsUnit.Cost["metal"], obsUnit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", obsUnit.Cost["metal"], obsUnit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET observers = observers + 1 WHERE encampment_id = $1", campID)
+		successAlert = "👁️ Observer satellite deployed to garrison!"
+
+	case "guardian":
+		gdUnit, _ := content.FindUnit("guardian")
+		if metal < gdUnit.Cost["metal"] || crystal < gdUnit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", gdUnit.Cost["metal"], gdUnit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", gdUnit.Cost["metal"], gdUnit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET guardians = guardians + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🛡️🤖 Guardian walker garrisoned - Defense Grid reinforced!"
+
+	case "piercing_missile":
+		pmUnit, _ := content.FindUnit("piercing_missile")
+		if metal < pmUnit.Cost["metal"] || crystal < pmUnit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", pmUnit.Cost["metal"], pmUnit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", pmUnit.Cost["metal"], pmUnit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET piercing_missiles = piercing_missiles + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🎯☢️ Piercing Missile assembled - ready for Silo launch!"
+
+	case "cargo_mk1":
+		cm1Unit, _ := content.FindUnit("cargo_mk1")
+		if metal < cm1Unit.Cost["metal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal.", cm1Unit.Cost["metal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1 WHERE encampment_id = $2", cm1Unit.Cost["metal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk1 = cargo_mk1 + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🚚 Cargo Ship Mk I constructed!"
+
+	case "cargo_mk2":
+		cm2Unit, _ := content.FindUnit("cargo_mk2")
+		if metal < cm2Unit.Cost["metal"] || crystal < cm2Unit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", cm2Unit.Cost["metal"], cm2Unit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", cm2Unit.Cost["metal"], cm2Unit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk2 = cargo_mk2 + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🚚🚚 Cargo Ship Mk II constructed!"
+
+	case "cargo_mk3":
+		cm3Unit, _ := content.FindUnit("cargo_mk3")
+		if metal < cm3Unit.Cost["metal"] || crystal < cm3Unit.Cost["crystal"] {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"])})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"], campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk3 = cargo_mk3 + 1 WHERE encampment_id = $1", campID)
+		successAlert = "🚚🚚🚚 Cargo Ship Mk III constructed!"
 	}
 
 	// Engineering Bay: reduces effective material waste on any successful
@@ -393,7 +510,8 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		_ = c.Respond(&gopkg.CallbackResponse{Text: successAlert})
 	}
 
-	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" {
+	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" ||
+		item == "cargo_mk1" || item == "cargo_mk2" || item == "cargo_mk3" {
 		return h.HandleVehiclesPanel(c)
 	}
 	return h.HandleRecruitPanel(c)

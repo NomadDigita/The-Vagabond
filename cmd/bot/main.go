@@ -559,6 +559,26 @@ func executeStartupMigrations(db *sql.DB) {
 			autopilot_enabled  BOOLEAN NOT NULL DEFAULT FALSE,
 			updated_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		// --- Phase 6: Engage-weapon turret differentiation + remaining
+		// new units (Liberator, Observer, Wraith, Piercing Missile,
+		// Guardian, Cargo Ship Mk I/II/III). See
+		// migrations/022_spacehunt_phase6_weapons_and_units.sql for the
+		// annotated standalone copy.
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS liberators INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS observers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS wraiths INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS piercing_missiles INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS guardians INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS cargo_mk1 INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS cargo_mk2 INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS cargo_mk3 INT DEFAULT 0;`,
+
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS liberators INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS wraiths INT DEFAULT 0;`,
+
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS liberators_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS wraiths_mobilized INT DEFAULT 0;`,
 	}
 
 	for _, stmt := range migrations {
@@ -915,6 +935,7 @@ func main() {
 	bot.Handle("\fmutate_mod", camp.HandleMutationCallback)
 	bot.Handle("\fjoin_queue", arena.HandleJoinQueueCallback)
 	bot.Handle("\flaunch_icbm", silo.HandleLaunchICBMCallback)
+	bot.Handle("\flaunch_piercing", silo.HandleLaunchPiercingMissileCallback)
 	bot.Handle("\fmine_action", camp.HandleMineCallback)
 	bot.Handle("\fhero_action", hero.HandleHeroCallback)
 	bot.Handle("\flaunch_interceptor", combat.HandleLaunchInterceptor)

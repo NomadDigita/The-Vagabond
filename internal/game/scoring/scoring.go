@@ -25,6 +25,8 @@ const ScoreExpr = `(
 		     + (buggies * 80) + (ships * 100) + (jets * 150) + (haulers * 120)
 		     + (tankers * 130) + (rigs * 140) + (destroyers * 300) + (bombers * 450)
 		     + (scouts * 20) + (battlecruisers * 1500)
+		     + (liberators * 700) + (wraiths * 350) + (observers * 30) + (guardians * 200)
+		     + (piercing_missiles * 800) + (cargo_mk1 * 100) + (cargo_mk2 * 180) + (cargo_mk3 * 280)
 		FROM workshop_inventory w WHERE w.encampment_id = e.id
 	), 0)
 )`
@@ -36,5 +38,7 @@ const MilitaryScoreExpr = `COALESCE((
 	     + (buggies * 80) + (ships * 100) + (jets * 150) + (haulers * 120)
 	     + (tankers * 130) + (rigs * 140) + (destroyers * 300) + (bombers * 450)
 	     + (scouts * 20) + (battlecruisers * 1500)
+	     + (liberators * 700) + (wraiths * 350) + (observers * 30) + (guardians * 200)
+	     + (piercing_missiles * 800) + (cargo_mk1 * 100) + (cargo_mk2 * 180) + (cargo_mk3 * 280)
 	FROM workshop_inventory w WHERE w.encampment_id = e.id
 ), 0)`

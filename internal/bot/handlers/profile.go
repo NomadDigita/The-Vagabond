@@ -488,12 +488,16 @@ func (h *ProfileHandler) HandleUnits(c telebot.Context) error {
 	}
 
 	var soldiers, drones, mechs, nukes, buggies, ships, jets, haulers, tankers, rigs, destroyers, bombers, scouts, battlecruisers, deathstars int
+	var liberators, wraiths, observers, guardians, piercingMissiles, cargoMk1, cargoMk2, cargoMk3 int
 	query := `SELECT COALESCE(soldiers,0), COALESCE(drones,0), COALESCE(mechs,0), COALESCE(nukes,0), 
 	          COALESCE(buggies,0), COALESCE(ships,0), COALESCE(jets,0), 
 	          COALESCE(haulers,0), COALESCE(tankers,0), COALESCE(rigs,0),
-	          COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0)
+	          COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0),
+	          COALESCE(liberators,0), COALESCE(wraiths,0), COALESCE(observers,0), COALESCE(guardians,0), COALESCE(piercing_missiles,0),
+	          COALESCE(cargo_mk1,0), COALESCE(cargo_mk2,0), COALESCE(cargo_mk3,0)
 	          FROM workshop_inventory WHERE encampment_id = $1`
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars)
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars,
+		&liberators, &wraiths, &observers, &guardians, &piercingMissiles, &cargoMk1, &cargoMk2, &cargoMk3)
 
 	var marchingCount int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND state IN ('marching', 'engaged', 'returning')", campID).Scan(&marchingCount)
@@ -512,12 +516,17 @@ func (h *ProfileHandler) HandleUnits(c telebot.Context) error {
 			"🛵 Scouts: %d\n"+
 			"🚢👑 Battlecruisers: %d\n"+
 			"🌑💀 Doomsday Rigs: %d\n"+
+			"🦅 Liberators: %d | 👻 Wraiths: %d\n"+
+			"👁️ Observers: %d | 🛡️🤖 Guardians: %d\n"+
+			"🎯☢️ Piercing Missiles: %d\n"+
 			"🚗 Buggies: %d | ⛵ Ships: %d | ✈️ Jets: %d\n"+
-			"🚛 Haulers: %d | 🛡️ Tankers: %d | 🔧 Rigs: %d\n\n"+
+			"🚛 Haulers: %d | 🛡️ Tankers: %d | 🔧 Rigs: %d\n"+
+			"🚚 Cargo Mk I: %d | 🚚🚚 Mk II: %d | 🚚🚚🚚 Mk III: %d\n\n"+
 			"🚀 ON ACTIVE MISSIONS: %d fleet(s) deployed (check /missions)\n"+
 			"🪖━━━━━━━━━━━━━━━━━━━━━━🪖",
 		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars,
-		buggies, ships, jets, haulers, tankers, rigs, marchingCount,
+		liberators, wraiths, observers, guardians, piercingMissiles,
+		buggies, ships, jets, haulers, tankers, rigs, cargoMk1, cargoMk2, cargoMk3, marchingCount,
 	)
 
 	return c.Send(panelText)

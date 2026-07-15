@@ -46,6 +46,14 @@ var deconstructTable = []deconstructRefund{
 	{"hauler", "🚛", "Resource Hauler", "haulers", map[string]float64{"metal": 220.0}},
 	{"tanker", "🛡️", "Fuel Tanker", "tankers", map[string]float64{"metal": 160.0, "hydrogen": 40.0}},
 	{"rig", "🔧", "Recovery Rig", "rigs", map[string]float64{"metal": 260.0}},
+	{"liberator", "🦅", "Liberator", "liberators", content.MustFindUnit("liberator").DeconstructRefund()},
+	{"wraith", "👻", "Wraith", "wraiths", content.MustFindUnit("wraith").DeconstructRefund()},
+	{"observer", "👁️", "Observer", "observers", content.MustFindUnit("observer").DeconstructRefund()},
+	{"guardian", "🛡️🤖", "Guardian", "guardians", content.MustFindUnit("guardian").DeconstructRefund()},
+	{"piercing_missile", "🎯☢️", "Piercing Missile", "piercing_missiles", content.MustFindUnit("piercing_missile").DeconstructRefund()},
+	{"cargo_mk1", "🚚", "Cargo Ship Mk I", "cargo_mk1", content.MustFindUnit("cargo_mk1").DeconstructRefund()},
+	{"cargo_mk2", "🚚🚚", "Cargo Ship Mk II", "cargo_mk2", content.MustFindUnit("cargo_mk2").DeconstructRefund()},
+	{"cargo_mk3", "🚚🚚🚚", "Cargo Ship Mk III", "cargo_mk3", content.MustFindUnit("cargo_mk3").DeconstructRefund()},
 }
 
 func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {
@@ -103,12 +111,16 @@ func (h *DeconstructHandler) fetchInventory(ctx context.Context, campID string) 
 	inventory := make(map[string]int)
 
 	var soldiers, drones, mechs, nukes, buggies, ships, jets, haulers, tankers, rigs, destroyers, bombers, scouts, battlecruisers, deathstars int
+	var liberators, wraiths, observers, guardians, piercingMissiles, cargoMk1, cargoMk2, cargoMk3 int
 	query := `SELECT COALESCE(soldiers,0), COALESCE(drones,0), COALESCE(mechs,0), COALESCE(nukes,0), 
 	          COALESCE(buggies,0), COALESCE(ships,0), COALESCE(jets,0), 
 	          COALESCE(haulers,0), COALESCE(tankers,0), COALESCE(rigs,0),
-	          COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0)
+	          COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(scouts,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0),
+	          COALESCE(liberators,0), COALESCE(wraiths,0), COALESCE(observers,0), COALESCE(guardians,0), COALESCE(piercing_missiles,0),
+	          COALESCE(cargo_mk1,0), COALESCE(cargo_mk2,0), COALESCE(cargo_mk3,0)
 	          FROM workshop_inventory WHERE encampment_id = $1`
-	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars)
+	err := h.DB.QueryRowContext(ctx, query, campID).Scan(&soldiers, &drones, &mechs, &nukes, &buggies, &ships, &jets, &haulers, &tankers, &rigs, &destroyers, &bombers, &scouts, &battlecruisers, &deathstars,
+		&liberators, &wraiths, &observers, &guardians, &piercingMissiles, &cargoMk1, &cargoMk2, &cargoMk3)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inventory, nil
 	} else if err != nil {
@@ -130,6 +142,14 @@ func (h *DeconstructHandler) fetchInventory(ctx context.Context, campID string) 
 	inventory["scouts"] = scouts
 	inventory["battlecruisers"] = battlecruisers
 	inventory["deathstars"] = deathstars
+	inventory["liberators"] = liberators
+	inventory["wraiths"] = wraiths
+	inventory["observers"] = observers
+	inventory["guardians"] = guardians
+	inventory["piercing_missiles"] = piercingMissiles
+	inventory["cargo_mk1"] = cargoMk1
+	inventory["cargo_mk2"] = cargoMk2
+	inventory["cargo_mk3"] = cargoMk3
 
 	return inventory, nil
 }
