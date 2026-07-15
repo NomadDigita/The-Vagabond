@@ -14,7 +14,10 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/anthropic"
+	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/gemini"
 	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/mock"
+	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/ollama"
+	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/openaicompat"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
@@ -150,6 +153,17 @@ func executeStartupMigrations(db *sql.DB) {
 				ALTER TABLE resources DROP COLUMN IF EXISTS silver;
 			END IF;
 		END $$;`,
+
+		// Bugfix (found live, 2026-07-15): CREATE TABLE IF NOT EXISTS
+		// resources is a no-op on any database where the table already
+		// existed before `ether`/`neuro_cores` were added to its column
+		// list above, so those two columns silently never got created on
+		// already-deployed databases. This broke internal/game/econadvisor
+		// ("column ether does not exist") and would have caused the same
+		// failure in internal/game/governor. Idempotent regardless of
+		// whether the table is brand new or years old.
+		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS ether DOUBLE PRECISION DEFAULT 0.00;`,
+		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS neuro_cores DOUBLE PRECISION DEFAULT 0.00;`,
 
 		`CREATE TABLE IF NOT EXISTS modules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -742,6 +756,12 @@ func main() {
 	aiConfig := ai.LoadConfig()
 	aiRegistry := ai.NewRegistry()
 	aiRegistry.Register(anthropic.New(aiConfig.AnthropicAPIKey, aiConfig.AnthropicModel))
+	aiRegistry.Register(openaicompat.New("openai", "https://api.openai.com/v1", aiConfig.OpenAIAPIKey, aiConfig.OpenAIModel, true))
+	aiRegistry.Register(openaicompat.New("deepseek", "https://api.deepseek.com/v1", aiConfig.DeepSeekAPIKey, aiConfig.DeepSeekModel, true))
+	aiRegistry.Register(openaicompat.New("qwen", aiConfig.QwenBaseURL, aiConfig.QwenAPIKey, aiConfig.QwenModel, true))
+	aiRegistry.Register(openaicompat.New("grok", "https://api.x.ai/v1", aiConfig.GrokAPIKey, aiConfig.GrokModel, true))
+	aiRegistry.Register(gemini.New(aiConfig.GeminiAPIKey, aiConfig.GeminiModel))
+	aiRegistry.Register(ollama.New(aiConfig.OllamaBaseURL, aiConfig.OllamaModel))
 	aiRegistry.Register(mock.New())
 	aiCostTracker := ai.NewPostgresCostTracker(db)
 	aiPermissions := ai.NewPermissionManager(db)
@@ -833,8 +853,12 @@ func main() {
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
 	bot.Handle("/governor", governorHandler.HandleGovernor)
 	bot.Handle("/governor_autopilot", governorHandler.HandleGovernorAutopilot)
+	bot.Handle("\fgov_refresh", governorHandler.HandleGovernorRefreshCallback)
+	bot.Handle("\fgov_toggle_autopilot", governorHandler.HandleGovernorToggleCallback)
 	bot.Handle("/fleet_commander", fleetCommanderHandler.HandleFleetCommander)
+	bot.Handle("\ffleet_refresh", fleetCommanderHandler.HandleFleetCommanderRefreshCallback)
 	bot.Handle("/economy_advisor", econAdvisorHandler.HandleEconomyAdvisor)
+	bot.Handle("\fecon_refresh", econAdvisorHandler.HandleEconomyAdvisorRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

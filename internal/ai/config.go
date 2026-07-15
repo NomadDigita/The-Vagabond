@@ -60,6 +60,49 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 
+	// OpenAIAPIKey / OpenAIModel configure the OpenAI provider
+	// (internal/ai/providers/openaicompat, registered as "openai").
+	OpenAIAPIKey string
+	OpenAIModel  string
+
+	// DeepSeekAPIKey / DeepSeekModel configure the DeepSeek provider
+	// (openaicompat, registered as "deepseek"). Note: as of 2026-07-15
+	// the legacy "deepseek-chat" model alias is scheduled for
+	// deprecation by DeepSeek on 2026-07-24 — the default below uses
+	// "deepseek-v4-flash" instead.
+	DeepSeekAPIKey string
+	DeepSeekModel  string
+
+	// QwenAPIKey / QwenModel / QwenBaseURL configure the Qwen provider
+	// (openaicompat, registered as "qwen") via Alibaba DashScope's
+	// OpenAI-compatible endpoint. QwenBaseURL defaults to the
+	// international (Singapore) endpoint; mainland China deployments
+	// should set it to the dashscope.aliyuncs.com equivalent.
+	QwenAPIKey  string
+	QwenModel   string
+	QwenBaseURL string
+
+	// GrokAPIKey / GrokModel configure the Grok/xAI provider
+	// (openaicompat, registered as "grok"). xAI's model lineup and
+	// naming have shifted repeatedly through 2026 — verify GrokModel
+	// against https://docs.x.ai/docs/models if recommendations seem
+	// to be failing with a model-not-found error.
+	GrokAPIKey string
+	GrokModel  string
+
+	// GeminiAPIKey / GeminiModel configure the Gemini provider
+	// (internal/ai/providers/gemini, registered as "gemini").
+	GeminiAPIKey string
+	GeminiModel  string
+
+	// OllamaBaseURL / OllamaModel configure the Ollama provider
+	// (internal/ai/providers/ollama, registered as "ollama") for
+	// self-hosted open-weight models. No API key is used. Empty
+	// OllamaBaseURL means the provider reports itself unavailable —
+	// it is never enabled by default.
+	OllamaBaseURL string
+	OllamaModel   string
+
 	// MaxUserCostPerDayUSD caps spend attributable to a single
 	// Telegram user across all features, per UTC day. Zero disables
 	// the per-user cap (not recommended in production).
@@ -130,9 +173,27 @@ func getenvString(key, def string) string {
 //	AI_FALLBACK_PROVIDERS      (comma-separated, default "mock")
 //	ANTHROPIC_API_KEY          (string, default "")
 //	ANTHROPIC_MODEL            (string, default "claude-sonnet-4-6")
+//	OPENAI_API_KEY             (string, default "")
+//	OPENAI_MODEL               (string, default "gpt-4o-mini")
+//	DEEPSEEK_API_KEY           (string, default "")
+//	DEEPSEEK_MODEL             (string, default "deepseek-v4-flash")
+//	QWEN_API_KEY               (string, default "")
+//	QWEN_MODEL                 (string, default "qwen-plus")
+//	QWEN_BASE_URL              (string, default DashScope international endpoint)
+//	GROK_API_KEY               (string, default "")
+//	GROK_MODEL                 (string, default "grok-4-fast")
+//	GEMINI_API_KEY             (string, default "")
+//	GEMINI_MODEL               (string, default "gemini-2.5-flash")
+//	OLLAMA_BASE_URL            (string, default "" — unset means disabled)
+//	OLLAMA_MODEL               (string, default "llama3.1")
 //	AI_MAX_USER_COST_USD_DAY   (float,  default 0.50)
 //	AI_MAX_GLOBAL_COST_USD_DAY (float,  default 25.00)
 //	AI_CACHE_TTL_SECONDS       (int,    default 120)
+//
+// Only ANTHROPIC_API_KEY is required for any real (non-mock) output;
+// every other provider activates automatically the moment its own key
+// is set, with no other code change needed — set only the ones you
+// have.
 func LoadConfig() *Config {
 	fallback := getenvString("AI_FALLBACK_PROVIDERS", "mock")
 	var order []string
@@ -144,11 +205,32 @@ func LoadConfig() *Config {
 	}
 
 	return &Config{
-		Enabled:                getenvBool("AI_ENABLED", true),
-		DefaultProvider:        getenvString("AI_DEFAULT_PROVIDER", "mock"),
-		FallbackOrder:          order,
-		AnthropicAPIKey:        os.Getenv("ANTHROPIC_API_KEY"),
-		AnthropicModel:         getenvString("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+		Enabled:         getenvBool("AI_ENABLED", true),
+		DefaultProvider: getenvString("AI_DEFAULT_PROVIDER", "mock"),
+		FallbackOrder:   order,
+
+		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicModel:  getenvString("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+
+		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+		OpenAIModel:  getenvString("OPENAI_MODEL", "gpt-4o-mini"),
+
+		DeepSeekAPIKey: os.Getenv("DEEPSEEK_API_KEY"),
+		DeepSeekModel:  getenvString("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+
+		QwenAPIKey:  os.Getenv("QWEN_API_KEY"),
+		QwenModel:   getenvString("QWEN_MODEL", "qwen-plus"),
+		QwenBaseURL: getenvString("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+
+		GrokAPIKey: os.Getenv("GROK_API_KEY"),
+		GrokModel:  getenvString("GROK_MODEL", "grok-4-fast"),
+
+		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:  getenvString("GEMINI_MODEL", "gemini-2.5-flash"),
+
+		OllamaBaseURL: os.Getenv("OLLAMA_BASE_URL"),
+		OllamaModel:   getenvString("OLLAMA_MODEL", "llama3.1"),
+
 		MaxUserCostPerDayUSD:   getenvFloat("AI_MAX_USER_COST_USD_DAY", 0.50),
 		MaxGlobalCostPerDayUSD: getenvFloat("AI_MAX_GLOBAL_COST_USD_DAY", 25.00),
 		CacheTTLSeconds:        getenvInt("AI_CACHE_TTL_SECONDS", 120),
