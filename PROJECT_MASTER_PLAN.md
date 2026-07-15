@@ -210,7 +210,7 @@ see §4 and the Phase C notes in §1.
 | A | AI Foundation | Done | — |
 | B | AI Planet Governor | Done (advisory-only; autopilot execution deferred, see §4) | A |
 | C | AI Fleet Commander | Done (PvE rogue-nest target only; PvP target lookup deferred, see §4) | A |
-| D | AI Economy Advisor | Not started | A |
+| D | AI Economy Advisor | Done | A |
 | E | AI Research Planner | Not started | A |
 | F | AI Battle Analyst | Not started | A |
 | G | AI Guild Assistant | Not started | A |
@@ -221,7 +221,31 @@ see §4 and the Phase C notes in §1.
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
 flow 100%, autopilot execution 0% (intentionally deferred). Fleet
 Commander: PvE recommend flow 100%, PvP target lookup 0% (deferred).
-Remaining gameplay-facing AI phases (D–J): 0%.
+Economy Advisor: 100%. Remaining gameplay-facing AI phases (E–J): 0%.
+
+### What Phase B built
+
+```
+internal/game/governor/
+├── prompt.go        Pure logic: Snapshot type, SystemPrompt, BuildUserPrompt
+│                     (deterministic — sorts modules so cache keys are stable),
+│                     ParseRecommendation (JSON with markdown-fence tolerance
+│                     and raw-text fallback), FormatForTelegram.
+├── prompt_test.go    7 passing unit tests, zero DB/network dependency.
+└── governor.go       Governor: BuildSnapshot (reads encampments/resources/
+                       modules/workshop_inventory/research_states — mirrors
+                       internal/engine/resource's COALESCE defaults so the
+                       Governor's view of "not built yet" agrees with the
+                       tick engine's), Recommend (calls ai.Service.Complete,
+                       stores both turns in ai_memory under scope
+                       "planet_governor"), AutopilotSetting/SetAutopilot
+                       (preference storage only — see ADR-007).
+```
+
+New table: `governor_settings` (encampment_id PK, autopilot_enabled).
+New commands: `/governor` (any player — read-only recommendation),
+`/governor_autopilot [on|off]` (any player — preference only, inert;
+see ADR-007).
 
 ### What Phase C built
 
@@ -264,23 +288,53 @@ becoming a fresher, cheaper recon tool than the game's real recon
 mechanic? Shipping that carelessly could quietly undercut the existing
 scouting gameplay loop, so it's deferred rather than rushed. See §4.
 
+### What Phase D built
+
+```
+internal/game/econadvisor/
+├── prompt.go         Pure logic: Snapshot (generic Resources map like
+│                      fleetcommander's FleetComposition, plus Modules,
+│                      bank balances/debt, own market listings, market-wide
+│                      stats per item type), SystemPrompt (requires every
+│                      action include a quantitative expected_gain per the
+│                      roadmap spec), deterministic BuildUserPrompt,
+│                      ParseRecommendation (fence tolerance + fallback),
+│                      FormatForTelegram.
+├── prompt_test.go     6 passing unit tests, zero DB/network dependency.
+└── advisor.go         Advisor: BuildSnapshot (resources table via explicit
+                        column list, modules, bank_accounts, own active
+                        market_exchange listings, market-wide stats grouped
+                        by item_type), Recommend (ties it together via
+                        ai.Service.Complete, persists to ai_memory scope
+                        "economy_advisor").
+```
+
+New command: `/economy_advisor` (any player — read-only recommendation
+with quantitative ROI estimates, bottleneck warnings, market timing,
+trading advice). No new DB table — reads existing resources, modules,
+bank_accounts, market_exchange.
+
+Note: deliberately kept independent of `governor` and `fleetcommander`
+packages (no shared import) even though all three read overlapping
+data (resources, modules) — see the package doc comment in
+`econadvisor/prompt.go` for the reasoning (isolation over reuse, at
+this small a duplication cost).
+
 ### Recommended next task
 
-**Phase D — AI Economy Advisor**, because:
-1. Like Phases B and C, it's fully recommend-only by roadmap design —
-   no execution-safety design needed, continuing the pattern that's
-   now proven twice.
-2. It naturally reuses `governor.Snapshot`-shaped data (resources,
-   modules) that Phase B already knows how to gather — Phase D is
-   mostly a different system prompt and a different structured output
-   shape over largely the same underlying data, plus market data from
-   `market_exchange`.
-3. Deferring the PvP-target question in Phase C longer gives more
-   time to think it through properly rather than needing an answer
-   under this session's momentum.
+**Phase E — AI Research Planner**, because:
+1. Continues the fully-recommend-only pattern (B, C, D) that needs no
+   new execution-safety design.
+2. It's the last of the "single-player analysis" style phases before
+   F (Battle Analyst, needs real battle data — check whether one now
+   exists from the parallel SpaceHunt Phase 6 combat work before
+   building), G (Guild Assistant, needs guild data from SpaceHunt
+   Phase 2), and H onward, which are more cross-cutting.
 
-**Before writing Phase D code:** read `internal/bot/handlers/exchange.go`
-and the `market_exchange` table for the existing trading data model.
+**Before writing Phase E code:** read `internal/bot/handlers/*` for
+any existing research/tech-tree handler (search for `research_states`
+usage beyond what governor/fleetcommander already read) to understand
+what research paths and costs already exist to plan around.
 
 ---
 
@@ -363,6 +417,13 @@ and the `market_exchange` table for the existing trading data model.
   command (`/fleet_commander`), no new tables. PvP target lookup and
   authoritative win/loss tracking explicitly deferred — see ADR-008,
   ADR-009. Recommended next task updated to Phase D.
+- **This session (continued):** Phase D (AI Economy Advisor)
+  implemented: pure prompt/parsing logic (`prompt.go`, 6 passing unit
+  tests) requiring quantitative expected-gain estimates per the
+  roadmap spec, DB-backed orchestration (`advisor.go`) reading
+  resources/modules/bank_accounts/market_exchange, 1 new bot command
+  (`/economy_advisor`), no new tables. Recommended next task updated
+  to Phase E.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
