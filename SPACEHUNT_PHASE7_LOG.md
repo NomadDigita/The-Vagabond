@@ -67,7 +67,7 @@ brief describes.
 | 4 | Hero Commander — manual garrison | **Partial** — "Manual Defense Garrison" panel lets a player lock/withdraw Soldiers/Mechs from the draftable pool (enforced, not just displayed). Still open: explicit "which hero leads this raid" picker UI (the DB link `raid_forces.hero_id` exists — confirm it's actually exposed before assuming it needs building), per-hero XP-from-battles-led, ability unlocks beyond the existing superpower. | `3e2195f` |
 | 2 | Bulk unit selection | **Done** — Step: x1/x10/x100/MAX toggle on the draft board (bulk moves now clamp instead of rejecting partial steps); `/add <n> <unit>`, `/remove <n> <unit>` text commands; `/deconstruct <n> <unit>` bulk text shortcut alongside the existing per-tap panel. | `f412147`→`60665b1` (rebased) |
 | 3 | Keyboard/UI audit | **Not started** | — |
-| 5 | Automation Agent limit bugs | **Partial** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. Asiwaju explicitly directed this session to go ahead (supersedes the item-9 hands-off default below for this specific fix). Still open: `collector`/`collector_omega`/`collector_precious` haven't been audited against their own caps yet (collector already respects `storageCap`; the two collector_omega/precious variants add Metal/Hydrogen/Crystal/Dollars/NeuroCores with no cap check at all — see item 9 note, needs a look). | `90caeef`, `53d1916` |
+| 5 | Automation Agent limit bugs | **Done** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. A third suspected gap (collector_omega/precious having no storage cap) was investigated and ruled out — see detailed note, it matches existing game-wide behavior for those resources. Asiwaju explicitly directed this session to go ahead (supersedes the item-9 hands-off default below for this specific fix). | `90caeef`, `53d1916` |
 | 6 | Doomsday unit balance | **Done** — hard cap of exactly 1 replaced with a level-scaled cap; attack rating and toughness bumped; a real missing-affordability-check bug (neuro_cores wasn't validated before deduction) fixed along the way. | `3fd86a5` |
 | 10 | World exploration (continents/sectors/discovery) | **Not started** — biggest single item left; needs new schema (sectors/continents, discovery state per player) | — |
 | 11 | Diplomacy (Known Bases, friend/enemy), long battles/reinforcements | **Not started** — long-battle round cap (currently 5 rounds max, see `engine.go` `r.roundNumber >= 5` draw condition) needs revisiting once reinforcement mechanics exist | — |
@@ -222,29 +222,29 @@ brief describes.
   that cap). Fixed by running the identical hangar-level + total-units
   query inside the military case and requiring `totalUnits <
   maxCapacity` alongside the existing resource check.
-- **Not yet audited**: `collector_omega` (Metal/Hydrogen) and
-  `collector_precious` (Crystal/Dollars/NeuroCores) modes add resources
-  every tick with **no storage cap check at all** — unlike plain
-  `collector`, which already respects `storageCap` (`TentLvl * 500`).
-  This looks like the same class of bug but wasn't in the original
-  two flagged cases, so it wasn't touched without separate sign-off.
-  Worth flagging back to Asiwaju before fixing.
+- **Not a bug, corrected from a prior note**: `collector_omega`
+  (Metal/Hydrogen) and `collector_precious` (Crystal/Dollars/
+  NeuroCores) add resources every tick with no storage cap check.
+  This was initially flagged as an open gap, but tracing every
+  `storageCap` reference in the codebase shows caps are applied
+  **only to Scrap/Rations/Electricity**, never to Metal/Crystal/
+  Hydrogen/Dollars/NeuroCores — including in the canonical passive
+  resource engine (`internal/engine/resource/resource.go`), where
+  Metal Mine/Crystal Mine building income is added completely
+  uncapped. The two collector modes are consistent with that
+  existing design, not a deviation from it. No fix needed here.
 
 ---
 
 ## 4. Next in line (recommended order)
 
-1. Item 5 — Automation limit bugs, remainder: `collector_omega` /
-   `collector_precious` resource-gain has no storage cap check at all
-   (see note above) — confirm with Asiwaju this is in-scope before
-   touching `internal/engine/agent` again.
-2. Item 3 — Keyboard audit (needs a menu-by-menu pass across
+1. Item 3 — Keyboard audit (needs a menu-by-menu pass across
    `internal/bot/keyboards` and every handler that sends a
    `ReplyMarkup`, checking for stale/missing keyboard replacement).
-3. Item 12 — expand world events beyond weather (Acid Rain/Radiation
+2. Item 12 — expand world events beyond weather (Acid Rain/Radiation
    Storm already exist; add EMP/Supply Crisis/Disease/Sandstorm,
    scope to continent rather than global).
-4. Item 10/11 — world exploration + diplomacy (biggest remaining
+3. Item 10/11 — world exploration + diplomacy (biggest remaining
    item, needs new schema; do this after the smaller items above so
    the schema design benefits from everything else being settled).
 5. Item 13 — Admin panel consolidation (mechanical, do last).
