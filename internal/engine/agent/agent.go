@@ -228,7 +228,24 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			var rations, metal float64
 			_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1", a.CampID).Scan(&rations, &metal)
 
-			if rations >= 50.0 && metal >= 10.0 {
+			// Same Hangar capacity rule enforced on the manual Recruit
+			// Soldier path (factory.go HandleCraftItemCallback):
+			// maxCapacity = 50 + hangarLvl*20, blocked once totalUnits
+			// hits that cap. The agent must not be able to auto-recruit
+			// past what a manual recruit would allow.
+			var hangarLvl int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", a.CampID).Scan(&hangarLvl)
+			maxCapacity := 50 + hangarLvl*20
+
+			var totalUnits int
+			_ = tx.QueryRowContext(ctx, `
+				SELECT COALESCE(soldiers,0)+COALESCE(drones,0)+COALESCE(mechs,0)+COALESCE(nukes,0)+COALESCE(buggies,0)+COALESCE(ships,0)+COALESCE(jets,0)+
+				       COALESCE(haulers,0)+COALESCE(tankers,0)+COALESCE(rigs,0)+COALESCE(destroyers,0)+COALESCE(bombers,0)+COALESCE(scouts,0)+
+				       COALESCE(battlecruisers,0)+COALESCE(deathstars,0)+COALESCE(liberators,0)+COALESCE(wraiths,0)+COALESCE(observers,0)+
+				       COALESCE(guardians,0)+COALESCE(piercing_missiles,0)+COALESCE(cargo_mk1,0)+COALESCE(cargo_mk2,0)+COALESCE(cargo_mk3,0)
+				FROM workshop_inventory WHERE encampment_id = $1`, a.CampID).Scan(&totalUnits)
+
+			if rations >= 50.0 && metal >= 10.0 && totalUnits < maxCapacity {
 				newRations := rations - 50.0
 				newMetal := metal - 10.0
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2, electricity = $3 WHERE encampment_id = $4", newRations, newMetal, newEnergy, a.CampID)
@@ -236,6 +253,9 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 
 				log.Printf("Agent [Military] auto-recruited 1 Soldier for outpost: %s", a.CampName)
 			} else {
+				if rations >= 50.0 && metal >= 10.0 && totalUnits >= maxCapacity {
+					log.Printf("Agent [Military] skipped recruit for outpost %s: Hangar full (%d/%d)", a.CampName, totalUnits, maxCapacity)
+				}
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 			}
 		}
