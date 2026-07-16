@@ -1418,7 +1418,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			dronesDefender = nest.Drones
 			jetsDefender = nest.Jets
 			defLevel = attackerCoreLvl
-			defenderTurretLevels = int(nest.TurretBonus / 0.08) // reuses the existing turret-bonus-per-level multiplier below
+
+			// Phase 7 AI scaling: the Nest now feeds the exact same
+			// per-subsystem fields a real defender does (Defense Grid,
+			// Guardians/Observers, research, shields, hero superpower)
+			// instead of a single flat fallback bonus, so it resolves
+			// through the identical combat code path below as any
+			// player base.
+			defenderTurretLevels = int(nest.TurretBonus / 0.08)
+			defenderLightLaserLvl = nest.LightLaserLvl
+			defenderHeavyLaserLvl = nest.HeavyLaserLvl
+			defenderGaussCannonLvl = nest.GaussCannonLvl
+			defenderIonCannonLvl = nest.IonCannonLvl
+			defenderPlasmaTurretLvl = nest.PlasmaTurretLvl
+			defenderGuardians = nest.Guardians
+			defenderObservers = nest.Observers
+			defenderIntegrityTechLvl = nest.IntegrityTechLvl
+			defenderShields = nest.Shields
+			defenderHeroSuperpower = nest.HeroSuperpower
 		} else {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers, 0), COALESCE(drones, 0), COALESCE(jets, 0), COALESCE(mechs, 0), COALESCE(scouts, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&soldiersDefender, &dronesDefender, &jetsDefender, &mechsDefender, &scoutsDefender)
 			_ = tx.QueryRowContext(ctx, "SELECT level FROM modules WHERE encampment_id = $1 AND type = 'tent'", r.defenderID.String).Scan(&defLevel)
@@ -1475,23 +1492,22 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		// against the attacker composition it's meant to counter. Rogue
 		// AI nests (no real defenderID) don't have individually-typed
 		// turrets, so they fall back to the original flat aggregate.
-		var turretDefenseBonus float64
-		if r.defenderID.Valid {
-			lightLaserBonus := float64(defenderLightLaserLvl) * 0.02 // cheap, flat anti-infantry baseline
-			heavyLaserBonus := float64(defenderHeavyLaserLvl) * 0.03 * (1.0 + math.Min(float64(totSoldiers)*0.005, 0.5))
-			gaussCannonBonus := float64(defenderGaussCannonLvl) * 0.05 * (1.0 + math.Min(float64(totMechs+totLiberators)*0.02, 1.0))
-			ionCannonBonus := float64(defenderIonCannonLvl) * 0.05 * (1.0 + math.Min(float64(totDestroyers+totWraiths)*0.03, 1.0))
-			plasmaTurretBonus := float64(defenderPlasmaTurretLvl) * 0.08 // top-tier, no counter needed
-			turretDefenseBonus = lightLaserBonus + heavyLaserBonus + gaussCannonBonus + ionCannonBonus + plasmaTurretBonus
+		// Phase 7: the Rogue Nest now carries individually-typed turret
+		// levels of its own (content.RogueNestComposition), so it runs
+		// through the exact same per-turret-type formula as a real
+		// player defender - no more flat-sum fallback branch.
+		lightLaserBonus := float64(defenderLightLaserLvl) * 0.02 // cheap, flat anti-infantry baseline
+		heavyLaserBonus := float64(defenderHeavyLaserLvl) * 0.03 * (1.0 + math.Min(float64(totSoldiers)*0.005, 0.5))
+		gaussCannonBonus := float64(defenderGaussCannonLvl) * 0.05 * (1.0 + math.Min(float64(totMechs+totLiberators)*0.02, 1.0))
+		ionCannonBonus := float64(defenderIonCannonLvl) * 0.05 * (1.0 + math.Min(float64(totDestroyers+totWraiths)*0.03, 1.0))
+		plasmaTurretBonus := float64(defenderPlasmaTurretLvl) * 0.08 // top-tier, no counter needed
+		turretDefenseBonus := lightLaserBonus + heavyLaserBonus + gaussCannonBonus + ionCannonBonus + plasmaTurretBonus
 
-			// Wraith: stealth strike fighter. Its cloaking field partially
-			// blinds the target's Defense Grid before the engagement,
-			// shaving a chunk off the combined turret bonus.
-			if totWraiths > 0 {
-				turretDefenseBonus *= 1.0 - math.Min(float64(totWraiths)*0.03, 0.40)
-			}
-		} else {
-			turretDefenseBonus = float64(defenderTurretLevels) * 0.08
+		// Wraith: stealth strike fighter. Its cloaking field partially
+		// blinds the target's Defense Grid before the engagement,
+		// shaving a chunk off the combined turret bonus.
+		if totWraiths > 0 {
+			turretDefenseBonus *= 1.0 - math.Min(float64(totWraiths)*0.03, 0.40)
 		}
 
 		// Guardian: garrison-only heavy defense walker, adds directly to

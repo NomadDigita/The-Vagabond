@@ -207,7 +207,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged' OR r.state = 'returning')
-		LIMIT 2`
+		ORDER BY r.resolve_time ASC`
 
 	rowsOut, err := h.DB.QueryContext(ctx, queryOutbound, campID)
 	outboundText := ""
@@ -256,28 +256,35 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		WHERE r.defender_id = $1 AND (r.state = 'marching' OR r.state = 'engaged')
-		LIMIT 1`
+		ORDER BY r.resolve_time ASC`
 
-	var attackerName, rState string
-	var resolveTime time.Time
-	err = h.DB.QueryRowContext(ctx, queryInbound, campID).Scan(&attackerName, &resolveTime, &rState)
+	rowsIn, errIn := h.DB.QueryContext(ctx, queryInbound, campID)
 	inboundText := ""
-	if errors.Is(err, sql.ErrNoRows) {
-		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected.\n\n"
-	} else if err != nil {
-		log.Printf("Inbound radar scan failed: %v", err)
-		inboundText = "📡 Static: Scanner interference detected.\n\n"
+	if errIn == nil {
+		defer rowsIn.Close()
+		for rowsIn.Next() {
+			var attackerName, rState string
+			var resolveTime time.Time
+			if scanErr := rowsIn.Scan(&attackerName, &resolveTime, &rState); scanErr == nil {
+				diff := resolveTime.UTC().Sub(time.Now().UTC())
+				timeLeft := int(diff.Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				if rState == "marching" {
+					inboundText += fmt.Sprintf("🚨 INBOUND INVASION WARNING!\n   Hostile Force: Outpost [%s]\n   March Arrival: %s (%ds remaining)\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+				} else {
+					inboundText += fmt.Sprintf("💥 BASE SIEGE UNDERWAY!\n   Invading Force: Outpost [%s]\n   Silo Impact Window: %s (%ds remaining)\n\n⚠️ TIP: Repair defensive modules immediately!\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+				}
+			}
+		}
+		rowsIn.Close()
 	} else {
-		diff := resolveTime.UTC().Sub(time.Now().UTC())
-		timeLeft := int(diff.Seconds())
-		if timeLeft < 0 {
-			timeLeft = 0
-		}
-		if rState == "marching" {
-			inboundText = fmt.Sprintf("🚨 INBOUND INVASION WARNING!\n   Hostile Force: Outpost [%s]\n   March Arrival: %s (%ds remaining)\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
-		} else {
-			inboundText = fmt.Sprintf("💥 BASE SIEGE UNDERWAY!\n   Invading Force: Outpost [%s]\n   Silo Impact Window: %s (%ds remaining)\n\n⚠️ TIP: Repair defensive modules immediately!\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
-		}
+		log.Printf("Inbound radar scan failed: %v", errIn)
+		inboundText = "📡 Static: Scanner interference detected.\n\n"
+	}
+	if inboundText == "" {
+		inboundText = "🛡️ INBOUND: Radar clean. No incoming hostile military vectors detected.\n\n"
 	}
 
 	querySpies := `
@@ -323,16 +330,53 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		spyText = "🛰️ ESPIONAGE: No active satellite link signals detected on local frequencies."
 	}
 
+	queryBossAttacks := `
+		SELECT wb.name, wba.state, wba.resolve_time
+		FROM world_boss_attacks wba
+		JOIN world_bosses wb ON wb.id = wba.boss_id
+		WHERE wba.encampment_id = $1 AND wba.state IN ('marching', 'engaged', 'returning')
+		ORDER BY wba.resolve_time ASC`
+
+	bossText := ""
+	rowsBoss, errBoss := h.DB.QueryContext(ctx, queryBossAttacks, campID)
+	if errBoss == nil {
+		defer rowsBoss.Close()
+		for rowsBoss.Next() {
+			var bossName, bState string
+			var resolveTime time.Time
+			if scanErr := rowsBoss.Scan(&bossName, &bState, &resolveTime); scanErr == nil {
+				diff := resolveTime.UTC().Sub(time.Now().UTC())
+				timeLeft := int(diff.Seconds())
+				if timeLeft < 0 {
+					timeLeft = 0
+				}
+				switch bState {
+				case "marching":
+					bossText += fmt.Sprintf("🐲 BOSS ASSAULT (MARCHING): Target: %s\n   ETA: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+				case "returning":
+					bossText += fmt.Sprintf("↩️ BOSS ASSAULT (RETURNING): Target: %s\n   Base Arrival: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+				default:
+					bossText += fmt.Sprintf("⚔️ BOSS ENGAGEMENT LIVE: Target: %s\n   Resolution: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+				}
+			}
+		}
+		rowsBoss.Close()
+	}
+	if bossText == "" {
+		bossText = "🐲 WORLD BOSS: No active engagements.\n\n"
+	}
+
 	panelText := fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🛸 ACTIVE EXPEDITION RADAR HUD\n"+
+			"🛸 ONGOING EVENTS: EXPEDITION RADAR HUD\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"%s"+
 			"%s"+
 			"%s"+
 			"📡 COGNITIVE SIGNAL SCANNER:\n"+
 			"%s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		outboundText, inboundText, spyText,
+		outboundText, inboundText, bossText, spyText,
 	)
 
 	selector.Inline(buttons...)
@@ -377,8 +421,32 @@ func (h *CombatHandler) HandleReconAICallback(c telebot.Context) error {
 		threat, campLevel, nest.Soldiers, nest.Mechs, nest.Drones, nest.Jets,
 	)
 
-	if nest.TurretBonus > 0 {
-		reportText += fmt.Sprintf("🏰 Dug-in Elite Guard Bonus: +%.0f%% defense rating\n", nest.TurretBonus*100)
+	if nest.LightLaserLvl+nest.HeavyLaserLvl+nest.GaussCannonLvl+nest.IonCannonLvl+nest.PlasmaTurretLvl > 0 {
+		reportText += "\n🛰️ DEFENSE GRID DETECTED:\n"
+		if nest.LightLaserLvl > 0 {
+			reportText += fmt.Sprintf("🔫 Light Laser: Lvl %d\n", nest.LightLaserLvl)
+		}
+		if nest.HeavyLaserLvl > 0 {
+			reportText += fmt.Sprintf("🔥 Heavy Laser: Lvl %d\n", nest.HeavyLaserLvl)
+		}
+		if nest.GaussCannonLvl > 0 {
+			reportText += fmt.Sprintf("🧲 Gauss Cannon: Lvl %d\n", nest.GaussCannonLvl)
+		}
+		if nest.IonCannonLvl > 0 {
+			reportText += fmt.Sprintf("⚡ Ion Cannon: Lvl %d\n", nest.IonCannonLvl)
+		}
+		if nest.PlasmaTurretLvl > 0 {
+			reportText += fmt.Sprintf("☄️ Plasma Turret: Lvl %d\n", nest.PlasmaTurretLvl)
+		}
+	}
+	if nest.Guardians > 0 || nest.Observers > 0 {
+		reportText += fmt.Sprintf("🛡️🤖 Guardians: %d | 👁️ Observers: %d\n", nest.Guardians, nest.Observers)
+	}
+	if nest.Shields > 0 {
+		reportText += fmt.Sprintf("🧿 Nuclear Shields: %d\n", nest.Shields)
+	}
+	if nest.HeroSuperpower != "" {
+		reportText += fmt.Sprintf("👑 WARLORD DETECTED: Faction Superpower - %s\n", nest.HeroSuperpower)
 	}
 
 	reportText += "\n💰 Loot Yield: Metal + Crystal + Scrap (defeat scales the amount)\n" +
