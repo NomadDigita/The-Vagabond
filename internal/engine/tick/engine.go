@@ -1735,7 +1735,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			destroyerToughness = 4.0
 			bomberToughness    = 4.0
 			bcToughness        = 20.0
-			dsToughness        = 150.0
+			dsToughness        = 200.0 // bumped alongside the Phase 7 attack rating rebalance (was 150.0)
 			liberatorToughness = 8.0
 			wraithToughness    = 3.0
 		)

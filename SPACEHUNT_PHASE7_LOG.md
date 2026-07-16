@@ -68,7 +68,7 @@ brief describes.
 | 2 | Bulk unit selection | **Done** — Step: x1/x10/x100/MAX toggle on the draft board (bulk moves now clamp instead of rejecting partial steps); `/add <n> <unit>`, `/remove <n> <unit>` text commands; `/deconstruct <n> <unit>` bulk text shortcut alongside the existing per-tap panel. | `f412147`→`60665b1` (rebased) |
 | 3 | Keyboard/UI audit | **Not started** | — |
 | 5 | Automation Agent limit bugs | **Not started** — needs a read of `internal/engine/agent` + Governor interaction to confirm what "ignores game limits" actually means today before touching anything (Governor/Automation files are explicitly hands-off per item 9 unless a fix is unavoidable — coordinate with `PROJECT_MASTER_PLAN.md` owner before editing anything under `internal/game/governor` or `internal/engine/agent`). | — |
-| 6 | Doomsday unit balance | **Not started** | — |
+| 6 | Doomsday unit balance | **Done** — hard cap of exactly 1 replaced with a level-scaled cap; attack rating and toughness bumped; a real missing-affordability-check bug (neuro_cores wasn't validated before deduction) fixed along the way. | `<pending>` |
 | 10 | World exploration (continents/sectors/discovery) | **Not started** — biggest single item left; needs new schema (sectors/continents, discovery state per player) | — |
 | 11 | Diplomacy (Known Bases, friend/enemy), long battles/reinforcements | **Not started** — long-battle round cap (currently 5 rounds max, see `engine.go` `r.roundNumber >= 5` draw condition) needs revisiting once reinforcement mechanics exist | — |
 | 12 | Dynamic World Events + notification engine | **Partially exists** — `internal/engine/world/weather.go` already drives Acid Rain/Radiation Storm effects on combat (see `engine.go` weather switch); notification *dispatcher* itself (`internal/engine/notifications`) is a working 3s-poll queue, not a stub. What's missing: more event types (EMP, Supply Crisis, Disease, Sandstorm from the brief), and continent/world-scoped broadcast rather than the current single global weather state. | — |
@@ -179,6 +179,24 @@ brief describes.
   exception, and per practical reality, it's the other workstream's
   active territory.
 
+### Doomsday Rig rebalance
+- `internal/game/content/units.go`: `AttackRating` 500.0 → 650.0; new
+  exported `MaxDoomsdayRigs(outpostLevel int) int` helper
+  (`1 + level/5`, capped at 10) — single source of truth for the cap,
+  used by both the craft handler and the recruitment panel display.
+- `internal/engine/tick/engine.go`: `dsToughness` 150.0 → 200.0, kept in
+  proportion with the attack rating bump.
+- `internal/bot/handlers/factory.go` (`HandleCraftCallback`, `"deathstar"`
+  case): replaced the hard `if currentDS >= 1` rejection with
+  `content.MaxDoomsdayRigs(campLvl)`. **Also fixed a real pre-existing
+  bug while in there**: the affordability check only tested
+  `metal`/`crystal`, never `neuro_cores` — a player with enough
+  metal/crystal but zero neuro_cores could previously still trigger the
+  deduction (going negative on that resource). Now checked alongside
+  the other two.
+- Recruitment panel (`HandleRecruitPanel`) now displays `Doomsday Rigs:
+  N / cap` instead of a bare count.
+
 ---
 
 ## 4. Next in line (recommended order)
@@ -186,15 +204,13 @@ brief describes.
 1. Item 5 — Automation limit bugs (read-first: confirm what "ignores
    game limits" means in the current Automation Agent before writing
    any fix; likely touches `internal/engine/agent`, coordinate first).
-2. Item 6 — Doomsday rebalance (self-contained stat tuning in
-   `internal/game/content/units.go` + raid combat math, low risk).
-3. Item 3 — Keyboard audit (needs a menu-by-menu pass across
+2. Item 3 — Keyboard audit (needs a menu-by-menu pass across
    `internal/bot/keyboards` and every handler that sends a
    `ReplyMarkup`, checking for stale/missing keyboard replacement).
-4. Item 12 — expand world events beyond weather (Acid Rain/Radiation
+3. Item 12 — expand world events beyond weather (Acid Rain/Radiation
    Storm already exist; add EMP/Supply Crisis/Disease/Sandstorm,
    scope to continent rather than global).
-5. Item 10/11 — world exploration + diplomacy (biggest remaining
+4. Item 10/11 — world exploration + diplomacy (biggest remaining
    item, needs new schema; do this after the smaller items above so
    the schema design benefits from everything else being settled).
-6. Item 13 — Admin panel consolidation (mechanical, do last).
+5. Item 13 — Admin panel consolidation (mechanical, do last).

@@ -88,6 +88,10 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	gdUnit, _ := content.FindUnit("guardian")
 	pmUnit, _ := content.FindUnit("piercing_missile")
 
+	var campLvl int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(level,1) FROM encampments WHERE id = $1", campID).Scan(&campLvl)
+	maxDS := content.MaxDoomsdayRigs(campLvl)
+
 	panelText := fmt.Sprintf(
 		"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\n"+
 			"🪖⚙️ BARRACKS RECRUITMENT FORGE ⚙️🪖\n"+
@@ -97,7 +101,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🤖 Mechs: %d  |  ☢️ Nuclear Weapons: %d\n"+
 			"💥 Destroyers: %d  |  🛩️ Bombers: %d\n"+
 			"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\n"+
-			"🌑💀 Doomsday Rigs: %d\n"+
+			"🌑💀 Doomsday Rigs: %d / %d (cap rises with Outpost level)\n"+
 			"🦅 Liberators: %d  |  👻 Wraiths: %d\n"+
 			"👁️ Observers: %d  |  🛡️🤖 Guardians: %d\n"+
 			"🎯☢️ Piercing Missiles: %d\n\n"+
@@ -117,7 +121,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🛡️🤖 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
 			"🎯☢️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
 			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭",
-		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars, liberators, wraiths, observers, guardians, piercingMissiles,
+		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars, maxDS, liberators, wraiths, observers, guardians, piercingMissiles,
 		scoutUnit.Title, scoutUnit.Cost["metal"], scoutUnit.Flavor,
 		bcUnit.Title, bcUnit.Cost["metal"], bcUnit.Cost["crystal"], bcUnit.Flavor,
 		dsUnit.Title, dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"], dsUnit.Flavor,
@@ -355,18 +359,22 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		successAlert = "🚢👑 BATTLECRUISER LAUNCHED! The pride of your fleet stands ready!"
 
 	case "deathstar":
-		var currentDS int
+		var currentDS, campLvl int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(deathstars, 0) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&currentDS)
-		if currentDS >= 1 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Limit Reached: Only ONE Doomsday Rig can be commanded at a time."})
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1) FROM encampments WHERE id = $1", campID).Scan(&campLvl)
+		maxDS := content.MaxDoomsdayRigs(campLvl)
+		if currentDS >= maxDS {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s). Level up to raise the cap.", campLvl, maxDS)})
 		}
 		dsUnit, _ := content.FindUnit("deathstar")
-		if metal < dsUnit.Cost["metal"] || crystal < dsUnit.Cost["crystal"] {
+		var neuroCores float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(neuro_cores, 0) FROM resources WHERE encampment_id = $1", campID).Scan(&neuroCores)
+		if metal < dsUnit.Cost["metal"] || crystal < dsUnit.Cost["crystal"] || neuroCores < dsUnit.Cost["neuro_cores"] {
 			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal, %.0f Neuro Cores.", dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"])})
 		}
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2, neuro_cores = neuro_cores - $3 WHERE encampment_id = $4", dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"], campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET deathstars = deathstars + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🌑💀👑 THE DOOMSDAY RIG IS OPERATIONAL! The Wasteland trembles at its shadow!"
+		successAlert = fmt.Sprintf("🌑💀👑 THE DOOMSDAY RIG IS OPERATIONAL! (%d/%d) The Wasteland trembles at its shadow!", currentDS+1, maxDS)
 
 	case "buggy":
 		if metal < 120.0 {

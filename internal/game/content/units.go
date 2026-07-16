@@ -36,6 +36,24 @@ type Unit struct {
 	Flavor          string             // one-line flavor/description text for panels
 }
 
+// MaxDoomsdayRigs returns how many Doomsday Rigs a player at the given
+// Outpost level may own at once. Phase 7 rebalance: the old hard cap of
+// exactly 1 made the unit feel irrelevant at scale (a single 500-rating
+// unit is negligible next to a garrison of thousands of Soldiers), so
+// ownership now grows with Outpost level instead - one Rig baseline,
+// plus one more every 5 levels, capped at 10 so it never becomes a
+// second army in its own right.
+func MaxDoomsdayRigs(outpostLevel int) int {
+	if outpostLevel < 1 {
+		outpostLevel = 1
+	}
+	max := 1 + outpostLevel/5
+	if max > 10 {
+		max = 10
+	}
+	return max
+}
+
 // DeconstructRefund returns the resource_column -> amount map refunded when
 // a single unit of this type is scrapped.
 func (u Unit) DeconstructRefund() map[string]float64 {
@@ -81,10 +99,10 @@ var Units = []Unit{
 		Emoji:           "🌑💀",
 		Title:           "Doomsday Rig",
 		Role:            RoleCapital,
-		AttackRating:    500.0,
+		AttackRating:    650.0,
 		Cost:            map[string]float64{"metal": 25000.0, "crystal": 7200.0, "neuro_cores": 500.0},
 		DeconstructRate: 0.25,
-		Flavor:          "☠️👑 THE ultimate superweapon. A single Doomsday Rig outweighs an entire fleet - but the cost is catastrophic, and losing one in a failed raid is devastating.",
+		Flavor:          "☠️👑 THE ultimate superweapon. A single Doomsday Rig outweighs an entire fleet - but the cost is catastrophic, and losing one in a failed raid is devastating. Ownership scales with Outpost level - see /factory for your current cap.",
 	},
 	{
 		Key:             "liberator",
