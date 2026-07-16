@@ -67,13 +67,13 @@ brief describes.
 | 4 | Hero Commander — manual garrison | **Partial** — "Manual Defense Garrison" panel lets a player lock/withdraw Soldiers/Mechs from the draftable pool (enforced, not just displayed). Still open: explicit "which hero leads this raid" picker UI (the DB link `raid_forces.hero_id` exists — confirm it's actually exposed before assuming it needs building), per-hero XP-from-battles-led, ability unlocks beyond the existing superpower. | `3e2195f` |
 | 2 | Bulk unit selection | **Done** — Step: x1/x10/x100/MAX toggle on the draft board (bulk moves now clamp instead of rejecting partial steps); `/add <n> <unit>`, `/remove <n> <unit>` text commands; `/deconstruct <n> <unit>` bulk text shortcut alongside the existing per-tap panel. | `f412147`→`60665b1` (rebased) |
 | 3 | Keyboard/UI audit | **Not started** | — |
-| 5 | Automation Agent limit bugs | **Not started** — needs a read of `internal/engine/agent` + Governor interaction to confirm what "ignores game limits" actually means today before touching anything (Governor/Automation files are explicitly hands-off per item 9 unless a fix is unavoidable — coordinate with `PROJECT_MASTER_PLAN.md` owner before editing anything under `internal/game/governor` or `internal/engine/agent`). | — |
+| 5 | Automation Agent limit bugs | **Partial** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. Asiwaju explicitly directed this session to go ahead (supersedes the item-9 hands-off default below for this specific fix). Still open: `collector`/`collector_omega`/`collector_precious` haven't been audited against their own caps yet (collector already respects `storageCap`; the two collector_omega/precious variants add Metal/Hydrogen/Crystal/Dollars/NeuroCores with no cap check at all — see item 9 note, needs a look). | `90caeef`, `53d1916` |
 | 6 | Doomsday unit balance | **Done** — hard cap of exactly 1 replaced with a level-scaled cap; attack rating and toughness bumped; a real missing-affordability-check bug (neuro_cores wasn't validated before deduction) fixed along the way. | `3fd86a5` |
 | 10 | World exploration (continents/sectors/discovery) | **Not started** — biggest single item left; needs new schema (sectors/continents, discovery state per player) | — |
 | 11 | Diplomacy (Known Bases, friend/enemy), long battles/reinforcements | **Not started** — long-battle round cap (currently 5 rounds max, see `engine.go` `r.roundNumber >= 5` draw condition) needs revisiting once reinforcement mechanics exist | — |
 | 12 | Dynamic World Events + notification engine | **Partially exists** — `internal/engine/world/weather.go` already drives Acid Rain/Radiation Storm effects on combat (see `engine.go` weather switch); notification *dispatcher* itself (`internal/engine/notifications`) is a working 3s-poll queue, not a stub. What's missing: more event types (EMP, Supply Crisis, Disease, Sandstorm from the brief), and continent/world-scoped broadcast rather than the current single global weather state. | — |
 | 13 | Admin panel consolidation | **Not started** | — |
-| 9 | AI Agent files hands-off | **Respected** — no edits made to `internal/game/governor`, `internal/engine/agent`, or fleetcommander/econadvisor this workstream. | — |
+| 9 | AI Agent files hands-off | **Exception granted for item 5** — no edits to `internal/game/governor`, fleetcommander, or econadvisor. `internal/engine/agent` *was* edited this session (`90caeef`, `53d1916`), but only the game-limit-enforcement bugs under item 5 — Asiwaju explicitly directed the audit-and-fix in-chat. No other agent logic (mode selection, resource-gain formulas) touched. | — |
 
 ---
 
@@ -197,13 +197,47 @@ brief describes.
 - Recruitment panel (`HandleRecruitPanel`) now displays `Doomsday Rigs:
   N / cap` instead of a bare count.
 
+### Automation Agent limit bugs (`90caeef`, `53d1916`)
+- **Explicitly authorized exception to item 9** — Asiwaju directed this
+  audit-and-fix in-chat. Scope stayed narrow: only the two confirmed
+  "agent ignores a manual-path limit" bugs below were touched. Mode
+  selection, resource-gain rates, and everything else in
+  `internal/engine/agent/agent.go` is unchanged.
+- **`builder` mode** (`90caeef`): auto-upgrade selection (`ORDER BY
+  level ASC LIMIT 1` over `modules`) had no ceiling, so it could
+  auto-build a module past what the manual `/camp` path allows
+  (`camp.go` `HandleUpgradeCallback`: `currentLvl >= campLvl` is
+  blocked — "Module levels cannot exceed your Outpost Core level").
+  Fixed by pulling `encampments.level` into the agent query as
+  `CampLvl` and constraining eligible-module selection to
+  `level < CampLvl`. Starter-tent seeding also tightened: it now only
+  fires when zero modules exist, not on every "no eligible row" miss
+  (previously "all modules already capped" and "no modules yet" hit
+  the same branch and could re-seed a tent unnecessarily).
+- **`military` mode** (`53d1916`): auto-recruit (1 Soldier/tick)
+  checked only rations/metal affordability, ignoring the Hangar
+  capacity cap the manual Recruit Soldier path enforces
+  (`factory.go` `HandleCraftItemCallback`: `maxCapacity = 50 +
+  hangarLvl*20`, blocked once summed `workshop_inventory` units hit
+  that cap). Fixed by running the identical hangar-level + total-units
+  query inside the military case and requiring `totalUnits <
+  maxCapacity` alongside the existing resource check.
+- **Not yet audited**: `collector_omega` (Metal/Hydrogen) and
+  `collector_precious` (Crystal/Dollars/NeuroCores) modes add resources
+  every tick with **no storage cap check at all** — unlike plain
+  `collector`, which already respects `storageCap` (`TentLvl * 500`).
+  This looks like the same class of bug but wasn't in the original
+  two flagged cases, so it wasn't touched without separate sign-off.
+  Worth flagging back to Asiwaju before fixing.
+
 ---
 
 ## 4. Next in line (recommended order)
 
-1. Item 5 — Automation limit bugs (read-first: confirm what "ignores
-   game limits" means in the current Automation Agent before writing
-   any fix; likely touches `internal/engine/agent`, coordinate first).
+1. Item 5 — Automation limit bugs, remainder: `collector_omega` /
+   `collector_precious` resource-gain has no storage cap check at all
+   (see note above) — confirm with Asiwaju this is in-scope before
+   touching `internal/engine/agent` again.
 2. Item 3 — Keyboard audit (needs a menu-by-menu pass across
    `internal/bot/keyboards` and every handler that sends a
    `ReplyMarkup`, checking for stale/missing keyboard replacement).
