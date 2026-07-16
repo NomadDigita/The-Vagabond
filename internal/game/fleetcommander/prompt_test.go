@@ -86,3 +86,37 @@ func TestBuildRogueNestTarget_MatchesContentPackage(t *testing.T) {
 		t.Errorf("expected non-zero soldier garrison at level 10, got %+v", target.Garrison)
 	}
 }
+
+func TestBuildRogueNestTarget_IncludesEnrichedDefenseData(t *testing.T) {
+	// Level 20 crosses every enrichment threshold confirmed in
+	// content.RogueNestComposition (turrets, guardians, observers,
+	// integrity tech, shields, and the hero-superpower threshold at
+	// level 20), so this exercises the full enriched path, not just
+	// the legacy Soldiers/Mechs/Drones/Jets fields.
+	target := fleetcommander.BuildRogueNestTarget(20)
+
+	if target.IntegrityTechLvl <= 0 {
+		t.Errorf("expected non-zero IntegrityTechLvl at level 20, got %d", target.IntegrityTechLvl)
+	}
+	if target.Garrison["guardians"] <= 0 {
+		t.Errorf("expected non-zero guardians in garrison at level 20, got %+v", target.Garrison)
+	}
+	if target.Garrison["observers"] <= 0 {
+		t.Errorf("expected non-zero observers in garrison at level 20, got %+v", target.Garrison)
+	}
+	if target.TurretGrid["light_laser"] <= 0 {
+		t.Errorf("expected non-zero light_laser turret level at level 20, got %+v", target.TurretGrid)
+	}
+	if target.HeroSuperpower == "" {
+		t.Errorf("expected a hero superpower to be present at level 20 (the documented threshold), got empty string")
+	}
+
+	// The enriched data must actually reach the rendered prompt, not
+	// just live unused on the struct.
+	prompt := fleetcommander.BuildUserPrompt(fleetcommander.FleetComposition{"soldiers": 100}, target, fleetcommander.CombatHistorySummary{})
+	for _, want := range []string{"Defense Grid", "Integrity Tech level", target.HeroSuperpower} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected prompt to surface enriched defense data (%q), got:\n%s", want, prompt)
+		}
+	}
+}

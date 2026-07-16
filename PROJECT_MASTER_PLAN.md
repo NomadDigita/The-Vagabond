@@ -257,6 +257,103 @@ sandbox — same standing blocker noted in every phase above.
 
 ---
 
+## 1.6 Deep Schema-Drift Audit (following session, prompted by project owner)
+
+The project owner reported (via screenshots) that `/economy_advisor`
+was still crashing and mock output was still showing on the live bot,
+and asked for a genuinely deep review rather than another one-off
+patch. Two things were true at once, and it's worth being precise
+about which was which:
+
+**Not new breakage:** both symptoms in the screenshots were already
+fixed by the §1.5 commit — they just hadn't been pushed/merged/
+deployed yet. Confirmed via `git fetch origin main`: that commit was
+still local-only in the working sandbox.
+
+**A real, separate discovery:** fetching the true current `origin/main`
+revealed it had moved forward substantially since this project's
+Phase A–D work was merged (PR #16) — the parallel SpaceHunt workspace
+had since merged **Phase 6** (six new turret types, new ships:
+Liberator/Wraith/Observer/Guardian, Piercing Missile, three Cargo Ship
+tiers) and an unplanned **Phase 7** ("Rogue AI scaling via real player
+subsystems" — the PvE rogue nest now has a full per-turret Defense
+Grid, Guardian/Observer garrison, research level, shields, and an
+optional hero-equivalent superpower, not just a flat bonus).
+
+This was exactly the right thing to check for, because Phase C (Fleet
+Commander) depends on both `workshop_inventory`'s column set and
+`internal/game/content.RogueNestComposition`'s output shape — both of
+which Phase 6/7 changed.
+
+### Audit method (confirmed via git history, not guessed)
+
+For every table `internal/game/governor`, `internal/game/fleetcommander`,
+and `internal/game/econadvisor` read from, the definitive current
+column set was extracted programmatically from `cmd/bot/main.go` (union
+of `CREATE TABLE` columns and every `ALTER TABLE ... ADD COLUMN`), then
+cross-referenced against `git log` to find each table's *original*
+column set at first creation. A column present now but absent at
+creation, with no `ALTER TABLE ADD COLUMN` guard, is exactly the bug
+class that caused the `ether`/`neuro_cores` crash.
+
+**Result — one crash-class bug found (already fixed in §1.5), zero new
+ones:** `resources.ether`/`resources.neuro_cores` remain the only
+columns anywhere in the schema added to a `CREATE TABLE IF NOT EXISTS`
+column list without a corresponding `ALTER TABLE ADD COLUMN` guard.
+Every other newer column across `encampments`, `raids`,
+`research_states`, `bank_accounts`, and `workshop_inventory` — all
+tables this AI roadmap's code reads from — was confirmed to have a
+proper `ALTER TABLE ADD COLUMN IF NOT EXISTS` guard. `modules` and
+`market_exchange` were confirmed to have had every one of their current
+columns present since their very first commit (`d38ca0f`) — genuinely
+zero risk, not merely unchecked.
+
+**Result — two confirmed analysis-quality gaps found and fixed (not
+crashes, but real correctness gaps):**
+
+1. **`fleetcommander.unitColumns` was missing 10 real
+   `workshop_inventory` columns** added by Phase 6/7 (`liberators`,
+   `wraiths`, `observers`, `guardians`, `piercing_missiles`,
+   `cargo_mk1`/`2`/`3`, `garrisoned_soldiers`, `garrisoned_mechs`) —
+   confirmed by extracting the full 28-column set and diffing against
+   the hardcoded 18-column list. This never crashed (all 10 columns
+   are properly `ALTER`-guarded), but Fleet Commander was silently
+   blind to a meaningful slice of a player's actual fleet strength —
+   including several capital-ship-tier units. **Fixed:** the list now
+   includes all 28 confirmed columns, with a comment documenting how
+   to re-verify it's still complete after a future SpaceHunt combat
+   merge.
+2. **`fleetcommander.TargetProfile`/`BuildRogueNestTarget` only used
+   the legacy flat `TurretBonus` field**, ignoring the new
+   per-turret Defense Grid, Guardian/Observer garrison, Integrity Tech
+   level, shields, and hero-superpower data Phase 7 added to
+   `content.RogueNestForce`. Confirmed by reading the actual Phase 7
+   diff. This directly undermined Phase C's core purpose — accurately
+   assessing target strength. **Fixed:** `TargetProfile` gained
+   `TurretGrid`, `IntegrityTechLvl`, `Shields`, `HeroSuperpower` fields,
+   all populated in `BuildRogueNestTarget` and rendered in
+   `BuildUserPrompt`; the system prompt now explicitly calls out a
+   hero superpower as a risk factor. Verified with a new test
+   (`TestBuildRogueNestTarget_IncludesEnrichedDefenseData`) that
+   exercises every enrichment threshold at level 20 and asserts the
+   data reaches the actual rendered prompt, not just the struct.
+
+### Branch history note
+
+The `ai-foundation-phase-a` branch (this session's local work) was
+rebased onto the true current `origin/main` (picking up SpaceHunt
+Phase 6/7) with **zero merge conflicts** — a good sign the file
+boundaries between the two roadmaps (per §0's isolation rule) held up
+under real divergence, not just in theory.
+
+**Verification performed:** `gofmt`/`go build`/`go vet`/`go test` all
+clean; 44 tests total (was 43). The audit script/method itself is
+reproducible — re-run the same `CREATE TABLE` ∪ `ALTER TABLE ADD
+COLUMN` cross-reference against `git log` for any table before trusting
+new AI-roadmap code against it.
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -369,6 +466,17 @@ flagged as approximate in code comments — prices for these two
 providers have moved multiple times within 2026 across independent
 sources. Re-verify before trusting this table for a real production
 budget more than a few months out.
+
+**ADR-013: Schema-drift audits against the parallel branch are now a
+standing practice, not a one-off.** The `ether`/`neuro_cores` bug and
+the Fleet Commander gaps found in §1.6 are the same underlying risk:
+this AI roadmap's code reads tables and content owned by the parallel
+SpaceHunt roadmap, which evolves independently. The audit method in
+§1.6 (cross-reference `CREATE TABLE` ∪ `ALTER TABLE ADD COLUMN` against
+git history for column-level drift; diff `internal/game/content` for
+shape-level drift) is cheap enough to re-run after every SpaceHunt
+merge and should be, rather than waiting for another live crash report
+to prompt it.
 
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
@@ -576,15 +684,14 @@ what research paths and costs already exist to plan around.
   plan is unconfirmed** — see the tech-debt bullet in §4. Do not
   assume Ollama is viable there without confirming the plan's RAM/CPU
   and testing actual response latency for a real model.
-- **Push status, corrected:** Phases A–D (AI Foundation, Planet
-  Governor, Fleet Commander, Economy Advisor) were confirmed pushed by
-  the project owner to `origin/ai-foundation-phase-a` on GitHub via
-  Termux, following the git-bundle handoff process used throughout
-  this project (no token was ever pasted into or used from this
-  conversation — see below). **This session's additional work (the
-  `ether`/`neuro_cores` bugfix, mock provider JSON fix, inline
-  keyboards, and the 4 new providers) has NOT yet been pushed** as of
-  this write-up — it exists only as local commits in this session's
+- **Push status, corrected again:** as of this write-up, the
+  `ai-foundation-phase-a` branch has been rebased onto the true current
+  `origin/main` (confirmed via `git fetch`, which showed `main` had
+  advanced to include SpaceHunt Phase 6/7 since our Phase D merge —
+  see §1.6). This rebase was clean, zero conflicts. **The §1.5 and §1.6
+  work (bugfix, mock JSON fix, keyboards, 4 new providers, Fleet
+  Commander schema-drift fixes) is still not yet pushed to GitHub** as
+  of this write-up — it exists only as local commits in this session's
   sandbox / a new git bundle handed to the project owner. If a future
   session finds this file already reflecting these changes on GitHub,
   the push succeeded; otherwise it's still pending.
@@ -642,6 +749,17 @@ what research paths and costs already exist to plan around.
   Google had already shut down). Cost table rebuilt with prices
   verified by web search on 2026-07-15. Added ADR-010 through ADR-012.
   17 new tests this session (26 → 43 total).
+- **Following session (same day):** deep schema-drift audit prompted
+  by the project owner (see §1.6). Rebased onto the true current
+  `origin/main` (zero conflicts), discovering the parallel SpaceHunt
+  branch had merged Phase 6 and an unplanned Phase 7 since our Phase D
+  merge. Confirmed via git-history cross-reference that the
+  `ether`/`neuro_cores` bug was the only crash-class schema-drift issue
+  anywhere in the tables this roadmap's code reads. Found and fixed two
+  real (non-crash) analysis-quality gaps in Fleet Commander: a stale
+  10-column-short unit list, and unused richer Phase 7 rogue-nest
+  defense data. Added ADR-013 (schema-drift audits as standing
+  practice). 1 new test (43 → 44 total).
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
