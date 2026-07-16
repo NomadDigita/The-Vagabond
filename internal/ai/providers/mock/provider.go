@@ -98,6 +98,17 @@ func placeholderJSON(feature string) string {
 			"market_timing": "Not evaluated — placeholder mode.",
 			"trading_advice": "Not evaluated — placeholder mode."
 		}`
+	case "ai_research_planner":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real research-order analysis for this base.",
+			"goal_used": "n/a",
+			"recommended_order": [
+				{"node": "configure_provider", "target_level": 0, "reason": "This is mock output. See /ai_status for setup instructions.", "core_cost": 0, "expected_gain": "n/a"}
+			],
+			"cores_needed": 0,
+			"cores_available": 0,
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}

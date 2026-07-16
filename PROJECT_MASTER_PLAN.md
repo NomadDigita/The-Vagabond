@@ -573,7 +573,7 @@ accident.
 | B | AI Planet Governor | Done (advisory-only; autopilot execution deferred, see §4) | A |
 | C | AI Fleet Commander | Done (PvE rogue-nest target only; PvP target lookup deferred, see §4) | A |
 | D | AI Economy Advisor | Done | A |
-| E | AI Research Planner | Not started | A |
+| E | AI Research Planner | Done | A |
 | F | AI Battle Analyst | Not started | A |
 | G | AI Guild Assistant | Not started | A |
 | H | AI Dynamic Galaxy | Not started | A |
@@ -583,7 +583,8 @@ accident.
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
 flow 100%, autopilot execution 0% (intentionally deferred). Fleet
 Commander: PvE recommend flow 100%, PvP target lookup 0% (deferred).
-Economy Advisor: 100%. Remaining gameplay-facing AI phases (E–J): 0%.
+Economy Advisor: 100%. Research Planner: 100%. Remaining gameplay-facing
+AI phases (F–J): 0%.
 
 ### What Phase B built
 
@@ -682,21 +683,84 @@ data (resources, modules) — see the package doc comment in
 `econadvisor/prompt.go` for the reasoning (isolation over reuse, at
 this small a duplication cost).
 
+### What Phase E built
+
+```
+internal/game/researchplanner/
+├── prompt.go         Pure logic: Goal type (raiding/defense/economy/
+│                      balanced) with inference from the current tech
+│                      spread when the player doesn't pick one, TechNode/
+│                      Snapshot types (a small deliberate duplicate of
+│                      handlers.researchTree's 7-node shape — see the
+│                      package doc comment for why), SystemPrompt,
+│                      deterministic BuildUserPrompt, ParseRecommendation
+│                      (fence tolerance + fallback), FormatForTelegram.
+├── prompt_test.go     17 passing unit tests, zero DB/network dependency
+│                      (tech node cost formula, goal inference in both
+│                      directions, prompt content, JSON parse/fallback,
+│                      Telegram formatting).
+└── planner.go         Planner: BuildSnapshot (reads encampments/
+                        research_states/resources.neuro_cores — the
+                        fetchResearchLevels query mirrors
+                        handlers.ResearchHandler's exactly, including the
+                        same lazy-row-creation default, so the two never
+                        disagree about a new player's starting state),
+                        Recommend (calls ai.Service.Complete, persists to
+                        ai_memory scope "research_planner").
+```
+
+New command: `/research_planner [goal]` (any player — read-only
+recommendation with a concrete research order, core costs, and
+expected gains; `goal` is optional and one of `raiding`/`defense`/
+`economy`/`balanced` — omitted or invalid input falls back to
+inference). Inline keyboard: a refresh button plus one button per
+goal, so a player can steer future recommendations without typing a
+command. No new DB table — reads existing `research_states` and
+`resources`. Never spends a Neuro Core or upgrades a tech node itself;
+the existing `/research` panel remains the only place that actually
+happens.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_research_planner`, verified by a new
+`TestMockPlaceholder_ParsesForResearchPlanner` case in
+`placeholder_test.go` (mirroring the existing per-feature verification
+pattern). Combined with `researchplanner`'s own 17 tests, this phase
+adds 18 new tests (47 → 65 total, all passing — see the verification
+note below).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` were all run clean, full-repo, in this sandbox — not
+just the `internal/ai` subtree — by temporarily adding a local
+`replace gopkg.in/telebot.v3 => github.com/tucnak/telebot/v3 v3.3.8`
+directive to `go.mod` (this sandbox's network allowlist doesn't
+include `proxy.golang.org`, only `github.com`, and the module was
+already present in the local module cache under that path), then
+reverting `go.mod` before committing. That replace directive is
+**not** part of this phase's actual diff — it never touched the
+committed `go.mod`. This resolves the §4 tech-debt bullet about an
+unconfirmed full build for this session's own changes; the underlying
+`proxy.golang.org` network-access gap for *future* sessions'
+first-time dependency downloads is unchanged and still worth noting to
+whoever runs the real deploy (they should have normal internet access,
+so it's expected to be a non-issue there).
+
 ### Recommended next task
 
-**Phase E — AI Research Planner**, because:
-1. Continues the fully-recommend-only pattern (B, C, D) that needs no
-   new execution-safety design.
-2. It's the last of the "single-player analysis" style phases before
-   F (Battle Analyst, needs real battle data — check whether one now
-   exists from the parallel SpaceHunt Phase 6 combat work before
-   building), G (Guild Assistant, needs guild data from SpaceHunt
-   Phase 2), and H onward, which are more cross-cutting.
+**Phase F — AI Battle Analyst**, per the priority order already laid
+out in §3's table, with one open question to resolve first: **check
+whether real battle/combat log data now exists** from the parallel
+SpaceHunt branch's Phase 6/7 combat work (this branch's `git log`
+shows SpaceHunt commits like "Phase 7 (part 2): real Battle Logistics"
+and "Rogue AI scaling" landing on `main` well after this branch's
+Phase D merge — read `internal/game/battlereport` and any SpaceHunt
+combat-log tables before designing Phase F's `Snapshot`, the same way
+this phase started by reading `internal/bot/handlers/research.go`).
+Phase F needs that real data to analyze; building it against
+placeholder/imagined battle data would be wasted work.
 
-**Before writing Phase E code:** read `internal/bot/handlers/*` for
-any existing research/tech-tree handler (search for `research_states`
-usage beyond what governor/fleetcommander already read) to understand
-what research paths and costs already exist to plan around.
+After F: G (Guild Assistant, needs guild data from SpaceHunt Phase 2 —
+coordinate with that branch per §8 before building), then H onward,
+which are more cross-cutting.
 
 ---
 
@@ -861,6 +925,24 @@ what research paths and costs already exist to plan around.
   — confirmed not yet GA), OpenAI default updated 4o-mini→5.6-luna
   (GPT-5.6 reached GA 2026-07-09). Added ADR-014. 3 new tests (44 → 47
   total).
+- **Following session:** Phase E (AI Research Planner) implemented:
+  pure prompt/parsing logic (`prompt.go`, 17 passing unit tests
+  covering cost formula, goal inference in both directions, prompt
+  content, JSON parse/fallback, and Telegram formatting), DB-backed
+  orchestration (`planner.go`) reusing the exact tech-tree read
+  pattern from `internal/bot/handlers/research.go` (read first, per
+  §3's own instruction, before writing any Phase E code), 1 new bot
+  command (`/research_planner [goal]`) with a refresh button plus one
+  inline button per goal (raiding/defense/economy/balanced), no new
+  tables. Mock provider given a matching placeholder JSON case,
+  verified by 1 new test in `placeholder_test.go`. 18 new tests total
+  (47 → 65, all passing). Full `go build ./... && go vet ./... && go
+  test ./...` confirmed clean for the whole repo this session (see the
+  verification note under "What Phase E built" for how the sandbox's
+  `proxy.golang.org` gap was worked around locally without touching
+  the committed `go.mod`). Recommended next task updated to Phase F,
+  with an explicit note to check the parallel SpaceHunt branch for
+  real battle data before designing it.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
@@ -901,8 +983,8 @@ what research paths and costs already exist to plan around.
    network access — confirm Phase A still compiles end-to-end (this
    session could only verify the `internal/ai` subtree in isolation;
    see §1 and §4).
-3. Pick up the "Recommended next task" in §3 (Phase B) unless the
-   project owner has redirected you.
+3. Pick up the "Recommended next task" in §3 unless the project owner
+   has redirected you.
 4. Before writing code for any phase: inspect the relevant existing
    handler/engine code first (see the phase-specific note in §3),
    confirm extension points, and only then implement — incrementally,
