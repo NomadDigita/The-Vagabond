@@ -579,6 +579,15 @@ func executeStartupMigrations(db *sql.DB) {
 
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS liberators_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS wraiths_mobilized INT DEFAULT 0;`,
+
+		// --- Phase 7: Hero Commander / manual defense garrison. Lets a
+		// player lock a portion of their Soldiers/Mechs as a permanent
+		// home garrison that campaign drafts can never pull from, and
+		// withdraw them back to the general pool at any time. See
+		// migrations/023_spacehunt_phase7_garrison.sql for the annotated
+		// standalone copy.
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS garrisoned_soldiers INT DEFAULT 0;`,
+		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS garrisoned_mechs INT DEFAULT 0;`,
 	}
 
 	for _, stmt := range migrations {
@@ -938,6 +947,7 @@ func main() {
 	bot.Handle("\flaunch_piercing", silo.HandleLaunchPiercingMissileCallback)
 	bot.Handle("\fmine_action", camp.HandleMineCallback)
 	bot.Handle("\fhero_action", hero.HandleHeroCallback)
+	bot.Handle("\fgarrison_adjust", hero.HandleGarrisonAdjustCallback)
 	bot.Handle("\flaunch_interceptor", combat.HandleLaunchInterceptor)
 	bot.Handle("\fadmin_action", admin.HandleAdminActionCallback)
 	bot.Handle("\fstage_coop", combat.HandleStageCoopCallback)

@@ -954,9 +954,13 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 
 func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx) error {
 	queryExpeditions := `
-		SELECT id, attacker_id, state, resolve_time 
-		FROM raids 
-		WHERE state = 'marching' OR state = 'engaged'`
+		SELECT r.id, r.attacker_id, r.state, r.resolve_time, ea.user_id,
+		       COALESCE(r.attacker_rations, 100.0), COALESCE(r.attacker_ammo, 100.0),
+		       COALESCE(r.base_march_minutes, 15.0), COALESCE(ed.name, 'Rogue Drone Nest')
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		LEFT JOIN encampments ed ON ed.id = r.defender_id
+		WHERE r.state = 'marching' OR r.state = 'engaged'`
 
 	rows, err := tx.QueryContext(ctx, queryExpeditions)
 	if err != nil {
@@ -965,46 +969,87 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 	defer rows.Close()
 
 	type activeExp struct {
-		id          string
-		attackerID  string
-		state       string
-		resolveTime time.Time
+		id               string
+		attackerID       string
+		state            string
+		resolveTime      time.Time
+		userID           int64
+		rations          float64
+		ammo             float64
+		baseMarchMinutes float64
+		defenderName     string
 	}
 
 	var exps []activeExp
 	for rows.Next() {
 		var ex activeExp
-		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime); err == nil {
+		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime, &ex.userID,
+			&ex.rations, &ex.ammo, &ex.baseMarchMinutes, &ex.defenderName); err == nil {
 			exps = append(exps, ex)
 		}
 	}
 
 	for _, ex := range exps {
-		var rations, metalFuel float64
-		_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&rations, &metalFuel)
+		var homeRations, metalFuel float64
+		_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&homeRations, &metalFuel)
 
 		var tankers int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(tankers, 0) FROM workshop_inventory WHERE encampment_id = $1", ex.attackerID).Scan(&tankers)
 
 		deductRations := 3.0
 		deductMetalFuel := 1.0
-
 		if tankers > 0 {
 			deductMetalFuel = 0.80
 		}
 
-		newRations := math.Max(rations-deductRations, 0.0)
+		newHomeRations := math.Max(homeRations-deductRations, 0.0)
 		newMetalFuel := math.Max(metalFuel-deductMetalFuel, 0.0)
-
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2 WHERE encampment_id = $3", newRations, newMetalFuel, ex.attackerID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2 WHERE encampment_id = $3", newHomeRations, newMetalFuel, ex.attackerID)
 
 		if newMetalFuel <= 0 {
 			delayedResolve := ex.resolveTime.UTC().Add(3 * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
 		}
 
-		if newRations <= 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = 0.0 WHERE id = $1", ex.id)
+		// Raid-scoped supply pools (attacker_rations/attacker_ammo on the
+		// raid itself, distinct from the home base's stockpile above) -
+		// this is what actually reflects "the army in the field is running
+		// out of what it packed for the march", and previously ammo was a
+		// dead stub that never moved off its 100.0 default.
+		oldRations := ex.rations
+		oldAmmo := ex.ammo
+		newRations := math.Max(oldRations-4.0, 0.0)
+		newAmmo := math.Max(oldAmmo-4.0, 0.0)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1, attacker_ammo = $2 WHERE id = $3", newRations, newAmmo, ex.id)
+
+		// Threshold-crossing notifications only (not every tick), so the
+		// player gets one heads-up at 25% and one at empty per resource,
+		// instead of spam every 3 seconds.
+		if oldRations > 25.0 && newRations <= 25.0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🍖 RATIONS RUNNING LOW: Your marching force toward [%s] is down to %.0f%% rations.", ex.defenderName, newRations))
+		} else if oldRations > 0 && newRations <= 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🍖❌ OUT OF RATIONS: Your force marching on [%s] has run out of rations! Combat strength will suffer until they return.", ex.defenderName))
+		}
+		if oldAmmo > 25.0 && newAmmo <= 25.0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🎖️ AMMUNITION RUNNING LOW: Your marching force toward [%s] is down to %.0f%% ammunition.", ex.defenderName, newAmmo))
+		} else if oldAmmo > 0 && newAmmo <= 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🎖️❌ OUT OF AMMUNITION: Your force marching on [%s] has run dry! Combat strength will suffer until they return.", ex.defenderName))
+		}
+
+		// If a force runs completely dry (rations AND ammo) before it has
+		// even reached the target, it can't fight - order a forced
+		// retreat rather than let it arrive and immediately eat a -50%
+		// offense penalty in a battle it was never supplied to win.
+		if ex.state == "marching" && newRations <= 0 && newAmmo <= 0 {
+			returnResolve := time.Now().UTC().Add(time.Duration(ex.baseMarchMinutes) * time.Minute)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolve, ex.id)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("↩️ FORCED RETREAT: Your force marching on [%s] ran completely out of supplies before arrival and has turned back.", ex.defenderName))
 		}
 	}
 	return nil

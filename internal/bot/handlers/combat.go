@@ -896,6 +896,20 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0), COALESCE(destroyers, 0), COALESCE(bombers, 0), COALESCE(battlecruisers, 0), COALESCE(deathstars, 0), COALESCE(liberators, 0), COALESCE(wraiths, 0) FROM workshop_inventory WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes, &availDestroyers, &availBombers, &availBC, &availDS, &availLiberators, &availWraiths)
 
+	// Manual Defense Garrison: units reserved as permanent home defense
+	// are never presented as draftable, protecting them from being sent
+	// out on a raid by accident.
+	var garrSoldiers, garrMechs int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&garrSoldiers, &garrMechs)
+	availSoldiers -= garrSoldiers
+	if availSoldiers < 0 {
+		availSoldiers = 0
+	}
+	availMechs -= garrMechs
+	if availMechs < 0 {
+		availMechs = 0
+	}
+
 	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths int
 	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0) FROM campaign_drafts WHERE user_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &dBC, &dDS, &dLiberators, &dWraiths)
@@ -1013,6 +1027,19 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	if err != nil {
 		log.Printf("Failed query warehouse profile values: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Inventory records inaccessible."})
+	}
+
+	// Manual Defense Garrison: reserved units are excluded from the
+	// enforced draftable maximum, not just hidden from display.
+	var garrSoldiers, garrMechs int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&garrSoldiers, &garrMechs)
+	availSoldiers -= garrSoldiers
+	if availSoldiers < 0 {
+		availSoldiers = 0
+	}
+	availMechs -= garrMechs
+	if availMechs < 0 {
+		availMechs = 0
 	}
 
 	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths int

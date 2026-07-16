@@ -98,12 +98,128 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	btnTrain := selector.Data("🏋️ Train Commander", "hero_action", "train")
 	btnHeal := selector.Data("💊 Heal Injury", "hero_action", "heal")
+	btnGarrison := selector.Data("🛡️ Manual Defense Garrison", "hero_action", "garrison")
 
 	selector.Inline(
 		selector.Row(btnTrain, btnHeal),
+		selector.Row(btnGarrison),
 	)
 
 	return c.Send(dashboard, selector)
+}
+
+// HandleGarrisonPanel shows the player's current garrison reservation
+// (how many Soldiers/Mechs are locked at home vs. free to draft into a
+// campaign) and lets them adjust it. This is the "player manually assigns
+// defensive units" / "withdraw defenders anytime" half of the Hero
+// Commander system - garrisoned units always still count for defense
+// (nothing is subtracted from combat), they're simply protected from
+// being pulled into an outgoing raid draft.
+func (h *HeroHandler) HandleGarrisonPanel(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID string
+	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if err != nil {
+		return c.Send("⚠️ Setup your outpost camp first using /start", keyboards.MainNavigation())
+	}
+
+	var soldiers, mechs, garrSoldiers, garrMechs int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(soldiers,0), COALESCE(mechs,0), COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1", campID).
+		Scan(&soldiers, &mechs, &garrSoldiers, &garrMechs)
+
+	freeSoldiers := soldiers - garrSoldiers
+	freeMechs := mechs - garrMechs
+
+	panelText := fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"🛡️ MANUAL DEFENSE GARRISON\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━\n"+
+			"Garrisoned units always defend, but can NEVER be drafted into an outgoing raid - lock in a home guard you won't accidentally send away.\n\n"+
+			"🪖 Soldiers: %d garrisoned / %d total (%d draftable)\n"+
+			"🤖 Mechs: %d garrisoned / %d total (%d draftable)\n"+
+			"━━━━━━━━━━━━━━━━━━━━━━",
+		garrSoldiers, soldiers, freeSoldiers, garrMechs, mechs, freeMechs,
+	)
+
+	selector := &telebot.ReplyMarkup{}
+	btnPlusSol := selector.Data("🪖 +10 Garrison", "garrison_adjust", "soldier", "inc")
+	btnMinusSol := selector.Data("🪖 -10 Garrison", "garrison_adjust", "soldier", "dec")
+	btnPlusMech := selector.Data("🤖 +5 Garrison", "garrison_adjust", "mech", "inc")
+	btnMinusMech := selector.Data("🤖 -5 Garrison", "garrison_adjust", "mech", "dec")
+	selector.Inline(
+		selector.Row(btnPlusSol, btnMinusSol),
+		selector.Row(btnPlusMech, btnMinusMech),
+	)
+
+	if c.Callback() != nil {
+		return c.Edit(panelText, selector)
+	}
+	return c.Send(panelText, selector)
+}
+
+// HandleGarrisonAdjustCallback moves units between the general draftable
+// pool and the locked garrison reserve. "inc" reserves more units at home
+// (soldiers in steps of 10, mechs in steps of 5); "dec" withdraws them
+// back to the general pool, freeing them up to draft into a raid again.
+func (h *HeroHandler) HandleGarrisonAdjustCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	unitType := c.Args()[0]
+	action := c.Args()[1]
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Adjustment failed."})
+	}
+	defer tx.Rollback()
+
+	var soldiers, mechs, garrSoldiers, garrMechs int
+	err = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers,0), COALESCE(mechs,0), COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", campID).
+		Scan(&soldiers, &mechs, &garrSoldiers, &garrMechs)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Garrison records inaccessible."})
+	}
+
+	step := 10
+	column := "garrisoned_soldiers"
+	current := garrSoldiers
+	total := soldiers
+	if unitType == "mech" {
+		step = 5
+		column = "garrisoned_mechs"
+		current = garrMechs
+		total = mechs
+	}
+
+	newVal := current
+	if action == "inc" {
+		newVal += step
+		if newVal > total {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Not enough units in inventory to garrison that many."})
+		}
+	} else {
+		newVal -= step
+		if newVal < 0 {
+			newVal = 0
+		}
+	}
+
+	query := fmt.Sprintf("UPDATE workshop_inventory SET %s = $1 WHERE encampment_id = $2", column)
+	if _, err := tx.ExecContext(ctx, query, newVal, campID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Garrison update failed."})
+	}
+
+	_ = tx.Commit()
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛡️ Garrison reservation updated."})
+	return h.HandleGarrisonPanel(c)
 }
 
 func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
@@ -128,6 +244,10 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1), COALESCE(xp, 0) FROM heroes WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&currentLvl, &currentXp)
 
 	switch action {
+	case "garrison":
+		_ = tx.Rollback()
+		return h.HandleGarrisonPanel(c)
+
 	case "train":
 		if scrap < 50.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap! Need 50."})
