@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
@@ -54,6 +56,94 @@ var deconstructTable = []deconstructRefund{
 	{"cargo_mk1", "🚚", "Cargo Ship Mk I", "cargo_mk1", content.MustFindUnit("cargo_mk1").DeconstructRefund()},
 	{"cargo_mk2", "🚚🚚", "Cargo Ship Mk II", "cargo_mk2", content.MustFindUnit("cargo_mk2").DeconstructRefund()},
 	{"cargo_mk3", "🚚🚚🚚", "Cargo Ship Mk III", "cargo_mk3", content.MustFindUnit("cargo_mk3").DeconstructRefund()},
+}
+
+// HandleDeconstructCommand implements "/deconstruct <n> <unit>" as a bulk
+// text shortcut alongside the existing one-tap-per-unit panel button. With
+// no arguments it falls back to the original panel view unchanged.
+func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
+	args := c.Args()
+	if len(args) < 2 {
+		return h.HandleDeconstructPanel(c)
+	}
+
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	n, convErr := strconv.Atoi(args[0])
+	if convErr != nil || n <= 0 {
+		return c.Send("⚠️ Amount must be a positive whole number, e.g. /deconstruct 20 mechs")
+	}
+
+	unitArg := strings.ToLower(strings.TrimSuffix(args[1], "s"))
+	var target *deconstructRefund
+	for i := range deconstructTable {
+		if deconstructTable[i].key == unitArg || strings.ToLower(deconstructTable[i].key) == unitArg {
+			target = &deconstructTable[i]
+			break
+		}
+	}
+	// Handle known irregular plurals that a plain TrimSuffix("s") misses.
+	if target == nil {
+		irregular := map[string]string{"buggie": "buggy", "batterie": "battery"}
+		if alt, ok := irregular[unitArg]; ok {
+			for i := range deconstructTable {
+				if deconstructTable[i].key == alt {
+					target = &deconstructTable[i]
+					break
+				}
+			}
+		}
+	}
+	if target == nil {
+		return c.Send("⚠️ Unrecognized unit type for deconstruction.")
+	}
+
+	var campID string
+	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
+	if campID == "" {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Send("⚠️ Deconstruction failed.")
+	}
+	defer tx.Rollback()
+
+	var count int
+	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", target.column), campID).Scan(&count)
+	if count <= 0 {
+		return c.Send(fmt.Sprintf("❌ You don't have any %s to deconstruct.", target.title))
+	}
+
+	scrapped := n
+	if scrapped > count {
+		scrapped = count
+	}
+
+	_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE workshop_inventory SET %s = %s - $1 WHERE encampment_id = $2", target.column, target.column), scrapped, campID)
+
+	refundSummary := ""
+	for resourceCol, amount := range target.refunds {
+		total := amount * float64(scrapped)
+		_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", resourceCol, resourceCol), total, campID)
+		refundSummary += fmt.Sprintf("+%.0f %s ", total, resourceCol)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed committing bulk deconstruct transaction: %v", err)
+		return c.Send("⚠️ Error writing inventory data.")
+	}
+
+	note := ""
+	if scrapped < n {
+		note = fmt.Sprintf(" (only had %d available)", scrapped)
+	}
+	return c.Send(fmt.Sprintf("♻️ Scrapped %d %s%s! Recovered: %s", scrapped, target.title, note, refundSummary))
 }
 
 func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {

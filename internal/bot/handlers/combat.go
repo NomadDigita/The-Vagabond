@@ -910,15 +910,22 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 		availMechs = 0
 	}
 
-	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths int
-	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0) FROM campaign_drafts WHERE user_id = $1`
-	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &dBC, &dDS, &dLiberators, &dWraiths)
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths, stepSize int
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0), COALESCE(step_size,1) FROM campaign_drafts WHERE user_id = $1`
+	_ = h.DB.QueryRowContext(ctx, queryDraft, userID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &dBC, &dDS, &dLiberators, &dWraiths, &stepSize)
+
+	stepLabel := map[int]string{1: "x1", 10: "x10", 100: "x100", -1: "MAX"}[stepSize]
+	if stepLabel == "" {
+		stepLabel = "x1"
+	}
 
 	panelText := fmt.Sprintf(
 		"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\n"+
 			"✈️ HANGAR CUSTOM CAMPAIGN DRAFT BOARD ✈️\n"+
 			"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\n"+
-			"Select the exact military quantities you want to mobilize:\n\n"+
+			"Select the exact military quantities you want to mobilize:\n"+
+			"🔢 Bulk Step: %s (tap 🔢 Step to cycle x1 → x10 → x100 → MAX)\n"+
+			"💬 Text shortcut: /add <n> <unit>, /remove <n> <unit>\n\n"+
 			"📋 DRAFTED FORCES STOCKPILES:\n"+
 			"🪖 Soldiers: %d / %d active\n"+
 			"🤖 Mechs: %d / %d active\n"+
@@ -937,10 +944,13 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 			"🛡️ [Safe Route] — Costs 1.5x Fuel. Travels fast (0.7x duration).\n"+
 			"🛰️ [Stealth Route] — Slow travel (1.5x duration). BYPASSES ALL RADAR WARNINGS!\n"+
 			"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️",
+		stepLabel,
 		dSols, availSoldiers, dMechs, availMechs, dDestroyers, availDestroyers, dBombers, availBombers, dLiberators, availLiberators, dWraiths, availWraiths, dBC, availBC, dDS, availDS, dBuggies, availBuggies, dShips, availShips, dJets, availJets, dNukes, availNukes,
 	)
 
 	selector := &telebot.ReplyMarkup{}
+
+	btnStepToggle := selector.Data(fmt.Sprintf("🔢 Step: %s (tap to cycle)", stepLabel), "adjust_draft", "step", "cycle")
 
 	btnPlusSol := selector.Data("🪖 +Soldier", "adjust_draft", "soldier", "inc")
 	btnMinusSol := selector.Data("🪖 -Soldier", "adjust_draft", "soldier", "dec")
@@ -973,6 +983,7 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	btnConfirmSafe := selector.Data("🛡️ Launch Safe", "confirm_launch", targetCampID, "safe")
 
 	selector.Inline(
+		selector.Row(btnStepToggle),
 		selector.Row(btnPlusSol, btnMinusSol),
 		selector.Row(btnPlusMech, btnMinusMech),
 		selector.Row(btnPlusBC, btnMinusBC),
@@ -993,6 +1004,132 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 		return c.Edit(panelText, selector)
 	}
 	return c.Send(panelText, selector)
+}
+
+// draftUnitAliases maps the free-text unit names a player might type in
+// "/add 10 soldiers" to the canonical unitType key used throughout the
+// draft adjustment logic (matching the "adjust_draft" callback's switch).
+var draftUnitAliases = map[string]string{
+	"soldier": "soldier", "soldiers": "soldier", "troop": "soldier", "troops": "soldier",
+	"mech": "mech", "mechs": "mech", "colossus": "mech",
+	"destroyer": "destroyer", "destroyers": "destroyer",
+	"bomber": "bomber", "bombers": "bomber",
+	"liberator": "liberator", "liberators": "liberator",
+	"wraith": "wraith", "wraiths": "wraith",
+	"battlecruiser": "battlecruiser", "battlecruisers": "battlecruiser", "bc": "battlecruiser",
+	"deathstar": "deathstar", "deathstars": "deathstar", "doomsday": "deathstar", "rig": "deathstar", "rigs": "deathstar",
+	"buggy": "buggy", "buggies": "buggy",
+	"ship": "ship", "ships": "ship", "clipper": "ship",
+	"jet": "jet", "jets": "jet",
+	"nuke": "nuke", "nukes": "nuke",
+}
+
+// HandleAddDraftCommand implements "/add <n> <unit>" - a bulk text
+// shortcut for the same draft adjustment the +/- buttons perform, so a
+// player doesn't have to tap a button 100 times to draft 100 Soldiers.
+func (h *CombatHandler) HandleAddDraftCommand(c telebot.Context) error {
+	return h.handleBulkDraftCommand(c, 1)
+}
+
+// HandleRemoveDraftCommand implements "/remove <n> <unit>".
+func (h *CombatHandler) HandleRemoveDraftCommand(c telebot.Context) error {
+	return h.handleBulkDraftCommand(c, -1)
+}
+
+func (h *CombatHandler) handleBulkDraftCommand(c telebot.Context, sign int) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Send("💬 Usage: /add <amount> <unit> (e.g. /add 10 soldiers) or /remove <amount> <unit>")
+	}
+
+	amount, convErr := strconv.Atoi(args[0])
+	if convErr != nil || amount <= 0 {
+		return c.Send("⚠️ Amount must be a positive whole number, e.g. /add 10 soldiers")
+	}
+
+	unitKey, ok := draftUnitAliases[strings.ToLower(args[1])]
+	if !ok {
+		return c.Send("⚠️ Unrecognized unit. Try: soldiers, mechs, destroyers, bombers, liberators, wraiths, battlecruisers, deathstars, buggies, ships, jets, nukes")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Send("⚠️ Adjustment failed.")
+	}
+	defer tx.Rollback()
+
+	var campID, myRegion string
+	err = tx.QueryRowContext(ctx, `
+		SELECT e.id, c.region FROM encampments e
+		JOIN coordinates c ON c.id = e.coordinate_id
+		WHERE e.user_id = $1`, sender.ID).Scan(&campID, &myRegion)
+	if err != nil {
+		return c.Send("⚠️ Setup your outpost camp first using /start")
+	}
+
+	columnByKey := map[string]string{
+		"soldier": "soldiers", "mech": "mechs", "destroyer": "destroyers", "bomber": "bombers",
+		"liberator": "liberators", "wraith": "wraiths", "battlecruiser": "battlecruisers",
+		"deathstar": "deathstars", "buggy": "buggies", "ship": "ships", "jet": "jets", "nuke": "nukes",
+	}
+	invCol := columnByKey[unitKey]
+
+	var avail int
+	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", invCol), campID).Scan(&avail)
+
+	// Manual Defense Garrison exclusion applies to soldiers/mechs here too.
+	if unitKey == "soldier" || unitKey == "mech" {
+		garrCol := "garrisoned_soldiers"
+		if unitKey == "mech" {
+			garrCol = "garrisoned_mechs"
+		}
+		var garr int
+		_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0) FROM workshop_inventory WHERE encampment_id = $1", garrCol), campID).Scan(&garr)
+		avail -= garr
+		if avail < 0 {
+			avail = 0
+		}
+	}
+
+	var currentVal int
+	var target sql.NullString
+	err = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0), target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE", invCol), sender.ID).Scan(&currentVal, &target)
+	if err != nil {
+		return c.Send("⚠️ No active campaign draft found - open Tactical Combat and pick a target first.")
+	}
+
+	newVal := currentVal + sign*amount
+	if newVal > avail {
+		newVal = avail
+	}
+	if newVal < 0 {
+		newVal = 0
+	}
+
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("UPDATE campaign_drafts SET %s = $1 WHERE user_id = $2", invCol), newVal, sender.ID)
+	if err != nil {
+		return c.Send("⚠️ Draft update failed.")
+	}
+	if err := tx.Commit(); err != nil {
+		return c.Send("⚠️ Draft update failed.")
+	}
+
+	verb := "Added to"
+	if sign < 0 {
+		verb = "Removed from"
+	}
+	_ = c.Send(fmt.Sprintf("⚙️ %s draft: %s %d -> %d.", verb, unitKey, currentVal, newVal))
+
+	if target.Valid {
+		return h.renderDraftCustomizerHUD(c, sender.ID, target.String, myRegion)
+	}
+	return nil
 }
 
 func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
@@ -1042,13 +1179,39 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		availMechs = 0
 	}
 
-	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths int
+	var dSols, dMechs, dBuggies, dShips, dJets, dNukes, dDestroyers, dBombers, dBC, dDS, dLiberators, dWraiths, stepSize int
 	var targetCampID string
-	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0), target_id FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
-	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &dBC, &dDS, &dLiberators, &dWraiths, &targetCampID)
+	queryDraft := `SELECT soldiers, mechs, buggies, ships, jets, nukes, COALESCE(destroyers,0), COALESCE(bombers,0), COALESCE(battlecruisers,0), COALESCE(deathstars,0), COALESCE(liberators,0), COALESCE(wraiths,0), target_id, COALESCE(step_size,1) FROM campaign_drafts WHERE user_id = $1 FOR UPDATE`
+	err = tx.QueryRowContext(ctx, queryDraft, sender.ID).Scan(&dSols, &dMechs, &dBuggies, &dShips, &dJets, &dNukes, &dDestroyers, &dBombers, &dBC, &dDS, &dLiberators, &dWraiths, &targetCampID, &stepSize)
 	if err != nil {
 		log.Printf("Draft session select failure: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ No active campaign parameters found."})
+	}
+
+	// Bulk selection: cycle the persisted step size (x1 -> x10 -> x100 ->
+	// MAX -> x1...) instead of adjusting a specific unit type. -1 is the
+	// MAX sentinel: inc/dec on any unit then jumps straight to its cap or
+	// to zero, rather than moving a fixed amount.
+	if unitType == "step" {
+		next := 1
+		switch stepSize {
+		case 1:
+			next = 10
+		case 10:
+			next = 100
+		case 100:
+			next = -1
+		default:
+			next = 1
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE campaign_drafts SET step_size = $1 WHERE user_id = $2", next, sender.ID)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Step adjustment failed."})
+		}
+		_ = tx.Commit()
+		label := map[int]string{1: "x1", 10: "x10", 100: "x100", -1: "MAX"}[next]
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🔢 Bulk step set to %s.", label)})
+		return h.renderDraftCustomizerHUD(c, sender.ID, targetCampID, myRegion)
 	}
 
 	var currentVal, maxVal int
@@ -1110,12 +1273,26 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		if currentVal >= maxVal {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Warehouse Stock: Deploy limit reached!"})
 		}
-		newVal++
+		if stepSize == -1 { // MAX
+			newVal = maxVal
+		} else {
+			newVal = currentVal + stepSize
+			if newVal > maxVal {
+				newVal = maxVal
+			}
+		}
 	} else {
 		if currentVal <= 0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Invalid Value: Already at 0."})
 		}
-		newVal--
+		if stepSize == -1 { // MAX
+			newVal = 0
+		} else {
+			newVal = currentVal - stepSize
+			if newVal < 0 {
+				newVal = 0
+			}
+		}
 	}
 
 	queryUpdate := fmt.Sprintf("UPDATE campaign_drafts SET %s = $1 WHERE user_id = $2", dbColumn)
@@ -1126,7 +1303,7 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	_ = c.Respond(&telebot.CallbackResponse{Text: "⚙️ Fleet draft configuration modified."})
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚙️ Fleet draft updated: %d -> %d.", currentVal, newVal)})
 
 	return h.renderDraftCustomizerHUD(c, sender.ID, targetCampID, myRegion)
 }

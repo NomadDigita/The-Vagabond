@@ -602,6 +602,13 @@ func executeStartupMigrations(db *sql.DB) {
 		// standalone copy.
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS garrisoned_soldiers INT DEFAULT 0;`,
 		`ALTER TABLE workshop_inventory ADD COLUMN IF NOT EXISTS garrisoned_mechs INT DEFAULT 0;`,
+
+		// --- Phase 7: Bulk unit selection. A single "step size" stored on
+		// the draft itself (cycled via a Step: x1/x10/x100/MAX button row)
+		// makes every existing +/- button move that many units at once,
+		// instead of forcing 100 taps to draft 100 Soldiers. See
+		// migrations/024_spacehunt_phase7_bulk_selection.sql.
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS step_size INT DEFAULT 1;`,
 	}
 
 	for _, stmt := range migrations {
@@ -841,7 +848,9 @@ func main() {
 	bot.Handle("/silo", silo.HandleSiloPanel)
 	bot.Handle("/mine", camp.HandleActiveMining)
 	bot.Handle("/research", research.HandleResearchPanel)
-	bot.Handle("/deconstruct", deconstruct.HandleDeconstructPanel)
+	bot.Handle("/deconstruct", deconstruct.HandleDeconstructCommand)
+	bot.Handle("/add", combat.HandleAddDraftCommand)
+	bot.Handle("/remove", combat.HandleRemoveDraftCommand)
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 	bot.Handle("/infrastructure", camp.HandleInfrastructureGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
