@@ -24,7 +24,7 @@ type ActiveAgent struct {
 	CampName    string
 	Scrap       float64
 	Rations     float64
-	Electricity      float64
+	Electricity float64
 	Metal       float64
 	Crystal     float64
 	Hydrogen    float64
@@ -32,6 +32,7 @@ type ActiveAgent struct {
 	Dollars     float64
 	NeuroCores  float64
 	TentLvl     int
+	CampLvl     int
 	EconTechLvl int
 	SynapticLvl int
 }
@@ -42,6 +43,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		SELECT t.user_id, t.mode, e.id, e.name, 
 		       r.scrap, r.rations, r.electricity, r.metal, r.crystal, r.hydrogen, r.dollars, r.neuro_cores,
 		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
+		       e.level as camp_lvl,
 		       COALESCE((SELECT res.econ_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as econ_tech_lvl,
 		       COALESCE((SELECT mut.synaptic_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as synaptic_lvl
 		FROM agent_tasks t
@@ -59,9 +61,9 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var a ActiveAgent
 		err := rows.Scan(
-			&a.UserID, &a.Mode, &a.CampID, &a.CampName, 
+			&a.UserID, &a.Mode, &a.CampID, &a.CampName,
 			&a.Scrap, &a.Rations, &a.Electricity, &a.Metal, &a.Crystal, &a.Hydrogen, &a.Dollars, &a.NeuroCores,
-			&a.TentLvl, &a.EconTechLvl, &a.SynapticLvl,
+			&a.TentLvl, &a.CampLvl, &a.EconTechLvl, &a.SynapticLvl,
 		)
 		if err == nil {
 			agents = append(agents, a)
@@ -160,18 +162,35 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				continue
 			}
 
+			// Same "Module levels cannot exceed your Outpost Core level"
+			// rule enforced on the manual upgrade path (camp.go
+			// HandleUpgradeCallback: `currentLvl >= campLvl` is blocked).
+			// Only consider modules still below that cap so the agent
+			// can't auto-build past what a manual upgrade would allow.
 			queryEligible := `
 				SELECT type, level 
 				FROM modules 
 				WHERE encampment_id = $1 
+				  AND level < $2
 				ORDER BY level ASC 
 				LIMIT 1`
-			
+
 			var modType string
 			var lvl int
-			err = tx.QueryRowContext(ctx, queryEligible, a.CampID).Scan(&modType, &lvl)
+			err = tx.QueryRowContext(ctx, queryEligible, a.CampID, a.CampLvl).Scan(&modType, &lvl)
 			if err != nil {
-				_, _ = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, 'tent', 1) ON CONFLICT DO NOTHING", a.CampID)
+				if err == sql.ErrNoRows {
+					// Either no modules exist yet, or every module is
+					// already capped at the Outpost Core level. Seed a
+					// starter tent only if nothing exists at all.
+					var anyModule bool
+					_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1)", a.CampID).Scan(&anyModule)
+					if !anyModule {
+						_, _ = tx.ExecContext(ctx, "INSERT INTO modules (encampment_id, type, level) VALUES ($1, 'tent', 1) ON CONFLICT DO NOTHING", a.CampID)
+					}
+				} else {
+					log.Printf("Agent [Builder] failed querying eligible module: %v", err)
+				}
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
 				continue
 			}
@@ -214,7 +233,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				newMetal := metal - 10.0
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2, electricity = $3 WHERE encampment_id = $4", newRations, newMetal, newEnergy, a.CampID)
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", a.CampID)
-				
+
 				log.Printf("Agent [Military] auto-recruited 1 Soldier for outpost: %s", a.CampName)
 			} else {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newEnergy, a.CampID)
