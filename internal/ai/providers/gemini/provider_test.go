@@ -21,8 +21,8 @@ func TestProvider_Available(t *testing.T) {
 	if !p2.Available() {
 		t.Fatalf("expected Available() == true with an API key set")
 	}
-	if p2.DefaultModel != "gemini-2.5-flash" {
-		t.Errorf("expected default model gemini-2.5-flash (2.0-flash was shut down 2026-06-01), got %q", p2.DefaultModel)
+	if p2.DefaultModel != "gemini-3.5-flash" {
+		t.Errorf("expected default model gemini-3.5-flash (2.0-flash was shut down 2026-06-01), got %q", p2.DefaultModel)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-2.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash")
 	p.BaseURL = server.URL
 
 	resp, err := p.Complete(context.Background(), ai.CompletionRequest{
@@ -67,7 +67,7 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 	if resp.Usage.InputTokens != 8 || resp.Usage.OutputTokens != 5 {
 		t.Errorf("unexpected usage: %+v", resp.Usage)
 	}
-	if !strings.Contains(capturedPath, "gemini-2.5-flash") {
+	if !strings.Contains(capturedPath, "gemini-3.5-flash") {
 		t.Errorf("expected request path to reference the model name, got %q", capturedPath)
 	}
 
@@ -105,7 +105,7 @@ func TestProvider_Complete_JSONModeSetsResponseMimeType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-2.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash")
 	p.BaseURL = server.URL
 
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
@@ -127,7 +127,7 @@ func TestProvider_Complete_JSONModeSetsResponseMimeType(t *testing.T) {
 }
 
 func TestProvider_Complete_NoAPIKeyReturnsError(t *testing.T) {
-	p := gemini.New("", "gemini-2.5-flash")
+	p := gemini.New("", "gemini-3.5-flash")
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
 		Feature:  "ai_planet_governor",
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
@@ -144,7 +144,7 @@ func TestProvider_Complete_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-2.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash")
 	p.BaseURL = server.URL
 
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{

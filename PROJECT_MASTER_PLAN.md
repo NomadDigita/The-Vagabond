@@ -354,6 +354,83 @@ new AI-roadmap code against it.
 
 ---
 
+## 1.7 Critical Fix: Mock Provider Always Won + Model-Generation Drift (following session)
+
+The project owner deployed the §1.5/§1.6 work, set `GEMINI_API_KEY`
+and `QWEN_API_KEY` on Render, and confirmed via `/ai_status` that both
+providers reported `available ✅`. But `/governor` still returned mock
+placeholder output. This was a real, separate bug — not a deployment
+issue, not a re-run of the `ether` bug.
+
+### Confirmed root cause
+
+`ai.Registry.Ordered()` returned providers in the order given by
+`Config.DefaultProvider` + `Config.FallbackOrder`, which **default to
+`"mock"`** (`AI_DEFAULT_PROVIDER=mock`, `AI_FALLBACK_PROVIDERS=mock`)
+when unset — and nothing in this project's setup instructions ever
+told the project owner they needed to set those two variables once a
+real provider key was added. Because the mock provider is always
+`Available()` and its `Complete` never returns an error,
+`Service.Complete`'s fallback loop returned immediately after mock on
+every single call — Qwen and Gemini, despite being registered,
+available, and correctly configured, were **structurally unreachable**
+regardless of any key being set. ADR-003 always documented the
+*intent* that "mock is always last," but no code enforced that
+invariant — it only happened to be true by accident of config.
+
+### Fix
+
+`Registry.Ordered()` now enforces "the provider named `mock` is always
+placed last" unconditionally, regardless of its position in the
+configured order — moving the invariant from a documentation comment
+(ADR-003) into actual, tested code. Three new regression tests in
+`internal/ai/registry_test.go` directly reproduce the exact failure
+condition (mock listed first, alongside other available providers) and
+assert mock is never reachable before a real available provider.
+**This is the fix that makes a configured API key work immediately,
+with zero additional `AI_DEFAULT_PROVIDER`/`AI_FALLBACK_PROVIDERS`
+configuration ever required** — closing the gap that caused the
+project owner's confusion.
+
+### Confirmed model-generation drift (a second, related finding)
+
+Prompted by the project owner asking about "Gemini 3.5 Pro," a fresh
+round of web-search verification (2026-07-16) found the AI model
+landscape had moved meaningfully since the §1.5 pricing table was
+built just one day earlier (2026-07-15) — this space moves fast enough
+that even a one-day-old default can already be the wrong generation:
+
+- **Gemini**: Google shipped an entirely new 3.5 generation at I/O on
+  2026-05-19. `gemini-2.5-flash` (this project's prior default) is
+  superseded by `gemini-3.5-flash`, now GA. **Gemini 3.5 Pro — what the
+  project owner asked about by name — is confirmed NOT yet generally
+  available**, still in limited enterprise preview, with an unconfirmed
+  rumored July 17, 2026 GA date circulating in the press. Fixed:
+  default updated to `gemini-3.5-flash`; do not configure
+  `GEMINI_MODEL=gemini-3.5-pro` until independently reconfirmed GA.
+- **OpenAI**: GPT-5.6 reached general availability 2026-07-09,
+  superseding the `gpt-4o` family this project defaulted to. Fixed:
+  default updated to `gpt-5.6-luna` ($1.00/$6.00 per million, the
+  cheapest current-generation tier); `gpt-4o-mini`/`gpt-4o` pricing
+  rows kept in the cost table since they likely still work if
+  explicitly configured.
+- **Grok**: re-confirmed the existing `$0.20/$0.50` cheap-tier pricing
+  still holds (cited as "Grok 4.1 Fast" across independent trackers),
+  though xAI's flagship has moved to Grok 4.5 ($2.00/$6.00, launched
+  2026-07-08). No default change needed here, but the exact model-ID
+  string remains the least certain part of this codebase's provider
+  configuration — confirm at https://docs.x.ai/docs/models before
+  trusting `GROK_MODEL` in production.
+- **Anthropic** and **DeepSeek** defaults were re-checked and remain
+  accurate as of 2026-07-16 — no change needed.
+
+**Verification:** `gofmt`/`go build`/`go vet`/`go test` all clean; 47
+tests total (was 44), all passing. The 3 new registry tests are a
+direct, permanent regression guard for the mock-priority bug
+specifically — not just a passive count increase.
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -477,6 +554,16 @@ git history for column-level drift; diff `internal/game/content` for
 shape-level drift) is cheap enough to re-run after every SpaceHunt
 merge and should be, rather than waiting for another live crash report
 to prompt it.
+
+**ADR-014: "Mock is always last" is now enforced in `Registry.Ordered()`
+code, not left as a documentation-only intent.** Confirmed real bug
+(2026-07-16): the previous implementation only achieved ADR-003's
+stated invariant by coincidence of `Config`'s default values. Any
+future provider named `"mock"` — or any test double sharing that name
+— is now unconditionally sorted last by the registry itself, closing
+the gap between documented intent and actual behavior permanently
+rather than trusting every future config change to preserve it by
+accident.
 
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
@@ -760,6 +847,20 @@ what research paths and costs already exist to plan around.
   10-column-short unit list, and unused richer Phase 7 rogue-nest
   defense data. Added ADR-013 (schema-drift audits as standing
   practice). 1 new test (43 → 44 total).
+- **Following session (same day):** critical fix — `Registry.Ordered()`
+  was structurally routing every request to the mock provider
+  regardless of real, available, correctly-configured providers (see
+  §1.7). Root cause confirmed via reproduction, not guessed: mock's
+  default position (first) plus its guaranteed non-error `Complete`
+  meant real providers were unreachable. Fixed by making "mock always
+  last" a code-enforced invariant (`registry.go`), with 3 new
+  regression tests reproducing the exact failure condition. Also
+  fixed confirmed model-generation drift found the same session:
+  Gemini default updated 2.5→3.5-flash (Google's 3.5 generation
+  reached GA 2026-05-19; 3.5 Pro — what the project owner asked about
+  — confirmed not yet GA), OpenAI default updated 4o-mini→5.6-luna
+  (GPT-5.6 reached GA 2026-07-09). Added ADR-014. 3 new tests (44 → 47
+  total).
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
