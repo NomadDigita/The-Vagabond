@@ -35,15 +35,22 @@ type Provider struct {
 // New builds a Gemini provider. apiKey may be empty; Available() will
 // correctly report false in that case.
 //
-// Default model note (verified 2026-07-15): gemini-2.0-flash was
-// deprecated and shut down by Google on 2026-06-01 — do not default to
-// it. gemini-2.5-flash ($0.30/$2.50 per million input/output tokens,
-// confirmed against Google's pricing docs) is the current
-// cost-effective default; gemini-2.5-flash-lite ($0.10/$0.40) is
-// cheaper still if quality needs are modest.
+// Default model note (confirmed via web search 2026-07-16, superseding
+// this package's earlier 2026-07-15 note): Google shipped an entire
+// new generation since gemini-2.5-flash was last verified as current —
+// Gemini 3.5 launched at I/O on 2026-05-19, with gemini-3.5-flash
+// reaching general availability the same day ($1.50 input / $9.00
+// output per million tokens, confirmed against a dedicated pricing
+// tracker dated 2026-05-22). gemini-2.5-flash likely still works (no
+// deprecation was found for it specifically) but is no longer the
+// current generation. Gemini 3.5 Pro is NOT yet generally available
+// as of this check — it remains in limited enterprise preview, with a
+// rumored (not Google-confirmed) July 17, 2026 GA date circulating in
+// the press. Do not configure GEMINI_MODEL=gemini-3.5-pro until that
+// is independently confirmed generally available.
 func New(apiKey, defaultModel string) *Provider {
 	if defaultModel == "" {
-		defaultModel = "gemini-2.5-flash"
+		defaultModel = "gemini-3.5-flash"
 	}
 	return &Provider{
 		APIKey:       apiKey,

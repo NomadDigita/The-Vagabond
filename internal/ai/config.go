@@ -174,7 +174,7 @@ func getenvString(key, def string) string {
 //	ANTHROPIC_API_KEY          (string, default "")
 //	ANTHROPIC_MODEL            (string, default "claude-sonnet-4-6")
 //	OPENAI_API_KEY             (string, default "")
-//	OPENAI_MODEL               (string, default "gpt-4o-mini")
+//	OPENAI_MODEL               (string, default "gpt-5.6-luna")
 //	DEEPSEEK_API_KEY           (string, default "")
 //	DEEPSEEK_MODEL             (string, default "deepseek-v4-flash")
 //	QWEN_API_KEY               (string, default "")
@@ -183,7 +183,7 @@ func getenvString(key, def string) string {
 //	GROK_API_KEY               (string, default "")
 //	GROK_MODEL                 (string, default "grok-4-fast")
 //	GEMINI_API_KEY             (string, default "")
-//	GEMINI_MODEL               (string, default "gemini-2.5-flash")
+//	GEMINI_MODEL               (string, default "gemini-3.5-flash")
 //	OLLAMA_BASE_URL            (string, default "" — unset means disabled)
 //	OLLAMA_MODEL               (string, default "llama3.1")
 //	AI_MAX_USER_COST_USD_DAY   (float,  default 0.50)
@@ -213,7 +213,13 @@ func LoadConfig() *Config {
 		AnthropicModel:  getenvString("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
 
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
-		OpenAIModel:  getenvString("OPENAI_MODEL", "gpt-4o-mini"),
+		// Default model note (confirmed via web search 2026-07-16):
+		// gpt-4o-mini is an older OpenAI generation. OpenAI shipped
+		// GPT-5.6 to general availability on 2026-07-09; Luna is its
+		// cheapest tier ($1.00/$6.00 per million tokens, confirmed
+		// against OpenAI's own pricing page). gpt-4o-mini likely still
+		// works but is no longer current.
+		OpenAIModel: getenvString("OPENAI_MODEL", "gpt-5.6-luna"),
 
 		DeepSeekAPIKey: os.Getenv("DEEPSEEK_API_KEY"),
 		DeepSeekModel:  getenvString("DEEPSEEK_MODEL", "deepseek-v4-flash"),
@@ -226,7 +232,7 @@ func LoadConfig() *Config {
 		GrokModel:  getenvString("GROK_MODEL", "grok-4-fast"),
 
 		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:  getenvString("GEMINI_MODEL", "gemini-2.5-flash"),
+		GeminiModel:  getenvString("GEMINI_MODEL", "gemini-3.5-flash"),
 
 		OllamaBaseURL: os.Getenv("OLLAMA_BASE_URL"),
 		OllamaModel:   getenvString("OLLAMA_MODEL", "llama3.1"),

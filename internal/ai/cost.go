@@ -28,11 +28,15 @@ var pricePerMillionTokens = map[string]struct{ In, Out float64 }{
 	// Anthropic — confirmed at $3.00/$15.00 (Sonnet 4.6) as of 2026-07-15.
 	"anthropic:claude-sonnet-4-6": {In: 3.00, Out: 15.00},
 
-	// OpenAI — gpt-4o-mini confirmed at $0.15/$0.60. gpt-4o (the
-	// larger, pricier tier) confirmed at $2.50/$10.00 — add that row
-	// yourself if you configure OPENAI_MODEL=gpt-4o.
-	"openai:gpt-4o-mini": {In: 0.15, Out: 0.60},
-	"openai:gpt-4o":      {In: 2.50, Out: 10.00},
+	// OpenAI — GPT-5.6 reached general availability 2026-07-09,
+	// superseding the gpt-4o family. gpt-5.6-luna (the cheapest tier)
+	// confirmed at $1.00/$6.00 as of 2026-07-16 against OpenAI's own
+	// pricing page. gpt-4o-mini ($0.15/$0.60) and gpt-4o ($2.50/$10.00)
+	// are kept below since they likely still work if explicitly
+	// configured, but are no longer the current generation.
+	"openai:gpt-5.6-luna": {In: 1.00, Out: 6.00},
+	"openai:gpt-4o-mini":  {In: 0.15, Out: 0.60},
+	"openai:gpt-4o":       {In: 2.50, Out: 10.00},
 
 	// DeepSeek — confirmed at $0.14/$0.28 for deepseek-v4-flash as of
 	// 2026-07-15. IMPORTANT: the legacy "deepseek-chat" model alias is
@@ -49,20 +53,26 @@ var pricePerMillionTokens = map[string]struct{ In, Out float64 }{
 	// a real budget.
 	"qwen:qwen-plus": {In: 0.40, Out: 1.20},
 
-	// Grok (xAI) — model naming and pricing here have shifted several
-	// times within 2026 (grok-4.1-fast -> grok-4.20 -> grok-4.3 ->
-	// grok-4.5), and sources disagree on the exact current cheap-tier
-	// ID. The row below reflects the cheap "fast" tier commonly cited
-	// at $0.20/$0.50 per million tokens as of mid-2026 — confirm the
-	// exact model ID at https://docs.x.ai/docs/models before relying
-	// on this for a real budget; it is the least certain row in this
-	// table.
+	// Grok (xAI) — re-confirmed 2026-07-16: xAI's flagship moved to
+	// Grok 4.5 ($2.00/$6.00, launched 2026-07-08), but the cheap
+	// "fast"/volume tier this codebase targets is still confirmed at
+	// $0.20/$0.50 per million tokens (cited as "Grok 4.1 Fast" across
+	// multiple independent pricing trackers). The exact API model
+	// string is the least certain part of this row — sources show
+	// both dash and dot conventions across xAI's model lineup
+	// (grok-4.5, grok-4.3, grok-4.1-fast). Confirm the exact string at
+	// https://docs.x.ai/docs/models before relying on GROK_MODEL in
+	// production; if requests fail with a model-not-found error, that
+	// is almost certainly why.
 	"grok:grok-4-fast": {In: 0.20, Out: 0.50},
 
-	// Gemini — gemini-2.5-flash confirmed at $0.30/$2.50 as of
-	// 2026-07-15. Note gemini-2.0-flash was shut down by Google on
-	// 2026-06-01 and must not be used.
-	"gemini:gemini-2.5-flash": {In: 0.30, Out: 2.50},
+	// Gemini — gemini-3.5-flash confirmed at $1.50/$9.00 as of
+	// 2026-07-16 (Google shipped the 3.5 generation 2026-05-19,
+	// superseding 2.5; gemini-2.0-flash was separately shut down
+	// 2026-06-01 and must not be used). gemini-3.5-pro is not yet
+	// generally available — do not add a pricing row for it until
+	// independently confirmed GA.
+	"gemini:gemini-3.5-flash": {In: 1.50, Out: 9.00},
 
 	// Ollama (self-hosted) — genuinely zero marginal API cost; you pay
 	// for the compute instead. Kept at 0/0 rather than omitted so a
