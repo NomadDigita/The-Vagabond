@@ -32,10 +32,27 @@ func New(db *sql.DB, service *ai.Service) *Commander {
 // knows about. Kept as an explicit list (rather than SELECT *) so a
 // schema change is a deliberate one-line addition here, not a silent
 // behavior change.
+//
+// Verified complete against origin/main as of 2026-07-16 by
+// cross-referencing every CREATE TABLE column and every
+// `ALTER TABLE workshop_inventory ADD COLUMN` statement in
+// cmd/bot/main.go (28 real unit/garrison columns, excluding the
+// encampment_id foreign key) — not assumed. This list was previously
+// missing 10 columns added by the parallel SpaceHunt Phase 6/7 combat
+// work (liberators, wraiths, observers, guardians, piercing_missiles,
+// cargo_mk1/2/3, garrisoned_soldiers, garrisoned_mechs), which would
+// have made Fleet Commander silently blind to a meaningful slice of a
+// player's real fleet strength — not a crash (those columns are all
+// properly ALTER-guarded), but a real analysis-quality gap. Re-run the
+// cross-reference in PROJECT_MASTER_PLAN.md's audit notes before
+// trusting this list is still complete after any future SpaceHunt
+// combat-phase merge.
 var unitColumns = []string{
 	"soldiers", "drones", "jets", "mechs", "nukes", "buggies", "ships",
 	"haulers", "tankers", "rigs", "miners", "destroyers", "bombers",
 	"scouts", "battlecruisers", "deathstars", "fusion_tanks", "nuclear_shields",
+	"liberators", "wraiths", "observers", "guardians", "piercing_missiles",
+	"cargo_mk1", "cargo_mk2", "cargo_mk3", "garrisoned_soldiers", "garrisoned_mechs",
 }
 
 // BuildOwnFleet loads the calling player's current unit composition.
@@ -88,6 +105,12 @@ func columnList() string {
 // shown to players via /recon (internal/game/content.RogueNestComposition)
 // so the Fleet Commander's view of the nest never disagrees with what
 // the static recon report already told the player.
+//
+// As of the parallel SpaceHunt Phase 7 work ("Rogue AI scaling via
+// real player subsystems"), RogueNestForce carries a full per-turret
+// Defense Grid, Guardian/Observer garrison, research level, shields,
+// and an optional hero-equivalent superpower — all surfaced here, not
+// just the legacy flat TurretBonus.
 func BuildRogueNestTarget(campLevel int) TargetProfile {
 	nest := content.RogueNestComposition(campLevel)
 	return TargetProfile{
@@ -95,12 +118,24 @@ func BuildRogueNestTarget(campLevel int) TargetProfile {
 		IsPvE:      true,
 		ThreatTier: content.ThreatTier(campLevel),
 		Garrison: FleetComposition{
-			"soldiers": nest.Soldiers,
-			"mechs":    nest.Mechs,
-			"drones":   nest.Drones,
-			"jets":     nest.Jets,
+			"soldiers":  nest.Soldiers,
+			"mechs":     nest.Mechs,
+			"drones":    nest.Drones,
+			"jets":      nest.Jets,
+			"guardians": nest.Guardians,
+			"observers": nest.Observers,
 		},
 		TurretBonus: nest.TurretBonus,
+		TurretGrid: FleetComposition{
+			"light_laser":   nest.LightLaserLvl,
+			"heavy_laser":   nest.HeavyLaserLvl,
+			"gauss_cannon":  nest.GaussCannonLvl,
+			"ion_cannon":    nest.IonCannonLvl,
+			"plasma_turret": nest.PlasmaTurretLvl,
+		},
+		IntegrityTechLvl: nest.IntegrityTechLvl,
+		Shields:          nest.Shields,
+		HeroSuperpower:   nest.HeroSuperpower,
 	}
 }
 

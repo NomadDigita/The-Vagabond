@@ -24,12 +24,35 @@ import (
 type FleetComposition map[string]int
 
 // TargetProfile describes what the fleet might be sent against.
+// TargetProfile describes what the fleet might be sent against.
+//
+// TurretGrid, IntegrityTechLvl, Shields, and HeroSuperpower mirror the
+// enriched internal/game/content.RogueNestForce fields added by the
+// parallel SpaceHunt Phase 7 work ("Rogue AI scaling via real player
+// subsystems") — a rogue nest now stands up individually-typed
+// turrets, research levels, and (at high tiers) a hero-equivalent
+// superpower, the same way a real player base would, rather than a
+// single flat bonus. TurretBonus is kept for backward compatibility
+// with anything reading only the legacy summed total.
 type TargetProfile struct {
 	Name        string
 	IsPvE       bool
 	ThreatTier  string // human-readable, e.g. "Moderate", "Severe" (PvE only)
 	Garrison    FleetComposition
-	TurretBonus float64 // flat defense-rating modifier bonus, 0 if none
+	TurretBonus float64 // legacy flat defense-rating modifier bonus, 0 if none
+
+	// TurretGrid is a turret-type→level map (e.g. "light_laser": 4),
+	// empty if the target has no Defense Grid breakdown available.
+	TurretGrid FleetComposition
+	// IntegrityTechLvl mirrors research_states.integrity_tech_lvl (or
+	// its PvE equivalent) — 0 if not applicable/unknown.
+	IntegrityTechLvl int
+	// Shields mirrors nuclear_shields count — 0 if none.
+	Shields int
+	// HeroSuperpower names an active hero-equivalent ability the
+	// target can bring to the fight (e.g. "Kinetic Barrier"), empty if
+	// none.
+	HeroSuperpower string
 }
 
 // CombatHistorySummary is a rough win/loss proxy built from completed
@@ -81,7 +104,8 @@ Rules:
 - If the player's fleet is clearly outmatched, recommend retreat, reinforce, or scout — never attack just because the player seems to want to.
 - If recent combat history shows a losing streak, factor that into your risk assessment explicitly.
 - If you recommend split_fleet, describe roughly what to send vs. hold back in suggested_split.
-- Be honest about uncertainty — if the target's garrison is only a rough estimate (as with a scanned rogue nest), say so in risk_assessment.`
+- Be honest about uncertainty — if the target's garrison is only a rough estimate (as with a scanned rogue nest), say so in risk_assessment.
+- If the target has an active hero superpower, treat it as a significant risk factor and call it out explicitly in risk_assessment — it can change the outcome regardless of raw unit counts.`
 
 // BuildUserPrompt renders own fleet + target + history into the data
 // block the model reasons over. Sorted map iteration keeps output
@@ -99,8 +123,21 @@ func BuildUserPrompt(own FleetComposition, target TargetProfile, history CombatH
 		fmt.Fprintf(&b, "%s (rival player base)\n", target.Name)
 	}
 	writeComposition(&b, target.Garrison)
+	if len(target.TurretGrid) > 0 {
+		b.WriteString("  Defense Grid:\n")
+		writeComposition(&b, target.TurretGrid)
+	}
 	if target.TurretBonus > 0 {
 		fmt.Fprintf(&b, "  Defensive bonus: +%.0f%% (dug-in position)\n", target.TurretBonus*100)
+	}
+	if target.IntegrityTechLvl > 0 {
+		fmt.Fprintf(&b, "  Integrity Tech level: %d\n", target.IntegrityTechLvl)
+	}
+	if target.Shields > 0 {
+		fmt.Fprintf(&b, "  Nuclear shields: %d\n", target.Shields)
+	}
+	if target.HeroSuperpower != "" {
+		fmt.Fprintf(&b, "  ⚠️ Hero superpower active: %s\n", target.HeroSuperpower)
 	}
 
 	b.WriteString("\nRECENT COMBAT HISTORY:\n")

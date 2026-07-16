@@ -21,6 +21,21 @@ func NewFleetCommanderHandler(cmd *fleetcommander.Commander) *FleetCommanderHand
 	return &FleetCommanderHandler{Commander: cmd}
 }
 
+func buildFleetCommanderKeyboard() *telebot.ReplyMarkup {
+	selector := &telebot.ReplyMarkup{}
+	btnRefresh := selector.Data("🔄 Refresh Analysis", "fleet_refresh")
+	selector.Inline(selector.Row(btnRefresh))
+	return selector
+}
+
+func (h *FleetCommanderHandler) renderReport(ctx context.Context, userID int64) (string, *telebot.ReplyMarkup, error) {
+	rec, err := h.Commander.Recommend(ctx, userID)
+	if err != nil {
+		return "", nil, err
+	}
+	return fleetcommander.FormatForTelegram(rec), buildFleetCommanderKeyboard(), nil
+}
+
 // ── /fleet_commander ─────────────────────────────────────────────────
 //
 // Analyzes the player's fleet against the rogue-nest PvE target scaled
@@ -36,7 +51,7 @@ func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
 	ctx := context.Background()
-	rec, err := h.Commander.Recommend(ctx, sender.ID)
+	text, keyboard, err := h.renderReport(ctx, sender.ID)
 	if errors.Is(err, fleetcommander.ErrNoEncampment) {
 		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
 	}
@@ -44,5 +59,28 @@ func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 		return c.Send("⚠️ The AI Fleet Commander is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(fleetcommander.FormatForTelegram(rec))
+	return c.Send(text, keyboard)
+}
+
+// ── callback: fleet_refresh ──────────────────────────────────────────
+//
+// Re-runs the same analysis on demand (a real new AI Foundation call,
+// subject to the usual cost/cache/budget rules) and posts a fresh report.
+func (h *FleetCommanderHandler) HandleFleetCommanderRefreshCallback(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	ctx := context.Background()
+
+	text, keyboard, err := h.renderReport(ctx, sender.ID)
+	if errors.Is(err, fleetcommander.ErrNoEncampment) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ You don't have an outpost yet."})
+	}
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Fleet Commander unavailable: " + err.Error()})
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
+	return c.Send(text, keyboard)
 }

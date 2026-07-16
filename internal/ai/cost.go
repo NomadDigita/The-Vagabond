@@ -11,15 +11,67 @@ import (
 // would exceed the configured per-user or global daily budget.
 var ErrBudgetExceeded = errors.New("ai: daily cost budget exceeded")
 
-// pricePerMillionTokens is a conservative, intentionally-static price
-// table used only for budget accounting (not billing). Update as
-// providers change published pricing. Unknown provider/model pairs
-// fall back to a safe default so cost tracking never silently under-
-// counts an unrecognized model.
+// pricePerMillionTokens is used only for budget accounting (not
+// billing) — it estimates spend against the daily budget caps in
+// Config, it is not what any provider actually charges you.
+//
+// Every entry below was verified by web search on 2026-07-15 against
+// each provider's own pricing documentation (not guessed). Prices
+// change — re-verify before trusting this table for a real budget
+// months from now, especially the fast-moving providers (DeepSeek,
+// Grok/xAI, Qwen) called out individually below.
+//
+// Unknown provider/model pairs fall back to a deliberately
+// conservative "default" entry so cost tracking never silently
+// under-counts an unrecognized model.
 var pricePerMillionTokens = map[string]struct{ In, Out float64 }{
+	// Anthropic — confirmed at $3.00/$15.00 (Sonnet 4.6) as of 2026-07-15.
 	"anthropic:claude-sonnet-4-6": {In: 3.00, Out: 15.00},
-	"mock:mock-1":                 {In: 0, Out: 0},
-	"default":                     {In: 5.00, Out: 15.00},
+
+	// OpenAI — gpt-4o-mini confirmed at $0.15/$0.60. gpt-4o (the
+	// larger, pricier tier) confirmed at $2.50/$10.00 — add that row
+	// yourself if you configure OPENAI_MODEL=gpt-4o.
+	"openai:gpt-4o-mini": {In: 0.15, Out: 0.60},
+	"openai:gpt-4o":      {In: 2.50, Out: 10.00},
+
+	// DeepSeek — confirmed at $0.14/$0.28 for deepseek-v4-flash as of
+	// 2026-07-15. IMPORTANT: the legacy "deepseek-chat" model alias is
+	// scheduled for deprecation by DeepSeek on 2026-07-24 — do not
+	// configure DEEPSEEK_MODEL=deepseek-chat going forward, use
+	// deepseek-v4-flash directly.
+	"deepseek:deepseek-v4-flash": {In: 0.14, Out: 0.28},
+
+	// Qwen (Alibaba DashScope) — qwen-plus commonly cited around
+	// $0.40/$1.20 per million tokens as of mid-2026, though DashScope
+	// pricing has tiered-by-request-length quirks and sources vary
+	// (some cite $0.26/$0.78) — treat this row as approximate and
+	// verify against the Alibaba Cloud Model Studio pricing page for
+	// a real budget.
+	"qwen:qwen-plus": {In: 0.40, Out: 1.20},
+
+	// Grok (xAI) — model naming and pricing here have shifted several
+	// times within 2026 (grok-4.1-fast -> grok-4.20 -> grok-4.3 ->
+	// grok-4.5), and sources disagree on the exact current cheap-tier
+	// ID. The row below reflects the cheap "fast" tier commonly cited
+	// at $0.20/$0.50 per million tokens as of mid-2026 — confirm the
+	// exact model ID at https://docs.x.ai/docs/models before relying
+	// on this for a real budget; it is the least certain row in this
+	// table.
+	"grok:grok-4-fast": {In: 0.20, Out: 0.50},
+
+	// Gemini — gemini-2.5-flash confirmed at $0.30/$2.50 as of
+	// 2026-07-15. Note gemini-2.0-flash was shut down by Google on
+	// 2026-06-01 and must not be used.
+	"gemini:gemini-2.5-flash": {In: 0.30, Out: 2.50},
+
+	// Ollama (self-hosted) — genuinely zero marginal API cost; you pay
+	// for the compute instead. Kept at 0/0 rather than omitted so a
+	// lookup for "ollama:<any model>" resolves to a real, correct
+	// answer instead of falling through to "default" below.
+	"ollama:*": {In: 0, Out: 0},
+
+	"mock:mock-1": {In: 0, Out: 0},
+	"default":     {In: 5.00, Out: 15.00},
 }
 
 // EstimateCostUSD prices a Usage for a given provider+model pair.

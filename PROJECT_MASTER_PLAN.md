@@ -119,6 +119,241 @@ internal/ai/
 
 ---
 
+## 1.5 Production Hardening + Multi-Provider Ecosystem (this session)
+
+This session did not add a new lettered phase. It (a) fixed a real bug
+found live in production, (b) addressed UX gaps the project owner
+flagged directly from the live bot, and (c) built out the
+provider-agnostic ecosystem Phase A's design always intended, so real
+(non-mock) output is one API key away for six different providers.
+
+### Production bugfix: `/economy_advisor` crash
+
+**Confirmed root cause**, not guessed: `cmd/bot/main.go`'s
+`CREATE TABLE IF NOT EXISTS resources` statement lists `ether` and
+`neuro_cores` in its column list, but on any database where the
+`resources` table already existed *before* those two columns were
+added to that list (i.e. the live production database), `CREATE TABLE
+IF NOT EXISTS` is a no-op — so those columns were silently never
+created there. Nothing in the migration list had a corresponding
+`ALTER TABLE ADD COLUMN`. `internal/game/econadvisor` reads `ether`,
+which crashed with `column "ether" does not exist` — confirmed via the
+project owner's own screenshot of the live error. `internal/game/governor`
+reads `neuro_cores`, which had the identical latent gap but hadn't
+been hit yet.
+
+**Fix:** two new, idempotent, defensively-placed statements —
+`ALTER TABLE resources ADD COLUMN IF NOT EXISTS ether ...` and the
+same for `neuro_cores` — added to the embedded migration list right
+after the existing resources rename/drop block. Safe to run against
+any database state (brand new or years old).
+
+### Mock provider output quality
+
+**Confirmed root cause** (via the project owner's screenshots): every
+Phase B/C/D handler requests `JSONMode: true` and parses the response
+through `ParseRecommendation`, which falls back to dumping raw text
+verbatim if JSON parsing fails. The mock provider (correctly, per
+ADR-003) never made a real API call, but it also never returned valid
+JSON — so every mock response fell through to the raw-text path,
+producing the "sooo worst" (project owner's words) output visible in
+the screenshots: a literal untruncated dump of the prompt data.
+
+**Fix:** `internal/ai/providers/mock/provider.go` now returns a valid,
+clearly-labeled placeholder JSON object per feature (governor,
+fleet_commander, economy_advisor), matching each phase's real
+`json:"..."` tag shape. This is verified, not assumed —
+`internal/ai/providers/mock/placeholder_test.go` calls each phase's
+real `ParseRecommendation` against the mock's output and asserts it
+parses cleanly (not a fallback), so the formatted, non-raw template
+renders even with zero API keys configured. If a phase's JSON shape
+changes in the future, this test will fail loudly rather than silently
+regressing back to raw-text mock output.
+
+### Inline keyboards
+
+The project owner flagged that `/governor`, `/fleet_commander`, and
+`/economy_advisor` had no inline keyboard, unlike the rest of the bot's
+UI. Fixed:
+- `/governor` — 🔄 Refresh Analysis + 🛠️ Autopilot toggle (label
+  reflects current stored preference; toggling still does not cause
+  any autonomous action, per ADR-007 — the button and the text command
+  both say so explicitly).
+- `/fleet_commander` — 🔄 Refresh Analysis.
+- `/economy_advisor` — 🔄 Refresh Analysis.
+
+Each refresh button triggers a genuine new `ai.Service.Complete` call
+(subject to the same cost/cache/budget rules as any other call), not a
+replay of the same cached text. Callback unique names
+(`gov_refresh`, `gov_toggle_autopilot`, `fleet_refresh`, `econ_refresh`)
+follow the existing `\f`-prefixed convention already used by
+`combat.go`'s inline buttons.
+
+### Multi-provider ecosystem
+
+Per the project owner's explicit request for "as many LLMs as
+possible, each with as many models as possible," four new providers
+were added on top of the existing Anthropic + mock:
+
+- **`internal/ai/providers/openaicompat`** — one implementation
+  covering **OpenAI**, **DeepSeek**, **Qwen** (Alibaba DashScope,
+  OpenAI-compatible mode), and **Grok** (xAI), since all four expose
+  the same Chat Completions wire format. Verified end-to-end
+  (`provider_test.go`, 4 tests) against a local `httptest` server —
+  this caught and fixed a real bug: the JSON-mode instruction was
+  silently dropped whenever a caller passed no `System` prompt (every
+  current Phase B/C/D caller always sets one, so this hadn't bitten
+  yet, but would have the moment a caller didn't).
+- **`internal/ai/providers/gemini`** — Google's native
+  `generateContent` API (distinct wire format: `"model"` role instead
+  of `"assistant"`, top-level `systemInstruction`, `responseMimeType`
+  for JSON mode). Verified end-to-end (`provider_test.go`, 5 tests)
+  against a local server, including the confirmed-necessary role
+  mapping. **Caught a real bug before it shipped**: the initial default
+  model was `gemini-2.0-flash`, which Google shut down 2026-06-01 —
+  confirmed via web search, not assumed; fixed to default to
+  `gemini-2.5-flash`.
+- **`internal/ai/providers/ollama`** — self-hosted open-weight models
+  via Ollama's native `/api/chat` endpoint. No API key required
+  (`Available()` only checks a base URL is set). Verified end-to-end
+  (`provider_test.go`, 5 tests) including an unreachable-host case.
+  **This is the concrete path toward the project owner's "supermini
+  LLM, thinks itself, less dependency on outside LLMs" ask** — but see
+  the honest caveat in §5: capable open-weight inference needs real
+  compute (RAM/GPU), which this provider does not manufacture out of
+  nothing.
+
+**Cost table (`internal/ai/cost.go`)** was rebuilt with prices verified
+by live web search on 2026-07-15 (not estimated) for every provider:
+Anthropic Sonnet 4.6 ($3.00/$15.00 — unchanged, confirmed still
+accurate), OpenAI gpt-4o-mini ($0.15/$0.60), DeepSeek deepseek-v4-flash
+($0.14/$0.28 — **note:** the legacy `deepseek-chat` alias retires
+2026-07-24, do not configure that model name), Qwen qwen-plus
+(~$0.40/$1.20, flagged as approximate — DashScope pricing has
+request-length tiering), Grok grok-4-fast (~$0.20/$0.50, flagged as
+the least certain row — xAI's model naming has shifted repeatedly
+through 2026), Gemini gemini-2.5-flash ($0.30/$2.50), Ollama (genuinely
+$0/$0 — compute cost instead of API cost).
+
+**`internal/ai/config.go`** gained `OPENAI_API_KEY`/`OPENAI_MODEL`,
+`DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`, `QWEN_API_KEY`/`QWEN_MODEL`/
+`QWEN_BASE_URL`, `GROK_API_KEY`/`GROK_MODEL`, `GEMINI_API_KEY`/
+`GEMINI_MODEL`, `OLLAMA_BASE_URL`/`OLLAMA_MODEL` — every one optional,
+every provider activates the moment its own key (or, for Ollama, base
+URL) is set, with zero other code change needed. `cmd/bot/main.go`
+registers all seven providers (five new + Anthropic + mock) into the
+registry at boot; `Registry.Ordered()`'s existing "unlisted-but-
+available providers are appended last" behavior (see `registry.go`)
+means a freshly-configured provider is reachable even if
+`AI_FALLBACK_PROVIDERS` isn't updated to mention it explicitly.
+
+**Verification performed this session:** `gofmt`, `go build`, `go vet`,
+and `go test` all clean across every touched package — 43 tests total
+(was 26 at end of Phase D), zero external module dependencies added to
+any of the new provider packages (all use only `net/http`,
+`encoding/json`, and stdlib). Full `./...` build against the real
+`telebot.v3`/`lib/pq` dependency tree still not verified in this
+sandbox — same standing blocker noted in every phase above.
+
+---
+
+## 1.6 Deep Schema-Drift Audit (following session, prompted by project owner)
+
+The project owner reported (via screenshots) that `/economy_advisor`
+was still crashing and mock output was still showing on the live bot,
+and asked for a genuinely deep review rather than another one-off
+patch. Two things were true at once, and it's worth being precise
+about which was which:
+
+**Not new breakage:** both symptoms in the screenshots were already
+fixed by the §1.5 commit — they just hadn't been pushed/merged/
+deployed yet. Confirmed via `git fetch origin main`: that commit was
+still local-only in the working sandbox.
+
+**A real, separate discovery:** fetching the true current `origin/main`
+revealed it had moved forward substantially since this project's
+Phase A–D work was merged (PR #16) — the parallel SpaceHunt workspace
+had since merged **Phase 6** (six new turret types, new ships:
+Liberator/Wraith/Observer/Guardian, Piercing Missile, three Cargo Ship
+tiers) and an unplanned **Phase 7** ("Rogue AI scaling via real player
+subsystems" — the PvE rogue nest now has a full per-turret Defense
+Grid, Guardian/Observer garrison, research level, shields, and an
+optional hero-equivalent superpower, not just a flat bonus).
+
+This was exactly the right thing to check for, because Phase C (Fleet
+Commander) depends on both `workshop_inventory`'s column set and
+`internal/game/content.RogueNestComposition`'s output shape — both of
+which Phase 6/7 changed.
+
+### Audit method (confirmed via git history, not guessed)
+
+For every table `internal/game/governor`, `internal/game/fleetcommander`,
+and `internal/game/econadvisor` read from, the definitive current
+column set was extracted programmatically from `cmd/bot/main.go` (union
+of `CREATE TABLE` columns and every `ALTER TABLE ... ADD COLUMN`), then
+cross-referenced against `git log` to find each table's *original*
+column set at first creation. A column present now but absent at
+creation, with no `ALTER TABLE ADD COLUMN` guard, is exactly the bug
+class that caused the `ether`/`neuro_cores` crash.
+
+**Result — one crash-class bug found (already fixed in §1.5), zero new
+ones:** `resources.ether`/`resources.neuro_cores` remain the only
+columns anywhere in the schema added to a `CREATE TABLE IF NOT EXISTS`
+column list without a corresponding `ALTER TABLE ADD COLUMN` guard.
+Every other newer column across `encampments`, `raids`,
+`research_states`, `bank_accounts`, and `workshop_inventory` — all
+tables this AI roadmap's code reads from — was confirmed to have a
+proper `ALTER TABLE ADD COLUMN IF NOT EXISTS` guard. `modules` and
+`market_exchange` were confirmed to have had every one of their current
+columns present since their very first commit (`d38ca0f`) — genuinely
+zero risk, not merely unchecked.
+
+**Result — two confirmed analysis-quality gaps found and fixed (not
+crashes, but real correctness gaps):**
+
+1. **`fleetcommander.unitColumns` was missing 10 real
+   `workshop_inventory` columns** added by Phase 6/7 (`liberators`,
+   `wraiths`, `observers`, `guardians`, `piercing_missiles`,
+   `cargo_mk1`/`2`/`3`, `garrisoned_soldiers`, `garrisoned_mechs`) —
+   confirmed by extracting the full 28-column set and diffing against
+   the hardcoded 18-column list. This never crashed (all 10 columns
+   are properly `ALTER`-guarded), but Fleet Commander was silently
+   blind to a meaningful slice of a player's actual fleet strength —
+   including several capital-ship-tier units. **Fixed:** the list now
+   includes all 28 confirmed columns, with a comment documenting how
+   to re-verify it's still complete after a future SpaceHunt combat
+   merge.
+2. **`fleetcommander.TargetProfile`/`BuildRogueNestTarget` only used
+   the legacy flat `TurretBonus` field**, ignoring the new
+   per-turret Defense Grid, Guardian/Observer garrison, Integrity Tech
+   level, shields, and hero-superpower data Phase 7 added to
+   `content.RogueNestForce`. Confirmed by reading the actual Phase 7
+   diff. This directly undermined Phase C's core purpose — accurately
+   assessing target strength. **Fixed:** `TargetProfile` gained
+   `TurretGrid`, `IntegrityTechLvl`, `Shields`, `HeroSuperpower` fields,
+   all populated in `BuildRogueNestTarget` and rendered in
+   `BuildUserPrompt`; the system prompt now explicitly calls out a
+   hero superpower as a risk factor. Verified with a new test
+   (`TestBuildRogueNestTarget_IncludesEnrichedDefenseData`) that
+   exercises every enrichment threshold at level 20 and asserts the
+   data reaches the actual rendered prompt, not just the struct.
+
+### Branch history note
+
+The `ai-foundation-phase-a` branch (this session's local work) was
+rebased onto the true current `origin/main` (picking up SpaceHunt
+Phase 6/7) with **zero merge conflicts** — a good sign the file
+boundaries between the two roadmaps (per §0's isolation rule) held up
+under real divergence, not just in theory.
+
+**Verification performed:** `gofmt`/`go build`/`go vet`/`go test` all
+clean; 44 tests total (was 43). The audit script/method itself is
+reproducible — re-run the same `CREATE TABLE` ∪ `ALTER TABLE ADD
+COLUMN` cross-reference against `git log` for any table before trusting
+new AI-roadmap code against it.
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -202,6 +437,46 @@ undercutting that gameplay loop, or (b) need its own
 scouted-data-only lookup layer. Neither was designed carefully enough
 in this session to ship responsibly, so PvP targeting is deferred —
 see §4 and the Phase C notes in §1.
+
+**ADR-010: One `openaicompat` implementation serves four providers
+(OpenAI, DeepSeek, Qwen, Grok) rather than four near-duplicate HTTP
+clients.** Confirmed (not assumed) that all four expose the same Chat
+Completions wire shape via each provider's own published API docs.
+Trade-off: if one of the four ever diverges from the OpenAI shape in a
+provider-specific way, this shared implementation would need either a
+per-provider flag (the pattern `SupportsJSONResponseFormat` already
+establishes) or a fork into its own package. Not a problem yet — flag
+it if a fourth wire-format quirk shows up.
+
+**ADR-011: Gemini and Ollama each get their own provider package
+instead of being forced into `openaicompat`.** Confirmed both have
+genuinely different wire formats (Gemini: `"model"` role, top-level
+`systemInstruction`, `responseMimeType`; Ollama: native `/api/chat`,
+object-shaped tool-call arguments instead of a JSON string). Forcing
+either into the OpenAI shape would require lossy translation; a
+dedicated package per genuinely-different wire format was judged
+clearer than one "OpenAI-compatible-ish" package with special cases.
+
+**ADR-012: Provider cost prices are hardcoded from a verified,
+timestamped web search, not fetched live.** Same trade-off as ADR-004,
+extended to five more providers. Every price in
+`internal/ai/cost.go`'s table was individually confirmed via web search
+on 2026-07-15, with the least-certain entries (Qwen, Grok) explicitly
+flagged as approximate in code comments — prices for these two
+providers have moved multiple times within 2026 across independent
+sources. Re-verify before trusting this table for a real production
+budget more than a few months out.
+
+**ADR-013: Schema-drift audits against the parallel branch are now a
+standing practice, not a one-off.** The `ether`/`neuro_cores` bug and
+the Fleet Commander gaps found in §1.6 are the same underlying risk:
+this AI roadmap's code reads tables and content owned by the parallel
+SpaceHunt roadmap, which evolves independently. The audit method in
+§1.6 (cross-reference `CREATE TABLE` ∪ `ALTER TABLE ADD COLUMN` against
+git history for column-level drift; diff `internal/game/content` for
+shape-level drift) is cheap enough to re-run after every SpaceHunt
+merge and should be, rather than waiting for another live crash report
+to prompt it.
 
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
@@ -374,27 +649,62 @@ what research paths and costs already exist to plan around.
 - **Fleet Commander has no PvP target support.** See ADR-009. A player
   can currently only get a recommendation against the scaled PvE rogue
   nest, not a specific rival.
+- **Grok/Qwen cost estimates are the least certain entries in the cost
+  table.** See ADR-012. xAI in particular has renamed and repriced its
+  model lineup multiple times within 2026 across independent sources —
+  confirm `GROK_MODEL` still resolves to a real model ID at
+  https://docs.x.ai/docs/models before relying on it in production.
+- **`openaicompat`, `gemini`, and `ollama` all share the same
+  `RoleTool`-folded-into-`user` simplification as the Anthropic
+  provider** (see the existing tech-debt bullet above and ADR-006) —
+  fix all four together when a real tool-execution loop is built,
+  not one at a time.
+- **Ollama's realistic performance on Render's standard (CPU-only)
+  plans is unconfirmed.** The provider itself is complete and tested,
+  but nobody has verified it against an actual Render deployment. A
+  capable open-weight model (7B+ parameters) run on CPU is typically
+  much slower per reply than a hosted API, and standard Render web
+  service plans may not have enough RAM for a useful model size. This
+  is a known general constraint of CPU inference, not a guess specific
+  to this project — but the project owner's specific Render tier
+  hasn't been confirmed, so no claim is made here about whether Ollama
+  is currently practical on their infrastructure.
 
 ## 5. Risks / Blockers
 
-- **No `ANTHROPIC_API_KEY` is configured anywhere in this environment.**
-  Every Phase A code path was designed and tested to work with this
-  (mock fallback), but nobody has yet exercised the real Anthropic
-  provider against a live API key. First Phase B session should set
-  one (even a personal/test key) and manually sanity-check
-  `/ai_status` shows `anthropic` in the provider list.
-- **This session could not push to GitHub.** The repo owner offered a
-  Personal Access Token directly in chat; per this assistant's fixed
-  operating rules, credentials pasted into a conversation are never
-  used to authenticate, regardless of how the account is described.
-  **All work in this section exists only as local commits in this
-  session's sandbox / a git bundle handed to the user** — it has not
-  been pushed to `https://github.com/NomadDigita/The-Vagabond` and
-  will not exist there until the repo owner pushes it themselves (see
-  the handoff instructions given in-chat). If you're a future session
-  reading this file *from the actual GitHub repo*, that means the push
-  succeeded — if you're reading it any other way, it may still be
-  sitting unpushed.
+- **No API key is configured for any of the six real providers
+  (Anthropic, OpenAI, DeepSeek, Qwen, Grok, Gemini) as of this
+  session, and Ollama has no base URL set.** Every provider's code
+  path was designed and tested (via mocked HTTP servers, not live
+  calls — see §1.5) to work correctly once a key is added, but zero
+  have been exercised against a real, live API in this project. The
+  project owner has been asked directly which provider(s) they have
+  keys for; this is not yet confirmed.
+- **Whether Ollama is practical on the project owner's actual Render
+  plan is unconfirmed** — see the tech-debt bullet in §4. Do not
+  assume Ollama is viable there without confirming the plan's RAM/CPU
+  and testing actual response latency for a real model.
+- **Push status, corrected again:** as of this write-up, the
+  `ai-foundation-phase-a` branch has been rebased onto the true current
+  `origin/main` (confirmed via `git fetch`, which showed `main` had
+  advanced to include SpaceHunt Phase 6/7 since our Phase D merge —
+  see §1.6). This rebase was clean, zero conflicts. **The §1.5 and §1.6
+  work (bugfix, mock JSON fix, keyboards, 4 new providers, Fleet
+  Commander schema-drift fixes) is still not yet pushed to GitHub** as
+  of this write-up — it exists only as local commits in this session's
+  sandbox / a new git bundle handed to the project owner. If a future
+  session finds this file already reflecting these changes on GitHub,
+  the push succeeded; otherwise it's still pending.
+- **On credentials:** a GitHub Personal Access Token was offered
+  directly in chat more than once during this project. Per this
+  assistant's fixed operating rules, credentials pasted into a
+  conversation are never used to authenticate, regardless of how the
+  account is described or how much authority is attached to the token.
+  This is not a preference that changes with re-asking — future
+  sessions should expect the same response and should not spend
+  turns re-litigating it. The working handoff process (git bundle +
+  the project owner pushing themselves, from Termux or otherwise) is
+  proven to work and should simply be repeated.
 
 ## 6. Change Log
 
@@ -424,6 +734,32 @@ what research paths and costs already exist to plan around.
   resources/modules/bank_accounts/market_exchange, 1 new bot command
   (`/economy_advisor`), no new tables. Recommended next task updated
   to Phase E.
+- **Following session:** production hardening + multi-provider
+  ecosystem (see §1.5 for full detail). Fixed a confirmed live crash
+  (`ether`/`neuro_cores` columns missing from `resources` on the
+  production database). Fixed the mock provider's raw-text output
+  quality by making it JSON-aware per feature (verified via
+  `placeholder_test.go`, not assumed). Added inline keyboards
+  (refresh + autopilot toggle) to `/governor`, `/fleet_commander`,
+  `/economy_advisor`. Built and end-to-end tested (via local
+  `httptest` servers, not assumed) four new providers — `openaicompat`
+  (OpenAI/DeepSeek/Qwen/Grok), `gemini`, `ollama` — catching and fixing
+  two real bugs in the process (a silently-dropped JSON-mode
+  instruction in `openaicompat`, and a default Gemini model that
+  Google had already shut down). Cost table rebuilt with prices
+  verified by web search on 2026-07-15. Added ADR-010 through ADR-012.
+  17 new tests this session (26 → 43 total).
+- **Following session (same day):** deep schema-drift audit prompted
+  by the project owner (see §1.6). Rebased onto the true current
+  `origin/main` (zero conflicts), discovering the parallel SpaceHunt
+  branch had merged Phase 6 and an unplanned Phase 7 since our Phase D
+  merge. Confirmed via git-history cross-reference that the
+  `ether`/`neuro_cores` bug was the only crash-class schema-drift issue
+  anywhere in the tables this roadmap's code reads. Found and fixed two
+  real (non-crash) analysis-quality gaps in Fleet Commander: a stale
+  10-column-short unit list, and unused richer Phase 7 rogue-nest
+  defense data. Added ADR-013 (schema-drift audits as standing
+  practice). 1 new test (43 → 44 total).
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
