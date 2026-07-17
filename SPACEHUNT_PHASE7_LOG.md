@@ -67,13 +67,14 @@ brief describes.
 | 4 | Hero Commander — manual garrison | **Partial** — "Manual Defense Garrison" panel lets a player lock/withdraw Soldiers/Mechs from the draftable pool (enforced, not just displayed). Still open: explicit "which hero leads this raid" picker UI (the DB link `raid_forces.hero_id` exists — confirm it's actually exposed before assuming it needs building), per-hero XP-from-battles-led, ability unlocks beyond the existing superpower. | `3e2195f` |
 | 2 | Bulk unit selection | **Done** — Step: x1/x10/x100/MAX toggle on the draft board (bulk moves now clamp instead of rejecting partial steps); `/add <n> <unit>`, `/remove <n> <unit>` text commands; `/deconstruct <n> <unit>` bulk text shortcut alongside the existing per-tap panel. | `f412147`→`60665b1` (rebased) |
 | 3 | Keyboard/UI audit | **Not started** | — |
-| 5 | Automation Agent limit bugs | **Done** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. A third suspected gap (collector_omega/precious having no storage cap) was investigated and ruled out — see detailed note, it matches existing game-wide behavior for those resources. Asiwaju explicitly directed this session to go ahead (supersedes the item-9 hands-off default below for this specific fix). | `90caeef`, `53d1916` |
+| 5 | Automation Agent limit bugs | **Done** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. A third suspected gap (collector_omega/precious having no storage cap) was investigated and ruled out at the time — see item 5b, which then made the same cap universal anyway per Asiwaju's follow-up direction. | `90caeef`, `53d1916` |
+| 5b | Storage cap — full audit, every resource-gain path | **Done** — Asiwaju asked for storage caps everywhere, not just the two Automation Agent modes. New `internal/game/storagecap` package: single source of truth for the cap formula (Tent*500 + Warehouse*750 + Extension*1000) and the "Surplus Preservation" clamp rule (pre-existing surplus above cap is preserved, but no further gain lands on top of it). Applied to every resource-gain site game-wide: passive tick's Metal Mine/Crystal Mine/Ether generation (previously totally uncapped — and Metal/Crystal/Ether weren't even being read into the passive-tick struct before this, just blind-incremented); `collector_omega`/`collector_precious` automation modes; Bank borrow + Market buy/sell; Ether Shop conversions; P2P Exchange (both seller's Dollars and buyer's Metal/Crystal, independently); Engineering Bay's post-craft refund (also fixed a staleness bug — it was reading pre-cost-deduction values); onboarding referral bonuses (both sides); Rebellion donation reward; Gather Sunlight job; and six separate `tick/engine.go` sites (Daily Tax Law payout, World Boss loot, Clan War spoils, Arena team-victory loot, Arena queue-timeout refunds, returning raid loot). Deliberately left uncapped: `main.go`'s one-time schema-consolidation migration (not a live gameplay path), and `/admin` resource-injection commands (intentional override tool, same as other admin bypasses in the codebase). | `e3f6e15` (rebased to `ef47fb6`) |
 | 6 | Doomsday unit balance | **Done** — hard cap of exactly 1 replaced with a level-scaled cap; attack rating and toughness bumped; a real missing-affordability-check bug (neuro_cores wasn't validated before deduction) fixed along the way. | `3fd86a5` |
 | 10 | World exploration (continents/sectors/discovery) | **Not started** — biggest single item left; needs new schema (sectors/continents, discovery state per player) | — |
 | 11 | Diplomacy (Known Bases, friend/enemy), long battles/reinforcements | **Not started** — long-battle round cap (currently 5 rounds max, see `engine.go` `r.roundNumber >= 5` draw condition) needs revisiting once reinforcement mechanics exist | — |
 | 12 | Dynamic World Events + notification engine | **Partially exists** — `internal/engine/world/weather.go` already drives Acid Rain/Radiation Storm effects on combat (see `engine.go` weather switch); notification *dispatcher* itself (`internal/engine/notifications`) is a working 3s-poll queue, not a stub. What's missing: more event types (EMP, Supply Crisis, Disease, Sandstorm from the brief), and continent/world-scoped broadcast rather than the current single global weather state. | — |
 | 13 | Admin panel consolidation | **Not started** | — |
-| 9 | AI Agent files hands-off | **Exception granted for item 5** — no edits to `internal/game/governor`, fleetcommander, or econadvisor. `internal/engine/agent` *was* edited this session (`90caeef`, `53d1916`), but only the game-limit-enforcement bugs under item 5 — Asiwaju explicitly directed the audit-and-fix in-chat. No other agent logic (mode selection, resource-gain formulas) touched. | — |
+| 9 | AI Agent files hands-off | **Exception granted for items 5/5b** — no edits to `internal/game/governor`, fleetcommander, or econadvisor. `internal/engine/agent` *was* edited (`90caeef`, `53d1916`, `e3f6e15`), but only game-limit-enforcement bugs Asiwaju explicitly directed. No other agent logic (mode selection, resource-gain rates, upkeep formulas) touched. | — |
 
 ---
 
@@ -222,17 +223,92 @@ brief describes.
   that cap). Fixed by running the identical hangar-level + total-units
   query inside the military case and requiring `totalUnits <
   maxCapacity` alongside the existing resource check.
-- **Not a bug, corrected from a prior note**: `collector_omega`
-  (Metal/Hydrogen) and `collector_precious` (Crystal/Dollars/
-  NeuroCores) add resources every tick with no storage cap check.
-  This was initially flagged as an open gap, but tracing every
-  `storageCap` reference in the codebase shows caps are applied
-  **only to Scrap/Rations/Electricity**, never to Metal/Crystal/
-  Hydrogen/Dollars/NeuroCores — including in the canonical passive
-  resource engine (`internal/engine/resource/resource.go`), where
-  Metal Mine/Crystal Mine building income is added completely
-  uncapped. The two collector modes are consistent with that
-  existing design, not a deviation from it. No fix needed here.
+- **Not a bug at the time, then superseded by a design change**:
+  `collector_omega` (Metal/Hydrogen) and `collector_precious`
+  (Crystal/Dollars/NeuroCores) added resources every tick with no
+  storage cap check. This was initially flagged as an open gap, but
+  tracing every `storageCap` reference in the codebase at the time
+  showed caps were applied **only to Scrap/Rations/Electricity**,
+  never to Metal/Crystal/Hydrogen/Dollars/NeuroCores anywhere —
+  including the canonical passive resource engine
+  (`internal/engine/resource/resource.go`), where Metal Mine/Crystal
+  Mine building income was added completely uncapped. So this was
+  correctly ruled out as *not a deviation from existing design* — it
+  just turned out Asiwaju wanted the design itself changed to cap
+  everything universally. See item 5b (`e3f6e15`), which did exactly
+  that, including these two modes.
+
+---
+
+### Storage cap — full audit (`e3f6e15`)
+- Asiwaju's follow-up direction after item 5: apply storage caps
+  "everywhere," not just the two Automation Agent modes just fixed.
+  Investigated scope first (18 files touch the `resources` table) and
+  confirmed with Asiwaju before proceeding at that scale.
+- New `internal/game/storagecap` package is now the single source of
+  truth: `Cap(tent, warehouse, extension)` for the formula, `Levels`/
+  `CapFor` to fetch a camp's levels in one query, and `Clamp` for the
+  "Surplus Preservation" rule (pre-existing surplus above cap is never
+  reduced; no further gain lands on top of it once at/above cap) —
+  this rule already existed for passive Scrap/Rations/Electricity, now
+  it's one shared implementation instead of duplicated logic.
+- **Passive tick** (`internal/engine/resource/resource.go`): Metal
+  Mine/Crystal Mine building income and passive Ether generation had
+  no cap at all. Had to add Metal/Crystal/Ether as real fields on
+  `EncampmentState` and fetch their current values in the main query —
+  previously the code blind-incremented them via raw SQL (`metal =
+  metal + $1`) without the passive-tick struct ever reading current
+  values, so there was no way to even check a cap.
+- **Automation agent** (`internal/engine/agent/agent.go`):
+  `collector_omega` (Metal/Hydrogen) and `collector_precious`
+  (Crystal/Dollars/Neuro Cores) had zero cap check — the thing flagged
+  and then "cleared" under item 5 turned out to be worth fixing anyway
+  once the owner wanted universal caps regardless of precedent.
+  `collector` itself was upgraded from `Tent*500` only to the full
+  `Tent+Warehouse+Extension` formula, matching the passive tick.
+- **Everywhere else a resource gains value**, gated the same way:
+  - `economy.go` — Bank `borrow_scrap`/`borrow_cash`; Market
+    `sell_scrap`/`sell_metal`/`sell_crystal`/`buy_metal`/`buy_crystal`/
+    `buy_hydrogen`. (Bank deposits move Scrap/Dollars into
+    `bank_accounts`, a separate ledger from outpost storage — left
+    alone, that's savings, not storage.)
+  - `ether.go` — Ether Shop conversion (target resource is chosen
+    dynamically via `deal.resource`; the current value is now read
+    with the same dynamic column name before clamping).
+  - `exchange.go` — P2P market sale. Both sides of the trade now clamp
+    independently: the seller's Dollars payout against *their* cap,
+    the buyer's Metal/Crystal delivery against *their* cap.
+  - `factory.go` — Engineering Bay's post-craft refund. Also fixed a
+    real staleness bug while in there: the refund was computed using
+    the `metal`/`crystal` Go variables read at the *start* of the
+    handler, before that craft's own cost had already been deducted
+    from the database — now re-reads current values right before the
+    refund.
+  - `onboarding.go` — referral bonus (Metal/Crystal/Neuro Cores),
+    capped for the new player and their referrer independently (each
+    against their own outpost's cap).
+  - `rebellion.go` — donation reward (Neuro Cores).
+  - `jobs.go` — Gather Sunlight's Electricity burst.
+  - `tick/engine.go` — six sites: Daily Tax Law top-3 payout, World
+    Boss loot share, Clan War spoils share, Arena team-victory loot,
+    Arena queue-timeout refund (all Dollars), and returning raid loot
+    (Scrap/Metal/Crystal) credited to the attacker.
+- **Deliberately left uncapped**, by design, not oversight:
+  - `cmd/bot/main.go`'s iron/oil→Metal and diamond/gold/silver→Crystal
+    consolidation SQL — a one-time guarded schema migration (only
+    fires if the old columns still exist), not a live gameplay path.
+  - `admin.go`'s `/admin` resource-injection commands — an intentional
+    admin override/testing tool, consistent with how other admin
+    actions elsewhere in the codebase already bypass normal costs and
+    limits (e.g. free construction).
+- Verified via `gofmt` (full AST parse, all touched files clean) and
+  `go build` + `go vet` on every dependency-free package
+  (`storagecap`, `resource`, `agent`, `tick` — all pass). Handler
+  files under `internal/bot/handlers` import `gopkg.in/telebot.v3`,
+  which needs `proxy.golang.org` — not in this sandbox's network
+  allowlist — so those were verified via `gofmt`'s full parse plus
+  manual line-by-line review rather than a full compile, same
+  limitation noted in every prior session's log entry.
 
 ---
 
