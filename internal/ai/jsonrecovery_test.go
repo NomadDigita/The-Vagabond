@@ -105,6 +105,38 @@ func TestExtractJSONObject_TruncatedNeverCloses(t *testing.T) {
 	}
 }
 
+func TestWasTruncated_UnclosedObject(t *testing.T) {
+	if !WasTruncated(`{"summary": "partial output that just stops`) {
+		t.Fatal("expected unclosed object to be reported as truncated")
+	}
+}
+
+func TestWasTruncated_UnclosedNestedObject(t *testing.T) {
+	if !WasTruncated(`{"summary": "ok", "nested": {"a": 1`) {
+		t.Fatal("expected unclosed nested object to be reported as truncated")
+	}
+}
+
+func TestWasTruncated_ValidCompleteObject(t *testing.T) {
+	if WasTruncated(`{"summary": "ok"}`) {
+		t.Fatal("expected a complete, balanced object not to be reported as truncated")
+	}
+}
+
+func TestWasTruncated_NoJSONAtAll(t *testing.T) {
+	if WasTruncated("I'm sorry, I can't help with that right now.") {
+		t.Fatal("expected plain prose with no '{' at all not to be reported as truncated")
+	}
+}
+
+func TestWasTruncated_UnclosedStringInsideObject(t *testing.T) {
+	// The opening brace exists, and the object never closes because
+	// the string itself is still open when the text stops.
+	if !WasTruncated(`{"summary": "cut off mid senten`) {
+		t.Fatal("expected object left open via an unterminated string to be reported as truncated")
+	}
+}
+
 func TestSanitizeJSONControlChars_EscapesRawNewlineInString(t *testing.T) {
 	in := "{\"summary\": \"line one\nline two\"}"
 	out := SanitizeJSONControlChars(in)

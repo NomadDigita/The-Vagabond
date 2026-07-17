@@ -73,6 +73,68 @@ func ExtractJSONObject(llmText string) (string, bool) {
 	return "", false
 }
 
+// WasTruncated reports whether text contains what looks like a JSON
+// object whose opening brace was found but whose braces never
+// balanced by the end of the string — the signature of a response cut
+// off mid-object because the provider hit its MaxTokens limit, as
+// opposed to a response that never contained a JSON object at all
+// (e.g. a plain-prose refusal or an off-topic reply). Callers use
+// this — after ExtractJSONObject has already returned found=false —
+// to show players a more specific and more actionable message ("the
+// AI's response got cut off") than the generic parse-failure fallback
+// text. See ADR-016 in PROJECT_MASTER_PLAN.md.
+//
+// This intentionally re-walks the same string/escape-aware brace
+// scan as ExtractJSONObject rather than sharing state with it, since
+// the two are called independently (only on the already-confirmed
+// found=false path) and keeping WasTruncated a standalone read-only
+// scan makes it trivial to reason about and unit test in isolation.
+func WasTruncated(text string) bool {
+	start := strings.IndexByte(text, '{')
+	if start == -1 {
+		return false
+	}
+
+	inString := false
+	escaped := false
+	depth := 0
+
+	for i := start; i < len(text); i++ {
+		c := text[i]
+
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				// Braces balanced — ExtractJSONObject would have
+				// found and returned this object, so whatever made
+				// the caller's parse fail wasn't truncation.
+				return false
+			}
+		}
+	}
+
+	// Ran off the end of the string still inside an unclosed object:
+	// truncated mid-object.
+	return depth > 0
+}
+
 // SanitizeJSONControlChars repairs the single most common way a
 // model's otherwise-valid-looking JSON fails Go's strict
 // encoding/json parser: a raw, unescaped control character (newline,

@@ -96,6 +96,38 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	if rec.Summary != raw {
 		t.Errorf("expected raw text preserved in Summary, got %q", rec.Summary)
 	}
+	if rec.Truncated {
+		t.Errorf("expected Truncated=false for prose with no JSON object at all")
+	}
+}
+
+// The next two tests reproduce a real production failure (see
+// PROJECT_MASTER_PLAN.md ADR-016 / §1.9): a response that got cut off
+// mid-object (hit MaxTokens) used to be indistinguishable from a
+// response that never contained JSON at all, both showing the player
+// the same generic "couldn't parse" message.
+
+func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
+	raw := `{"summary": "Upgrade the generator next, since it's your`
+	rec := governor.ParseRecommendation(raw)
+	if !rec.FellBackToRawText {
+		t.Fatalf("expected fallback for truncated JSON")
+	}
+	if !rec.Truncated {
+		t.Errorf("expected Truncated=true for a response cut off mid-object")
+	}
+}
+
+func TestFormatForTelegram_TruncatedPath(t *testing.T) {
+	rec := &governor.Recommendation{
+		Summary:           `{"summary": "cut off mid`,
+		FellBackToRawText: true,
+		Truncated:         true,
+	}
+	out := governor.FormatForTelegram(rec)
+	if !strings.Contains(out, "cut off before it finished") {
+		t.Errorf("expected truncation-specific message, got: %s", out)
+	}
 }
 
 // The next two tests reproduce a real production failure (see

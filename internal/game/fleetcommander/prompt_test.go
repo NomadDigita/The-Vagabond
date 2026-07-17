@@ -57,6 +57,36 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	if rec.Reasoning != raw {
 		t.Errorf("expected raw text preserved, got %q", rec.Reasoning)
 	}
+	if rec.Truncated {
+		t.Errorf("expected Truncated=false for prose with no JSON object at all")
+	}
+}
+
+// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
+// (hit MaxTokens) is now distinguished from one that never contained
+// JSON at all, so the player sees a more specific message.
+
+func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
+	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "the target's garrison is`
+	rec := fleetcommander.ParseRecommendation(raw)
+	if !rec.FellBackToRawText {
+		t.Fatalf("expected fallback for truncated JSON")
+	}
+	if !rec.Truncated {
+		t.Errorf("expected Truncated=true for a response cut off mid-object")
+	}
+}
+
+func TestFormatForTelegram_TruncatedPath(t *testing.T) {
+	rec := &fleetcommander.Recommendation{
+		Reasoning:         `{"recommendation": "attack", "reasoning": "cut off mid`,
+		FellBackToRawText: true,
+		Truncated:         true,
+	}
+	out := fleetcommander.FormatForTelegram(rec)
+	if !strings.Contains(out, "cut off before it finished") {
+		t.Errorf("expected truncation-specific message, got: %s", out)
+	}
 }
 
 // See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real

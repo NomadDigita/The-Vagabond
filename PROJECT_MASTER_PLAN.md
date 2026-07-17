@@ -509,6 +509,64 @@ Phase E — see that phase's note for why).
 
 ---
 
+## 1.9 Critical Fix: Truncated Responses Were Indistinguishable From Genuinely Unparseable Ones (following session)
+
+ADR-015 closed the "prose-wrapped or mis-escaped but otherwise valid
+JSON" failure mode, but it left a related, narrower case unaddressed:
+when a real provider's response was cut off **mid-object** — because
+it hit the `MaxTokens` cap before finishing — `ExtractJSONObject`
+correctly reports `found=false` (there's no balanced object to
+extract), and every package's `ParseRecommendation` falls back to raw
+text exactly as it would for a response that never contained JSON at
+all (a refusal, an off-topic reply, etc.). Both cases produced the
+same generic "⚠️ Couldn't parse the AI's structured response" message,
+even though a truncated response is a distinguishable, more actionable
+situation — the model was on the right track, it simply ran out of
+room.
+
+### Fix
+
+Two parts, both scoped to the same root cause:
+
+1. **Raise `MaxTokens` from 1024 to 2048** in all four packages
+   (`governor.go`, `commander.go`, `advisor.go`, `planner.go`) —
+   reduces how often the model hits the cap before finishing a
+   normal-length recommendation in the first place.
+2. **Distinguish truncation from other unparseable responses.** Added
+   `ai.WasTruncated(text)` to `internal/ai/jsonrecovery.go`: it re-runs
+   the same string/escape-aware brace scan as `ExtractJSONObject`, and
+   reports `true` only when an opening `{` was found but the braces
+   never balanced by the end of the text — the structural signature of
+   a `MaxTokens` cutoff, as opposed to prose with no JSON object at
+   all. All four `ParseRecommendation` functions now set a new
+   `Truncated bool` field on their fallback `Recommendation` using
+   this helper, and all four `FormatForTelegram` functions show a more
+   specific "⚠️ The AI's response got cut off before it finished —
+   showing the partial reply below" message when `Truncated` is true,
+   instead of the generic parse-failure notice.
+
+This is deliberately *not* a fix that tries to salvage a partial
+object (e.g. auto-closing dangling braces and guessing at missing
+fields) — a truncated response is definitionally missing information
+the player needs (e.g. `priority_actions` cut off halfway through), so
+showing the raw partial text with an honest "cut off" label is more
+trustworthy than fabricating a complete-looking but silently
+incomplete result.
+
+**Verification:** 5 new tests in `internal/ai/jsonrecovery_test.go`
+(unclosed object, unclosed nested object, valid complete object
+correctly reported as not truncated, plain prose with no `{` at all
+correctly reported as not truncated, object left open via an
+unterminated string) plus 2 new regression tests per feature package
+(8 total) confirming both the `Truncated` flag itself and the new
+Telegram message. 100 tests total (was 87), all passing. Full `go
+build ./... && go vet ./... && go test ./...` confirmed clean for the
+whole repo (same sandbox-only, reverted-before-commit `go.mod` replace
+workaround as Phases E and the §1.8 fix — see those sessions' notes
+for why).
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -667,6 +725,19 @@ This does not replace the ADR-005/§4 tech-debt item asking for a real
 JSON-Schema-validating retry loop before Phase F/J — it closes today's
 observed failure mode; a model that returns genuinely-wrong-shaped
 JSON (right syntax, wrong fields) still needs that future work.
+
+**ADR-016: Truncation detection (`ai.WasTruncated`) is a separate
+helper from `ExtractJSONObject`, not a third return value bolted onto
+it.** `ExtractJSONObject` is called on every `ParseRecommendation`
+attempt, including the common, fully-successful case, so its signature
+and hot-path logic are kept minimal and unchanged. `WasTruncated` is
+only ever called after `ExtractJSONObject` has already returned
+`found=false` — a comparatively rare path — so paying the small cost
+of a second, independent brace-scan there (rather than threading extra
+state through the first scan) keeps `ExtractJSONObject` itself easier
+to reason about and leaves every existing call site untouched. The
+trade-off: if a future caller needed truncation info on the *success*
+path too, this would need revisiting — not a real need today.
 
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
@@ -1063,6 +1134,16 @@ which are more cross-cutting.
   last-resort case. 22 new tests (14 in `internal/ai`, 2 regression
   tests each in governor/fleetcommander/econadvisor/researchplanner).
   65 → 87 total, all passing.
+- **Following session:** Critical fix (§1.9, ADR-016): distinguished
+  responses truncated mid-object (hit `MaxTokens`) from genuinely
+  unparseable ones, which previously showed the player the same
+  generic "couldn't parse" message. Added `ai.WasTruncated`; wired a
+  new `Truncated bool` field through all four packages'
+  `ParseRecommendation`/`FormatForTelegram`; raised `MaxTokens`
+  1024→2048 in all four packages to reduce how often truncation
+  happens at all. 13 new tests (5 in `internal/ai`, 2 regression tests
+  each in governor/fleetcommander/econadvisor/researchplanner). 87 →
+  100 total, all passing. Recommended next task remains Phase F.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
