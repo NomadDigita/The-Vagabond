@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -328,7 +329,11 @@ func (h *JobsHandler) HandleGatherSunlight(c telebot.Context) error {
 	}
 
 	const gain = 150.0
-	_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET electricity = electricity + $1 WHERE encampment_id = $2", gain, campID)
+	var curElectricity float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1", campID).Scan(&curElectricity)
+	storageCap := storagecap.CapFor(ctx, h.DB, campID)
+	newElectricity, _ := storagecap.Clamp(curElectricity, gain, storageCap)
+	_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newElectricity, campID)
 	_, _ = h.DB.ExecContext(ctx, "UPDATE encampments SET last_sunlight_at = CURRENT_TIMESTAMP WHERE id = $1", campID)
 
 	return c.Send(fmt.Sprintf("☀️✅ SUNLIGHT GATHERED! +%.0f Electricity harvested manually.", gain))

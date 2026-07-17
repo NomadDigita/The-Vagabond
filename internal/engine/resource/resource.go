@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
 type Processor struct {
@@ -17,18 +19,21 @@ func NewProcessor(db *sql.DB) *Processor {
 }
 
 type EncampmentState struct {
-	ID             string
-	Scrap          float64
-	Rations        float64
-	Electricity         float64
-	TentLvl        int
-	ScrapHeapLvl   int
-	GeneratorLvl   int
-	TroopCount     int
-	LoanAmount     float64
-	BuggyCount     int
-	ShipCount      int
-	JetCount       int
+	ID                string
+	Scrap             float64
+	Rations           float64
+	Electricity       float64
+	Metal             float64
+	Crystal           float64
+	Ether             float64
+	TentLvl           int
+	ScrapHeapLvl      int
+	GeneratorLvl      int
+	TroopCount        int
+	LoanAmount        float64
+	BuggyCount        int
+	ShipCount         int
+	JetCount          int
 	DefenseTechLvl    int
 	ProductionTechLvl int
 	SalvageLvl        int
@@ -46,7 +51,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 
 	query := `
 		SELECT 
-			e.id, r.scrap, r.rations, r.electricity,
+			e.id, r.scrap, r.rations, r.electricity, r.metal, r.crystal, r.ether,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'scrap_heap'), 1) as heap_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'generator'), 1) as gen_lvl,
@@ -77,9 +82,9 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var s EncampmentState
 		err := rows.Scan(
-			&s.ID, &s.Scrap, &s.Rations, &s.Electricity, 
-			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl, 
-			&s.TroopCount, &s.LoanAmount, 
+			&s.ID, &s.Scrap, &s.Rations, &s.Electricity, &s.Metal, &s.Crystal, &s.Ether,
+			&s.TentLvl, &s.ScrapHeapLvl, &s.GeneratorLvl,
+			&s.TroopCount, &s.LoanAmount,
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
 			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.WarehouseLvl, &s.ExtensionLvl, &s.SolarPanelLvl, &s.TechCenterLvl, &s.MetalMineLvl, &s.CrystalMineLvl, &s.SalvageLvl,
 		)
@@ -93,7 +98,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 	for _, s := range states {
 		overclockBonus := float64(s.ProductionTechLvl-1) * 0.20
 		salvageBonus := float64(s.SalvageLvl-1) * 0.15
-		
+
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
 		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
@@ -120,7 +125,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		rationsConsumed := float64(s.TroopCount) * 0.05
 		electricityConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
-		storageCap := (float64(s.TentLvl) * 500.0) + (float64(s.WarehouseLvl) * 750.0) + (float64(s.ExtensionLvl) * 1000.0)
+		storageCap := storagecap.Cap(s.TentLvl, s.WarehouseLvl, s.ExtensionLvl)
 
 		// Surplus Preservation System: Only caps new passive allocations. Pre-existing balances are preserved.
 		newScrap := s.Scrap
@@ -149,21 +154,26 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		// Ether trickles in slowly, scaled by Technology research and
-		// boosted further by the Technology Center building.
+		// boosted further by the Technology Center building. Same cap
+		// rule as everything else: capped if generated passively.
 		etherGenerated := 0.02 * float64(s.ProductionTechLvl)
 		etherGenerated += 0.03 * float64(s.TechCenterLvl)
+		newEther, _ := storagecap.Clamp(s.Ether, etherGenerated, storageCap)
 
 		// Metal Mine / Crystal Mine: passive building-based generation,
 		// distinct from (and stacking with) the active miner-queue system.
+		// Now cap-checked the same as every other passive resource gain.
 		metalGenerated := 2.0 * float64(s.MetalMineLvl)
 		crystalGenerated := 0.8 * float64(s.CrystalMineLvl)
+		newMetal, _ := storagecap.Clamp(s.Metal, metalGenerated, storageCap)
+		newCrystal, _ := storagecap.Clamp(s.Crystal, crystalGenerated, storageCap)
 
 		updateQuery := `
 			UPDATE resources 
-			SET scrap = $1, rations = $2, electricity = $3, ether = ether + $5, metal = metal + $6, crystal = crystal + $7, last_ticked_at = CURRENT_TIMESTAMP 
+			SET scrap = $1, rations = $2, electricity = $3, ether = $5, metal = $6, crystal = $7, last_ticked_at = CURRENT_TIMESTAMP 
 			WHERE encampment_id = $4`
-		
-		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID, etherGenerated, metalGenerated, crystalGenerated)
+
+		_, err = tx.ExecContext(ctx, updateQuery, newScrap, newRations, newElectricity, s.ID, newEther, newMetal, newCrystal)
 		if err != nil {
 			return fmt.Errorf("failed executing resource state write back: %w", err)
 		}

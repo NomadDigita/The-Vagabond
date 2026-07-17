@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -41,7 +42,7 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 		JOIN encampments e ON e.id = m.seller_id
 		WHERE m.is_sold = FALSE 
 		LIMIT 3`
-	
+
 	rows, err := h.DB.QueryContext(ctx, query)
 	var listingsText string
 	var buttons []telebot.Row
@@ -168,7 +169,7 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		SELECT seller_id, item_type, quantity, price_dollars, is_sold 
 		FROM market_exchange 
 		WHERE id = $1 FOR UPDATE`
-	
+
 	err = tx.QueryRowContext(ctx, query, listingID).Scan(&sellerID, &itemType, &qty, &price, &isSold)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This listing is no longer available."})
@@ -190,14 +191,23 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", price, myCampID)
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", price, sellerID)
+
+	var sellerDollars float64
+	_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", sellerID).Scan(&sellerDollars)
+	sellerCap := storagecap.CapFor(ctx, tx, sellerID)
+	newSellerDollars, _ := storagecap.Clamp(sellerDollars, price, sellerCap)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newSellerDollars, sellerID)
 
 	columnName := "metal"
 	if itemType == "crystal" {
 		columnName = "crystal"
 	}
-	queryTransfer := fmt.Sprintf("UPDATE resources SET %s = %s + $1 WHERE encampment_id = $2", columnName, columnName)
-	_, _ = tx.ExecContext(ctx, queryTransfer, qty, myCampID)
+	var buyerCurrent float64
+	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1", columnName), myCampID).Scan(&buyerCurrent)
+	buyerCap := storagecap.CapFor(ctx, tx, myCampID)
+	newBuyerVal, _ := storagecap.Clamp(buyerCurrent, float64(qty), buyerCap)
+	queryTransfer := fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", columnName)
+	_, _ = tx.ExecContext(ctx, queryTransfer, newBuyerVal, myCampID)
 
 	_, _ = tx.ExecContext(ctx, "UPDATE market_exchange SET is_sold = TRUE WHERE id = $1", listingID)
 

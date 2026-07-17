@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"time"
+
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
 type Processor struct {
@@ -29,12 +31,14 @@ type ActiveAgent struct {
 	Crystal     float64
 	Hydrogen    float64
 
-	Dollars     float64
-	NeuroCores  float64
-	TentLvl     int
-	CampLvl     int
-	EconTechLvl int
-	SynapticLvl int
+	Dollars      float64
+	NeuroCores   float64
+	TentLvl      int
+	CampLvl      int
+	WarehouseLvl int
+	ExtensionLvl int
+	EconTechLvl  int
+	SynapticLvl  int
 }
 
 // RunAgentPass executes automation logic for all active agents inside the transaction
@@ -44,6 +48,8 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		       r.scrap, r.rations, r.electricity, r.metal, r.crystal, r.hydrogen, r.dollars, r.neuro_cores,
 		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'tent'), 1) as tent_lvl,
 		       e.level as camp_lvl,
+		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'warehouse'), 0) as warehouse_lvl,
+		       COALESCE(e.extension_lvl, 0) as extension_lvl,
 		       COALESCE((SELECT res.econ_tech_lvl FROM research_states res WHERE res.encampment_id = e.id), 1) as econ_tech_lvl,
 		       COALESCE((SELECT mut.synaptic_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as synaptic_lvl
 		FROM agent_tasks t
@@ -63,7 +69,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		err := rows.Scan(
 			&a.UserID, &a.Mode, &a.CampID, &a.CampName,
 			&a.Scrap, &a.Rations, &a.Electricity, &a.Metal, &a.Crystal, &a.Hydrogen, &a.Dollars, &a.NeuroCores,
-			&a.TentLvl, &a.CampLvl, &a.EconTechLvl, &a.SynapticLvl,
+			&a.TentLvl, &a.CampLvl, &a.WarehouseLvl, &a.ExtensionLvl, &a.EconTechLvl, &a.SynapticLvl,
 		)
 		if err == nil {
 			agents = append(agents, a)
@@ -94,18 +100,12 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		newEnergy := math.Max(a.Electricity-upkeepEnergy, 0.0)
-		storageCap := float64(a.TentLvl) * 500.0
+		storageCap := storagecap.Cap(a.TentLvl, a.WarehouseLvl, a.ExtensionLvl)
 
 		switch a.Mode {
 		case "collector":
-			newScrap := a.Scrap
-			if a.Scrap < storageCap {
-				newScrap = math.Min(a.Scrap+5.00, storageCap)
-			}
-			newRations := a.Rations
-			if a.Rations < storageCap {
-				newRations = math.Min(a.Rations+2.00, storageCap)
-			}
+			newScrap, _ := storagecap.Clamp(a.Scrap, 5.00, storageCap)
+			newRations, _ := storagecap.Clamp(a.Rations, 2.00, storageCap)
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
@@ -121,8 +121,10 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		case "collector_omega":
 			// Autopilot Industrial mode (Metal, Hydrogen). Former separate
 			// Iron/Oil gains are now folded directly into Metal.
-			newMetal := a.Metal + 33.00
-			newHydrogen := a.Hydrogen + 5.00
+			// Same Surplus Preservation cap rule as `collector`: no
+			// further passive gain once a resource is at/above cap.
+			newMetal, _ := storagecap.Clamp(a.Metal, 33.00, storageCap)
+			newHydrogen, _ := storagecap.Clamp(a.Hydrogen, 5.00, storageCap)
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
@@ -133,15 +135,16 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			if err != nil {
 				log.Printf("Agent failed executing collector_omega pass: %v", err)
 			}
-			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s", a.CampName)
+			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s (capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_precious":
 			// Autopilot Precious mode (Crystal, Dollars, Neuro Cores).
 			// Former separate Silver/Gold/Diamond gains are now folded
-			// directly into Crystal.
-			newCrystal := a.Crystal + 8.10
-			newDollars := a.Dollars + 2.00
-			newNeuro := a.NeuroCores + 1.00
+			// directly into Crystal. Same cap rule as the other
+			// collector modes.
+			newCrystal, _ := storagecap.Clamp(a.Crystal, 8.10, storageCap)
+			newDollars, _ := storagecap.Clamp(a.Dollars, 2.00, storageCap)
+			newNeuro, _ := storagecap.Clamp(a.NeuroCores, 1.00, storageCap)
 
 			_, err = tx.ExecContext(ctx, `
 				UPDATE resources 
@@ -152,7 +155,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			if err != nil {
 				log.Printf("Agent failed executing collector_precious pass: %v", err)
 			}
-			log.Printf("Agent [Collector Precious] executed resource extraction pass for outpost: %s", a.CampName)
+			log.Printf("Agent [Collector Precious] executed resource extraction pass for outpost: %s (capped at %.0f)", a.CampName, storageCap)
 
 		case "builder":
 			var isUpgrading bool

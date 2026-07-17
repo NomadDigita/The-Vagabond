@@ -17,6 +17,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/battlereport"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
 type Engine struct {
@@ -166,7 +167,11 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 				if len(winners) > 0 {
 					share := totalCollected / float64(len(winners))
 					for _, w := range winners {
-						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, w.campID)
+						var curDollars float64
+						_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", w.campID).Scan(&curDollars)
+						wCap := storagecap.CapFor(ctx, tx, w.campID)
+						newDollars, _ := storagecap.Clamp(curDollars, share, wCap)
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, w.campID)
 						alertMsg := fmt.Sprintf(
 							"💰🏆 DAILY TAX PAYOUT! 🏆💰\n\nAs a Top-3 ranked survivor, you received 💵 $%.2f from the Wasteland Tax Law (%d%% rate) collected from all players!",
 							share, taxRate,
@@ -260,13 +265,13 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 	}
 
 	type marchingAttack struct {
-		id, bossID, encampmentID          string
-		userID                             int64
-		soldiers, mechs                   int
-		marchMinutes                       float64
-		bossName, bossEmoji                string
-		bossCurHP, bossMaxHP, lootPool     float64
-		retaliation                        float64
+		id, bossID, encampmentID       string
+		userID                         int64
+		soldiers, mechs                int
+		marchMinutes                   float64
+		bossName, bossEmoji            string
+		bossCurHP, bossMaxHP, lootPool float64
+		retaliation                    float64
 	}
 	var marching []marchingAttack
 	for marchingRows.Next() {
@@ -434,7 +439,11 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 	if totalDamage > 0 {
 		for _, ct := range contributors {
 			share := lootPool * (ct.damage / totalDamage)
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, ct.campID)
+			var curDollars float64
+			_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", ct.campID).Scan(&curDollars)
+			ctCap := storagecap.CapFor(ctx, tx, ct.campID)
+			newDollars, _ := storagecap.Clamp(curDollars, share, ctCap)
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, ct.campID)
 			alertMsg := fmt.Sprintf("☠️🎉 BOSS SLAIN: %s\n\nYour cumulative %.0f damage earned you 💵 $%.2f from the loot pool.", bossName, ct.damage, share)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ct.userID, alertMsg)
 		}
@@ -553,7 +562,11 @@ func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 		if len(winnerCamps) > 0 {
 			share := spoilsPool / float64(len(winnerCamps))
 			for _, campID := range winnerCamps {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = $2", share, campID)
+				var curDollars float64
+				_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&curDollars)
+				campCap := storagecap.CapFor(ctx, tx, campID)
+				newDollars, _ := storagecap.Clamp(curDollars, share, campCap)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 			}
 
 			winMsg := fmt.Sprintf("🏆⚔️ CLAN WAR VICTORY!\n\nYour Clan defeated %s! Final score: %.0f - %.0f.\n💵 Your share of the spoils: $%.2f", loserName, winnerScore, loserScore, share)
@@ -636,7 +649,7 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 		SELECT r.id, r.attacker_id, r.defender_id, r.resolve_time
 		FROM raids r
 		WHERE r.state = 'staged' AND r.resolve_time <= CURRENT_TIMESTAMP`
-	
+
 	rows, err := tx.QueryContext(ctx, queryExpiredStaged)
 	if err != nil {
 		return err
@@ -667,7 +680,7 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 		if totalHelpers == 0 {
 			var sols, mechs int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&sols, &mechs)
-			
+
 			// Refund locked lobby creator forces
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", sols, mechs, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", r.id)
@@ -714,7 +727,7 @@ func (e *Engine) notifyIdleMiners(ctx context.Context, tx *sql.Tx) error {
 		JOIN encampments e ON e.user_id = u.telegram_id
 		JOIN workshop_inventory w ON w.encampment_id = e.id
 		WHERE u.idle_miner_notifications = TRUE`
-	
+
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return err
@@ -753,7 +766,7 @@ func (e *Engine) resolveCompletedCoopRallies(ctx context.Context, tx *sql.Tx) er
 		UPDATE raid_coop_members 
 		SET state = 'stationed' 
 		WHERE state = 'marching_to_ally' AND arrival_time <= CURRENT_TIMESTAMP`
-	
+
 	_, err := tx.ExecContext(ctx, queryRallies)
 	if err != nil {
 		return fmt.Errorf("failed executing co-op rally state transition: %w", err)
@@ -835,7 +848,7 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
 		WHERE s.resolved = FALSE AND s.is_intercepted = FALSE`
-	
+
 	rows, err := tx.QueryContext(ctx, queryOutbound)
 	if err != nil {
 		return fmt.Errorf("failed querying outbound espionage: %w", err)
@@ -1107,7 +1120,13 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			}
 
 			for _, w := range winners {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", lootWon, w.userID)
+				var wCampID string
+				_ = tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", w.userID).Scan(&wCampID)
+				var curDollars float64
+				_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", wCampID).Scan(&curDollars)
+				wCap := storagecap.CapFor(ctx, tx, wCampID)
+				newDollars, _ := storagecap.Clamp(curDollars, lootWon, wCap)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, wCampID)
 
 				winAlert := fmt.Sprintf("🏟️ ARENA REPORT: TEAM VICTORY!\n\nYou won the %s team clash!\n🏆 Reward: +$%.0f Cash credited.", b, lootWon)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, winAlert)
@@ -1149,7 +1168,13 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 					refundDollars = 200.0
 				}
 
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + $1 WHERE encampment_id = (SELECT id FROM encampments WHERE user_id = $2)", refundDollars, q.userID)
+				var qCampID string
+				_ = tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", q.userID).Scan(&qCampID)
+				var curDollars float64
+				_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", qCampID).Scan(&curDollars)
+				qCap := storagecap.CapFor(ctx, tx, qCampID)
+				newDollars, _ := storagecap.Clamp(curDollars, refundDollars, qCap)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, qCampID)
 
 				alert := fmt.Sprintf("⏳ ARENA QUEUE TIMEOUT\n\nNo equivalent opponents were found for the %s queue. Your entry fee of $%.0f has been refunded.", b, refundDollars)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", q.userID, alert)
@@ -1296,24 +1321,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	defer rows.Close()
 
 	type activeRaid struct {
-		id              string
-		attackerID      string
-		defenderID      sql.NullString
-		state           string
-		roundNumber     int
-		attackerName    string
-		attackerUserID  int64
-		defenderName    string
-		defenderUserID  int64
-		resolveTime     time.Time
-		stolenScrap     float64
-		stolenMetal     float64
-		stolenCrystal   float64
+		id               string
+		attackerID       string
+		defenderID       sql.NullString
+		state            string
+		roundNumber      int
+		attackerName     string
+		attackerUserID   int64
+		defenderName     string
+		defenderUserID   int64
+		resolveTime      time.Time
+		stolenScrap      float64
+		stolenMetal      float64
+		stolenCrystal    float64
 		baseMarchMinutes float64
-		attackerRations float64
-		attackerAmmo    float64
-		attackerLosses  int
-		defenderLosses  int
+		attackerRations  float64
+		attackerAmmo     float64
+		attackerLosses   int
+		defenderLosses   int
 	}
 
 	var raids []activeRaid
@@ -1342,7 +1367,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob, &liberatorsMob, &wraithsMob)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7, liberators = liberators + $8, wraiths = wraiths + $9 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob, liberatorsMob, wraithsMob)
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + $1, metal = metal + $2, crystal = crystal + $3 WHERE encampment_id = $4", r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.attackerID)
+			var curScrap, curMetal, curCrystal float64
+			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal FROM resources WHERE encampment_id = $1", r.attackerID).Scan(&curScrap, &curMetal, &curCrystal)
+			attackerCap := storagecap.CapFor(ctx, tx, r.attackerID)
+			newScrap, _ := storagecap.Clamp(curScrap, r.stolenScrap, attackerCap)
+			newMetal, _ := storagecap.Clamp(curMetal, r.stolenMetal, attackerCap)
+			newCrystal, _ := storagecap.Clamp(curCrystal, r.stolenCrystal, attackerCap)
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, metal = $2, crystal = $3 WHERE encampment_id = $4", newScrap, newMetal, newCrystal, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
 			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap, +%.1f Metal, +%.1f Crystal!", r.stolenScrap, r.stolenMetal, r.stolenCrystal)
@@ -1390,7 +1421,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		var helpers []coopContributor
-		
+
 		queryHelpers := "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1 AND state = 'stationed'"
 		rowH, errH := tx.QueryContext(ctx, queryHelpers, r.id)
 		if errH == nil {

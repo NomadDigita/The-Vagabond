@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -131,7 +132,12 @@ func (h *RebellionHandler) HandleRebellionDonateCallback(c telebot.Context) erro
 
 	reward := donationAmount * 0.10
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, neuro_cores = neuro_cores + $2 WHERE encampment_id = $3", donationAmount, reward, campID)
+	var curNeuro float64
+	_ = tx.QueryRowContext(ctx, "SELECT neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&curNeuro)
+	storageCap := storagecap.CapFor(ctx, tx, campID)
+	newNeuro, _ := storagecap.Clamp(curNeuro, reward, storageCap)
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, neuro_cores = $2 WHERE encampment_id = $3", donationAmount, newNeuro, campID)
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO rebellion_support (encampment_id, total_contributed) VALUES ($1, $2)
 		ON CONFLICT (encampment_id) DO UPDATE SET total_contributed = rebellion_support.total_contributed + $2`,

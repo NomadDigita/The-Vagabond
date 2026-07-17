@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -219,6 +220,10 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	var balance, balanceCash, loanAmount, loanCash float64
 	_ = tx.QueryRowContext(ctx, "SELECT balance, balance_cash, loan_amount, loan_cash FROM bank_accounts WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&balance, &balanceCash, &loanAmount, &loanCash)
 
+	// Loan draws land in the same resources table as everything else,
+	// so they're subject to the same outpost storage cap as any other gain.
+	storageCap := storagecap.CapFor(ctx, tx, campID)
+
 	switch action {
 	case "deposit_scrap", "deposit":
 		if scrap < 100.0 {
@@ -240,7 +245,8 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 		if loanAmount >= 500.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing scrap debt first."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap + 100.0 WHERE encampment_id = $1", campID)
+		newScrap, _ := storagecap.Clamp(scrap, 100.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1 WHERE encampment_id = $2", newScrap, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_amount = loan_amount + 100.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed 100 Scrap."})
 
@@ -248,7 +254,8 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 		if loanCash >= 500.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Credit Limit Reached: Repay existing cash debt first."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars + 100.0 WHERE encampment_id = $1", campID)
+		newDollars, _ := storagecap.Clamp(dollars, 100.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE bank_accounts SET loan_cash = loan_cash + 100.0 WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💳 Borrowed $100 Cash."})
 
@@ -308,12 +315,15 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 	var scrap, dollars float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &dollars)
 
+	storageCap := storagecap.CapFor(ctx, tx, campID)
+
 	switch item {
 	case "sell_scrap":
 		if scrap < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap to convert."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = dollars + 50.0 WHERE encampment_id = $1", campID)
+		newDollars, _ := storagecap.Clamp(dollars, 50.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Scrap for $50.0 Cash!"})
 
 	case "sell_metal":
@@ -322,7 +332,8 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		if metal < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Metal to convert."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 100.0, dollars = dollars + 80.0 WHERE encampment_id = $1", campID)
+		newDollars, _ := storagecap.Clamp(dollars, 80.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 100.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Metal for $80.0 Cash!"})
 
 	case "sell_crystal":
@@ -331,28 +342,38 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		if crystal < 50.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Crystal to convert."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 50.0, dollars = dollars + 120.0 WHERE encampment_id = $1", campID)
+		newDollars, _ := storagecap.Clamp(dollars, 120.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 50.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 50 Crystal for $120.0 Cash!"})
 
 	case "buy_metal":
 		if dollars < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = metal + 50.0 WHERE encampment_id = $1", campID)
+		var metal float64
+		_ = tx.QueryRowContext(ctx, "SELECT metal FROM resources WHERE encampment_id = $1", campID).Scan(&metal)
+		newMetal, _ := storagecap.Clamp(metal, 50.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = $1 WHERE encampment_id = $2", newMetal, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🔩 Purchased 50 tons of Metal!"})
 
 	case "buy_crystal":
 		if dollars < 200.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, crystal = crystal + 20.0 WHERE encampment_id = $1", campID)
+		var crystal float64
+		_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1", campID).Scan(&crystal)
+		newCrystal, _ := storagecap.Clamp(crystal, 20.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, crystal = $1 WHERE encampment_id = $2", newCrystal, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💎 Purchased 20 kg of Crystal!"})
 
 	case "buy_hydrogen":
 		if dollars < 150.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $150."})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 150.0, hydrogen = hydrogen + 40.0 WHERE encampment_id = $1", campID)
+		var hydrogen float64
+		_ = tx.QueryRowContext(ctx, "SELECT hydrogen FROM resources WHERE encampment_id = $1", campID).Scan(&hydrogen)
+		newHydrogen, _ := storagecap.Clamp(hydrogen, 40.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 150.0, hydrogen = $1 WHERE encampment_id = $2", newHydrogen, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🎈 Purchased 40 L of Hydrogen Fuel!"})
 	}
 

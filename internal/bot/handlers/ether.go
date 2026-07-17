@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -123,8 +124,14 @@ func (h *EtherHandler) HandleEtherConvertCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Ether! Need %.1f, you have %.2f.", effectiveCost, ether)})
 	}
 
-	query := fmt.Sprintf("UPDATE resources SET ether = ether - $1, %s = %s + $2 WHERE encampment_id = $3", deal.resource, deal.resource)
-	_, _ = tx.ExecContext(ctx, query, effectiveCost, deal.amount, campID)
+	query := fmt.Sprintf("UPDATE resources SET ether = ether - $1, %s = $2 WHERE encampment_id = $3", deal.resource)
+
+	var currentVal float64
+	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1", deal.resource), campID).Scan(&currentVal)
+	storageCap := storagecap.CapFor(ctx, tx, campID)
+	newVal, _ := storagecap.Clamp(currentVal, deal.amount, storageCap)
+
+	_, _ = tx.ExecContext(ctx, query, effectiveCost, newVal, campID)
 
 	if err := tx.Commit(); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error saving conversion."})

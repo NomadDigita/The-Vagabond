@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"github.com/NomadDigita/The-Vagabond/internal/models"
 	"gopkg.in/telebot.v3"
 )
@@ -55,7 +56,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			JOIN resources r ON r.encampment_id = e.id
 			JOIN coordinates c ON c.id = e.coordinate_id
 			WHERE e.user_id = $1`
-		
+
 		err = h.DB.QueryRowContext(ctx, queryCamp, user.TelegramID).Scan(&camp.ID, &camp.Name, &res.Scrap, &res.Rations, &res.Electricity, &region, &myX, &myY)
 		if err != nil {
 			log.Printf("Failed to query existing player details: %v", err)
@@ -306,9 +307,9 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			y = rGen.Intn(991) + 10 // [10, 1000]
 		case "Europe":
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
-			y = rGen.Intn(991) + 10 // [10, 1000]
+			y = rGen.Intn(991) + 10    // [10, 1000]
 		case "Asia":
-			x = rGen.Intn(991) + 10 // [10, 1000]
+			x = rGen.Intn(991) + 10    // [10, 1000]
 			y = -(rGen.Intn(991) + 10) // [-1000, -10]
 		default: // Americas
 			x = -(rGen.Intn(991) + 10) // [-1000, -10]
@@ -325,7 +326,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			VALUES ($1, $2, $3, 1, $4, $3) 
 			ON CONFLICT (x, y) DO NOTHING
 			RETURNING id`
-		
+
 		err = tx.QueryRowContext(ctx, insertCoord, x, y, biome, spawnedContinent).Scan(&coordID)
 		if err == nil {
 			success = true
@@ -383,11 +384,24 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
 	if referrerID.Valid {
 		const refMetal, refCrystal, refNeuro = 500.0, 200.0, 100.0
-		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2, neuro_cores = neuro_cores + $3 WHERE encampment_id = $4", refMetal, refCrystal, refNeuro, campID)
+
+		var curMetal, curCrystal, curNeuro float64
+		_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal, &curNeuro)
+		myCap := storagecap.CapFor(ctx, h.DB, campID)
+		newMetal, _ := storagecap.Clamp(curMetal, refMetal, myCap)
+		newCrystal, _ := storagecap.Clamp(curCrystal, refCrystal, myCap)
+		newNeuro, _ := storagecap.Clamp(curNeuro, refNeuro, myCap)
+		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", newMetal, newCrystal, newNeuro, campID)
 
 		var referrerCampID string
 		if refErr := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", referrerID.Int64).Scan(&referrerCampID); refErr == nil {
-			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2, neuro_cores = neuro_cores + $3 WHERE encampment_id = $4", refMetal, refCrystal, refNeuro, referrerCampID)
+			var refCurMetal, refCurCrystal, refCurNeuro float64
+			_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", referrerCampID).Scan(&refCurMetal, &refCurCrystal, &refCurNeuro)
+			referrerCap := storagecap.CapFor(ctx, h.DB, referrerCampID)
+			refNewMetal, _ := storagecap.Clamp(refCurMetal, refMetal, referrerCap)
+			refNewCrystal, _ := storagecap.Clamp(refCurCrystal, refCrystal, referrerCap)
+			refNewNeuro, _ := storagecap.Clamp(refCurNeuro, refNeuro, referrerCap)
+			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", refNewMetal, refNewCrystal, refNewNeuro, referrerCampID)
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
 				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 500 Metal, 200 Crystal, 100 Neuro Cores.", sender.FirstName))
 		}

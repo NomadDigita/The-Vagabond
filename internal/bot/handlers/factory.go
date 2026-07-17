@@ -10,6 +10,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	gopkg "gopkg.in/telebot.v3"
 )
 
@@ -192,7 +193,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 			COALESCE(cargo_mk1, 0), COALESCE(cargo_mk2, 0), COALESCE(cargo_mk3, 0)
 		FROM workshop_inventory 
 		WHERE encampment_id = $1`
-	
+
 	_ = h.DB.QueryRowContext(ctx, queryInv, campID).Scan(&buggies, &ships, &jets, &haulers, &tankers, &rigs, &cargoMk1, &cargoMk2, &cargoMk3)
 
 	cm1Unit, _ := content.FindUnit("cargo_mk1")
@@ -504,7 +505,12 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		var engineeringBayLvl int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'engineering_bay'", campID).Scan(&engineeringBayLvl)
 		if engineeringBayLvl > 0 {
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal + $1, crystal = crystal + $2 WHERE encampment_id = $3", float64(engineeringBayLvl)*5.0, float64(engineeringBayLvl)*1.0, campID)
+			var curMetal, curCrystal float64
+			_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal)
+			storageCap := storagecap.CapFor(ctx, tx, campID)
+			newMetal, _ := storagecap.Clamp(curMetal, float64(engineeringBayLvl)*5.0, storageCap)
+			newCrystal, _ := storagecap.Clamp(curCrystal, float64(engineeringBayLvl)*1.0, storageCap)
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2 WHERE encampment_id = $3", newMetal, newCrystal, campID)
 		}
 	}
 
