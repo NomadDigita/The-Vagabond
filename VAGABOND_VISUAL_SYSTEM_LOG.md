@@ -146,7 +146,24 @@ assets/visual-system/
 ├── svg/                  10 source SVGs, v3 style
 ├── png/                  10 icons × 4 sizes (100/128/256/512px)
 ├── pipeline/build_icons.py   regenerates svg/ + png/ from scratch
-└── previews/preview_sheet_v3.png   contact sheet, dark bg, for review
+├── previews/preview_sheet_v3.png   contact sheet, dark bg, for review
+└── reference/
+    ├── telegram-premium-emoji-reference.mp4   the actual clip the
+    │   project owner sent to explain the target rendering quality
+    │   (Telegram's own Premium animated emoji, incl. the crystal
+    │   ball). Kept as the raw video, not just a written description
+    │   — a future session should watch it, not take my paraphrase of
+    │   it on faith. It is a reference for *technique* (glossy render,
+    │   soft top light, colored glow) only — see §2 and the explicit
+    │   "rejected directions" note about not copying the actual
+    │   character designs shown in it.
+    └── stills/
+        ├── crystal-ball-emoji-picker.png   frame ~15s, the icon that
+        │   prompted this whole v3 pass — study this one first.
+        └── emoji-topics-panel.png   frame ~30s, shows the Telegram
+            "Topics" emoji-removal panel the project owner screenshotted
+            earlier in the conversation — useful context for what a
+            typical bot's current stock-emoji footprint looks like.
 ```
 
 Icons done: `warning`, `failure`, `shield`, `transport`, `ai_mech`,
@@ -187,6 +204,17 @@ Maximizes how much of the 1,962 total emoji occurrences get upgraded
 per icon designed — `warning` alone is 250 occurrences (12.7% of all
 emoji use in the codebase).
 
+**ADR-V4: Store the raw reference video, not just a written
+description of it.**
+Could have just expanded §2's prose instead. Rejected — a design
+brief this subjective (visual "premium" feel) is a source that should
+be revisitable directly. A written description of a highlight/glow
+technique is a lossy compression of the actual frame; if v4/v5 needs
+to re-derive intent from scratch, or if the project owner disputes
+that a future batch matches the original ask, the raw clip is the
+ground truth, not this log's interpretation of it. 25MB video +
+2 stills is a trivial repo-size cost for that.
+
 ---
 
 ## 5. Known Issues / Not Yet Done
@@ -222,14 +250,22 @@ emoji use in the codebase).
   with highlight flecks. Not yet reviewed by project owner when v3
   work started (project owner instead supplied the Telegram Premium
   emoji reference video before responding to v2).
-- **v3 (this session, iteration 3, current):** Added the `glassDome`
+- **v3 (this session, iteration 3):** Added the `glassDome`
   broad soft highlight and per-icon colored glow halo to match the
   glossy/premium *rendering quality* of the reference video, richer
   4-stop gradients, without adopting Telegram's actual character
   designs (kept Vagabond's own hardware/military subject matter).
   Assets + this log committed to `assets/visual-system/` and repo
-  root respectively. **Awaiting project owner sign-off before scaling
-  to the remaining 163 icons.**
+  root respectively.
+- **v3.1 (this session, iteration 4):** Project owner correctly pointed
+  out that a static contact sheet doesn't prove anything about how
+  these actually render as Telegram custom emoji at real inline size —
+  see §9, that verification hasn't happened yet. Archived the raw
+  reference video + two key stills into `assets/visual-system/reference/`
+  per project owner request, so future sessions have the original
+  source instead of relying on this log's paraphrase of it (ADR-V4).
+  **Still awaiting: (a) in-Telegram render verification, (b) sign-off
+  before scaling to the remaining 163 icons.**
 
 ---
 
@@ -250,7 +286,39 @@ emoji use in the codebase).
 
 ---
 
-## 8. How to Resume Work (for the next session, AI or human)
+## 8. Verification Status — IMPORTANT, READ BEFORE CLAIMING THIS IS DONE
+
+**Nothing in this workstream has been confirmed to render correctly
+inside actual Telegram yet.** Everything in §1/§3 is PNG/SVG viewed as
+static files on a simulated dark background. That is not the same
+thing as a Telegram custom emoji rendered inline in a real message at
+real size, and the project owner was right to flag that gap.
+
+What "actually verified" requires, that hasn't been done:
+
+1. A Telegram bot with a user who has previously started it (custom
+   emoji sticker sets are created against a `user_id`, not just a bot
+   token — see the Bot API docs for `createNewStickerSet`).
+2. `uploadStickerFile` for each of the 10 pilot PNGs (must be exactly
+   100×100 per Telegram's spec — the pipeline already exports this
+   size, see §3).
+3. `createNewStickerSet(sticker_type="custom_emoji")` to actually
+   create the set.
+4. Sending a real test message containing those `custom_emoji_id`
+   values, on an actual phone/desktop client, at the small inline size
+   they'll really be used at (not the 512px preview sheet).
+5. Only after that: a real answer to "does this look premium at 18px
+   in a chat," not a simulated one.
+
+None of steps 1–4 have been run. This needs either a bot token with
+appropriate permissions from the project owner, or the project owner
+running the upload themselves with a script this workstream provides.
+**Whoever picks this up next should treat the pilot batch as
+"art-complete, render-unverified" — not "done."**
+
+---
+
+## 9. How to Resume Work (for the next session, AI or human)
 
 1. Read this whole file first, then look at
    `assets/visual-system/previews/preview_sheet_v3.png` before opening
