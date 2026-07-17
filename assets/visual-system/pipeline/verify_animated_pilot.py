@@ -83,7 +83,29 @@ def main():
         print(f"Created {set_name}.")
     except RuntimeError as e:
         if "already exists" in str(e) or "occupied" in str(e):
-            print(f"{set_name} already exists from a previous run — reusing it.")
+            print(f"{set_name} already exists — replacing its sticker with this "
+                  f"version so the test always reflects the latest design.")
+            existing = call("getStickerSet", name=set_name)
+            for old in existing["stickers"]:
+                call("replaceStickerInSet",
+                     user_id=OWNER_ID,
+                     name=set_name,
+                     old_sticker=old["file_id"],
+                     sticker=json.dumps({
+                         "sticker": file_id,
+                         "format": "video",
+                         "emoji_list": ["\u26A1"],
+                     }))
+                print("Replaced existing sticker in place.")
+                break
+            else:
+                call("addStickerToSet", user_id=OWNER_ID, name=set_name,
+                     sticker=json.dumps({
+                         "sticker": file_id,
+                         "format": "video",
+                         "emoji_list": ["\u26A1"],
+                     }))
+                print("Set was empty — added fresh.")
         else:
             raise
 

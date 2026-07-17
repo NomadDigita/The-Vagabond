@@ -93,6 +93,22 @@ preference):
 | Tech, energy, AI, comms | Electric cyan | `#39d6ec` |
 | Hazard / caution | Radiation yellow | `#dcbe28` |
 | Combat, failure, danger | Danger red | `#c72a1e` |
+| Premium accent / high-energy | Gold | `#e0a824` |
+
+**Amendment (v5):** earlier guidance implied roughly one accent color
+per icon. Project owner pushed back — icons that pair two colors
+deliberately (not randomly) read as noticeably more premium than a
+single-hue icon, even with identical shading technique. New rule:
+**icons may combine 2, occasionally 3, palette colors** when there's a
+real reason for the pairing (a "core + arc" relationship, a
+"structure + energy" relationship, etc) — every color still has to
+come from this table, never a one-off hex invented for a single icon.
+Reference case: `electricity` v2 — danger-red main bolt as the "core
+discharge," gold/yellow secondary arc-bolts crackling around it as the
+"overflow energy." Cohesion still comes from the shared gradient
+defs and construction rules below, not from a one-color-per-icon
+restriction — that restriction was overcautious, not what was making
+things feel unified.
 
 **Construction rules** (every icon, no exceptions):
 
@@ -281,9 +297,25 @@ ground truth, not this log's interpretation of it. 25MB video +
   WEBM/VP9/alpha, ~13KB, 1.25s loop) and a standalone verification
   script (`verify_animated_pilot.py`) using an isolated test sticker
   set so it doesn't collide with the main set's existing duplicate
-  mess (also documented, see §10's last paragraph). **Not yet
-  confirmed to actually animate in a real Telegram client — that's
-  the next thing this session or the next one needs to check.**
+  mess (also documented, see §10's last paragraph). **Confirmed
+  working** — project owner verified the animated custom emoji
+  actually animates in a real Telegram client.
+- **v5 (this session, iteration 7):** Project owner asked for richer,
+  more "sweet"/premium color combinations per icon rather than one
+  accent color each — gave `electricity` in red-with-gold as the
+  concrete example. Rebuilt it: danger-red main bolt, two golden
+  secondary arc-bolts crackling around it with independent flicker
+  timing, dual-tone (red+gold) glow halo, gold-tinted sparkle motes.
+  Added the Gold entry and the multi-color amendment to §2. Fixed
+  `verify_animated_pilot.py` to replace (`replaceStickerInSet`) the
+  existing test sticker instead of skipping when the test set already
+  exists, so re-running it after a design change actually shows the
+  new version instead of the stale one. **Awaiting project owner
+  confirmation on the red/gold redesign specifically**, then: apply
+  the same multi-tone treatment + animation to the other 9 pilot
+  icons, replace all 10 in the real `vagabond_pilot_by_<bot>` set
+  (cleaning up the duplicate mess from §10 while at it), then decide
+  whether to scale to the remaining 163.
 
 ---
 
