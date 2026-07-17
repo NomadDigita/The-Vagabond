@@ -74,6 +74,33 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
+// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
+// production failure where prose or a raw newline around/inside an
+// otherwise-valid JSON object made json.Unmarshal fail outright.
+
+func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
+	raw := `{"summary": "Focus on storage.", "top_roi_actions": []}` +
+		"\n\nHappy to dig into any of these further."
+	rec := econadvisor.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
+	}
+	if rec.Summary != "Focus on storage." {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
+func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
+	raw := "{\"summary\": \"Economy is advanced\nbut severely unbalanced.\", \"top_roi_actions\": []}"
+	rec := econadvisor.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
+	}
+	if !strings.Contains(rec.Summary, "severely unbalanced") {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
 func TestFormatForTelegram_StructuredPath(t *testing.T) {
 	rec := econadvisor.ParseRecommendation(`{"summary": "Focus on storage.", "top_roi_actions": [{"action": "upgrade", "target": "warehouse", "reason": "overflow risk", "expected_gain": "+30% capacity"}], "bottlenecks": "scrap overflow", "market_timing": "prices are high, sell", "trading_advice": "hold crystal"}`)
 	out := econadvisor.FormatForTelegram(rec)

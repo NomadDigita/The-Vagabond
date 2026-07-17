@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
 // ModuleState is a minimal projection of a row in the `modules` table.
@@ -159,17 +161,24 @@ func BuildUserPrompt(s Snapshot) string {
 // ParseRecommendation decodes the model's response text, tolerating a
 // markdown code fence the same way governor/fleetcommander do.
 func ParseRecommendation(text string) *Recommendation {
-	cleaned := strings.TrimSpace(text)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
-
-	var rec Recommendation
-	if err := json.Unmarshal([]byte(cleaned), &rec); err != nil || rec.Summary == "" {
+	candidate, found := ai.ExtractJSONObject(text)
+	if !found {
 		return &Recommendation{Summary: text, FellBackToRawText: true}
 	}
-	return &rec
+
+	var rec Recommendation
+	if err := json.Unmarshal([]byte(candidate), &rec); err == nil && rec.Summary != "" {
+		return &rec
+	}
+
+	// See ADR-015: real providers occasionally leave a raw,
+	// unescaped newline/tab inside a string value.
+	repaired := ai.SanitizeJSONControlChars(candidate)
+	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
+		return &rec
+	}
+
+	return &Recommendation{Summary: text, FellBackToRawText: true}
 }
 
 // FormatForTelegram renders a Recommendation as a plain-text message.
@@ -178,7 +187,8 @@ func FormatForTelegram(rec *Recommendation) string {
 	b.WriteString("💹 AI ECONOMY ADVISOR\n\n")
 
 	if rec.FellBackToRawText {
-		b.WriteString(rec.Summary)
+		b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
 		return b.String()
 	}
 

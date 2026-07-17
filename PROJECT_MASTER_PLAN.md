@@ -431,6 +431,84 @@ specifically — not just a passive count increase.
 
 ---
 
+## 1.8 Critical Fix: Real Provider JSON Responses Silently Fell Back to Raw Text (following session)
+
+The project owner deployed Phase E (this branch) and, before testing
+it, sent a live screenshot of `/governor`, `/economy_advisor`, and
+`/fleet_commander` output from the production bot. All three showed a
+literal, unformatted JSON blob (`{ "summary": "..." }`) instead of the
+emoji-formatted report every one of those commands is supposed to
+produce — flagged, correctly, as looking "generic" and unfinished.
+
+### Confirmed root cause
+
+Every one of `governor.ParseRecommendation`,
+`fleetcommander.ParseRecommendation`, `econadvisor.ParseRecommendation`
+(and this session's own new `researchplanner.ParseRecommendation`)
+used the same brittle two-step cleanup: strip a leading/trailing
+` ```json ` fence, then call `json.Unmarshal` on the *entire* remaining
+string. That only works if the model's response is **exactly** one
+JSON object and nothing else. In production, real providers (Qwen via
+DashScope, Gemini) — despite every provider's JSONMode already
+appending an explicit "respond with a single valid JSON object and
+nothing else" instruction — sometimes:
+
+1. add a sentence of prose before and/or after the object anyway
+   (`"Here's the analysis: {...}"` or `"{...}\n\nLet me know if you'd
+   like more detail!"`), which makes `json.Unmarshal` reject the whole
+   string as invalid (trailing/leading data); or
+2. leave a raw, unescaped newline or tab character inside a string
+   value (most often a multi-sentence `"summary"`) instead of encoding
+   it as `\n`/`\t` — valid enough for a "relaxed" JSON reader, but
+   rejected outright by Go's strict `encoding/json`.
+
+Either failure tripped the existing `err != nil` fallback, which
+displayed the raw model text completely unformatted — exactly the
+"generic," unbeautified output in the screenshot. This was worse than
+the risk ADR-005 already flagged (that risk was scoped to *future*
+Phase F/J structured-output needs) — it was live today in three
+already-shipped phases.
+
+### Fix
+
+Added `internal/ai/jsonrecovery.go`: `ExtractJSONObject` (scans for the
+first balanced top-level `{...}` object, tracking string/escape state
+so quotes and braces *inside* string values don't confuse the
+boundary — this is what discards any leading/trailing prose) and
+`SanitizeJSONControlChars` (re-escapes a raw newline/tab/carriage
+return found while inside a string literal, leaving formatting
+whitespace *between* JSON tokens untouched). This is shared
+`internal/ai` infrastructure, not duplicated per package — see
+ADR-015 for why that's the right call here specifically, in contrast
+to this project's usual per-package type-duplication pattern.
+
+All four `ParseRecommendation` functions
+(governor/fleetcommander/econadvisor/researchplanner) now: extract the
+JSON object first, attempt to unmarshal it, and if that fails, retry
+once against the control-char-sanitized version, before finally
+falling back to raw text. **The raw-text fallback path itself was also
+improved** in all four packages' `FormatForTelegram`: instead of
+dumping the model's raw text bare, it's now prefixed with a clear
+"⚠️ Couldn't parse..." notice and wrapped in a Telegram monospace code
+block — so even the genuine last-resort case (a model producing
+actually-wrong-shaped output, not just mis-escaped valid output) no
+longer looks like a broken/half-finished feature.
+
+**Verification:** 14 new tests in `internal/ai/jsonrecovery_test.go`
+(bare JSON, fence-wrapped, leading prose, trailing prose, both,
+brace-inside-string-value, escaped-quote-inside-string, nested object,
+no-JSON-at-all, truncated-never-closes, raw-newline-escaped,
+formatting-whitespace-left-alone, tab/CR handled,
+already-escaped-not-double-escaped) plus 2 new regression tests per
+feature package (8 total) directly reproducing the exact
+trailing-prose and raw-newline failure modes this session found live.
+87 tests total (was 65), all passing. Full `go build ./... && go vet
+./... && go test ./...` confirmed clean for the whole repo (same
+sandbox-only, reverted-before-commit `go.mod` replace workaround as
+Phase E — see that phase's note for why).
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -564,6 +642,31 @@ future provider named `"mock"` — or any test double sharing that name
 the gap between documented intent and actual behavior permanently
 rather than trusting every future config change to preserve it by
 accident.
+
+**ADR-015: JSON recovery from real providers is a shared
+`internal/ai` helper (`ExtractJSONObject` +
+`SanitizeJSONControlChars`), not duplicated per-feature-package.**
+Confirmed real bug (2026-07-17, reported by project owner with a live
+screenshot — see §1.8): despite every provider's JSONMode appending an
+explicit "respond with a single valid JSON object and nothing else"
+instruction (see ADR-005's related caveat about Anthropic specifically
+lacking a native `response_format` field), real Qwen/Gemini responses
+observed in production sometimes wrap the object in a sentence of
+prose, or leave a raw unescaped newline inside a string value — both
+of which make Go's strict `encoding/json.Unmarshal` reject an object a
+human would read as obviously-intended-to-be-valid JSON. This is
+**not** domain logic the way the tech-tree/module/unit type
+duplication in governor/fleetcommander/econadvisor/researchplanner is
+(see each package's doc comment for why *that* duplication is a
+deliberate isolation trade-off) — it's generic text-recovery
+infrastructure with zero game knowledge, so it lives once in
+`internal/ai` (which every one of those packages already imports for
+`ai.Service`/`ai.CompletionRequest`, so this adds no new dependency
+edge) and all four `ParseRecommendation` functions call it identically.
+This does not replace the ADR-005/§4 tech-debt item asking for a real
+JSON-Schema-validating retry loop before Phase F/J — it closes today's
+observed failure mode; a model that returns genuinely-wrong-shaped
+JSON (right syntax, wrong fields) still needs that future work.
 
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
@@ -780,7 +883,11 @@ which are more cross-cutting.
   loop; `Service.Complete` only returns the requested tool calls, it
   does not execute them.
 - **No JSON-Schema validation/retry for structured output.** See
-  ADR-005. Needed before Phase F/J can be trusted for anything
+  ADR-005. ADR-015 closed the specific failure mode observed live
+  (prose-wrapped/malformed-whitespace JSON getting rejected outright)
+  with a text-recovery layer, but a model returning genuinely
+  wrong-shaped JSON (valid syntax, missing/renamed fields) still isn't
+  caught — needed before Phase F/J can be trusted for anything
   machine-consumed downstream.
 - **`InMemoryCache` is process-local.** If the bot ever runs as more
   than one instance/process, cache hits won't be shared across
@@ -943,6 +1050,19 @@ which are more cross-cutting.
   the committed `go.mod`). Recommended next task updated to Phase F,
   with an explicit note to check the parallel SpaceHunt branch for
   real battle data before designing it.
+- **Following session:** Critical fix (§1.8, ADR-015): confirmed real
+  production bug where Governor/Fleet Commander/Economy Advisor (and
+  latently, Research Planner) fell back to displaying raw unformatted
+  JSON whenever a real provider's response had prose wrapped around
+  the JSON object or a raw newline inside a string value — reported by
+  the project owner via a live screenshot. Added shared
+  `internal/ai/jsonrecovery.go` (`ExtractJSONObject` +
+  `SanitizeJSONControlChars`) and wired it into all 4 packages'
+  `ParseRecommendation`; also improved all 4 packages' raw-text
+  fallback rendering (clear notice + code block) for the genuine
+  last-resort case. 22 new tests (14 in `internal/ai`, 2 regression
+  tests each in governor/fleetcommander/econadvisor/researchplanner).
+  65 → 87 total, all passing.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
