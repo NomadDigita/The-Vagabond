@@ -371,16 +371,92 @@ patterns) per file and check each against what section it visually
 belongs to, the same way this pass did — the list in this note is a
 starting point, not exhaustive.
 
+### Keyboard/UI audit (item 3, continued — clan/federation/arena/hero/camp/combat/ether/settings)
+Continued the grep-and-check pass recommended above. Ruled out
+sub-panels reached **only** via inline callback from an already-correct
+parent panel (e.g. `clan.go`'s `HandleApplicationsInboxCallback`,
+`HandleManageMembersCallback`; `hero.go`'s `HandleGarrisonPanel`) —
+Telegram's persistent bottom keyboard is a property of the *last message
+that set one*, so a callback-only sub-screen opened from a panel that
+already sent the right keyboard doesn't need to resend it. Also ruled
+out `onboarding.go`'s `renderFactionChoice`: it's the very first message
+a brand-new user ever receives, before any bottom keyboard has been set,
+so there's no stale "previous section" bar to leave behind.
+
+Fixed real entry-point cases:
+- `clan.go`: `HandleClanPanel` (both the unaligned and in-clan HUD
+  branches), `HandleBrowseClans` (`/clans`), `HandleBoard` (`/board`) →
+  all now send `keyboards.EconomyNavigation()`, matching "🛡️ Clan
+  Alliances"'s section (consistent with `economy.go`'s existing fixes).
+- `federation.go`: `HandleFederationsPanel` (`/federations`),
+  `HandleMyFederationPanel` (`/federation`) → same, `EconomyNavigation()`
+  (Federations are the Clan-adjacent guild-of-guilds feature; these two
+  had zero keyboard argument at all, not even a stale one, since they
+  never took one to begin with).
+- `arena.go`: `HandleArenaPanel` → `keyboards.CombatNavigation()`. Also
+  corrected a misleading comment above the old `c.Send(panelText,
+  selector)` claiming inline buttons and a reply keyboard "conflict" —
+  they don't; that was the same misunderstanding item 3's root-cause
+  investigation already disproved elsewhere.
+- **Found and fixed a related but distinct bug while in `arena.go`**:
+  the "🏟️ Combat Arena" button was registered as a live handler
+  (`cmd/bot/main.go`) but was never actually placed on any
+  `ReplyMarkup` — a dead handler with no button anywhere in the UI to
+  reach it (players could only reach the Arena via the raw `/arena`
+  command). Added `btnArena` to `keyboards.CombatNavigation()`.
+- `hero.go`: `HandleHeroPanel` → `keyboards.CampNavigation()` ("👥 Hero
+  Commander" lives there).
+- `agent.go`: `HandleAgent` → `keyboards.CampNavigation()` ("🧠
+  Automation Agent").
+- `camp.go`: `HandleStructuralUpgrades`, `HandleActiveMining`,
+  `HandleMutationsPanel` → same, `CampNavigation()`.
+- `combat.go`: `HandleRaidBoard` (the "⚔️ Tactical Combat" main entry
+  point itself — the single most-used missing case, since every other
+  Combat sub-panel inherits from whatever this one leaves behind),
+  `HandleExpeditionRadar`, `HandleScout` (`/scout`),
+  `renderDraftCustomizerHUD`'s non-callback fallback branch, and
+  `renderExpeditionPanel` → all now send `keyboards.CombatNavigation()`.
+- `ether.go`: `HandleEtherShop` (`/ether`) → `keyboards.CampNavigation()`
+  (Ether ties to Technology research, same as `research.go`'s existing
+  fix); also fixed its "no camp yet" branch, which previously sent no
+  keyboard argument at all.
+- `profile.go`: `HandleSettings` (`/settings`) → `keyboards.MainNavigation()`
+  — a standalone command not owned by any submenu, so it resets to the
+  main bar the same way `boss.go`/`rebellion.go` do for single-panel
+  destinations.
+
+Verified via `gofmt -e` (full parse, all ten touched files + all
+pre-existing files clean of new syntax errors) and `go build` on every
+dependency-free package. Installed the Go 1.22 toolchain via
+`apt-get install golang-1.22-go` this session (wasn't present in this
+sandbox instance). Full `go build ./...` still isn't possible here:
+`gopkg.in` is not in this sandbox's network egress allowlist, and Go
+needs it to resolve `gopkg.in/telebot.v3`'s vanity-import redirect
+before it can even try GitHub directly — same limitation as every prior
+session's log entry, just confirmed by trying `GOPROXY=direct` this
+time instead of assuming.
+
+**Still not yet audited**: `world.go` was already found clean (its
+three panel-sends already carry `CombatNavigation()`). `jobs.go`'s
+sends are all one-line text acks/errors with no inline selector at all,
+replying directly to an explicit slash command (`/hyperspeed`,
+`/extend`, `/teleport`, etc.) rather than a menu-navigation event —
+left alone as a different code shape from the "leaves the previous
+panel's bottom bar showing" bug class this audit targets, consistent
+with how other quick-ack commands elsewhere in the codebase already
+behave. Item 3 (keyboard audit) is now considered complete against the
+brief's example and every panel-style entry point found; only
+click-through inline callbacks and one-line command acks remain
+un-instrumented, by design.
+
 ---
 
 ## 4. Next in line (recommended order)
 
-1. Item 3 (continued) — finish the keyboard audit across the
-   not-yet-checked files listed above.
-2. Item 12 — expand world events beyond weather (Acid Rain/Radiation
+1. Item 12 — expand world events beyond weather (Acid Rain/Radiation
    Storm already exist; add EMP/Supply Crisis/Disease/Sandstorm,
    scope to continent rather than global).
-3. Item 10/11 — world exploration + diplomacy (biggest remaining
+2. Item 10/11 — world exploration + diplomacy (biggest remaining
    item, needs new schema; do this after the smaller items above so
    the schema design benefits from everything else being settled).
-5. Item 13 — Admin panel consolidation (mechanical, do last).
+3. Item 13 — Admin panel consolidation (mechanical, do last).

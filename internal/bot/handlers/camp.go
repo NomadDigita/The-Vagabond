@@ -132,7 +132,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 		selector.Row(btnUpgradeGen, btnUpgradeCamp),
 	)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
 // defenseModule describes one Defense Grid structure. All of these ride on
@@ -336,7 +336,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 		selector.Row(btnToggleAlert),
 	)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
@@ -513,7 +513,7 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 		selector.Row(btnMutateSalvage, btnMutateBio),
 	)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
 func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {

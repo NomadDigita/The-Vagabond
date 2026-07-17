@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 	"gopkg.in/telebot.v3"
 )
@@ -79,7 +80,7 @@ func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 	panelText += "\n💡 A Clan King can found a Federation with /fed_found [name], join one with /fed_join [name], or leave with /fed_leave.\n" +
 		"🌐━━━━━━━━━━━━━━━━━━━━━━🌐"
 
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.EconomyNavigation())
 }
 
 // HandleMyFederationPanel (/federation) shows detailed info on the
@@ -133,7 +134,7 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 
 	panelText += "🌐━━━━━━━━━━━━━━━━━━━━━━🌐"
 
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.EconomyNavigation())
 }
 
 // HandleFoundFederation (/fed_found [name]) - a Clan King founds a new

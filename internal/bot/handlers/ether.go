@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -50,7 +51,7 @@ func (h *EtherHandler) HandleEtherShop(c telebot.Context) error {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
 	var ether float64
@@ -78,7 +79,7 @@ func (h *EtherHandler) HandleEtherShop(c telebot.Context) error {
 	panelText += "🔮━━━━━━━━━━━━━━━━━━━━━━🔮"
 	selector.Inline(buttons...)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CampNavigation())
 }
 
 func (h *EtherHandler) HandleEtherConvertCallback(c telebot.Context) error {

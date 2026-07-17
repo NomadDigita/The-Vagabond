@@ -81,7 +81,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		btnBrowse := selector.Data("🔍 Browse Clans", "browse_clans", "0")
 		selector.Inline(selector.Row(btnBrowse))
 
-		return c.Send(panelText, selector)
+		return c.Send(panelText, selector, keyboards.EconomyNavigation())
 	}
 
 	var members int
@@ -145,7 +145,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnLeave))
 
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
 
 // HandleBrowseClansCallback / HandleBrowseClansCommand lists all clans,
@@ -196,7 +196,7 @@ func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 
 	panelText += "\n🔍━━━━━━━━━━━━━━━━━━━━━━🔍"
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
 
 // HandleApplyToClanCallback sends a join application, notifying the Leader.
@@ -685,7 +685,7 @@ func (h *ClanHandler) HandleBoard(c telebot.Context) error {
 
 	panelText += "\n📋━━━━━━━━━━━━━━━━━━━━━━📋"
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
 
 // HandleCreateClanCommand establishes a clan with a REAL custom name

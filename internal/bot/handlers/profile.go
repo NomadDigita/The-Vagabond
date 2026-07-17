@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
 
@@ -75,7 +76,7 @@ func (h *ProfileHandler) HandleSettings(c telebot.Context) error {
 	btnStorage := selector.Data("📦 Toggle Storage Alerts", "settings_toggle", "storage")
 	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage))
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.MainNavigation())
 }
 
 func onOff(b bool) string {

@@ -186,7 +186,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
-	return c.Send(dashboard, selector)
+	return c.Send(dashboard, selector, keyboards.CombatNavigation())
 }
 
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
@@ -380,7 +380,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CombatNavigation())
 }
 
 // HandleAutoScanToggle toggles the SpaceHunt-style "Automatic Scan" job:
@@ -537,7 +537,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
-	return c.Send(report, selector)
+	return c.Send(report, selector, keyboards.CombatNavigation())
 }
 
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
@@ -1003,7 +1003,7 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	if c.Callback() != nil {
 		return c.Edit(panelText, selector)
 	}
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CombatNavigation())
 }
 
 // draftUnitAliases maps the free-text unit names a player might type in
@@ -1715,5 +1715,5 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 	btnAbort := selector.Data("↩️ Abort", "exp_action", "abort", raidID)
 	selector.Inline(selector.Row(btnSpeed, btnAbort))
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.CombatNavigation())
 }

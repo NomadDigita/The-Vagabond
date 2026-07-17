@@ -69,8 +69,10 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 		selector.Row(btnJoin3),
 	)
 
-	// Send without a trailing Reply Keyboard parameter so that inline buttons display successfully
-	return c.Send(panelText, selector)
+	// Inline buttons and the persistent bottom keyboard are independent
+	// ReplyMarkup roles - passing both is safe and required, matching the
+	// fix applied across the rest of the item-3 keyboard audit.
+	return c.Send(panelText, selector, keyboards.CombatNavigation())
 }
 
 // HandleJoinQueueCallback handles inserting the player into the matchmaking table
