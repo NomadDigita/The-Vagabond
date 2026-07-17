@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+
+<defs>
+  <radialGradient id="gunmetal" cx="32%" cy="24%" r="90%">
+    <stop offset="0" stop-color="#88919b"/>
+    <stop offset="0.28" stop-color="#5b616a"/>
+    <stop offset="0.62" stop-color="#2e3238"/>
+    <stop offset="1" stop-color="#0e1013"/>
+  </radialGradient>
+  <radialGradient id="steel" cx="30%" cy="22%" r="90%">
+    <stop offset="0" stop-color="#ffffff"/>
+    <stop offset="0.3" stop-color="#dbe4ec"/>
+    <stop offset="0.62" stop-color="#96a2ad"/>
+    <stop offset="1" stop-color="#3c434b"/>
+  </radialGradient>
+  <radialGradient id="rust" cx="30%" cy="22%" r="90%">
+    <stop offset="0" stop-color="#ffd199"/>
+    <stop offset="0.32" stop-color="#ff9a48"/>
+    <stop offset="0.65" stop-color="#c2591c"/>
+    <stop offset="1" stop-color="#3c1a08"/>
+  </radialGradient>
+  <radialGradient id="cyan" cx="32%" cy="22%" r="90%">
+    <stop offset="0" stop-color="#ffffff"/>
+    <stop offset="0.28" stop-color="#baffff"/>
+    <stop offset="0.6" stop-color="#39d6ec"/>
+    <stop offset="1" stop-color="#063e47"/>
+  </radialGradient>
+  <radialGradient id="radyellow" cx="32%" cy="22%" r="90%">
+    <stop offset="0" stop-color="#ffffe8"/>
+    <stop offset="0.3" stop-color="#fbef8a"/>
+    <stop offset="0.65" stop-color="#dcbe28"/>
+    <stop offset="1" stop-color="#4c3f08"/>
+  </radialGradient>
+  <radialGradient id="danger" cx="32%" cy="22%" r="90%">
+    <stop offset="0" stop-color="#ffd4cf"/>
+    <stop offset="0.3" stop-color="#ff6a5c"/>
+    <stop offset="0.65" stop-color="#c72a1e"/>
+    <stop offset="1" stop-color="#420a07"/>
+  </radialGradient>
+  <radialGradient id="bolt" cx="35%" cy="28%" r="85%">
+    <stop offset="0" stop-color="#ffffff"/>
+    <stop offset="0.35" stop-color="#c3ccd4"/>
+    <stop offset="1" stop-color="#33383e"/>
+  </radialGradient>
+  <radialGradient id="glassDome" cx="50%" cy="0%" r="75%">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.75"/>
+    <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.18"/>
+    <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="softshadow" x="-50%" y="-50%" width="220%" height="220%">
+    <feDropShadow dx="0" dy="2.5" stdDeviation="2.2" flood-color="#000000" flood-opacity="0.65"/>
+  </filter>
+  <filter id="blur1"><feGaussianBlur stdDeviation="1.1"/></filter>
+  <filter id="blur2"><feGaussianBlur stdDeviation="2.6"/></filter>
+  <filter id="blur3"><feGaussianBlur stdDeviation="5.5"/></filter>
+</defs>
+
+<circle cx="50" cy="52" r="40" fill="#38d6ec" opacity="0.30" filter="url(#blur3)"/>
+<g filter="url(#softshadow)">
+
+<ellipse cx="50" cy="90" rx="20" ry="5" fill="#000000" opacity="0.4" filter="url(#blur2)"/>
+<polygon points="56,4 20,54 44,54 38,96 82,42 56,42" fill="#000" opacity="0.4" transform="translate(1.5,2)"/>
+<polygon points="56,4 20,54 44,54 38,96 82,42 56,42" fill="url(#cyan)" stroke="#04262b" stroke-width="3.5" stroke-linejoin="round"/>
+<polygon points="53,12 30,50 46,50 41,84 74,44 55,44" fill="#ffffff" opacity="0.4"/>
+<ellipse cx="52" cy="22" rx="20" ry="16" fill="url(#glassDome)"/>
+<circle cx="20" cy="54" r="2.4" fill="url(#bolt)" stroke="#0d0e10" stroke-width="0.8"/><circle cx="19.28" cy="53.28" r="0.672" fill="#ffffff" opacity="0.85"/><circle cx="82" cy="42" r="2.4" fill="url(#bolt)" stroke="#0d0e10" stroke-width="0.8"/><circle cx="81.28" cy="41.28" r="0.672" fill="#ffffff" opacity="0.85"/><circle cx="38" cy="96" r="2.4" fill="url(#bolt)" stroke="#0d0e10" stroke-width="0.8"/><circle cx="37.28" cy="95.28" r="0.672" fill="#ffffff" opacity="0.85"/>
+
+</g>
+</svg>
