@@ -59,6 +59,33 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
+// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
+// production failure where prose or a raw newline around/inside an
+// otherwise-valid JSON object made json.Unmarshal fail outright.
+
+func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
+	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "you outnumber them"}` +
+		"\n\nGood luck out there!"
+	rec := fleetcommander.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
+	}
+	if rec.Recommendation != "attack" {
+		t.Errorf("unexpected recommendation: %q", rec.Recommendation)
+	}
+}
+
+func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
+	raw := "{\"recommendation\": \"retreat\", \"confidence\": \"medium\", \"reasoning\": \"they have reinforcements\nincoming within 2 ticks\"}"
+	rec := fleetcommander.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
+	}
+	if !strings.Contains(rec.Reasoning, "incoming within 2 ticks") {
+		t.Errorf("unexpected reasoning: %q", rec.Reasoning)
+	}
+}
+
 func TestFormatForTelegram_StructuredPath(t *testing.T) {
 	rec := fleetcommander.ParseRecommendation(`{"recommendation": "retreat", "confidence": "medium", "reasoning": "garrison too strong", "risk_assessment": "high losses expected", "suggested_split": ""}`)
 	out := fleetcommander.FormatForTelegram(rec)

@@ -183,6 +183,35 @@ func TestParseRecommendation_InvalidFallsBackToRawText(t *testing.T) {
 	}
 }
 
+// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
+// production failure (confirmed live via Governor/Economy
+// Advisor/Fleet Commander) where prose or a raw newline around/inside
+// an otherwise-valid JSON object made json.Unmarshal fail outright,
+// sending the player a raw JSON dump instead of a formatted report.
+
+func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
+	raw := `{"summary": "Focus raiding.", "recommended_order": []}` +
+		"\n\nLet me know if you'd like a different focus."
+	rec := ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
+	}
+	if rec.Summary != "Focus raiding." {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
+func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
+	raw := "{\"summary\": \"Base has fallen behind\non defense relative to its economy.\", \"recommended_order\": []}"
+	rec := ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
+	}
+	if !strings.Contains(rec.Summary, "relative to its economy") {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
 func TestFormatForTelegram_FallbackShowsRawText(t *testing.T) {
 	rec := &Recommendation{Summary: "raw dump", FellBackToRawText: true}
 	out := FormatForTelegram(rec)

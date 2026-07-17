@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
 // FleetComposition is a generic unit-name → count map, deliberately
@@ -178,17 +180,24 @@ func writeComposition(b *strings.Builder, comp FleetComposition) {
 // failure it falls back to Reasoning=<raw text> so the player always
 // gets something usable.
 func ParseRecommendation(text string) *Recommendation {
-	cleaned := strings.TrimSpace(text)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
-
-	var rec Recommendation
-	if err := json.Unmarshal([]byte(cleaned), &rec); err != nil || rec.Recommendation == "" {
+	candidate, found := ai.ExtractJSONObject(text)
+	if !found {
 		return &Recommendation{Reasoning: text, FellBackToRawText: true}
 	}
-	return &rec
+
+	var rec Recommendation
+	if err := json.Unmarshal([]byte(candidate), &rec); err == nil && rec.Recommendation != "" {
+		return &rec
+	}
+
+	// See ADR-015: real providers occasionally leave a raw,
+	// unescaped newline/tab inside a string value.
+	repaired := ai.SanitizeJSONControlChars(candidate)
+	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Recommendation != "" {
+		return &rec
+	}
+
+	return &Recommendation{Reasoning: text, FellBackToRawText: true}
 }
 
 // actionEmoji gives each recommendation a distinct glyph so players
@@ -208,7 +217,8 @@ func FormatForTelegram(rec *Recommendation) string {
 	b.WriteString("🎖️ AI FLEET COMMANDER\n\n")
 
 	if rec.FellBackToRawText {
-		b.WriteString(rec.Reasoning)
+		b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+		fmt.Fprintf(&b, "```\n%s\n```", rec.Reasoning)
 		return b.String()
 	}
 

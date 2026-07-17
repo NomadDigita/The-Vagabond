@@ -98,6 +98,36 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
+// The next two tests reproduce a real production failure (see
+// PROJECT_MASTER_PLAN.md ADR-015 / §1.8): real providers, despite an
+// explicit "JSON only" instruction, sometimes wrap the object in
+// prose or leave a raw newline inside a string value. Both used to
+// make json.Unmarshal fail outright, sending the player a raw JSON
+// dump instead of a formatted report.
+
+func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
+	raw := `{"summary": "Upgrade generator next.", "priority_actions": []}` +
+		"\n\nLet me know if you'd like more detail on any of this!"
+	rec := governor.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
+	}
+	if rec.Summary != "Upgrade generator next." {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
+func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
+	raw := "{\"summary\": \"Base has a severe imbalance,\nwith nearly 100M of most resources.\", \"priority_actions\": []}"
+	rec := governor.ParseRecommendation(raw)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
+	}
+	if !strings.Contains(rec.Summary, "severe imbalance") {
+		t.Errorf("unexpected summary: %q", rec.Summary)
+	}
+}
+
 func TestFormatForTelegram_FallbackPath(t *testing.T) {
 	rec := governor.ParseRecommendation("plain text advice")
 	out := governor.FormatForTelegram(rec)
