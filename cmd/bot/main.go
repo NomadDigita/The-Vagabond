@@ -23,6 +23,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
+	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/joho/godotenv"
@@ -819,6 +820,10 @@ func main() {
 	aiEconAdvisor := econadvisor.New(db, aiService)
 	econAdvisorHandler := handlers.NewEconomyAdvisorHandler(aiEconAdvisor)
 
+	// --- AI Research Planner wiring (Phase E, independent AI roadmap branch) ---
+	aiResearchPlanner := researchplanner.New(db, aiService)
+	researchPlannerHandler := handlers.NewResearchPlannerHandler(aiResearchPlanner)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -898,6 +903,9 @@ func main() {
 	bot.Handle("\ffleet_refresh", fleetCommanderHandler.HandleFleetCommanderRefreshCallback)
 	bot.Handle("/economy_advisor", econAdvisorHandler.HandleEconomyAdvisor)
 	bot.Handle("\fecon_refresh", econAdvisorHandler.HandleEconomyAdvisorRefreshCallback)
+	bot.Handle("/research_planner", researchPlannerHandler.HandleResearchPlanner)
+	bot.Handle("\fresearch_refresh", researchPlannerHandler.HandleResearchPlannerRefreshCallback)
+	bot.Handle("\fresearch_goal", researchPlannerHandler.HandleResearchPlannerGoalCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
