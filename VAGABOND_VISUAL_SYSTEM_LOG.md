@@ -260,10 +260,17 @@ ground truth, not this log's interpretation of it. 25MB video +
 - **v3.1 (this session, iteration 4):** Project owner correctly pointed
   out that a static contact sheet doesn't prove anything about how
   these actually render as Telegram custom emoji at real inline size —
-  see §9, that verification hasn't happened yet. Archived the raw
+  see §8, that verification hasn't happened yet. Archived the raw
   reference video + two key stills into `assets/visual-system/reference/`
   per project owner request, so future sessions have the original
   source instead of relying on this log's paraphrase of it (ADR-V4).
+- **v3.2 (this session, iteration 5):** Wrote
+  `assets/visual-system/pipeline/telegram_upload.py` — the real
+  Telegram upload/verification script (uploadStickerFile →
+  createNewStickerSet → mapping.json → live test message). Confirmed
+  this sandbox cannot reach `api.telegram.org` (network allow-list),
+  so the script is written and syntax-checked but **not run**.
+  Project owner has the credentials to run it themselves; see §8.
   **Still awaiting: (a) in-Telegram render verification, (b) sign-off
   before scaling to the remaining 163 icons.**
 
@@ -315,6 +322,23 @@ appropriate permissions from the project owner, or the project owner
 running the upload themselves with a script this workstream provides.
 **Whoever picks this up next should treat the pilot batch as
 "art-complete, render-unverified" — not "done."**
+
+**Update, same session:** `assets/visual-system/pipeline/telegram_upload.py`
+now exists and does steps 2–4 end-to-end (upload → create custom-emoji
+set → write `mapping.json` → send a real test message to the owner's
+own Telegram account so they can eyeball every icon at true inline
+size). **It has not been run.** The AI sandbox that wrote it has an
+outbound network allow-list that does not include `api.telegram.org` —
+confirmed via a direct request (`host_not_allowed`) — so this is a
+hard environment limitation, not a missing-credential problem. The
+project owner needs to run this script from a machine with normal
+internet access (see the script's own docstring for the two required
+env vars and how to get them). A test bot token was shared in this
+chat for this purpose — **it should be revoked from BotFather once
+testing is done**, same as the GitHub token earlier in this
+workstream's history; pasting live credentials into a chat transcript
+means treating them as burned after use, even for a throwaway test
+account.
 
 ---
 
