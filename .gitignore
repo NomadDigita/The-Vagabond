@@ -16,5 +16,6 @@ bin/
 *.dylib
 
 # Go Workspace files
-go.workassets/visual-system/animated/*/frames/
+go.work
+assets/visual-system/animated/*/frames/
 assets/visual-system/pipeline/__pycache__/

@@ -61,22 +61,25 @@ the ocean in one sitting; it produces worse art, not more of it.
 | Item | Status |
 |---|---|
 | Emoji usage audit (`internal/`, `*.go`, `*.md`, `*.sql`) | **Done** — 173 unique emoji, 1,962 occurrences, 46 files. Script not yet committed (was a one-off `python3` scan; worth productionizing if the full 173 gets built out — see §7). |
-| Art direction / style guide | **Done, v3** — see §2. Locked in after 3 iterations with the project owner. |
-| Pilot icon batch (10 of 173) | **Done, v3.** `warning`, `failure`, `shield`, `transport`, `ai_mech`, `gear`, `satellite`, `combat`, `electricity`, `scrap`. SVG + PNG (100/128/256/512px) in `assets/visual-system/`. |
-| Remaining ~163 icons | **Not started.** Blocked on project owner sign-off on v3 style (this session ends with that question open). |
-| Telegram custom-emoji sticker-set upload script | **Not started.** |
-| Go source: swap literal emoji → `custom_emoji_id` entities | **Not started.** Needs a mapping table (old emoji → new custom_emoji_id) and a helper in `internal/bot` — proposed but not built, see §7. |
+| Art direction / style guide | **Done, v5.** Multi-tone (2, occasionally 3, palette colors per icon) locked in — see §2. |
+| Pilot icon batch (10 of 173), static | **Done, v3.** SVG + PNG (100/128/256/512px) in `assets/visual-system/`. |
+| Pilot icon batch (10 of 173), animated | **Done, v6 — all 10.** WEBM/VP9/alpha, 100×100, ≤3s loop, each with its own bespoke motion (not a uniform pulse) — see §10 v6 entry. `electricity` (v5) + `warning`, `failure`, `shield`, `transport`, `ai_mech`, `gear`, `satellite`, `combat`, `scrap` (v6). Render-unverified in real Telegram — see §8, unchanged. |
+| Remaining ~163 icons | **Not started.** Next candidate once the animated pilot batch is confirmed in real Telegram (§8). |
+| Telegram custom-emoji sticker-set upload script | **Written, updated for animated icons, still unrun** (§8/§10 — this sandbox cannot reach `api.telegram.org`). `telegram_upload.py` now uploads video-format for any icon with a WEBM and falls back to static PNG otherwise, and replaces (not duplicates) anything already in the set. |
+| Go source: swap literal emoji → `custom_emoji_id` entities | **Not started.** Needs `mapping.json` populated by an actual `telegram_upload.py` run (owner-side) and a helper in `internal/bot` — proposed but not built, see §7. |
 | Ecosystem logo | **Not started.** |
 | Social media asset kit | **Not started.** |
-| Sticker pack / Lottie / TGS animation | **Not started.** |
+| Sticker pack / Lottie / TGS animation | **Not started** (WEBM/VP9 chosen over TGS for the animated pilot — see §10). |
 
-**Recommended next task:** get explicit sign-off on the v3 pilot
-(waiting on project owner reply as of this log entry), then either (a)
-extend the same style to the full 173-icon set, or (b) start the
-ecosystem logo — whichever the project owner prioritizes. Don't start
-both in parallel; the style guide in §2 needs to survive contact with
-a second, very different asset type (a logo) before it's safe to call
-"locked."
+**Recommended next task:** get the project owner to run `telegram_upload.py`
+(now animated-aware) from a machine with normal internet access, and
+confirm all 10 icons render and animate correctly at true inline size
+in a real Telegram client — this is the one thing this workstream
+still cannot self-verify (§8). Once confirmed: (a) clean up the known
+duplicate-sticker mess in `vagabond_pilot_by_<bot>` (§10), then (b)
+decide whether to extend the animated multi-tone treatment to the
+remaining 163 icons, or pivot to the ecosystem logo. Don't start both
+in parallel — see the original scope note above.
 
 ---
 
@@ -159,10 +162,25 @@ without a reason):
 
 ```
 assets/visual-system/
-├── svg/                  10 source SVGs, v3 style
+├── svg/                  10 source SVGs, v3 style (static)
 ├── png/                  10 icons × 4 sizes (100/128/256/512px)
-├── pipeline/build_icons.py   regenerates svg/ + png/ from scratch
-├── previews/preview_sheet_v3.png   contact sheet, dark bg, for review
+├── animated/             10 icons, WEBM/VP9/alpha, 100×100, ≤3s loop
+│   └── <name>/<name>.webm   one per pilot icon (v4: electricity only;
+│       v6: all 10). `frames/` subdirs are gitignored build scratch,
+│       regenerate via the pipeline scripts below, not committed.
+├── pipeline/
+│   ├── build_icons.py          regenerates svg/ + png/ from scratch
+│   ├── animate_electricity.py  electricity's animation (v5, red/gold)
+│   ├── animate_pilot_batch.py  the other 9 icons' animations (v6)
+│   ├── telegram_upload.py      real upload/verify script (unrun, §8)
+│   └── verify_animated_pilot.py  narrow "does animation work at all"
+│       smoke test against an isolated test set (§10)
+├── previews/
+│   ├── preview_sheet_v3.png     static contact sheet, dark bg
+│   └── all10_preview.mp4        all 10 animated icons tiled + looping,
+│       dark bg, for reviewing the full set together (v6)
+├── mapping.json          NOT YET CREATED — written by telegram_upload.py
+│   once the project owner actually runs it (§8)
 └── reference/
     ├── telegram-premium-emoji-reference.mp4   the actual clip the
     │   project owner sent to explain the target rendering quality
@@ -310,12 +328,65 @@ ground truth, not this log's interpretation of it. 25MB video +
   `verify_animated_pilot.py` to replace (`replaceStickerInSet`) the
   existing test sticker instead of skipping when the test set already
   exists, so re-running it after a design change actually shows the
-  new version instead of the stale one. **Awaiting project owner
-  confirmation on the red/gold redesign specifically**, then: apply
-  the same multi-tone treatment + animation to the other 9 pilot
-  icons, replace all 10 in the real `vagabond_pilot_by_<bot>` set
-  (cleaning up the duplicate mess from §10 while at it), then decide
-  whether to scale to the remaining 163.
+  new version instead of the stale one. **Confirmed by project owner**
+  on the red/gold redesign specifically.
+- **v6 (this session, iteration 8):** Project owner confirmed
+  `electricity` v5 and said to proceed with full authority: same
+  two-tone-with-a-reason animated treatment on the other 9 pilot
+  icons, WEBM as the standing format going forward (VP9, alpha,
+  100×100, ≤3s loop — Telegram's best custom-emoji format for real
+  motion; confirmed as the right call, see §10), and no in-icon text
+  (a 100×100 canvas renders ~18–20px inline, well below any legible
+  glyph size — the message text already carries the label, e.g. "⚡
+  electricity", and that's what actually works instead of baking words
+  into the icon itself). Built `pipeline/animate_pilot_batch.py`, one
+  bespoke motion per icon rather than a generic pulse applied
+  uniformly:
+  - `warning` — red rim-flash (double pulse/loop) + exclamation glow
+  - `failure` — gold spark-burst radiating from the X on a beat
+  - `shield` — cyan core breathing (radius+opacity) + a gold ring
+    chasing the shield's rim via animated `stroke-dashoffset`
+  - `transport` — wheel spokes actually rotate (`transform=rotate`
+    driven by `t`), headlight opacity pulses, three gold dust
+    particles drift/fade behind the cab on staggered phases
+  - `ai_mech` — a bright scan-line sweeps down the visor rect (clipped
+    to the visor shape), a gold ping ring pulses on the antenna tip
+  - `gear` — the whole icon rotates continuously (`transform=rotate`
+    on the outer group), one gold spark flick timed to the loop seam
+    so it reads as "once per turn" rather than once per tooth
+  - `satellite` — three gold ping rings expand from the dish on
+    staggered phases, both solar panels flicker independently
+  - `combat` — a bright glint slides down each blade's long axis
+    (independent phase per blade), the red core "beats" (two-lobe
+    pulse, not a plain sine, to read as a heartbeat)
+  - `scrap` — gold weld-spark streaks burst off the center bolt at
+    randomized angles (seeded, so it's reproducible) on a beat
+  All colors still route through the shared palette (§2) — every
+  "gold" or "red" accent above is `url(#gold)` / `url(#danger)` from
+  the same `<defs>`, never a one-off hex. File sizes: `ai_mech` 20KB,
+  `combat` 12KB, `failure` 12KB, `gear` 48KB (was 66KB at the default
+  36-frame/crf-30 encode — dropped to 24 frames + crf 40 specifically
+  for this icon, since a continuously-rotating full-frame silhouette
+  is much higher-entropy per frame than a mostly-static icon with a
+  small moving accent; still the heaviest of the ten but well under
+  Telegram's ceiling), `satellite` 32KB, `scrap` 16KB, `shield` 12KB,
+  `transport` 12KB, `warning` 20KB. All 10 (including `electricity`,
+  32KB) total ~216KB — trivial. Built a composited preview
+  (`previews/all10_preview.mp4`, all 10 tiled on a dark background,
+  looped) to sanity-check the full set together before pushing.
+  Updated `telegram_upload.py` to actually use the `ANIMATED_ICONS`
+  detection it already had but never acted on: icons with a WEBM now
+  upload as `format="video"` instead of always falling back to the
+  static PNG, and any icon already present in the live set gets
+  `replaceStickerInSet`'d instead of duplicated — directly fixes the
+  "replace, not just add" gap the previous session flagged. Still
+  unrun (§8's network limitation is unchanged) — this is the next
+  concrete action for the project owner. **No in-Telegram verification
+  yet for the 9 new animated icons** (only `electricity` has been
+  confirmed live, per v4). The known duplicate-sticker mess in the
+  live `vagabond_pilot_by_<bot>` set (§10) is still there — the
+  updated script now detects and reports it but deliberately never
+  deletes anything on its own.
 
 ---
 
@@ -462,19 +533,71 @@ Cosmetic, not correctness-affecting for `mapping.json` (positional
 zip against upload order still lines up), but should be tidied with
 `deleteStickerFromSet` once we're doing the full animated pass anyway.
 
+**v6 — full 10-icon animated batch:** with `electricity` confirmed
+working (v4) and its multi-tone redesign confirmed (v5), the project
+owner gave the go-ahead for the same treatment on the remaining 9
+pilot icons plus a standing rule: WEBM/VP9/alpha is the format for
+*all* future animated custom emoji (not just electricity — this was
+worth confirming explicitly since v4's investigation into WEBM vs TGS
+was scoped to the one pilot icon). One correction made mid-session:
+the project owner asked whether words could be baked into the 100×100
+icon itself. Flagged that this won't read — Telegram custom emoji
+render as small as ~18–20px inline, and even a single bold glyph turns
+to mush below that; the existing convention of pairing the icon with
+its name in the message text (e.g. "⚡ electricity") is what actually
+carries a label. Built for that, not for text-in-icon.
+
+`pipeline/animate_pilot_batch.py` holds all 9 new animations, each
+with a motion chosen for what that icon's subject actually does (full
+per-icon breakdown in §6's v6 entry) — a rotating gear actually
+rotates, a shield's rim gets a chasing charge-indicator light, a truck
+kicks up dust, etc. Deliberately not a single "breathing glow" effect
+reused 9 times; that would have been faster but reads as generic
+rather than considered. Shared machinery (glow halos, spark streaks,
+star-shaped sparkle motes, single/double-pulse timing helpers) is
+factored into reusable functions in that file so a future icon can
+reuse the vocabulary without copy-pasting a whole animation from
+scratch. `gear` needed its own compression pass (24 frames instead of
+36, crf 40 instead of 30) since a full-frame continuous rotation is
+much higher-entropy per frame than a static icon with a small moving
+accent — even trimmed it's the heaviest of the ten at 48KB, still
+trivially under Telegram's limit.
+
+`telegram_upload.py` was updated (not rewritten from scratch) to
+actually branch on `ANIMATED_ICONS` — it already computed that set but
+never used it to pick static vs. video format, so every icon was still
+uploading as a static PNG regardless of whether a WEBM existed. Also
+added `replaceStickerInSet` support: if `mapping.json` says an icon is
+already in the live set, re-running the script now swaps it in place
+instead of calling `addStickerToSet` and creating a second copy — this
+is the concrete fix for exactly the kind of drift that caused the
+duplicate mess described above. The script still cannot run inside
+this sandbox (§8's network restriction is environmental, unchanged
+since v3.2) and still needs the project owner to run it from a machine
+with real internet access before any of the 9 new animations are
+verified in an actual Telegram client. `verify_animated_pilot.py` was
+left as-is — it's still a useful narrow smoke test for "does animation
+work at all" independent of the main set, and doesn't need to know
+about all 10 icons to do that job.
+
 ---
 
 ## 11. How to Resume Work (for the next session, AI or human)
 
-1. Read this whole file first, then look at
-   `assets/visual-system/previews/preview_sheet_v3.png` before opening
-   any SVG.
-2. Check with the project owner whether v3 was approved. If a v4
-   exists, this file's §2 should already reflect it — if it doesn't,
-   the previous session forgot to update this log; fix that first.
-3. If extending the icon set: follow §2's construction rules exactly,
-   reuse the shared `<defs>`, don't invent a new gradient without
-   adding it to §2's table.
+1. Read this whole file first, then watch
+   `assets/visual-system/previews/all10_preview.mp4` (all 10 animated
+   icons together) before opening any SVG or animation script.
+2. Check with the project owner whether `telegram_upload.py` has been
+   run yet and what it showed. As of this entry it hasn't — that's the
+   single open blocker (§8/§10 v6). If it has, this file's §1/§8/§10
+   should already reflect the result; if they don't, the previous
+   session forgot to update this log — fix that first.
+3. If extending the icon set (static or animated): follow §2's
+   construction rules exactly, reuse the shared `<defs>`, don't invent
+   a new gradient without adding it to §2's table. For animation
+   specifically, give each icon its own motion tied to what the
+   subject does (§10 v6) — don't reuse one generic effect across many
+   icons.
 4. If starting the logo or another asset type: don't assume the icon
    style guide transfers 1:1 (see §5's last bullet) — validate it
    against the new context before committing to it.
