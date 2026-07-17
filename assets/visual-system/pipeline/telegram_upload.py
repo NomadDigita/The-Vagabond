@@ -106,7 +106,61 @@ def call(method, **kwargs):
     return data["result"]
 
 
+def utf16_len(s: str) -> int:
+    """Telegram entity offset/length are counted in UTF-16 code units,
+    not Python codepoints. Any character outside the Basic Multilingual
+    Plane (most of our placeholder emoji, e.g. U+1F916) is 2 UTF-16
+    units even though Python's len() counts it as 1 — that mismatch is
+    exactly what caused the original 'ends in the middle of a UTF-16
+    symbol' error. Always compute lengths through this helper when
+    building message entities."""
+    return len(s.encode("utf-16-le")) // 2
+
+
+def send_verification_message(mapping):
+    entities = []
+    text_parts = []
+    cursor = 0
+    for name, cid in mapping.items():
+        # Placeholder text under a custom_emoji entity should be the
+        # underlying standard emoji it's replacing (matches Telegram's
+        # own convention, and keeps this readable as plain text as a
+        # fallback on any client that doesn't render custom emoji).
+        piece = ICONS.get(name, "\u2753")  # fallback: question mark
+        line = f"{piece} {name}\n"
+        entities.append({
+            "type": "custom_emoji",
+            "offset": cursor,
+            "length": utf16_len(piece),
+            "custom_emoji_id": cid,
+        })
+        text_parts.append(line)
+        cursor += utf16_len(line)
+
+    text = "".join(text_parts)
+    call("sendMessage", chat_id=OWNER_ID, text=text, entities=json.dumps(entities))
+    print(f"Sent a live test message to Telegram user {OWNER_ID}.")
+    print("Open that chat now and check every line at real size, in real Telegram.")
+    print("If any icon looks wrong, fix the SVG, re-run build_icons.py, and re-run")
+    print("this script — addStickerToSet will fail for duplicates, so bump the")
+    print("icon's PNG content or delete it from the set first via deleteStickerFromSet.")
+
+
 def main():
+    # If a previous run already got through the upload/create-set phase
+    # (mapping.json exists with all 10 icons), don't redo that — Telegram
+    # will just bounce duplicate-sticker errors. Go straight to sending
+    # the verification message so a fix to *that* step alone is a fast
+    # re-run, not a full re-upload.
+    if MAPPING_PATH.exists():
+        with open(MAPPING_PATH) as f:
+            existing = json.load(f)
+        if set(existing.keys()) == set(ICONS.keys()):
+            print(f"Found complete {MAPPING_PATH.name} from a previous run — "
+                  f"skipping upload/create, sending verification message only.")
+            send_verification_message(existing)
+            return
+
     me = call("getMe")
     bot_username = me["username"]
     set_name = f"vagabond_pilot_by_{bot_username}"
@@ -185,30 +239,7 @@ def main():
         json.dump(mapping, f, indent=2, sort_keys=True)
     print(f"Wrote {MAPPING_PATH} ({len(mapping)} icons).")
 
-    # Build a real test message using these custom emoji so you can SEE them.
-    entities = []
-    text_parts = []
-    cursor = 0
-    for name, cid in mapping.items():
-        piece = "\U0001FAA8"  # placeholder glyph Telegram requires under a custom_emoji entity
-        line = f"{piece} {name}\n"
-        start = cursor
-        entities.append({
-            "type": "custom_emoji",
-            "offset": start,
-            "length": len(piece),
-            "custom_emoji_id": cid,
-        })
-        text_parts.append(line)
-        cursor += len(line)
-
-    text = "".join(text_parts)
-    call("sendMessage", chat_id=OWNER_ID, text=text, entities=json.dumps(entities))
-    print(f"Sent a live test message to Telegram user {OWNER_ID}.")
-    print("Open that chat now and check every line at real size, in real Telegram.")
-    print("If any icon looks wrong, fix the SVG, re-run build_icons.py, and re-run")
-    print("this script — addStickerToSet will fail for duplicates, so bump the")
-    print("icon's PNG content or delete it from the set first via deleteStickerFromSet.")
+    send_verification_message(mapping)
 
 
 if __name__ == "__main__":
