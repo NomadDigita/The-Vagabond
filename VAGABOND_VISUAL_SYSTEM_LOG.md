@@ -273,6 +273,17 @@ ground truth, not this log's interpretation of it. 25MB video +
   Project owner has the credentials to run it themselves; see §8.
   **Still awaiting: (a) in-Telegram render verification, (b) sign-off
   before scaling to the remaining 163 icons.**
+- **v4 (this session, iteration 6):** Project owner sent two videos of
+  the actual live static pilot next to Telegram's animated Premium
+  emoji reference and correctly rejected it — static was never going
+  to match. Root-caused to a file-format gap, not an art-direction
+  gap (see new §10). Built the first animated icon (`electricity`,
+  WEBM/VP9/alpha, ~13KB, 1.25s loop) and a standalone verification
+  script (`verify_animated_pilot.py`) using an isolated test sticker
+  set so it doesn't collide with the main set's existing duplicate
+  mess (also documented, see §10's last paragraph). **Not yet
+  confirmed to actually animate in a real Telegram client — that's
+  the next thing this session or the next one needs to check.**
 
 ---
 
@@ -342,7 +353,86 @@ account.
 
 ---
 
-## 9. How to Resume Work (for the next session, AI or human)
+## 10. Static vs. Animated — the gap that made the pilot look wrong
+
+**What happened:** the pilot batch (§1–§3) was static PNG/SVG only.
+When actually sent as Telegram custom emoji, they sat still next to
+Telegram's own Premium animated emoji (project owner's reference
+video, e.g. the crystal ball), which visibly pulse/rotate/sparkle.
+Project owner correctly called this out — a beautifully shaded static
+icon still reads as cheap next to something that moves.
+
+**Root cause, precisely:** this was never a rendering-quality problem
+(§2's gradients/highlights/glow are fine). It was a *file format*
+problem — Telegram custom emoji come in three formats
+(`core.telegram.org/stickers`, `core.telegram.org/stickers/webm-vp9-encoding`):
+
+| Format | What it is | Spec |
+|---|---|---|
+| `static` | PNG/WebP | exactly 100×100px |
+| `animated` | TGS = gzipped Lottie/Bodymovin JSON | 512×512 canvas, ≤64KB, ≤3s, loops, restricted After-Effects feature subset (no images/masks/expressions/3D layers) |
+| `video` | WEBM, VP9 codec, alpha channel | 100×100px for emoji specifically, no audio, ≤3s, loops, keep well under 64–256KB (sources vary; aim low) |
+
+§1–§3's pipeline only ever produced the first kind. Nothing else was
+wrong.
+
+**Also worth correcting directly:** the reference isn't rendering true
+3D geometry either — nobody ray-traces a scene for a 20px emoji. It's
+a 2D vector illustration that reads as dimensional because of
+*motion* (rotation, drifting sparkle, pulsing light) layered on top of
+the same kind of shading §2 already does statically. "Make it 3D" and
+"make it move" turned out to be the same request.
+
+**Why WEBM was picked over TGS for the fix:** TGS requires a valid
+gzipped Lottie/Bodymovin JSON, hand-authoring which is possible (it's
+just shape layers + keyframed transforms) but has a strict validator
+on Telegram's side and a much larger space to get subtly wrong with no
+local way to preview it before upload. WEBM/VP9 reuses tooling already
+in this pipeline (`cairosvg` for frames, `ffmpeg` — confirmed
+`libvpx-vp9` available in this environment — for encoding), is
+trivially previewable locally before ever touching the Telegram API,
+and meets the same visual goal. TGS may be worth revisiting later
+purely for its much smaller file-size ceiling if that ever matters at
+scale (173 icons × a few KB adds up either way — 173 WEBMs at ~13KB
+each is still only ~2.2MB total, not a real constraint yet).
+
+**Pilot animated icon:** `electricity` — done, unverified in real
+Telegram as of this entry. Built by
+`assets/visual-system/pipeline/animate_electricity.py`, self-contained
+(renders 30 frames at 24fps = 1.25s loop, then shells out to `ffmpeg`
+to encode straight to `assets/visual-system/animated/electricity/electricity.webm`,
+~13KB). Motion: pulsing colored glow halo (matches the icon's existing
+glow-halo motif from §2 rule 4, just breathing now instead of static),
+a bright point of light traveling along the bolt's centerline once per
+loop, and three independently-phased sparkle motes fading in and out —
+deliberately the same twinkle motif as the reference crystal ball, but
+built from scratch as our own shape (4-point star, not a copy of
+Telegram's).
+
+**Verification-in-progress:** `assets/visual-system/pipeline/verify_animated_pilot.py`
+uploads just this one animated icon into an isolated test sticker set
+(`vagabond_animtest_by_<bot>`), deliberately separate from the main
+`vagabond_pilot_by_<bot>` set — that set already has ~20 stickers
+(duplicates from an earlier double-run before the UTF-16 fix, see §5's
+addendum in this section below) and untangling it isn't worth doing
+before answering the more basic question "does an animated custom
+emoji actually animate for us at all." Once that's confirmed, the
+plan is: replace (not duplicate) each of the 10 pilot entries in the
+real set with an animated version, one at a time, via `replaceStickerInSet`.
+
+**Known mess to clean up later, not blocking:** the main
+`vagabond_pilot_by_<bot>` set currently has roughly double the
+expected stickers because an early test run of `telegram_upload.py`
+(before the UTF-16 fix in commit `d786834`) was run twice against an
+already-created set, and `addStickerToSet` didn't reject the repeat
+the way `createNewStickerSet` rejected the set-level duplicate.
+Cosmetic, not correctness-affecting for `mapping.json` (positional
+zip against upload order still lines up), but should be tidied with
+`deleteStickerFromSet` once we're doing the full animated pass anyway.
+
+---
+
+## 11. How to Resume Work (for the next session, AI or human)
 
 1. Read this whole file first, then look at
    `assets/visual-system/previews/preview_sheet_v3.png` before opening

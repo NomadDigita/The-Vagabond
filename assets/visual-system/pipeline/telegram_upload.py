@@ -93,6 +93,17 @@ ICONS = {
     "scrap":       "\U0001F529",  # 🔩
 }
 
+# Icons that have an animated WEBM (VP9, alpha, 100x100, <3s, looped) in
+# assets/visual-system/animated/<name>/<name>.webm. Everything else in
+# ICONS still falls back to the static PNG in png/. See
+# VAGABOND_VISUAL_SYSTEM_LOG.md §10 for why WEBM was chosen over TGS/Lottie,
+# and for the plan to animate the rest.
+ANIMATED_DIR = HERE.parent / "animated"
+ANIMATED_ICONS = {
+    name for name in ICONS
+    if (ANIMATED_DIR / name / f"{name}.webm").exists()
+}
+
 # Must end in _by_<bot_username> per Telegram's rules. Fetched dynamically
 # below via getMe so this script doesn't need the bot username hardcoded.
 
