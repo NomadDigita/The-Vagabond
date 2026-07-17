@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
 
@@ -84,7 +85,7 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	panelText += "👹━━━━━━━━━━━━━━━━━━━━━━👹"
 	selector.Inline(buttonRows...)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.MainNavigation())
 }
 
 // HandleAttackBossCallback commits the caller's ENTIRE current standing

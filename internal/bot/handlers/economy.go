@@ -83,10 +83,8 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 
 	selector.Inline(selector.Row(btnVault, btnMarket))
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
-
-// HandleTradeHubNavCallback routes the Trade Hub's inline navigation
 // buttons directly into the Vault or Market sub-panels, so players don't
 // have to hunt through the bottom reply-keyboard menu to get there.
 func (h *EconomyHandler) HandleTradeHubNavCallback(c telebot.Context) error {
@@ -155,7 +153,7 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 		selector.Row(btnBuyHydrogen),
 	)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
 
 func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
@@ -193,7 +191,7 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 		dollars, scrap, rations, electricity, metal, crystal, hydrogen,
 	)
 
-	return c.Send(inventoryText)
+	return c.Send(inventoryText, keyboards.EconomyNavigation())
 }
 
 func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {

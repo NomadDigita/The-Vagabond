@@ -66,7 +66,7 @@ brief describes.
 | 7 | Battle Logistics | **Done** — `attacker_ammo` was a dead stub (never decremented); now depletes for real, fires threshold notifications (25%/empty), and a still-marching force that runs fully dry auto-retreats. | `3e2195f` |
 | 4 | Hero Commander — manual garrison | **Partial** — "Manual Defense Garrison" panel lets a player lock/withdraw Soldiers/Mechs from the draftable pool (enforced, not just displayed). Still open: explicit "which hero leads this raid" picker UI (the DB link `raid_forces.hero_id` exists — confirm it's actually exposed before assuming it needs building), per-hero XP-from-battles-led, ability unlocks beyond the existing superpower. | `3e2195f` |
 | 2 | Bulk unit selection | **Done** — Step: x1/x10/x100/MAX toggle on the draft board (bulk moves now clamp instead of rejecting partial steps); `/add <n> <unit>`, `/remove <n> <unit>` text commands; `/deconstruct <n> <unit>` bulk text shortcut alongside the existing per-tap panel. | `f412147`→`60665b1` (rebased) |
-| 3 | Keyboard/UI audit | **Not started** | — |
+| 3 | Keyboard/UI audit | **In progress** — 9 confirmed instances fixed of the exact bug named in the brief ("System Economy does not replace the keyboard as expected"): Trade Hub, Financial Vault, Market Exchange, Warehouse Reserves, World Bosses, The Rebellion, Admin Terminal, Research Lab, and Silo panels all previously sent their inline panel with no persistent bottom keyboard at all (or omitted it entirely), so the bottom bar just stayed whatever it was before. Full menu-by-menu audit not yet exhaustive — see notes below for what's confirmed clean vs. still unchecked. | `<pending>` |
 | 5 | Automation Agent limit bugs | **Done** — audited `internal/engine/agent`. `builder` mode's auto-upgrade selection ignored the "module level cannot exceed Outpost Core level" cap enforced on the manual `/camp` path; `military` mode's auto-recruit ignored the Hangar capacity cap enforced on the manual Recruit Soldier path. Both now gated to match. A third suspected gap (collector_omega/precious having no storage cap) was investigated and ruled out at the time — see item 5b, which then made the same cap universal anyway per Asiwaju's follow-up direction. | `90caeef`, `53d1916` |
 | 5b | Storage cap — full audit, every resource-gain path | **Done** — Asiwaju asked for storage caps everywhere, not just the two Automation Agent modes. New `internal/game/storagecap` package: single source of truth for the cap formula (Tent*500 + Warehouse*750 + Extension*1000) and the "Surplus Preservation" clamp rule (pre-existing surplus above cap is preserved, but no further gain lands on top of it). Applied to every resource-gain site game-wide: passive tick's Metal Mine/Crystal Mine/Ether generation (previously totally uncapped — and Metal/Crystal/Ether weren't even being read into the passive-tick struct before this, just blind-incremented); `collector_omega`/`collector_precious` automation modes; Bank borrow + Market buy/sell; Ether Shop conversions; P2P Exchange (both seller's Dollars and buyer's Metal/Crystal, independently); Engineering Bay's post-craft refund (also fixed a staleness bug — it was reading pre-cost-deduction values); onboarding referral bonuses (both sides); Rebellion donation reward; Gather Sunlight job; and six separate `tick/engine.go` sites (Daily Tax Law payout, World Boss loot, Clan War spoils, Arena team-victory loot, Arena queue-timeout refunds, returning raid loot). Deliberately left uncapped: `main.go`'s one-time schema-consolidation migration (not a live gameplay path), and `/admin` resource-injection commands (intentional override tool, same as other admin bypasses in the codebase). | `e3f6e15` (rebased to `ef47fb6`) |
 | 6 | Doomsday unit balance | **Done** — hard cap of exactly 1 replaced with a level-scaled cap; attack rating and toughness bumped; a real missing-affordability-check bug (neuro_cores wasn't validated before deduction) fixed along the way. | `3fd86a5` |
@@ -156,13 +156,26 @@ brief describes.
 
 ## 3. Known open questions / things worth confirming before continuing
 
-- **Concurrent workstream risk:** the AI-roadmap session pushed
-  `Deep schema-drift audit: rebase onto real main + fix Fleet Commander
-  gaps` (`82e34e6`) while this workstream was mid-flight. It rebased
-  clean with no file overlap this time, but the two sessions are not
-  coordinating in real time — if you're picking this up, `git fetch`
-  and check `git log origin/main` before assuming this file's "Status"
-  table is still accurate.
+- **Concurrent workstream risk — this actually happened, not just a
+  theoretical risk:** a later session (same log conventions, so almost
+  certainly another Claude instance working the same brief in parallel
+  via a separate Claude Code session) independently fixed the exact same
+  item-5 Automation Agent bugs (`90caeef`/`53d1916`) *and* went further
+  with a full storage-cap audit (item 5b, `e3f6e15`) before this
+  session's own item-5 fix could be pushed. The rebase conflicted
+  directly on `internal/engine/agent/agent.go` and this file. Resolution:
+  discarded this session's redundant commit entirely and re-synced to
+  the real `origin/main` rather than trying to merge two independent
+  rewrites of the same logic — their version was more complete (it
+  covered a gap, `collector_omega`/`_precious`, that this session had
+  explicitly investigated and decided to leave alone) and was already
+  pushed. **Lesson for next time:** `git fetch` + read this file's
+  actual `origin/main` content (not just a locally-cached copy) *before
+  starting* any item, not just before pushing — the two sessions aren't
+  coordinating in real time, so the only defense is checking freshly
+  and often. If you're a session picking this up, assume the "Status"
+  table and "Next in line" list may already be stale by the time you
+  read them.
 - **No full binary build was possible in the sandbox this log was
   written from** — its network egress allowlist blocks `gopkg.in`
   (telebot.v3's module host), so every change above was verified with
@@ -312,11 +325,58 @@ brief describes.
 
 ---
 
+### Keyboard/UI audit (item 3, in progress)
+**Confirmed root cause, matches the brief's own example exactly:**
+sending an inline `*telebot.ReplyMarkup` (the per-message button grid)
+does **not** touch Telegram's separate persistent bottom reply-keyboard —
+those are two different `ReplyMarkup` roles that just happen to share a
+Go type. A handler that does `c.Send(panelText, selector)` with only an
+inline selector leaves the bottom bar exactly as it was before the tap.
+telebot does support passing more than one `SendOption`, and the
+existing (working) pattern for "inline buttons + change the bottom bar"
+is `c.Send(text, inlineSelector, keyboards.SomeNavigation())` — already
+used successfully elsewhere (`onboarding.go`'s welcome screen). Applied
+that same pattern everywhere below.
+
+Fixed this pass:
+- `economy.go`: `HandleEconPanel` (Trade Hub — **the exact case named
+  in the brief**), `HandleFinancialVault`, `HandleWarehouseReserves` →
+  all now send `keyboards.EconomyNavigation()`.
+- `exchange.go`: `HandleExchangePanel` (Market Exchange) → same.
+- `boss.go`: `HandleBossPanel` (World Bosses) → `keyboards.MainNavigation()`
+  (no dedicated sub-nav exists for this section; it's a single-panel
+  destination straight off the main menu, same as Global Ranking).
+- `rebellion.go`: `HandleRebellionPanel` (The Rebellion) → same,
+  `MainNavigation()`.
+- `admin.go`: `HandleAdminPanel` (Admin Terminal) → `keyboards.AdminNavigation()`.
+  This was the most surprising one: `AdminNavigation()` already existed
+  and is used *elsewhere* in the same file (after `/admin_tick`,
+  `/admin_metrics`), but was never applied at the Admin Terminal's own
+  primary entry point — so opening the section fresh from the bottom
+  button showed the *previous* section's keyboard until the first
+  sub-action.
+- `research.go`: `HandleResearchPanel` (Research Lab) → `keyboards.CampNavigation()`.
+- `silo.go`: the Silo panel → same, `CampNavigation()` (both are reached
+  from within the Outpost Camp submenu, consistent with how `camp.go`
+  itself uses `CampNavigation()`).
+
+**Not yet audited** (full brief says "every menu" — this pass covered
+the 9 main bottom-menu destinations plus their immediate children where
+found broken, not every nested callback in every handler file):
+`clan.go`, `federation.go`, `arena.go`, `hero.go`'s deeper sub-panels,
+`world.go`'s remaining panels, `jobs.go`, and anything reached only via
+inline callback rather than a bottom-menu button. Recommend the next
+session grep `c.Send(panelText, selector)` (or similar single-inline-arg
+patterns) per file and check each against what section it visually
+belongs to, the same way this pass did — the list in this note is a
+starting point, not exhaustive.
+
+---
+
 ## 4. Next in line (recommended order)
 
-1. Item 3 — Keyboard audit (needs a menu-by-menu pass across
-   `internal/bot/keyboards` and every handler that sends a
-   `ReplyMarkup`, checking for stale/missing keyboard replacement).
+1. Item 3 (continued) — finish the keyboard audit across the
+   not-yet-checked files listed above.
 2. Item 12 — expand world events beyond weather (Acid Rain/Radiation
    Storm already exist; add EMP/Supply Crisis/Disease/Sandstorm,
    scope to continent rather than global).

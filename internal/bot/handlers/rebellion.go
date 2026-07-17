@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -101,7 +102,7 @@ func (h *RebellionHandler) HandleRebellionPanel(c telebot.Context) error {
 	btnDonate := selector.Data(fmt.Sprintf("💰 Donate %.0f Scrap", donationAmount), "rebellion_donate")
 	selector.Inline(selector.Row(btnDonate))
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.MainNavigation())
 }
 
 func (h *RebellionHandler) HandleRebellionDonateCallback(c telebot.Context) error {

@@ -89,7 +89,7 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, selector, keyboards.EconomyNavigation())
 }
 
 func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {

@@ -69,7 +69,7 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		selector.Row(btnGift, btnMetrics),
 	)
 
-	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the secure inline controls or bottom submenu deck.", selector)
+	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the secure inline controls or bottom submenu deck.", selector, keyboards.AdminNavigation())
 }
 
 func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
