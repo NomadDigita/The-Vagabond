@@ -571,6 +571,79 @@ ground truth, not this log's interpretation of it. 25MB video +
   rewording the comment; worth remembering that any inline SVG
   comments in these scripts can't contain em-dash-style `--` at all.
 
+  **Checkpoint 5: `oracle` — an 11th icon, testing how far the glass
+  technique can go.** Project owner pushed back on checkpoint 4:
+  the glass prototype was real progress but nowhere near the
+  reference's crystal-ball/Durov-figure fidelity, and asked for an
+  original "Vagabond" crystal/orb icon built to the highest version of
+  this technique, explicitly calling out that the collectible-figure
+  reference reads as "future tech," not 2025-era flat premium emoji.
+
+  **Restated plainly, because it matters more here than anywhere else
+  in this log:** the reference material is professional 3D-modeled or
+  hand-animated Lottie/After-Effects work. This pipeline is layered SVG
+  gradients rendered through `cairosvg`. It cannot literally equal that
+  fidelity, and the honest move is to say so directly rather than nod
+  and quietly under-deliver again — that exact pattern (claiming more
+  than was true) is what v7 already had to walk back once. What this
+  checkpoint IS: every SVG-technique lever pushed further than any of
+  the first 10 icons went, judged as "how far can this specific medium
+  go," not as parity with a professional 3D render.
+
+  Built `pipeline/animate_oracle_prototype.py` — an **original** design
+  (not a copy of Telegram's crystal-ball-with-painted-eye; copying it
+  would violate this project's own "original art only" rule from §0),
+  named `oracle`: a glass sphere on a gold ring stand (the
+  object-on-a-pedestal *composition* is a fair technique reference; the
+  specific character/glyph design is not) housing a floating mechanical
+  iris/aperture as its hero motif — ties thematically to `ai_mech`'s
+  visor without reusing it, and reads as a sci-fi scanner core rather
+  than a mystical eye. New techniques over checkpoint 4:
+  - **Chromatic dispersion rim** — two colored ring strokes (cyan,
+    magenta) offset in opposite phase around a beat, visibly separating
+    and re-converging, simulating the color-fringing real refractive
+    materials show.
+  - **Depth-parallax particles** — 6 sparkle motes each carry their own
+    orbital radius/speed/blur-radius tied to a `depth` value, so nearer
+    ones are sharper/bigger/faster and farther ones are softer/smaller/
+    slower — a real depth cue, not just particles scattered at random.
+  - **Dual independent refraction bands** at different angles/speeds
+    (checkpoint 4 had one).
+  - **A genuinely distinct hero motif** rather than the shared
+    gradient-body-plus-recolored-silhouette approach every icon before
+    this used — directly answering the "everything should read
+    different" note.
+  Introduces one new shared-palette color, `violet` (deep
+  indigo-to-violet glass gradient) — if kept, this needs promoting into
+  `build_icons.py`'s shared `<defs>` so future icons reuse it instead of
+  redefining it locally, per the skill's "never invent inline" rule.
+  Renders to a separate `animated/oracle_prototype/` path (11th icon,
+  for testing — not yet added to `telegram_upload.py`'s `ICONS` dict).
+
+  **Real bug hit and fixed, worth remembering:** the iris motif
+  silently failed to render at all on the first attempt — a `<g>` had
+  both `clip-path="url(#orbClip)"` and `transform="translate(...)
+  rotate(...)"`. When both are present on the same element, the
+  transform establishes a new coordinate system that the `userSpaceOnUse`
+  clip path's own coordinates get evaluated in *after* — so the clip
+  circle's `(50,44)` center, which was meant to line up with the
+  content, ended up transformed miles away from it, clipping the whole
+  motif to nothing. No error was thrown; it just silently vanished.
+  Fixed by removing the (unnecessary — the motif stays within the
+  orb's radius naturally) clip-path from that group. Worth checking for
+  this specific combination (`clip-path` + `transform` on the same
+  element) any time something silently fails to render rather than
+  erroring.
+
+  Checked at true 100×100 render (not just the zoomed preview) — the
+  orb-on-a-stand silhouette and the glass depth cues hold up clearly;
+  the iris's fine detail will simplify to a soft glowing core at actual
+  Telegram inline size (~18-20px) but the icon still reads as distinct
+  from all 10 existing ones at that size. **Awaiting project owner
+  reaction to this specific checkpoint before doing anything with the
+  other 9** — see `previews/oracle_and_glass_v2_preview.mp4` for both
+  prototypes side by side.
+
 ---
 
 ## 7. Future Ideas (unscoped, not committed to any session)

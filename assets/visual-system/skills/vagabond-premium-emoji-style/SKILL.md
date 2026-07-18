@@ -109,14 +109,15 @@ icon. As of v8:
 | satellite | gunmetal | cyan + gold |
 | combat | steel + gunmetal | danger + gold |
 | scrap | steel | rust + gold |
+| oracle (11th, prototype) | violet (new) | cyan + magenta (chromatic) |
 
 Notice `cyan + gold` repeats three times (shield, transport/ai_mech,
 satellite) and `gold` alone is the accent on nearly everything. That's
 the exact problem this rule exists to catch — **this table itself is a
-todo, not a certificate of compliance.** The next session extending this
-set should diversify the accent palette (e.g. introduce a distinct
-violet/magenta or teal-only accent family) rather than defaulting to gold
-again because it's the one that's worked so far.
+todo, not a certificate of compliance.** `oracle`'s violet+chromatic
+pairing is a genuine step toward fixing this, but the other 9 still
+need diversifying before the rule is actually satisfied across the
+set.
 
 ## The v8 direction: push toward "liquid glass," not flat gradient
 
@@ -151,6 +152,46 @@ None of this is a rewrite of the shared `<defs>` — it's 2–3 additional
 highlight/rim-light shapes layered on top of the existing gradient body,
 prototyped on ONE icon first (same discipline as v5's electricity
 redesign) before touching all 10.
+
+## v9: pushing the glass technique further (still honest about the ceiling)
+
+The project owner asked for the technique pushed closer to the
+reference's crystal-ball/collectible-figure fidelity. Restating the v8
+honesty note because it matters even more here: that reference is
+professional 3D-modeled or hand-animated Lottie/After-Effects work.
+Layered SVG gradients through `cairosvg` cannot literally equal it —
+say so plainly rather than implying otherwise. What DID move the
+needle, prototyped on an original 11th icon (`oracle`, a glass-orb
+scanner — see the log's v8 checkpoint 5 for the full writeup):
+
+- **Chromatic dispersion rim** — two colored ring/edge strokes (e.g.
+  cyan + magenta) offset in opposite phase around a beat, so they
+  visibly separate and re-converge. Simulates the color-fringing real
+  refractive materials show at their edges; a single-color rim stroke
+  never gets this even at high opacity.
+- **Depth-parallax particles** — give each sparkle/mote its own `depth`
+  value (0=far, 1=near) and derive its orbital speed, size, and blur
+  radius from that value. Nearer particles: bigger, sharper, faster.
+  Farther ones: smaller, softer, slower. Randomly-placed same-size
+  sparkles read as flat confetti; depth-linked ones read as floating
+  inside a real volume.
+- **Multiple independent refraction bands** at different angles and
+  speeds (not just one) sweeping across the same clipped silhouette.
+- **A genuinely distinct hero motif per icon**, not a shared
+  gradient-body-plus-recolored-silhouette. Directly answers "everything
+  should read different" — the point isn't just varying the color
+  table (that's the v8 rule, still separate and still required), it's
+  making sure each icon's *central shape/concept* is unique too, not
+  just its palette.
+
+**A real bug worth remembering if something silently fails to render
+with no error:** `clip-path` and `transform` on the *same* SVG element
+interact badly — the transform establishes a new coordinate system that
+the clip path's own coordinates then get evaluated inside, so a clip
+circle meant to line up with the content can end up transformed far
+away from it, silently clipping everything inside that group to
+nothing. If a layer vanishes with no error message, check for this
+combination before anything else.
 
 ## Format spec (unchanged, confirm against the log before assuming)
 
