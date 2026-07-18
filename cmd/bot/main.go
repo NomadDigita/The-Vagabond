@@ -26,6 +26,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
+	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -881,6 +882,10 @@ func main() {
 	aiBattleAnalyst := battleanalyst.New(db, aiService)
 	battleAnalystHandler := handlers.NewBattleAnalystHandler(aiBattleAnalyst)
 
+	// --- AI Guild Assistant wiring (Phase G, independent AI roadmap branch) ---
+	aiGuildAssistant := guildassistant.New(db, aiService)
+	guildAssistantHandler := handlers.NewGuildAssistantHandler(aiGuildAssistant)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -970,6 +975,8 @@ func main() {
 	bot.Handle("\fresearch_goal", researchPlannerHandler.HandleResearchPlannerGoalCallback)
 	bot.Handle("/battle_analyst", battleAnalystHandler.HandleBattleAnalyst)
 	bot.Handle("\fbattle_analyst_refresh", battleAnalystHandler.HandleBattleAnalystRefreshCallback)
+	bot.Handle("/guild_assistant", guildAssistantHandler.HandleGuildAssistant)
+	bot.Handle("\fguild_assistant_refresh", guildAssistantHandler.HandleGuildAssistantRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

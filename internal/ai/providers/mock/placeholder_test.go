@@ -9,6 +9,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
+	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 )
 
@@ -69,5 +70,17 @@ func TestMockPlaceholder_ParsesForBattleAnalyst(t *testing.T) {
 	rec := battleanalyst.ParseRecommendation(resp.Text)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock battle analyst placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
+	}
+}
+
+func TestMockPlaceholder_ParsesForGuildAssistant(t *testing.T) {
+	p := New()
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{Feature: "ai_guild_assistant", JSONMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := guildassistant.ParseRecommendation(resp.Text)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected mock guild assistant placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
 }

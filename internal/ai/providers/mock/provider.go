@@ -118,6 +118,16 @@ func placeholderJSON(feature string) string {
 			"recommended_focus": "Not evaluated — placeholder mode.",
 			"notes": "Not evaluated — placeholder mode."
 		}`
+	case "ai_guild_assistant":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real recruitment/war analysis for this clan.",
+			"recruitment_calls": [
+				{"username": "configure_provider", "recommendation": "undecided", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"war_insight": "Not evaluated — placeholder mode.",
+			"recommended_focus": "Not evaluated — placeholder mode.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}

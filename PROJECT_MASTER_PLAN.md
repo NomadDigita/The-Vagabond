@@ -774,7 +774,7 @@ Phase B+ package).
 | D | AI Economy Advisor | Done | A |
 | E | AI Research Planner | Done | A |
 | F | AI Battle Analyst | Done (raids + arena only; World Boss history excluded, see ADR-017) | A |
-| G | AI Guild Assistant | Not started | A |
+| G | AI Guild Assistant | Done (Leader-only; see §3 "What Phase G built") | A |
 | H | AI Dynamic Galaxy | Not started | A |
 | I | AI NPC Intelligence | Not started | A, ideally after G |
 | J | AI Developer Console | Not started | A |
@@ -998,17 +998,82 @@ reverted-before-commit `go.mod` replace workaround as every prior
 session since Phase E (see that phase's note for why it's needed and
 why it's safe to revert).
 
+### What Phase G built
+
+```
+internal/game/guildassistant/
+├── prompt.go          Pure logic: Applicant/WarRecord/Snapshot types,
+│                       RecruitmentCall/Recommendation types,
+│                       SystemPrompt, deterministic BuildUserPrompt,
+│                       ParseRecommendation (fence tolerance + fallback,
+│                       Truncated flag baked in per ADR-016),
+│                       FormatForTelegram.
+├── prompt_test.go      13 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content,
+│                       empty-state paths, JSON parse/fallback/
+│                       truncation, Telegram formatting).
+└── assistant.go        Assistant: BuildSnapshot (reads the caller's
+                         clan roster/combined level/military power via
+                         the same soldiers*10+mechs*150 formula
+                         HandleAllianceStatsCallback already uses, plus
+                         pending clan_applications enriched with
+                         applicant level, plus durable clan_wars
+                         history), Recommend (calls
+                         ai.Service.Complete, persists to ai_memory
+                         scope "guild_assistant").
+```
+
+New command: `/guild_assistant` — **Leader-only**, unlike every prior
+Phase B-F command. Every other clan-leadership decision in
+`internal/bot/handlers/clan.go` (accepting/rejecting applicants,
+declaring war, kicking/promoting members) is already gated to
+`role = "Leader"`; recruitment and war strategy fall in that same
+bucket, so `Assistant.BuildSnapshot` returns a distinct `ErrNotLeader`
+(as well as `ErrNoClan` for players not in a clan at all) rather than
+silently serving a regular member clan-wide leadership information
+that isn't theirs to act on. Inline keyboard: a single refresh button
+(no per-goal buttons, matching Battle Analyst's reasoning — this looks
+at whatever the clan's current state is, not one steerable goal). No
+new DB table — reads existing `clans`, `user_clans`, `clan_applications`,
+`clan_wars`, `encampments`, `workshop_inventory`. Never accepts/rejects
+an applicant, declares a war, or changes membership itself.
+
+**Scope decided by reading the real "clans" system before writing any
+code**, the same discipline Phase F used: `migrations/017_spacehunt_
+phase2_guild_extras.sql` confirmed the guild feature (tables `clans`,
+`user_clans`, `clan_applications`, `clan_wars`) already exists on
+`main` from the parallel SpaceHunt branch, with a hard 15-member cap
+and a "Leader"/"Soldier" role model (no separate Officer tier).
+Grepping every `DELETE FROM` touching those tables confirmed
+`clan_wars` rows are never deleted (durable win/loss history, unlike
+Phase F's World Boss tables), while `clan_applications` rows are
+deleted on accept/reject (current pending state only, which is exactly
+what's needed here — no history claim made about past decisions).
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_guild_assistant`, verified by a new
+`TestMockPlaceholder_ParsesForGuildAssistant` case. Combined with
+`guildassistant`'s own 13 tests, this phase adds 14 new tests (114 →
+128 total, all passing).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo. Also rebased both the
+still-open `critical-fix-truncation-flag` and `phase-f-battle-analyst`
+branches onto `main` first this session, since `main` had moved
+forward (SpaceHunt visual-system commits) since they were last pushed
+— confirmed both rebase cleanly and still build/test clean before
+starting Phase G on top of them.
+
 ### Recommended next task
 
-**Phase G — AI Guild Assistant**, per the priority order in §3's
-table. Per §8 (Integration Notes for the Parallel SpaceHunt Branch),
-this needs guild data from SpaceHunt's Phase 2 — read whatever guild
-tables/handlers exist on `main` first (the same way Phase F started by
-auditing the real `raids`/`arena_battles`/`world_boss_*` schema before
-writing a line of code) and coordinate with that branch's owner before
-building, rather than assuming a shape.
+**Phase H — AI Dynamic Galaxy**, per the priority order in §3's table.
+This one is explicitly flagged in that table as "more cross-cutting"
+than G, so expect it to touch more of the galaxy/world engine than a
+single per-player or per-clan advisor — read `internal/engine/world`
+and whatever galaxy/zone tables exist before designing its `Snapshot`,
+the same schema-first discipline used for Phases F and G.
 
-After G: H onward, which are more cross-cutting.
+After H: I (NPC Intelligence, ideally after G — now done) and J.
 
 ---
 
@@ -1253,6 +1318,29 @@ After G: H onward, which are more cross-cutting.
   confirmed clean for the whole repo this session (same sandbox-only
   go.mod workaround as every session since Phase E). Recommended next
   task updated to Phase G.
+- **Following session:** Phase G (AI Guild Assistant) implemented:
+  pure prompt/parsing logic (`prompt.go`, 13 passing unit tests,
+  `Truncated` handling baked in per ADR-016), DB-backed orchestration
+  (`assistant.go`) reading the caller's clan roster/military
+  power/pending applicants (enriched with applicant level) plus
+  durable `clan_wars` history, 1 new bot command (`/guild_assistant`,
+  Leader-only — unlike every prior Phase B-F command, since
+  recruitment/war strategy are already Leader-gated decisions
+  elsewhere in `clan.go`). Confirmed the guild system
+  (`clans`/`user_clans`/`clan_applications`/`clan_wars`) already exists
+  on `main` from the parallel SpaceHunt branch by reading
+  `migrations/017_spacehunt_phase2_guild_extras.sql` and `clan.go`
+  before writing any Phase G code, then confirmed via `DELETE FROM`
+  grepping that `clan_wars` (unlike Phase F's World Boss tables) is
+  genuinely durable history. Also rebased the still-open
+  `critical-fix-truncation-flag` and `phase-f-battle-analyst` branches
+  onto `main` (which had moved forward with SpaceHunt visual-system
+  commits) before starting Phase G on top of them — both rebased
+  cleanly. Mock provider given a matching placeholder JSON case,
+  verified by 1 new test. 14 new tests total (114 → 128, all passing).
+  Full `go build ./... && go vet ./... && go test ./...` confirmed
+  clean for the whole repo this session. Recommended next task updated
+  to Phase H.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
