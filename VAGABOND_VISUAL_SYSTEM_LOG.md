@@ -171,10 +171,16 @@ assets/visual-system/
 │   └── <name>/<name>.webm   one per pilot icon (v4: electricity only;
 │       v6: all 10). `frames/` subdirs are gitignored build scratch,
 │       regenerate via the pipeline scripts below, not committed.
+├── animated/electricity_glass_prototype/   v8 "liquid glass" material
+│   prototype, NOT the live confirmed electricity.webm — separate path
+│   on purpose, awaiting owner sign-off (§6 v8 checkpoint 4)
 ├── pipeline/
 │   ├── build_icons.py          regenerates svg/ + png/ from scratch
 │   ├── animate_electricity.py  electricity's animation (v5, red/gold)
 │   ├── animate_pilot_batch.py  the other 9 icons' animations (v6)
+│   ├── animate_electricity_glass_prototype.py  v8 liquid-glass
+│   │   technique prototype, renders to a separate path, does not
+│   │   touch the live electricity.webm
 │   ├── telegram_upload.py      real upload/verify script (confirmed
 │   │   working, v8 — all 10 icons live)
 │   ├── delete_stale_stickers.py  dry-run-by-default cleanup for the
@@ -187,8 +193,11 @@ assets/visual-system/
 │       rules; defers to THIS log for status/history, doesn't duplicate it
 ├── previews/
 │   ├── preview_sheet_v3.png     static contact sheet, dark bg
-│   └── all10_preview.mp4        all 10 animated icons tiled + looping,
-│       dark bg, for reviewing the full set together (v6)
+│   ├── all10_preview.mp4        all 10 animated icons tiled + looping,
+│   │   dark bg, for reviewing the full set together (v6)
+│   └── electricity_glass_prototype_vs_original.mp4   literal
+│       side-by-side of the v8 liquid-glass prototype vs. the live
+│       confirmed version, for owner sign-off before scaling to all 10
 ├── mapping.json          NOT YET CREATED — written by telegram_upload.py
 │   once the project owner actually runs it (§8)
 └── reference/
@@ -533,6 +542,34 @@ ground truth, not this log's interpretation of it. 25MB video +
   the oversized-video push failure, the pushed-vs-verified conflation,
   and the dry-run-by-default pattern — so each of those gets learned
   once, not re-learned by a future session hitting the same wall.
+
+  **Checkpoint 4: `pipeline/animate_electricity_glass_prototype.py`**
+  — a working prototype of the SKILL.md's "liquid glass" technique
+  (three additions: a second sharp specular highlight near the true
+  light-source corner, a thin bright rim-light stroke just inside each
+  bolt's outer edge, and a diagonal refraction band clipped to the
+  main bolt that sweeps across it once per loop), applied to
+  `electricity` only — same discipline as v5's color redesign: prove
+  it on the one already-confirmed icon before touching the other 9.
+  Renders to `animated/electricity_glass_prototype/` — a separate
+  path, so the live, confirmed, working `electricity.webm` is
+  completely untouched. Built
+  `previews/electricity_glass_prototype_vs_original.mp4`, a literal
+  side-by-side of the two so the difference can be judged directly
+  rather than described. **Awaiting project owner sign-off before this
+  becomes the new standard and gets applied to the other 9** — do not
+  skip that step even if the prototype looks obviously better in
+  isolation; v3→v4's static-vs-animated gap and v5's color redesign
+  were both real, owner-confirmed steps, not assumed ones, and this
+  should follow the same pattern.
+
+  One bug worth logging so it isn't hit again: an XML comment inside
+  the generated SVG contained a literal `--` in the middle of the
+  comment text ("corner -- real glass..."), which is invalid anywhere
+  inside an XML comment (not just at the start/end) and broke
+  `cairosvg`'s parser with an opaque "not well-formed" error. Fixed by
+  rewording the comment; worth remembering that any inline SVG
+  comments in these scripts can't contain em-dash-style `--` at all.
 
 ---
 
