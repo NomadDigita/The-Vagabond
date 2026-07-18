@@ -181,6 +181,10 @@ assets/visual-system/
 │   │   duplicate-sticker mess (v8, §10); needs --confirm to delete
 │   ├── verify_animated_pilot.py  narrow "does animation work at all"
 │       smoke test against an isolated test set (§10)
+├── skills/
+│   └── vagabond-premium-emoji-style/SKILL.md   portable style/process
+│       skill for future sessions (v8) — technique + hard-won process
+│       rules; defers to THIS log for status/history, doesn't duplicate it
 ├── previews/
 │   ├── preview_sheet_v3.png     static contact sheet, dark bg
 │   └── all10_preview.mp4        all 10 animated icons tiled + looping,
@@ -506,6 +510,29 @@ ground truth, not this log's interpretation of it. 25MB video +
   Refuses to delete anything if `mapping.json` is missing or has fewer
   than 10 entries, specifically so it can't be run against stale
   ground truth and accidentally delete a real icon.
+
+  **Checkpoint 3: `skills/vagabond-premium-emoji-style/SKILL.md`.**
+  Project owner asked for a proper, portable style/process document —
+  written as an actual Claude Skill (YAML frontmatter + Markdown body,
+  matching the format `skill-creator` documents) so it can be copied
+  into `/mnt/skills/user/` and auto-load in future sessions, or just
+  read directly from the repo. Deliberately scoped as *technique and
+  process*, not history — it defers to this log for "what's actually
+  been built and confirmed," to avoid the two documents drifting out
+  of sync with each other. Contents: an index of all 3 reference
+  videos with an honest read of what each does and doesn't license;
+  the current shared-`<defs>` construction system; a color-pairing
+  table so no two icons repeat the same primary+accent combination
+  (and an explicit note that the current table already has 3 `cyan +
+  gold` repeats — a todo, not a pass); a concrete, still-pure-SVG
+  "liquid glass" technique upgrade (layered specular highlights, a
+  thin inner rim-light stroke, refraction-style accent bands) as the
+  actionable response to the v8 reference video, instead of promising
+  literal 3D-collectible fidelity; and a "process rules learned from
+  an actual mistake" section listing the gitignore concatenation bug,
+  the oversized-video push failure, the pushed-vs-verified conflation,
+  and the dry-run-by-default pattern — so each of those gets learned
+  once, not re-learned by a future session hitting the same wall.
 
 ---
 
