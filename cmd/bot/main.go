@@ -28,6 +28,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
+	"github.com/NomadDigita/The-Vagabond/internal/game/npcintel"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -891,6 +892,10 @@ func main() {
 	aiGalaxyAdvisor := galaxyadvisor.New(db, aiService)
 	galaxyAdvisorHandler := handlers.NewGalaxyAdvisorHandler(aiGalaxyAdvisor)
 
+	// --- AI NPC Intelligence wiring (Phase I, independent AI roadmap branch) ---
+	aiNPCIntel := npcintel.New(db, aiService)
+	npcIntelHandler := handlers.NewNPCIntelHandler(aiNPCIntel)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -984,6 +989,8 @@ func main() {
 	bot.Handle("\fguild_assistant_refresh", guildAssistantHandler.HandleGuildAssistantRefreshCallback)
 	bot.Handle("/galaxy_advisor", galaxyAdvisorHandler.HandleGalaxyAdvisor)
 	bot.Handle("\fgalaxy_advisor_refresh", galaxyAdvisorHandler.HandleGalaxyAdvisorRefreshCallback)
+	bot.Handle("/npc_intel", npcIntelHandler.HandleNPCIntel)
+	bot.Handle("\fnpc_intel_refresh", npcIntelHandler.HandleNPCIntelRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

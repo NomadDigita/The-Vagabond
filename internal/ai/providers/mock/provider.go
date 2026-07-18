@@ -138,6 +138,16 @@ func placeholderJSON(feature string) string {
 			],
 			"notes": "Not evaluated — placeholder mode."
 		}`
+	case "ai_npc_intelligence":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real tactical read on this Rogue Nest.",
+			"nest_reading": "Not evaluated — placeholder mode.",
+			"fleet_composition_advice": [
+				{"unit": "configure_provider", "verdict": "fine", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"key_risk": "Not evaluated — placeholder mode.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}

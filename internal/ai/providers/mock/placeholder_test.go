@@ -11,6 +11,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
+	"github.com/NomadDigita/The-Vagabond/internal/game/npcintel"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 )
 
@@ -95,5 +96,17 @@ func TestMockPlaceholder_ParsesForGalaxyAdvisor(t *testing.T) {
 	rec := galaxyadvisor.ParseRecommendation(resp.Text)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock galaxy advisor placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
+	}
+}
+
+func TestMockPlaceholder_ParsesForNPCIntel(t *testing.T) {
+	p := New()
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{Feature: "ai_npc_intelligence", JSONMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := npcintel.ParseRecommendation(resp.Text)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected mock NPC intel placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
 }
