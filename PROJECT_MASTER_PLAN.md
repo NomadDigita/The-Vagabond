@@ -792,7 +792,7 @@ near a coordinate), Galaxy Advisor should pick it up then, not before.
 | F | AI Battle Analyst | Done (raids + arena only; World Boss history excluded, see ADR-017) | A |
 | G | AI Guild Assistant | Done (Leader-only; see §3 "What Phase G built") | A |
 | H | AI Dynamic Galaxy | Done (see §3 "What Phase H built") | A |
-| I | AI NPC Intelligence | Not started | A, ideally after G |
+| I | AI NPC Intelligence | Done (see §3 "What Phase I built") | A, ideally after G |
 | J | AI Developer Console | Not started | A |
 
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
@@ -1157,16 +1157,93 @@ moved forward (SpaceHunt Phase 7 regional world events landed) since
 they were last pushed — all three rebase cleanly and still build/test
 clean before starting Phase H on top of them.
 
+### What Phase I built
+
+```
+internal/game/npcintel/
+├── prompt.go          Pure logic: NestProfile/FleetProfile/Snapshot
+│                       types, UnitVerdict/Recommendation types,
+│                       SystemPrompt (encodes the combat engine's real
+│                       hard-counter rules explicitly), deterministic
+│                       BuildUserPrompt, ParseRecommendation (fence
+│                       tolerance + fallback, Truncated flag baked in
+│                       per ADR-016), FormatForTelegram.
+├── prompt_test.go      14 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content,
+│                       Warlord-present and no-fleet paths, JSON
+│                       parse/fallback/truncation, Telegram formatting).
+└── intel.go            Intel: BuildSnapshot (scales the Rogue Drone
+                         Nest via the same content.RogueNestComposition
+                         Fleet Commander and /recon_ai already use, and
+                         reads the player's own mobile fleet from
+                         workshop_inventory), Recommend (calls
+                         ai.Service.Complete, persists to ai_memory
+                         scope "npc_intel").
+```
+
+New command: `/npc_intel` (any player — a composition-specific
+tactical read of the Rogue Drone Nest against their own current mobile
+fleet). Inline keyboard: a single refresh button. No new DB tables or
+game content — reuses `content.RogueNestComposition`/`ThreatTier`
+directly and reads existing `encampments`/`workshop_inventory`. Never
+launches a raid or moves any unit.
+
+**What this phase actually is, and isn't.** The Vagabond has exactly
+one NPC/hostile-AI entity — the Rogue Drone Nest
+(`internal/game/content.RogueNestComposition`) — not a roster of
+distinct NPCs, so "AI NPC Intelligence" could easily have collapsed
+into a second copy of Fleet Commander's existing attack/no-attack call.
+It deliberately doesn't: Fleet Commander (Phase C) already answers
+"should I attack this Nest at all"; this phase answers a different,
+previously-unaddressed question — "given I might attack, which of my
+own units help or hurt against *this specific* Nest's composition." That
+distinction is only meaningful because the combat engine has real
+hard-counter mechanics (Destroyer/Wraith vs. the Nest's drones+jets,
+Bomber vs. a turreted Defense Grid, the Nest's own Guardians countering
+Bombers right back, and three of its five turret types scaling against
+specific attacker unit types) that the static `/recon_ai` report
+already shows as raw numbers but never interprets. Those mechanics are
+listed explicitly in `SystemPrompt` — read directly from
+`internal/engine/tick/engine.go`'s combat resolution comments before
+writing a line of this package's code — rather than left for the model
+to guess at or invent.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_npc_intelligence`, verified by a new
+`TestMockPlaceholder_ParsesForNPCIntel` case. Combined with
+`npcintel`'s own 14 tests, this phase adds 14 new tests (141 → 155
+total, all passing — recounted fresh this session, continuing the
+practice started in Phase H's write-up rather than trusting a prior
+session's arithmetic).
+
+**Process note:** this session initially wrote all of Phase I's code
+directly on `main` by mistake (forgot to check out a feature branch
+first) before any of it was committed. Caught before anything was
+committed or pushed — the new files were moved onto a proper branch
+stacked on `phase-h-dynamic-galaxy` before continuing, and `main` was
+left untouched. Also rebased all four still-open branches
+(`critical-fix-truncation-flag` through `phase-h-dynamic-galaxy`) onto
+`main` again this session, since `main` had moved forward again
+(SpaceHunt Phase 7 items 10/11: World Exploration + Clan Diplomacy)
+since they were last pushed — all four rebase cleanly.
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo.
+
 ### Recommended next task
 
-**Phase I — AI NPC Intelligence**, per the priority order in §3's
-table (listed as "ideally after G", which is now done). Read whatever
-NPC/rogue-nest AI logic already exists (e.g. `internal/game/scoring`,
-and however Fleet Commander's PvE rogue-nest targets are currently
-generated) before designing its `Snapshot`, the same schema/logic-first
-discipline used for Phases F, G, and H.
-
-After I: J (AI Developer Console), the last phase on the roadmap.
+**Phase J — AI Developer Console**, the last phase on the roadmap.
+This one is different in kind from every prior phase — it's aimed at
+the game's operators/admins rather than players, so read
+`internal/bot/handlers/admin.go` and whatever admin-only tooling
+already exists before designing its scope, the same schema/logic-first
+discipline used for every phase since F. Consider explicitly with the
+project owner what "AI Developer Console" should mean in practice
+(e.g. natural-language querying of live game state for debugging,
+AI-assisted content/balance suggestions, or something else) before
+committing to a `Snapshot` shape, since this phase's name is the
+vaguest of the ten and least grounded in an existing player-facing
+system already read this session.
 
 ---
 
@@ -1480,6 +1557,35 @@ After I: J (AI Developer Console), the last phase on the roadmap.
   Phase 7 regional world events had landed) before starting Phase H on
   top of them — all three rebase cleanly. Recommended next task updated
   to Phase I.
+- **Following session:** Phase I (AI NPC Intelligence) implemented:
+  pure prompt/parsing logic (`prompt.go`, 14 passing unit tests,
+  `Truncated` handling baked in per ADR-016), DB-backed orchestration
+  (`intel.go`) scaling the Rogue Drone Nest via the existing
+  `content.RogueNestComposition`/`ThreatTier` helpers Fleet Commander
+  and `/recon_ai` already use and reading the player's own mobile
+  fleet from `workshop_inventory`, 1 new bot command (`/npc_intel`,
+  single refresh button). Deliberately scoped to NOT duplicate Fleet
+  Commander's existing attack/no-attack call: this phase instead reads
+  the combat engine's real hard-counter mechanics (Destroyer/Wraith
+  vs. drones+jets, Bomber vs. turreted Defense Grids countered by
+  Guardians, per-turret-type scaling against specific attacker unit
+  types) straight from `internal/engine/tick/engine.go`'s combat
+  resolution comments and gives a composition-specific tactical read
+  the static `/recon_ai` report never provided. Mock provider given a
+  matching placeholder JSON case, verified by 1 new test. 14 new tests
+  total (141 → 155, all passing). Full `go build ./... && go vet
+  ./... && go test ./...` confirmed clean for the whole repo.
+  Mid-session process note: all of this phase's code was initially
+  written directly on `main` by mistake (forgot to check out a feature
+  branch); caught before anything was committed, moved onto a proper
+  branch stacked on `phase-h-dynamic-galaxy`, `main` left untouched.
+  Also rebased all four still-open branches onto `main` again
+  (SpaceHunt Phase 7 items 10/11: World Exploration + Clan Diplomacy
+  had landed) before starting Phase I on top of them — all four
+  rebase cleanly. Recommended next task updated to Phase J, flagged as
+  needing explicit scope discussion with the project owner before
+  building (vaguest phase name on the roadmap, least grounded in an
+  existing player-facing system).
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
