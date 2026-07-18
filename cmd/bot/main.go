@@ -22,6 +22,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
+	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
@@ -876,6 +877,10 @@ func main() {
 	aiResearchPlanner := researchplanner.New(db, aiService)
 	researchPlannerHandler := handlers.NewResearchPlannerHandler(aiResearchPlanner)
 
+	// --- AI Battle Analyst wiring (Phase F, independent AI roadmap branch) ---
+	aiBattleAnalyst := battleanalyst.New(db, aiService)
+	battleAnalystHandler := handlers.NewBattleAnalystHandler(aiBattleAnalyst)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -963,6 +968,8 @@ func main() {
 	bot.Handle("/research_planner", researchPlannerHandler.HandleResearchPlanner)
 	bot.Handle("\fresearch_refresh", researchPlannerHandler.HandleResearchPlannerRefreshCallback)
 	bot.Handle("\fresearch_goal", researchPlannerHandler.HandleResearchPlannerGoalCallback)
+	bot.Handle("/battle_analyst", battleAnalystHandler.HandleBattleAnalyst)
+	bot.Handle("\fbattle_analyst_refresh", battleAnalystHandler.HandleBattleAnalystRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

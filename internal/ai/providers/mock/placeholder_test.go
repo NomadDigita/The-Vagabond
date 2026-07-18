@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
+	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
@@ -56,5 +57,17 @@ func TestMockPlaceholder_ParsesForResearchPlanner(t *testing.T) {
 	rec := researchplanner.ParseRecommendation(resp.Text)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock research planner placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
+	}
+}
+
+func TestMockPlaceholder_ParsesForBattleAnalyst(t *testing.T) {
+	p := New()
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{Feature: "ai_battle_analyst", JSONMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := battleanalyst.ParseRecommendation(resp.Text)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected mock battle analyst placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
 }

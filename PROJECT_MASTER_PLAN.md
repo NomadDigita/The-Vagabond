@@ -739,6 +739,31 @@ to reason about and leaves every existing call site untouched. The
 trade-off: if a future caller needed truncation info on the *success*
 path too, this would need revisiting — not a real need today.
 
+**ADR-017: Battle Analyst (Phase F) covers raids and arena battles
+only, not World Bosses — confirmed by re-auditing the schema, not
+inherited from an earlier session's claim.** A schema audit done
+before writing any Phase F code (grepping every `DELETE
+FROM`/`ON CONFLICT ... DO UPDATE` touching the relevant tables in
+`internal/engine/tick/engine.go`) found `raids` (`state = 'completed'`
+rows) and `arena_battles` are genuinely durable, but
+`world_boss_attacks` rows are deleted once survivors return home and
+`world_boss_contributions` rows are deleted the moment a boss is
+defeated — neither retains cross-engagement history today. Building
+Battle Analyst's `Snapshot` around World Boss data that doesn't
+durably exist would have meant either silently analyzing only
+whatever boss is currently mid-fight (misleading — that's not
+"history") or fabricating a shape around data that isn't there. Scope
+was narrowed instead, and the gap is documented in §4 as real schema
+work for a future session, not hidden or worked around with
+placeholder data. A related, smaller decision made the same session:
+Battle Analyst's defender-side "apparent win" heuristic (attacker
+stole nothing) is a natural inverse of Fleet Commander's existing
+attacker-side heuristic (some resources stolen) rather than a new,
+unrelated proxy — keeping the two packages' win/loss judgment
+philosophically consistent even though they're independently
+implemented (per the same package-isolation trade-off as every other
+Phase B+ package).
+
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
 | Phase | Name | Status | Depends on |
@@ -748,7 +773,7 @@ path too, this would need revisiting — not a real need today.
 | C | AI Fleet Commander | Done (PvE rogue-nest target only; PvP target lookup deferred, see §4) | A |
 | D | AI Economy Advisor | Done | A |
 | E | AI Research Planner | Done | A |
-| F | AI Battle Analyst | Not started | A |
+| F | AI Battle Analyst | Done (raids + arena only; World Boss history excluded, see ADR-017) | A |
 | G | AI Guild Assistant | Not started | A |
 | H | AI Dynamic Galaxy | Not started | A |
 | I | AI NPC Intelligence | Not started | A, ideally after G |
@@ -918,33 +943,98 @@ first-time dependency downloads is unchanged and still worth noting to
 whoever runs the real deploy (they should have normal internet access,
 so it's expected to be a non-issue there).
 
+### What Phase F built
+
+```
+internal/game/battleanalyst/
+├── prompt.go         Pure logic: RaidStats/ArenaStats/Snapshot types,
+│                      Pattern/Recommendation types, SystemPrompt,
+│                      deterministic BuildUserPrompt, ParseRecommendation
+│                      (fence tolerance + fallback, Truncated flag baked
+│                      in from the start per ADR-016), FormatForTelegram.
+├── prompt_test.go     13 passing unit tests, zero DB/network dependency
+│                      (prompt determinism/content, empty-history paths,
+│                      attacker-vs-defender stolen-value asymmetry, JSON
+│                      parse/fallback/truncation, Telegram formatting).
+└── analyst.go         Analyst: BuildSnapshot (reads completed raids from
+                        both the attacker and defender side, plus
+                        arena_battles matched by current username),
+                        Recommend (calls ai.Service.Complete, persists to
+                        ai_memory scope "battle_analyst").
+```
+
+New command: `/battle_analyst` (any player — read-only analysis of
+their accumulated raid and arena combat record; no goal/argument, since
+this looks backward at everything that already happened rather than
+steering toward one forward-looking goal). Inline keyboard: a single
+refresh button (no per-goal buttons, unlike Research Planner — see
+ADR-017). No new DB table — reads existing `raids` and `arena_battles`.
+Never changes any raid, arena battle, or unit itself.
+
+**Scope decided by re-auditing the actual schema, not by trusting an
+earlier session's notes.** Before writing any code, this session
+re-confirmed which tables are genuinely durable history by grepping
+every `DELETE FROM`/`ON CONFLICT ... DO UPDATE` touching `raids`,
+`world_boss_attacks`, `world_boss_contributions`, and `arena_battles`
+in `internal/engine/tick/engine.go`. Result: `raids` rows with
+`state = 'completed'` persist (matching what `fleetcommander` already
+relies on); `arena_battles` rows are never deleted; but
+`world_boss_attacks` rows are deleted once survivors return home, and
+`world_boss_contributions` rows are deleted the moment a boss is
+defeated — neither retains any history across completed engagements.
+See ADR-017 for why this means Battle Analyst covers raids (both
+sides) and arena only, not World Bosses, at least until/unless a
+future session adds a durable World Boss history table.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_battle_analyst`, verified by a new
+`TestMockPlaceholder_ParsesForBattleAnalyst` case in
+`placeholder_test.go`. Combined with `battleanalyst`'s own 13 tests,
+this phase adds 14 new tests (100 → 114 total, all passing).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo, using the same sandbox-only,
+reverted-before-commit `go.mod` replace workaround as every prior
+session since Phase E (see that phase's note for why it's needed and
+why it's safe to revert).
+
 ### Recommended next task
 
-**Phase F — AI Battle Analyst**, per the priority order already laid
-out in §3's table, with one open question to resolve first: **check
-whether real battle/combat log data now exists** from the parallel
-SpaceHunt branch's Phase 6/7 combat work (this branch's `git log`
-shows SpaceHunt commits like "Phase 7 (part 2): real Battle Logistics"
-and "Rogue AI scaling" landing on `main` well after this branch's
-Phase D merge — read `internal/game/battlereport` and any SpaceHunt
-combat-log tables before designing Phase F's `Snapshot`, the same way
-this phase started by reading `internal/bot/handlers/research.go`).
-Phase F needs that real data to analyze; building it against
-placeholder/imagined battle data would be wasted work.
+**Phase G — AI Guild Assistant**, per the priority order in §3's
+table. Per §8 (Integration Notes for the Parallel SpaceHunt Branch),
+this needs guild data from SpaceHunt's Phase 2 — read whatever guild
+tables/handlers exist on `main` first (the same way Phase F started by
+auditing the real `raids`/`arena_battles`/`world_boss_*` schema before
+writing a line of code) and coordinate with that branch's owner before
+building, rather than assuming a shape.
 
-After F: G (Guild Assistant, needs guild data from SpaceHunt Phase 2 —
-coordinate with that branch per §8 before building), then H onward,
-which are more cross-cutting.
+After G: H onward, which are more cross-cutting.
 
 ---
 
 ## 4. Known Issues / Technical Debt
 
-- **Full binary was never compiled this session** (see §1 — sandbox
-  network couldn't reach `proxy.golang.org`/`gopkg.in`). The
-  `cmd/bot/main.go` wiring edits are believed correct (mirrors the
-  exact pattern every other handler uses) but must be confirmed with a
-  real `go build ./...` before deploying.
+- **World Boss engagement history is not durable in the current
+  schema** (see ADR-017 and the "What Phase F built" note in §3): `world_boss_attacks` rows are
+  deleted once survivors return home, and `world_boss_contributions`
+  rows are deleted the moment a boss is defeated. Battle Analyst
+  (Phase F) therefore only covers raids and arena battles. If a future
+  session wants World Boss pattern analysis, it needs a new durable
+  history table (e.g. an append-only `world_boss_attack_log`) added
+  first — this is real schema work, not something Phase F itself could
+  work around.
+- **Arena/raid win-loss stats rely on heuristics, not authoritative
+  outcome columns.** Battle Analyst's defender-side "apparent win" (no
+  resources stolen) and Fleet Commander's existing attacker-side
+  "apparent win" (some resources stolen) are both proxies for a real
+  outcome column `raids` doesn't have — see ADR-009's original note on
+  this for Fleet Commander, now shared by Battle Analyst too. Also,
+  Battle Analyst's arena stats match by the player's *current*
+  Telegram username (since `arena_battles` stores usernames as plain
+  strings, not a `user_id` foreign key) — a player who changed their
+  username after a past arena battle will have that battle silently
+  excluded. Both are acceptable proxies today; replace if/when the
+  SpaceHunt combat branch adds authoritative columns.
 - **Static cost table will go stale.** `internal/ai/cost.go`'s
   `pricePerMillionTokens` map needs periodic manual updates as
   Anthropic (and future providers) change pricing. Consider moving
@@ -1144,6 +1234,25 @@ which are more cross-cutting.
   happens at all. 13 new tests (5 in `internal/ai`, 2 regression tests
   each in governor/fleetcommander/econadvisor/researchplanner). 87 →
   100 total, all passing. Recommended next task remains Phase F.
+- **Following session:** Phase F (AI Battle Analyst) implemented: pure
+  prompt/parsing logic (`prompt.go`, 13 passing unit tests, `Truncated`
+  handling baked in from the start per ADR-016), DB-backed
+  orchestration (`analyst.go`) reading completed raids from both the
+  attacker and defender side plus `arena_battles` matched by current
+  username, 1 new bot command (`/battle_analyst`, single refresh
+  button, no goal selection — this phase looks backward at the whole
+  combat record rather than steering toward one forward-looking goal),
+  no new tables. A schema audit done before writing any code (per §3's
+  own instruction to check real data first) found World Boss
+  engagement history is not durable in the current schema — see
+  ADR-017 for why this narrowed Battle Analyst's scope to raids and
+  arena only, and §4 for the follow-up work that would fix that. Mock
+  provider given a matching placeholder JSON case, verified by 1 new
+  test in `placeholder_test.go`. 14 new tests total (100 → 114, all
+  passing). Full `go build ./... && go vet ./... && go test ./...`
+  confirmed clean for the whole repo this session (same sandbox-only
+  go.mod workaround as every session since Phase E). Recommended next
+  task updated to Phase G.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
