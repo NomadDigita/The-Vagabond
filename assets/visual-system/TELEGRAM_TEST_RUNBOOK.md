@@ -8,9 +8,9 @@ legacy pilot set.
 
 1. The test owner has Telegram Premium and has started the bot in a direct
    message.
-2. The owner sets a throwaway test bot token and their numeric Telegram ID
-   **locally** as environment variables. Never paste a token into chat, a
-   source file, or a commit.
+2. The owner has a newly issued throwaway test-bot token and their numeric
+   Telegram ID. The command below asks for the token locally with hidden input;
+   never paste it into chat, a source file, a command line, or a commit.
 3. The local media validator has passed.
 
 Telegram’s current video custom-emoji requirements are a 100x100 VP9 WebM,
@@ -30,20 +30,20 @@ python assets/visual-system/pipeline/validate_video_custom_emoji.py `
   --ffmpeg C:\path\to\ffmpeg.exe
 ```
 
-Set credentials locally, then inspect the no-network plan first:
+Inspect the no-network plan first:
 
 ```powershell
-$env:TG_BOT_TOKEN = 'set-this-locally-not-in-chat'
-$env:TG_OWNER_ID = 'your-numeric-telegram-user-id'
 python assets/visual-system/pipeline/telegram_fresh_test_set.py
 ```
 
 When the printed source filename, SHA-256, and new test-set name look right,
-apply it once with a unique slug:
+apply it once with a unique slug. The token is requested through Python's
+hidden local prompt and is never written to a file or environment variable:
 
 ```powershell
 python assets/visual-system/pipeline/telegram_fresh_test_set.py `
-  --apply --set-slug vagabond_v10_oracle_test
+  --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID `
+  --set-slug vagabond_v10_oracle_test
 ```
 
 The script aborts if that set name exists. Pick a new slug for a new test;
