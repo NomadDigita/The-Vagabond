@@ -8,6 +8,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
+	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
@@ -82,5 +83,17 @@ func TestMockPlaceholder_ParsesForGuildAssistant(t *testing.T) {
 	rec := guildassistant.ParseRecommendation(resp.Text)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock guild assistant placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
+	}
+}
+
+func TestMockPlaceholder_ParsesForGalaxyAdvisor(t *testing.T) {
+	p := New()
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{Feature: "ai_dynamic_galaxy", JSONMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := galaxyadvisor.ParseRecommendation(resp.Text)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected mock galaxy advisor placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
 }

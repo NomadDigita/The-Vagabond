@@ -25,6 +25,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
+	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
@@ -886,6 +887,10 @@ func main() {
 	aiGuildAssistant := guildassistant.New(db, aiService)
 	guildAssistantHandler := handlers.NewGuildAssistantHandler(aiGuildAssistant)
 
+	// --- AI Dynamic Galaxy wiring (Phase H, independent AI roadmap branch) ---
+	aiGalaxyAdvisor := galaxyadvisor.New(db, aiService)
+	galaxyAdvisorHandler := handlers.NewGalaxyAdvisorHandler(aiGalaxyAdvisor)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -977,6 +982,8 @@ func main() {
 	bot.Handle("\fbattle_analyst_refresh", battleAnalystHandler.HandleBattleAnalystRefreshCallback)
 	bot.Handle("/guild_assistant", guildAssistantHandler.HandleGuildAssistant)
 	bot.Handle("\fguild_assistant_refresh", guildAssistantHandler.HandleGuildAssistantRefreshCallback)
+	bot.Handle("/galaxy_advisor", galaxyAdvisorHandler.HandleGalaxyAdvisor)
+	bot.Handle("\fgalaxy_advisor_refresh", galaxyAdvisorHandler.HandleGalaxyAdvisorRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
