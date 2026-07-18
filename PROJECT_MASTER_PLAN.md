@@ -764,6 +764,22 @@ philosophically consistent even though they're independently
 implemented (per the same package-isolation trade-off as every other
 Phase B+ package).
 
+**ADR-018: `coordinates.danger_level` is excluded from Galaxy
+Advisor's `Snapshot` — it's stored but mechanically dead, and building
+advice around dead data would be misleading.** Grepping every
+reference before writing Phase H's `Snapshot` found `danger_level` is
+only ever written (randomized 1-5) when a new coordinate is inserted
+(`internal/bot/handlers/onboarding.go`, `jobs.go`) and never read by
+any tick-engine or handler logic — no combat, resource, or event
+calculation consults it. This is the same category of state
+`world_state.active_weather` was in before SpaceHunt Phase 7 wired up
+`world_events` (stored, plausible-looking, but disconnected from
+anything that actually happens in-game). Feeding it to the model would
+produce advice that sounds grounded in a real risk signal but isn't —
+worse than simply not mentioning it. If a future session makes
+`danger_level` mechanically meaningful (e.g. affecting raid outcomes
+near a coordinate), Galaxy Advisor should pick it up then, not before.
+
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
 | Phase | Name | Status | Depends on |
@@ -775,7 +791,7 @@ Phase B+ package).
 | E | AI Research Planner | Done | A |
 | F | AI Battle Analyst | Done (raids + arena only; World Boss history excluded, see ADR-017) | A |
 | G | AI Guild Assistant | Done (Leader-only; see §3 "What Phase G built") | A |
-| H | AI Dynamic Galaxy | Not started | A |
+| H | AI Dynamic Galaxy | Done (see §3 "What Phase H built") | A |
 | I | AI NPC Intelligence | Not started | A, ideally after G |
 | J | AI Developer Console | Not started | A |
 
@@ -1064,16 +1080,93 @@ forward (SpaceHunt visual-system commits) since they were last pushed
 — confirmed both rebase cleanly and still build/test clean before
 starting Phase G on top of them.
 
+### What Phase H built
+
+```
+internal/game/galaxyadvisor/
+├── prompt.go          Pure logic: ContinentStatus/Snapshot types,
+│                       Action/Recommendation types, SystemPrompt,
+│                       deterministic BuildUserPrompt (including its
+│                       own eventEffect mechanical-effect-text mapping
+│                       for all 7 event types + nominal), ParseRecommendation
+│                       (fence tolerance + fallback, Truncated flag baked
+│                       in per ADR-016), FormatForTelegram.
+├── prompt_test.go      13 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content, no-news
+│                       and unrecognized-event-type paths, JSON parse/
+│                       fallback/truncation, Telegram formatting).
+└── advisor.go          Advisor: BuildSnapshot (reads the caller's home
+                         continent via encampments→coordinates.region,
+                         every continent's active event via the shared
+                         internal/engine/world.ActiveEventsByContinent/
+                         Continents helpers the tick engine and world-
+                         feed panel already use, and the same 5 most
+                         recent world_news headlines
+                         HandleWorldFeed's own panel shows), Recommend
+                         (calls ai.Service.Complete, persists to
+                         ai_memory scope "galaxy_advisor").
+```
+
+New command: `/galaxy_advisor` (any player — read-only briefing on
+their home continent's current world event plus the wider galaxy's
+environmental state across all four continents; no goal/argument,
+since — like Battle Analyst and Guild Assistant — this reasons about
+whatever the current state is, not one steerable goal). Inline
+keyboard: a single refresh button. No new DB table — reads existing
+`world_events`/`world_news`/`coordinates`/`encampments` through the
+already-shared `internal/engine/world` helpers rather than
+reimplementing that lookup. Never changes any world event, marches any
+fleet, or queues any construction itself.
+
+**Genuinely cross-cutting, matching how §3 already flagged this
+phase.** Every prior package (B-G) reasons about one player's base,
+fleet, one raid target, economy, research, combat record, or clan.
+This one is the first to reason about *shared* state — the same
+per-continent world events every player on that continent sees — and
+explicitly looks across all four continents together (`galaxy_outlook`
+in the JSON shape), not just the player's own, so a player can also
+reason about whether another continent is a better target right now.
+
+**Schema audit done before writing any code**, the same discipline as
+Phases F and G: read `internal/engine/world/events.go` and
+`weather.go` (added by the parallel SpaceHunt branch's Phase 7 item 12,
+`migrations/025`) to confirm world events are already resolved
+independently per continent with existing exported helpers this phase
+could reuse directly, rather than re-querying `world_events` by hand.
+Also checked whether `coordinates.danger_level` was worth including as
+a signal — it isn't: grepping every reference confirmed it's written
+(randomized 1-5) on new-coordinate insert but never read by any game
+mechanic, the same "stored but mechanically dead" state
+`world_state.active_weather` was in before Phase 7 wired up
+`world_events`. Excluded from `Snapshot` as a result; see ADR-018.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_dynamic_galaxy`, verified by a new
+`TestMockPlaceholder_ParsesForGalaxyAdvisor` case. Combined with
+`galaxyadvisor`'s own 13 tests, this phase adds 14 new tests. A fresh
+full-suite count this session verified 141 tests total, all passing
+(see Change Log for the exact before/after — a minor discrepancy was
+found in Phase G's own recorded count while verifying this, tracked in
+§4 rather than silently corrected).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo. Rebased all three still-open
+branches (`critical-fix-truncation-flag`, `phase-f-battle-analyst`,
+`phase-g-guild-assistant`) onto `main` first, since `main` had again
+moved forward (SpaceHunt Phase 7 regional world events landed) since
+they were last pushed — all three rebase cleanly and still build/test
+clean before starting Phase H on top of them.
+
 ### Recommended next task
 
-**Phase H — AI Dynamic Galaxy**, per the priority order in §3's table.
-This one is explicitly flagged in that table as "more cross-cutting"
-than G, so expect it to touch more of the galaxy/world engine than a
-single per-player or per-clan advisor — read `internal/engine/world`
-and whatever galaxy/zone tables exist before designing its `Snapshot`,
-the same schema-first discipline used for Phases F and G.
+**Phase I — AI NPC Intelligence**, per the priority order in §3's
+table (listed as "ideally after G", which is now done). Read whatever
+NPC/rogue-nest AI logic already exists (e.g. `internal/game/scoring`,
+and however Fleet Commander's PvE rogue-nest targets are currently
+generated) before designing its `Snapshot`, the same schema/logic-first
+discipline used for Phases F, G, and H.
 
-After H: I (NPC Intelligence, ideally after G — now done) and J.
+After I: J (AI Developer Console), the last phase on the roadmap.
 
 ---
 
@@ -1100,6 +1193,22 @@ After H: I (NPC Intelligence, ideally after G — now done) and J.
   username after a past arena battle will have that battle silently
   excluded. Both are acceptable proxies today; replace if/when the
   SpaceHunt combat branch adds authoritative columns.
+- **`coordinates.danger_level` is stored but mechanically dead** (see
+  ADR-018): randomized on insert, never read by any game logic. Galaxy
+  Advisor (Phase H) deliberately excludes it rather than presenting it
+  as a real signal. If it's ever wired up mechanically, revisit.
+- **Minor test-count discrepancy found while verifying Phase H.** Phase
+  G's own write-up claimed 128 tests total after that phase; a fresh
+  count this session (before adding any Phase H tests) found 127. The
+  likely cause: `guildassistant`'s package has 12 tests, not the 13
+  originally claimed in that session's notes — an off-by-one in
+  counting, not a missing test or a functional gap (every behavior
+  that write-up described is still covered; re-reading
+  `prompt_test.go` confirms 12 distinct `func Test...` cases). Left as
+  a recorded discrepancy rather than silently edited into Phase G's
+  already-committed history; Phase H's own numbers in this document
+  are based on a fresh, verified count (127 → 141) rather than trusting
+  the prior session's arithmetic.
 - **Static cost table will go stale.** `internal/ai/cost.go`'s
   `pricePerMillionTokens` map needs periodic manual updates as
   Anthropic (and future providers) change pricing. Consider moving
@@ -1341,6 +1450,36 @@ After H: I (NPC Intelligence, ideally after G — now done) and J.
   Full `go build ./... && go vet ./... && go test ./...` confirmed
   clean for the whole repo this session. Recommended next task updated
   to Phase H.
+- **Following session:** Phase H (AI Dynamic Galaxy) implemented: pure
+  prompt/parsing logic (`prompt.go`, 13 passing unit tests, `Truncated`
+  handling baked in per ADR-016, plus its own event→mechanical-effect
+  text mapping for all 7 event types), DB-backed orchestration
+  (`advisor.go`) reusing the existing shared
+  `internal/engine/world.ActiveEventsByContinent`/`Continents` helpers
+  and the same 5-headline `world_news` query
+  `HandleWorldFeed`'s panel already uses, 1 new bot command
+  (`/galaxy_advisor`, single refresh button). This is the first phase
+  to reason about shared per-continent state rather than one player's
+  own base/fleet/economy/research/combat/clan — matches how §3 already
+  flagged it as more cross-cutting. Read
+  `internal/engine/world/events.go` and `weather.go` (added by the
+  parallel SpaceHunt branch's Phase 7 item 12) before writing any code,
+  confirming reusable exported helpers already existed rather than
+  re-querying `world_events` by hand. Checked `coordinates.danger_level`
+  as a candidate signal and found it mechanically dead (written, never
+  read) — excluded per ADR-018. While verifying test counts, found a
+  minor discrepancy in Phase G's own recorded total (claimed 128;
+  fresh count found 127 before this session's additions — see §4);
+  Phase H's own numbers use the freshly-verified count. Mock provider
+  given a matching placeholder JSON case, verified by 1 new test. 14
+  new tests total (127 → 141, all passing). Full `go build ./... && go
+  vet ./... && go test ./...` confirmed clean for the whole repo. Also
+  rebased all three still-open branches
+  (`critical-fix-truncation-flag`, `phase-f-battle-analyst`,
+  `phase-g-guild-assistant`) onto `main` again this session (SpaceHunt
+  Phase 7 regional world events had landed) before starting Phase H on
+  top of them — all three rebase cleanly. Recommended next task updated
+  to Phase I.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 

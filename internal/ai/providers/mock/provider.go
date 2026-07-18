@@ -128,6 +128,16 @@ func placeholderJSON(feature string) string {
 			"recommended_focus": "Not evaluated — placeholder mode.",
 			"notes": "Not evaluated — placeholder mode."
 		}`
+	case "ai_dynamic_galaxy":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real galaxy briefing.",
+			"home_continent_advice": "Not evaluated — placeholder mode.",
+			"galaxy_outlook": "Not evaluated — placeholder mode.",
+			"recommended_actions": [
+				{"action": "configure_provider", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}
