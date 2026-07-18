@@ -120,12 +120,39 @@ def ao(cx, cy, rx, ry, op=0.4):
 def scratches(pts, color="#ffffff", op=0.14, w=0.9):
     return "\n".join(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{color}" stroke-width="{w}" opacity="{op}" stroke-linecap="round"/>' for (x1,y1,x2,y2) in pts)
 
-def star(cx, cy, s, op, color="#ffe066"):
+def star(cx, cy, s, op, color="#ffe066", blur="blurstar"):
     if op <= 0.02:
         return ""
-    return (f'<g transform="translate({cx},{cy})" opacity="{op:.3f}" filter="url(#blurstar)">'
+    return (f'<g transform="translate({cx},{cy})" opacity="{op:.3f}" filter="url(#{blur})">'
             f'<path d="M0,{-6*s} L{1.3*s},{-1.3*s} L{6*s},0 L{1.3*s},{1.3*s} '
             f'L0,{6*s} L{-1.3*s},{1.3*s} L{-6*s},0 L{-1.3*s},{-1.3*s} Z" fill="{color}"/></g>')
+
+def chromatic_rim(cx, cy, r, t, color_a, color_b, width=1.1, amp=1.4, phase=0.0):
+    """Two colored ring strokes offset in opposite phase around a beat —
+    they visibly separate and re-converge, simulating the color-fringing
+    real refractive materials show at their edges. v9 technique, see
+    oracle prototype / SKILL.md."""
+    disp = amp * math.sin(2*math.pi*t + phase)
+    return (f'<circle cx="{cx+disp:.2f}" cy="{cy:.2f}" r="{r}" fill="none" stroke="{color_a}" '
+            f'stroke-width="{width}" opacity="0.5"/>'
+            f'<circle cx="{cx-disp:.2f}" cy="{cy:.2f}" r="{r}" fill="none" stroke="{color_b}" '
+            f'stroke-width="{width}" opacity="0.45"/>')
+
+def depth_particles(cx, cy, t, particles, color, oy_scale=0.55):
+    """particles: list of (angle_deg, orbit_radius, size, depth 0..1).
+    Nearer (depth->1) particles orbit faster and render bigger/sharper;
+    farther ones (depth->0) orbit slower and render smaller/softer —
+    a real depth cue rather than randomly-scattered same-size sparkles.
+    v9 technique, see oracle prototype / SKILL.md."""
+    out = []
+    for (ang, orbit_r, size, depth) in particles:
+        orbit_ang = math.radians(ang + t * 360 * (0.25 + depth * 0.45))
+        px = cx + orbit_r * math.cos(orbit_ang)
+        py = cy + orbit_r * oy_scale * math.sin(orbit_ang)
+        op = 0.25 + 0.45 * depth * (0.5 + 0.5 * math.sin(orbit_ang * 2))
+        blur = "blur1" if depth < 0.4 else ("blur2" if depth < 0.7 else "blurstar")
+        out.append(star(px, py, size * (0.7 + depth * 0.5), max(0.12, op), color, blur=blur))
+    return "".join(out)
 
 def spark_streak(cx, cy, ang_deg, length, op, color="url(#gold)", w=2.0):
     if op <= 0.02:
@@ -451,6 +478,46 @@ def frame_scrap(t):
 {sparks}'''
 
 
+# ---------------------------------------------------------------------
+# v9 glass upgrade — layered on top of each icon's existing motion,
+# not a redesign of it. Each icon gets its own chromatic-rim color pair
+# (no two icons share the same unordered pair — see SKILL.md's
+# color-pairing table) and a small set of depth-parallax particles.
+# Approved by the project owner on the `oracle`/electricity-glass
+# prototypes before being rolled out here — see log §6 v8 checkpoints
+# 4-5 and the "continue" go-ahead that followed.
+# ---------------------------------------------------------------------
+GLASS_UPGRADE = {
+    "warning":   dict(cx=50, cy=54, r=40, rim=("#ffb347", "#ff5c4d"), particle_color="#fff3c9",
+                       particles=[(20, 22, 0.5, 0.3), (160, 26, 0.6, 0.6), (280, 18, 0.4, 0.15)]),
+    "failure":   dict(cx=50, cy=50, r=40, rim=("#ffe066", "#ff5c4d"), particle_color="#ffe9c9",
+                       particles=[(45, 24, 0.55, 0.4), (190, 20, 0.45, 0.2), (300, 26, 0.65, 0.7)]),
+    "shield":    dict(cx=50, cy=50, r=40, rim=("#39d6ec", "#b98aff"), particle_color="#d8f7ff",
+                       particles=[(10, 22, 0.5, 0.3), (140, 24, 0.6, 0.6), (250, 18, 0.4, 0.15)]),
+    "transport": dict(cx=50, cy=58, r=38, rim=("#ffb347", "#ffe066"), particle_color="#ffe3b0",
+                       particles=[(30, 20, 0.5, 0.35), (200, 22, 0.55, 0.55), (320, 16, 0.4, 0.2)]),
+    "ai_mech":   dict(cx=50, cy=50, r=38, rim=("#39d6ec", "#3fe2c4"), particle_color="#cdfff5",
+                       particles=[(60, 22, 0.5, 0.4), (210, 24, 0.6, 0.7), (330, 18, 0.4, 0.2)]),
+    "gear":      dict(cx=50, cy=50, r=40, rim=("#ffe066", "#e8f0f5"), particle_color="#fff6d8",
+                       particles=[(15, 24, 0.55, 0.4), (150, 26, 0.6, 0.65), (260, 20, 0.45, 0.25)]),
+    "satellite": dict(cx=50, cy=45, r=40, rim=("#39d6ec", "#ff5fd8"), particle_color="#e6d8ff",
+                       particles=[(0, 24, 0.5, 0.35), (130, 26, 0.6, 0.6), (250, 20, 0.45, 0.2)]),
+    "combat":    dict(cx=50, cy=50, r=38, rim=("#ff5c4d", "#e8f0f5"), particle_color="#ffd9d3",
+                       particles=[(40, 22, 0.5, 0.4), (170, 24, 0.6, 0.65), (290, 18, 0.4, 0.2)]),
+    "scrap":     dict(cx=45, cy=55, r=38, rim=("#ff9a48", "#ffe066"), particle_color="#ffe3c2",
+                       particles=[(50, 20, 0.5, 0.35), (190, 22, 0.55, 0.6), (310, 16, 0.4, 0.2)]),
+}
+
+def with_glass_upgrade(name, base_fn):
+    cfg = GLASS_UPGRADE[name]
+    def wrapped(t):
+        body = base_fn(t)
+        rim = chromatic_rim(cfg["cx"], cfg["cy"], cfg["r"], t, cfg["rim"][0], cfg["rim"][1])
+        particles = depth_particles(cfg["cx"], cfg["cy"], t, cfg["particles"], cfg["particle_color"])
+        return body + rim + particles
+    return wrapped
+
+
 ICONS = {
     "warning":   ("#dcbe28", frame_warning),
     "failure":   ("#e0392c", frame_failure),
@@ -468,5 +535,6 @@ if __name__ == "__main__":
     for name, (glow_hex, fn) in ICONS.items():
         crf = 40 if name == "gear" else 30
         n_frames = 24 if name == "gear" else None
-        total_kb += render_icon(name, glow_hex, fn, crf=crf, n_frames=n_frames)
+        upgraded_fn = with_glass_upgrade(name, fn) if name in GLASS_UPGRADE else fn
+        total_kb += render_icon(name, glow_hex, upgraded_fn, crf=crf, n_frames=n_frames)
     print(f"\nDone: {len(ICONS)} icons, {total_kb:.1f} KB total")

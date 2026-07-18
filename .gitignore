@@ -18,4 +18,5 @@ bin/
 # Go Workspace files
 go.work
 assets/visual-system/animated/*/frames/
+assets/visual-system/source/*.blend1
 assets/visual-system/pipeline/__pycache__/

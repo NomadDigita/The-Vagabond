@@ -96,6 +96,7 @@ ICONS = {
     "combat":      "\u2694",   # ⚔
     "electricity": "\u26A1",   # ⚡
     "scrap":       "\U0001F529",  # 🔩
+    "oracle":      "\U0001F52E",  # 🔮 (original design, not a copy — see animate_oracle.py's header)
 }
 
 # Icons that have an animated WEBM (VP9, alpha, 100x100, <3s, looped) in
@@ -188,6 +189,11 @@ def upload_one(name, emoji):
 
 
 def main():
+    raise SystemExit(
+        "SAFETY BLOCK: this legacy uploader infers sticker identities by positional order, "
+        "which is unsafe for the existing duplicate-filled pilot set. Do not use it. "
+        "Use pipeline/telegram_fresh_test_set.py to create an isolated, fresh v10 test set."
+    )
     me = call("getMe")
     bot_username = me["username"]
     set_name = f"vagabond_pilot_by_{bot_username}"

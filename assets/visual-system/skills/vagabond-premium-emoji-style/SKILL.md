@@ -109,15 +109,18 @@ icon. As of v8:
 | satellite | gunmetal | cyan + gold |
 | combat | steel + gunmetal | danger + gold |
 | scrap | steel | rust + gold |
-| oracle (11th, prototype) | violet (new) | cyan + magenta (chromatic) |
+| oracle (11th) | violet | cyan + magenta (chromatic) |
 
-Notice `cyan + gold` repeats three times (shield, transport/ai_mech,
-satellite) and `gold` alone is the accent on nearly everything. That's
-the exact problem this rule exists to catch — **this table itself is a
-todo, not a certificate of compliance.** `oracle`'s violet+chromatic
-pairing is a genuine step toward fixing this, but the other 9 still
-need diversifying before the rule is actually satisfied across the
-set.
+The body-material table above still has real repeats (`cyan + gold`
+appears 3-4 times as the *primary accent*) — that's still an open todo.
+But as of v9, every icon additionally carries its own chromatic-rim
+color pair (a separate, finer-grained layer — see below), and none of
+those 9 pairs repeat: `(amber,red)` warning, `(gold,red)` failure,
+`(cyan,violet)` shield, `(amber,gold)` transport, `(cyan,teal)` ai_mech,
+`(gold,white)` gear, `(cyan,magenta)` satellite, `(red,white)` combat,
+`(rust,gold)` scrap, `(cyan,magenta)` oracle's chromatic dispersion.
+Note oracle's chromatic pair duplicates satellite's — that's the next
+thing to fix if a 12th icon gets added.
 
 ## The v8 direction: push toward "liquid glass," not flat gradient
 
