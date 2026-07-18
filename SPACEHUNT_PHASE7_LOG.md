@@ -575,11 +575,72 @@ described above.
 
 ---
 
+### Supply Crisis wired into Market Exchange (closes the item-12 flag above)
+
+`economy.go`'s `HandleMarketCallback` (the Financial Vault's
+sell_scrap/sell_metal/sell_crystal/buy_metal/buy_crystal/buy_hydrogen
+conversions - the actual "Market Exchange sale prices" the Supply
+Crisis news headline refers to) now resolves the camp's own continent
+and checks `world.ActiveEventFor` before computing payouts/costs:
+during an active Supply Crisis, sell payouts are -25% and buy costs are
++25%, with a note appended to the response text so the penalty isn't
+silent. (`exchange.go`'s player-to-player listings are untouched - those
+prices are player-set, not system-set, so there's nothing for a system
+event to depress there.)
+
+### Item 10/11: World Exploration + Clan Diplomacy
+
+**World Exploration** (`internal/bot/handlers/exploration.go`, new):
+`/explore` shows undiscovered sites in the player's own continent (or
+their own expedition's ETA if one is already en route - one dispatch
+per outpost at a time, so this can't be spammed). A new tick phase,
+`spawnExplorationSites` in `internal/engine/tick/engine.go`, rolls each
+continent a 15% chance per tick to spawn a site once it doesn't already
+have an unclaimed one waiting (same shape as the weather engine's
+per-continent roll). Site pool: Ancient Ruins (Ether), Supply Cache
+(Metal or Crystal), Tech Artifact (Ether), Signal Beacon (Cash).
+Dispatching costs 30 Rations + 15 Metal and takes 20-45 random minutes;
+`resolveExplorationDispatches` credits the reward and marks the site
+claimed once the timer's up. Claim races are settled at the DB layer -
+`exploration_dispatches.site_id` is `UNIQUE`, so a second dispatch to a
+site already spoken for simply fails its `INSERT` inside the same
+transaction, rather than two players' costs both being deducted and one
+refunded after the fact. New schema in
+`026_spacehunt_phase7_exploration_diplomacy.sql`. Added a "🧭 World
+Exploration" button to `CombatNavigation()`.
+
+**Clan Diplomacy** (`internal/bot/handlers/diplomacy.go`, new): mirrors
+`clan_wars`'s clan_a/clan_b shape, but for peaceful pacts. `/ally
+[clan_name]` and `/nap [clan_name]` (Clan Kings only) propose an
+Alliance or Non-Aggression Pact; `/diplomacy` shows active pacts plus
+pending proposals with Accept/Reject buttons for the *receiving* King
+only (the proposing side can't accept their own outgoing proposal -
+checked via `proposed_by`); `/break_pact [clan_name]` lets either side
+end an active pact unilaterally, since a permanent, inescapable pact
+would be worse than no diplomacy system at all. `HasActivePact(ctx, q,
+clanAID, clanBID)` is exported so `combat.go`'s raid-launch check
+(`HandleConfirmHangarLaunchCallback`) can block raids between two
+Clans with an active pact, inserted right after the defender's Clan
+would otherwise be resolved. `HasActivePact` takes a small `pactQueryer`
+interface (just `QueryRowContext`) rather than a concrete `*sql.DB`, so
+it can be called from inside `combat.go`'s existing transaction instead
+of racing a separate connection against it.
+
+Verified via the same full `go build ./...` / `go vet ./...` pass
+described above - all three features (Supply Crisis, Exploration,
+Diplomacy) were built and verified together in one pass since they
+touch overlapping files (`economy.go`, `combat.go`, `main.go`).
+
+---
+
 ## 4. Next in line (recommended order)
 
-1. Item 10/11 — world exploration + diplomacy (biggest remaining
-   item, needs new schema).
-2. Item 13 — Admin panel consolidation (mechanical, do last).
-3. Wire Supply Crisis into the Market Exchange's actual sale-price
-   calculation (currently flavor-only - see item 12 above).
+1. Item 13 — Admin panel consolidation (the only item left on the
+   original Phase 7 list).
+2. Exploration/Diplomacy follow-ups worth a look if picking this back
+   up: an in-panel /diplomacy button in EconomyNavigation (currently
+   command-only, same as /federations); a `clan_id` index on
+   `user_clans` if diplomacy queries ever show up slow in practice;
+   possibly letting Federations (not just individual Clans) hold
+   pacts, once there's real federation-level play to justify it.
 

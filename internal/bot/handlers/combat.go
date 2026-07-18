@@ -732,7 +732,7 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 
 		attackerUser := &telebot.User{ID: attackerUserID}
 		_, _ = c.Bot().Send(attackerUser, "💥 SPY INTERCEPTED: Your spy satellite was intercepted and destroyed by defender air defense interceptor systems! Telemetry lost.")
-		
+
 		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🛡️ SUCCESS: Drone intercepted hostile satellite! (%d%% Success Probability)", int(interceptChance*100))})
 		return c.Send(fmt.Sprintf("🛡️ SUCCESS: Your Interceptor Drone destroyed the spy satellite! (%d%% probability hit). Telemetry was vaporized.", int(interceptChance*100)))
 	}
@@ -880,7 +880,7 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
-		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0, destroyers = 0, bombers = 0, battlecruisers = 0, deathstars = 0, liberators = 0, wraiths = 0`, 
+		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0, destroyers = 0, bombers = 0, battlecruisers = 0, deathstars = 0, liberators = 0, wraiths = 0`,
 		sender.ID, defenderCampID,
 	)
 
@@ -1369,6 +1369,18 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		defRegion = myRegion
 	}
 
+	// Phase 7 (item 11): diplomacy. An active alliance or non-aggression
+	// pact between the attacker's and defender's Clans blocks the raid
+	// outright, mirroring how clan membership already protects clanmates.
+	if !isAI {
+		var myClanID, defenderClanID sql.NullString
+		_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&myClanID)
+		_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", defenderUserID).Scan(&defenderClanID)
+		if myClanID.Valid && defenderClanID.Valid && HasActivePact(ctx, tx, myClanID.String, defenderClanID.String) {
+			return c.Respond(&telebot.CallbackResponse{Text: "🕊️ DIPLOMATIC IMMUNITY: Your Clan has an active pact with the target's Clan. Break it with /break_pact first if you wish to attack."})
+		}
+	}
+
 	var marchingMinutes float64
 
 	if defRegion != myRegion {
@@ -1440,7 +1452,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6,
 		    destroyers = destroyers - $8, bombers = bombers - $9, battlecruisers = battlecruisers - $10, deathstars = deathstars - $11,
 		    liberators = liberators - $12, wraiths = wraiths - $13
-		WHERE encampment_id = $7`, 
+		WHERE encampment_id = $7`,
 		mobSoldiers, mobMechs, mobBuggies, mobShips, mobJets, mobNukes, myCampID, mobDestroyers, mobBombers, mobBC, mobDS, mobLiberators, mobWraiths,
 	)
 
@@ -1477,7 +1489,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 CONNECTING ENGINE SYSTEMS...\n[▰▱▱▱▱▱▱▱▱▱] 10%\n⚡ Thrust vector buffer allocated.")
 		time.Sleep(350 * time.Millisecond)
-		
+
 		weatherStatus := "Baseline parameters nominal."
 		switch activeWeather {
 		case "radiation_storm":
@@ -1491,10 +1503,10 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		case "sandstorm":
 			weatherStatus = "🌪️ Sandstorm active. Navigation and targeting accuracy reduced."
 		}
-		
+
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 ANALYSIS ENGINE: WEATHER VECTORS...\n[▰▰▰▰▱▱▱▱▱▱] 40%%\n🌍 Weather Status: %s", weatherStatus))
 		time.Sleep(350 * time.Millisecond)
-		
+
 		fleetStatus := "Default land speed"
 		if mobBuggies > 0 {
 			fleetStatus = "🚗 Buggy logistics speed multiplier applied (+25%% speed)."
@@ -1504,7 +1516,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		} else if mobShips > 0 {
 			fleetStatus = "⛵ Clipper Ship sea transit structures secured."
 		}
-		
+
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 TELEMETRY ENGINE: FLEET ALIGNMENT...\n[▰▰▰▰▰▰▰▰▱▱] 80%%\n⚙️ Engine Sync: %s", fleetStatus))
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "📡 SECURE TRANSMISSION ESTABLISHED...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🚀 Handshake complete! Campaign deployed. Coordinates locked on targeting scanners.")
@@ -1581,7 +1593,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		if state == "staged" {
 			var creatorSols, creatorMechs int
 			_ = tx.QueryRowContext(ctx, "SELECT soldiers_mobilized, mechs_mobilized FROM raid_forces WHERE raid_id = $1", raidID).Scan(&creatorSols, &creatorMechs)
-			
+
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", creatorSols, creatorMechs, attackerID)
 
 			rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", raidID)
@@ -1610,7 +1622,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			}
 
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", raidID)
-			
+
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🤝 Co-Op lobby cancelled! Mobilized forces refunded."})
 			return c.Send("↩️ Co-Op lobby dismantled. All draft troops and helper contributions have returned safely.", keyboards.MainNavigation())

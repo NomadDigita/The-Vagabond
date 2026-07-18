@@ -23,9 +23,9 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
-	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
+	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"gopkg.in/telebot.v3"
@@ -487,6 +487,48 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS continent VARCHAR(50) NOT NULL DEFAULT 'Global';`,
 		`CREATE INDEX IF NOT EXISTS idx_world_events_continent ON world_events(continent, expires_at);`,
 
+		// Phase 7 (item 10): World Exploration. Sites rotate in per
+		// continent (same cadence/pattern as world_events above) and
+		// are claimed first-come-first-served by whichever outpost
+		// dispatches an expedition and survives the timer first.
+		`CREATE TABLE IF NOT EXISTS exploration_sites (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			continent VARCHAR(50) NOT NULL,
+			site_name VARCHAR(255) NOT NULL,
+			site_type VARCHAR(50) NOT NULL,
+			reward_type VARCHAR(50) NOT NULL,
+			reward_amount DOUBLE PRECISION NOT NULL,
+			expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			claimed_by UUID REFERENCES encampments(id) ON DELETE SET NULL,
+			claimed_at TIMESTAMP WITH TIME ZONE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_exploration_sites_continent ON exploration_sites(continent, claimed_by, expires_at);`,
+
+		`CREATE TABLE IF NOT EXISTS exploration_dispatches (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			site_id UUID NOT NULL UNIQUE REFERENCES exploration_sites(id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			resolve_time TIMESTAMP WITH TIME ZONE NOT NULL
+		);`,
+
+		// Phase 7 (item 11): Diplomacy. Mirrors clan_wars's clan_a/clan_b
+		// shape, but for peaceful pacts instead of conflicts. A pact only
+		// takes effect (blocks raids - see combat.go's launch check) once
+		// status = 'active', which requires the receiving Clan King to
+		// accept a 'pending' proposal.
+		`CREATE TABLE IF NOT EXISTS clan_diplomacy (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			clan_a_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			clan_b_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			pact_type VARCHAR(50) NOT NULL,
+			status VARCHAR(50) DEFAULT 'pending',
+			proposed_by BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			responded_at TIMESTAMP WITH TIME ZONE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_clan_diplomacy_clans ON clan_diplomacy(clan_a_id, clan_b_id, status);`,
+
 		`CREATE TABLE IF NOT EXISTS campaign_drafts (
 			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
 			target_id VARCHAR(50) NOT NULL,
@@ -790,6 +832,8 @@ func main() {
 	profile := handlers.NewProfileHandler(db)
 	ether := handlers.NewEtherHandler(db)
 	jobs := handlers.NewJobsHandler(db)
+	exploration := handlers.NewExplorationHandler(db)
+	diplomacy := handlers.NewDiplomacyHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
@@ -875,6 +919,11 @@ func main() {
 	bot.Handle("/fed_found", federation.HandleFoundFederation)
 	bot.Handle("/fed_join", federation.HandleJoinFederation)
 	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
+	bot.Handle("/explore", exploration.HandleExplorePanel)
+	bot.Handle("/diplomacy", diplomacy.HandleDiplomacyPanel)
+	bot.Handle("/ally", diplomacy.HandleProposeAlliance)
+	bot.Handle("/nap", diplomacy.HandleProposeNAP)
+	bot.Handle("/break_pact", diplomacy.HandleBreakPact)
 	bot.Handle("/description", profile.HandleDescription)
 	bot.Handle("/settings", profile.HandleSettings)
 	bot.Handle("/refer", profile.HandleRefer)
@@ -952,6 +1001,7 @@ func main() {
 	bot.Handle("🪙 Financial Vault", econ.HandleFinancialVault)
 	bot.Handle("🛡️ Clan Alliances", clan.HandleClanPanel)
 	bot.Handle("🏟️ Combat Arena", arena.HandleArenaPanel)
+	bot.Handle("🧭 World Exploration", exploration.HandleExplorePanel)
 	bot.Handle("☢️ Strategic Silo", silo.HandleSiloPanel)
 	bot.Handle("💱 Market Exchange", exchange.HandleExchangePanel)
 	bot.Handle("🪖 Recruit Troops", factory.HandleRecruitPanel)
@@ -971,6 +1021,8 @@ func main() {
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)
+	bot.Handle("\fexplore_dispatch", exploration.HandleDispatchExpeditionCallback)
+	bot.Handle("\fdiplo_respond", diplomacy.HandleDiplomacyRespondCallback)
 	bot.Handle("\fclan_apply", clan.HandleApplyToClanCallback)
 	bot.Handle("\fclan_apps", clan.HandleApplicationsInboxCallback)
 	bot.Handle("\fclan_app_accept", clan.HandleAcceptApplicationCallback)

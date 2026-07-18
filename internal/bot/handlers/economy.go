@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -85,6 +86,7 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 
 	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
+
 // buttons directly into the Vault or Market sub-panels, so players don't
 // have to hunt through the bottom reply-keyboard menu to get there.
 func (h *EconomyHandler) HandleTradeHubNavCallback(c telebot.Context) error {
@@ -315,14 +317,33 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 
 	storageCap := storagecap.CapFor(ctx, tx, campID)
 
+	// Phase 7 (item 12): Supply Crisis depresses sale payouts and raises
+	// purchase costs for camps in the affected continent - logistics
+	// networks in disarray on both sides of the transaction.
+	var campRegion string
+	_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", campID).Scan(&campRegion)
+	inSupplyCrisis := world.ActiveEventFor(ctx, tx, campRegion) == "supply_crisis"
+
+	sellMultiplier := 1.0
+	buyMultiplier := 1.0
+	if inSupplyCrisis {
+		sellMultiplier = 0.75 // -25% payout
+		buyMultiplier = 1.25  // +25% cost
+	}
+
 	switch item {
 	case "sell_scrap":
 		if scrap < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap to convert."})
 		}
-		newDollars, _ := storagecap.Clamp(dollars, 50.0, storageCap)
+		payout := 50.0 * sellMultiplier
+		newDollars, _ := storagecap.Clamp(dollars, payout, storageCap)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 100.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Scrap for $50.0 Cash!"})
+		respText := fmt.Sprintf("💵 Exchanged 100 Scrap for $%.1f Cash!", payout)
+		if inSupplyCrisis {
+			respText += "\n📉 Supply Crisis: sale prices depressed."
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: respText})
 
 	case "sell_metal":
 		var metal float64
@@ -330,9 +351,14 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		if metal < 100.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Metal to convert."})
 		}
-		newDollars, _ := storagecap.Clamp(dollars, 80.0, storageCap)
+		payout := 80.0 * sellMultiplier
+		newDollars, _ := storagecap.Clamp(dollars, payout, storageCap)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 100.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 100 Metal for $80.0 Cash!"})
+		respText := fmt.Sprintf("💵 Exchanged 100 Metal for $%.1f Cash!", payout)
+		if inSupplyCrisis {
+			respText += "\n📉 Supply Crisis: sale prices depressed."
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: respText})
 
 	case "sell_crystal":
 		var crystal float64
@@ -340,38 +366,46 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		if crystal < 50.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Crystal to convert."})
 		}
-		newDollars, _ := storagecap.Clamp(dollars, 120.0, storageCap)
+		payout := 120.0 * sellMultiplier
+		newDollars, _ := storagecap.Clamp(dollars, payout, storageCap)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 50.0, dollars = $1 WHERE encampment_id = $2", newDollars, campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💵 Exchanged 50 Crystal for $120.0 Cash!"})
+		respText := fmt.Sprintf("💵 Exchanged 50 Crystal for $%.1f Cash!", payout)
+		if inSupplyCrisis {
+			respText += "\n📉 Supply Crisis: sale prices depressed."
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: respText})
 
 	case "buy_metal":
-		if dollars < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $100."})
+		cost := 100.0 * buyMultiplier
+		if dollars < cost {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Funds! Cost is $%.0f.", cost)})
 		}
 		var metal float64
 		_ = tx.QueryRowContext(ctx, "SELECT metal FROM resources WHERE encampment_id = $1", campID).Scan(&metal)
 		newMetal, _ := storagecap.Clamp(metal, 50.0, storageCap)
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 100.0, metal = $1 WHERE encampment_id = $2", newMetal, campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1, metal = $2 WHERE encampment_id = $3", cost, newMetal, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🔩 Purchased 50 tons of Metal!"})
 
 	case "buy_crystal":
-		if dollars < 200.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $200."})
+		cost := 200.0 * buyMultiplier
+		if dollars < cost {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Funds! Cost is $%.0f.", cost)})
 		}
 		var crystal float64
 		_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1", campID).Scan(&crystal)
 		newCrystal, _ := storagecap.Clamp(crystal, 20.0, storageCap)
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 200.0, crystal = $1 WHERE encampment_id = $2", newCrystal, campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1, crystal = $2 WHERE encampment_id = $3", cost, newCrystal, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💎 Purchased 20 kg of Crystal!"})
 
 	case "buy_hydrogen":
-		if dollars < 150.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Funds! Cost is $150."})
+		cost := 150.0 * buyMultiplier
+		if dollars < cost {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Funds! Cost is $%.0f.", cost)})
 		}
 		var hydrogen float64
 		_ = tx.QueryRowContext(ctx, "SELECT hydrogen FROM resources WHERE encampment_id = $1", campID).Scan(&hydrogen)
 		newHydrogen, _ := storagecap.Clamp(hydrogen, 40.0, storageCap)
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - 150.0, hydrogen = $1 WHERE encampment_id = $2", newHydrogen, campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1, hydrogen = $2 WHERE encampment_id = $3", cost, newHydrogen, campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🎈 Purchased 40 L of Hydrogen Fuel!"})
 	}
 

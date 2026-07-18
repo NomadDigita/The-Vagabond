@@ -187,6 +187,123 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
+// explorationSiteTemplate is one entry in the pool spawnExplorationSites
+// rolls from - a flavor name/type paired with a reward currency and
+// amount range.
+type explorationSiteTemplate struct {
+	siteType   string
+	namePrefix string
+	rewardType string
+	minAmount  float64
+	maxAmount  float64
+}
+
+var explorationTemplates = []explorationSiteTemplate{
+	{"Ruins", "Ancient Ruins", "ether", 15, 40},
+	{"Cache", "Supply Cache", "metal", 200, 500},
+	{"Cache", "Supply Cache", "crystal", 80, 200},
+	{"Artifact", "Tech Artifact", "ether", 30, 70},
+	{"Beacon", "Signal Beacon", "dollars", 500, 1500},
+}
+
+const explorationSiteRollChance = 0.15
+const explorationSiteDuration = 3 * time.Hour
+
+// spawnExplorationSites is Phase 7 item 10's world-exploration engine.
+// Same shape as the weather engine's per-continent roll: each continent
+// gets a 15% chance per tick to spawn a new undiscovered site, but only
+// if it doesn't already have one waiting to be claimed (keeps the map
+// from flooding with sites nobody has time to reach).
+func (e *Engine) spawnExplorationSites(ctx context.Context, tx *sql.Tx) error {
+	for _, continent := range world.Continents {
+		var hasOpenSite bool
+		err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM exploration_sites WHERE continent = $1 AND claimed_by IS NULL AND expires_at > CURRENT_TIMESTAMP)",
+			continent).Scan(&hasOpenSite)
+		if err != nil {
+			continue
+		}
+		if hasOpenSite {
+			continue
+		}
+		if rand.Float64() >= explorationSiteRollChance {
+			continue
+		}
+
+		tmpl := explorationTemplates[rand.Intn(len(explorationTemplates))]
+		sector := rand.Intn(99) + 1
+		siteName := fmt.Sprintf("%s (Sector %d)", tmpl.namePrefix, sector)
+		rewardAmount := tmpl.minAmount + rand.Float64()*(tmpl.maxAmount-tmpl.minAmount)
+		expiresAt := time.Now().UTC().Add(explorationSiteDuration)
+
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO exploration_sites (continent, site_name, site_type, reward_type, reward_amount, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
+			continent, siteName, tmpl.siteType, tmpl.rewardType, rewardAmount, expiresAt)
+		if err != nil {
+			log.Printf("Failed inserting exploration site for %s: %v", continent, err)
+			continue
+		}
+
+		headline := fmt.Sprintf("🧭 UNCHARTED SIGNAL: A %s has been detected over %s. First outpost to dispatch an expedition claims it - check /explore.", siteName, continent)
+		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
+			log.Printf("Failed writing exploration-site news headline: %v", err)
+		}
+	}
+	return nil
+}
+
+// resolveExplorationDispatches credits the reward and marks the site
+// claimed for every expedition whose resolve_time has passed.
+func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT d.id, d.site_id, d.encampment_id, d.user_id, s.site_name, s.reward_type, s.reward_amount
+		FROM exploration_dispatches d
+		JOIN exploration_sites s ON s.id = d.site_id
+		WHERE d.resolve_time <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return fmt.Errorf("failed fetching resolved exploration dispatches: %w", err)
+	}
+
+	type resolvedDispatch struct {
+		id           string
+		siteID       string
+		encampmentID string
+		userID       int64
+		siteName     string
+		rewardType   string
+		rewardAmount float64
+	}
+	var dispatches []resolvedDispatch
+	for rows.Next() {
+		var d resolvedDispatch
+		if err := rows.Scan(&d.id, &d.siteID, &d.encampmentID, &d.userID, &d.siteName, &d.rewardType, &d.rewardAmount); err == nil {
+			dispatches = append(dispatches, d)
+		}
+	}
+	rows.Close()
+
+	for _, d := range dispatches {
+		storageCap := storagecap.CapFor(ctx, tx, d.encampmentID)
+
+		var current float64
+		column := d.rewardType // "metal", "crystal", "ether", or "dollars" - all valid column names on resources.
+		_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", column), d.encampmentID).Scan(&current)
+		newAmount, _ := storagecap.Clamp(current, d.rewardAmount, storageCap)
+		_, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", column), newAmount, d.encampmentID)
+		if err != nil {
+			log.Printf("Failed crediting exploration reward for dispatch %s: %v", d.id, err)
+			continue
+		}
+
+		_, _ = tx.ExecContext(ctx, "UPDATE exploration_sites SET claimed_by = $1, claimed_at = CURRENT_TIMESTAMP WHERE id = $2", d.encampmentID, d.siteID)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM exploration_dispatches WHERE id = $1", d.id)
+
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", d.userID,
+			fmt.Sprintf("🧭✅ EXPEDITION SUCCESSFUL: Your outpost has claimed %s! +%.0f %s credited to your reserves.", d.siteName, d.rewardAmount, d.rewardType))
+	}
+	return nil
+}
+
 // autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
 // encampment with auto_scan_enabled, pick one random rival outpost and
 // send a lightweight scan report - automating what /scout does manually.
@@ -618,8 +735,14 @@ func (e *Engine) ProcessTick() {
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
+		{"exploration_spawn", e.spawnExplorationSites},
+		{"exploration_resolve", e.resolveExplorationDispatches},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
+			return err
+		}},
+		{"expired_exploration_sites", func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "DELETE FROM exploration_sites WHERE claimed_by IS NULL AND expires_at < CURRENT_TIMESTAMP")
 			return err
 		}},
 	}
