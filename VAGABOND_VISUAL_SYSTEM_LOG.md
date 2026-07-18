@@ -175,8 +175,11 @@ assets/visual-system/
 │   ├── build_icons.py          regenerates svg/ + png/ from scratch
 │   ├── animate_electricity.py  electricity's animation (v5, red/gold)
 │   ├── animate_pilot_batch.py  the other 9 icons' animations (v6)
-│   ├── telegram_upload.py      real upload/verify script (unrun, §8)
-│   └── verify_animated_pilot.py  narrow "does animation work at all"
+│   ├── telegram_upload.py      real upload/verify script (confirmed
+│   │   working, v8 — all 10 icons live)
+│   ├── delete_stale_stickers.py  dry-run-by-default cleanup for the
+│   │   duplicate-sticker mess (v8, §10); needs --confirm to delete
+│   ├── verify_animated_pilot.py  narrow "does animation work at all"
 │       smoke test against an isolated test set (§10)
 ├── previews/
 │   ├── preview_sheet_v3.png     static contact sheet, dark bg
@@ -491,6 +494,18 @@ ground truth, not this log's interpretation of it. 25MB video +
   never repeat a palette" is honest and actionable. Proceeding on that
   reading — see the next checkpoint entries for what was actually
   built against it.
+
+  **Checkpoint 2: `pipeline/delete_stale_stickers.py`.** Same network
+  restriction as `telegram_upload.py` (§8, unchanged) — written here,
+  must be run by the project owner. Dry-run by default (prints what it
+  would delete, changes nothing); needs an explicit `--confirm` flag
+  to actually call `deleteStickerFromSet`. Decides what's "stale" by
+  diffing the live set against `mapping.json`'s known-good
+  `custom_emoji_id` values — anything in the set that doesn't match a
+  tracked icon is a leftover from the pre-replace-logic test runs.
+  Refuses to delete anything if `mapping.json` is missing or has fewer
+  than 10 entries, specifically so it can't be run against stale
+  ground truth and accidentally delete a real icon.
 
 ---
 
