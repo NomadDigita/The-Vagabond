@@ -41,6 +41,19 @@ DEFS = '''
     <stop offset="0.65" stop-color="#c72a1e"/>
     <stop offset="1" stop-color="#420a07"/>
   </radialGradient>
+  <radialGradient id="gold" cx="35%" cy="25%" r="90%">
+    <stop offset="0" stop-color="#fffbe0"/>
+    <stop offset="0.35" stop-color="#ffe066"/>
+    <stop offset="0.7" stop-color="#e0a824"/>
+    <stop offset="1" stop-color="#5c3d06"/>
+  </radialGradient>
+  <radialGradient id="violet" cx="34%" cy="24%" r="95%">
+    <stop offset="0" stop-color="#f2e9ff"/>
+    <stop offset="0.28" stop-color="#b98aff"/>
+    <stop offset="0.58" stop-color="#6c2fb8"/>
+    <stop offset="0.85" stop-color="#2c0f5c"/>
+    <stop offset="1" stop-color="#0c0420"/>
+  </radialGradient>
   <radialGradient id="bolt" cx="35%" cy="28%" r="85%">
     <stop offset="0" stop-color="#ffffff"/>
     <stop offset="0.35" stop-color="#c3ccd4"/>

@@ -65,8 +65,8 @@ the ocean in one sitting; it produces worse art, not more of it.
 |---|---|
 | Emoji usage audit (`internal/`, `*.go`, `*.md`, `*.sql`) | **Done** — 173 unique emoji, 1,962 occurrences, 46 files. Script not yet committed (was a one-off `python3` scan; worth productionizing if the full 173 gets built out — see §7). |
 | Art direction / style guide | **Done, v5.** Multi-tone (2, occasionally 3, palette colors per icon) locked in — see §2. |
-| Pilot icon batch (10 of 173), static | **Done, v3.** SVG + PNG (100/128/256/512px) in `assets/visual-system/`. |
-| Pilot icon batch (10 of 173), animated | **Confirmed, v6/v8.** All 10 render and animate correctly in real Telegram (confirmed by project owner, v8). Live set also has ~10 leftover static duplicates from earlier test runs — not yet cleaned up, see the new `delete_stale_stickers.py` (§10/v8). |
+| Pilot icon batch (10 of 173), static | **Done, v3.** SVG + PNG (100/128/256/512px) in `assets/visual-system/`. `oracle` (11th) is animated-only, no static variant. |
+| Pilot icon batch, animated | **11 icons now (10 + `oracle`). Confirmed live in Telegram as of v6/v8: the original 10.  NOT yet verified: the v9 "liquid glass" upgrade (chromatic rim + depth particles) applied to all 9 non-electricity icons, and `oracle` as a new 11th icon — both pushed to the repo but unrun through `telegram_upload.py` yet.** See v8 checkpoint 6 in §6. Live set also has ~10 leftover static duplicates from earlier test runs — not yet cleaned up, see `delete_stale_stickers.py` (§10/v8). |
 | Remaining ~163 icons | **Not started.** Next candidate once the animated pilot batch is confirmed in real Telegram (§8). |
 | Telegram custom-emoji sticker-set upload script | **Written, updated for animated icons, still unrun** (§8/§10 — this sandbox cannot reach `api.telegram.org`). `telegram_upload.py` now uploads video-format for any icon with a WEBM and falls back to static PNG otherwise, and replaces (not duplicates) anything already in the set. |
 | Go source: swap literal emoji → `custom_emoji_id` entities | **Not started.** Needs `mapping.json` populated by an actual `telegram_upload.py` run (owner-side) and a helper in `internal/bot` — proposed but not built, see §7. |
@@ -167,10 +167,11 @@ without a reason):
 assets/visual-system/
 ├── svg/                  10 source SVGs, v3 style (static)
 ├── png/                  10 icons × 4 sizes (100/128/256/512px)
-├── animated/             10 icons, WEBM/VP9/alpha, 100×100, ≤3s loop
+├── animated/             11 icons, WEBM/VP9/alpha, 100×100, ≤3s loop
 │   └── <name>/<name>.webm   one per pilot icon (v4: electricity only;
-│       v6: all 10). `frames/` subdirs are gitignored build scratch,
-│       regenerate via the pipeline scripts below, not committed.
+│       v6: 10 total; v8/v9: `oracle` added as the 11th). `frames/`
+│       subdirs are gitignored build scratch, regenerate via the
+│       pipeline scripts below, not committed.
 ├── animated/electricity_glass_prototype/   v8 "liquid glass" material
 │   prototype, NOT the live confirmed electricity.webm — separate path
 │   on purpose, awaiting owner sign-off (§6 v8 checkpoint 4)
@@ -195,6 +196,8 @@ assets/visual-system/
 │   ├── preview_sheet_v3.png     static contact sheet, dark bg
 │   ├── all10_preview.mp4        all 10 animated icons tiled + looping,
 │   │   dark bg, for reviewing the full set together (v6)
+│   ├── all11_v9_preview.mp4     all 11 (10 + oracle) with the v9 glass
+│   │   upgrade applied, 4x3 grid, dark bg (v8 checkpoint 6)
 │   └── electricity_glass_prototype_vs_original.mp4   literal
 │       side-by-side of the v8 liquid-glass prototype vs. the live
 │       confirmed version, for owner sign-off before scaling to all 10
@@ -643,6 +646,64 @@ ground truth, not this log's interpretation of it. 25MB video +
   reaction to this specific checkpoint before doing anything with the
   other 9** — see `previews/oracle_and_glass_v2_preview.mp4` for both
   prototypes side by side.
+
+  **Checkpoint 6 — rollout to all 9, plus `oracle` promoted to a real
+  11th icon.** Project owner didn't object to the `oracle`/glass
+  direction and said to continue (also noted GitHub's inline video
+  preview looks worse than actual playback — correct, and consistent
+  with why Telegram itself, not the GitHub embed, has been treated as
+  ground truth throughout this log). Read as approval to scale the v9
+  technique to the other 9 icons, per the standing rule of proving one
+  before scaling.
+
+  Rather than redesigning each icon's core motion (already
+  subject-specific and confirmed live, see v6), layered the v9 glass
+  additions on top via a `GLASS_UPGRADE` config + wrapper in
+  `pipeline/animate_pilot_batch.py`: each of the 9 gets its own
+  chromatic-dispersion rim-light pair and 3 depth-parallax particles,
+  with **every icon's rim color pair distinct from every other's** —
+  directly extending the color-pairing discipline from a body-material
+  question (v6/v8) to this new decorative layer too. Concretely: no
+  reused pair among `(amber,red)`, `(gold,red)`, `(cyan,violet)`,
+  `(amber,gold)`, `(cyan,teal)`, `(gold,white)`, `(cyan,magenta)`,
+  `(red,white)`, `(rust,gold)` across warning/failure/shield/transport/
+  ai_mech/gear/satellite/combat/scrap respectively. File sizes grew
+  modestly (extra geometry per frame): totals now `warning` 27KB,
+  `failure` 14KB, `shield` 18KB, `transport` 27KB, `ai_mech` 26KB,
+  `gear` 55KB, `satellite` 47KB, `combat` 32KB, `scrap` 33KB — all
+  still trivial for Telegram's limits.
+
+  Checked actual renders at true 100×100, not just assumed the
+  technique would look the same as the `electricity`/`oracle`
+  prototypes: it does — chromatic fringing is clearly visible on
+  `shield` and `combat` especially. `satellite` shows a green color
+  blotch at small size; checked and confirmed this is the **pre-existing
+  chroma-subsampling artifact** already noted when the original v6 grid
+  preview was reviewed (yuva420p at 100×100 has real color-bleed limits
+  at this resolution) — not a new bug introduced by this checkpoint.
+  Built `previews/all11_v9_preview.mp4` (4×3 grid, all 11 icons
+  including `electricity` and `oracle`) to review the whole set
+  together.
+
+  **`oracle` promoted from prototype to the real 11th icon:** moved
+  `animate_oracle_prototype.py` → `animate_oracle.py`, output path
+  `animated/oracle_prototype/` → `animated/oracle/oracle.webm` (the
+  old prototype path removed — git history still has it if needed),
+  registered in `telegram_upload.py`'s `ICONS` dict (emoji: 🔮, the
+  closest existing Unicode emoji this is meant to eventually replace in
+  bot text — the *design* is original, see `animate_oracle.py`'s
+  header). `delete_stale_stickers.py`'s `EXPECTED_ICON_COUNT` bumped
+  10→11 to match. `violet` (introduced for `oracle`) and `gold`
+  (introduced back in v5 for `electricity` but never promoted) are now
+  both in `build_icons.py`'s shared static-build `<defs>`, per the
+  skill's "never invent inline, add to the shared block" rule — so any
+  future static icon can reuse either without redefining them.
+
+  **Still unrun in real Telegram** (§8's restriction, unchanged): none
+  of this checkpoint's output — the 9 upgraded icons or `oracle` as a
+  registered 11th — has been uploaded or seen live yet. Don't read
+  "rolled out" as "verified"; that's the exact distinction v7 already
+  had to correct once.
 
 ---
 

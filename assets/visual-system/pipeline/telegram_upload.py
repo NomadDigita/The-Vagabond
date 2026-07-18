@@ -96,6 +96,7 @@ ICONS = {
     "combat":      "\u2694",   # ⚔
     "electricity": "\u26A1",   # ⚡
     "scrap":       "\U0001F529",  # 🔩
+    "oracle":      "\U0001F52E",  # 🔮 (original design, not a copy — see animate_oracle.py's header)
 }
 
 # Icons that have an animated WEBM (VP9, alpha, 100x100, <3s, looped) in

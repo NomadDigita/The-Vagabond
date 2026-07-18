@@ -1,11 +1,10 @@
 """
-animate_oracle_prototype.py — v9 prototype, 11th icon for testing.
+animate_oracle.py — v9, promoted from prototype to the 11th real icon.
 
-Project owner (this session) asked for the crystal-ball-style reference
-piece to get its own original Vagabond icon, and for the glass
-technique to be pushed as far as it can go: chromatic rim light
-(dispersion), multi-depth parallax particles, and a genuinely distinct
-hero motif rather than a shared silhouette recolored.
+Was animate_oracle_prototype.py; the project owner asked to continue
+past the sign-off checkpoint, so this now renders to the real
+animated/oracle/oracle.webm path and oracle is registered in
+telegram_upload.py's ICONS dict — no longer just a testing prototype.
 
 HONEST FRAMING, READ BEFORE ASSUMING THIS MATCHES THE REFERENCE
 -----------------------------------------------------------------
@@ -44,8 +43,8 @@ rather than reinventing it (see SKILL.md's "never invent inline" rule).
 import cairosvg, os, math, pathlib, random, subprocess
 
 HERE = pathlib.Path(__file__).resolve().parent
-OUT = str(HERE.parent / "animated" / "oracle_prototype" / "frames")
-WEBM_OUT = HERE.parent / "animated" / "oracle_prototype" / "oracle_prototype.webm"
+OUT = str(HERE.parent / "animated" / "oracle" / "frames")
+WEBM_OUT = HERE.parent / "animated" / "oracle" / "oracle.webm"
 os.makedirs(OUT, exist_ok=True)
 random.seed(23)
 
