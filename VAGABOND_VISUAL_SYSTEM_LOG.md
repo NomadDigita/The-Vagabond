@@ -25,6 +25,34 @@ the bot. If you're an AI or human picking this up cold:
   assets and the script that generates them only, until §5 says
   otherwise.
 
+## v10 ground truth — 2026-07-18
+
+This correction supersedes conflicting older statements in §§1, 5, 8, 10,
+and 11. It exists because the preceding work log contained stale claims about
+the upload path and could otherwise cause a destructive rerun.
+
+- The 11 legacy SVG/WebM pilot assets remain unchanged. Their current live
+  state is not inferred here; any claim of Telegram verification must identify
+  the exact asset version and client test.
+- A separate, original **Blender-rendered v10 Oracle** now exists at
+  `assets/visual-system/animated/oracle_3d_v10/oracle_3d_v10.webm`, with
+  matching 100/128/256/512px transparent PNGs and an editable `.blend` source.
+  It is locally render-verified but **has not been uploaded to Telegram**.
+  See `assets/visual-system/V10_ORACLE_3D_TEST_REPORT.md` for the complete
+  source, toolchain, visual-QA, and media-contract record.
+- `pipeline/telegram_upload.py` and `verify_animated_pilot.py` must not be
+  used for production or test uploads from the known duplicate-filled pilot
+  set. Their positional mapping assumptions can associate an incorrect
+  `custom_emoji_id` with an icon or create duplicates. The legacy uploader now
+  refuses to run.
+- The approved test path is `pipeline/telegram_fresh_test_set.py`. It is
+  dry-run by default, creates exactly one fresh isolated v10 Oracle set only
+  with `--apply`, and refuses to touch an existing set. Its owner-side sequence
+  is documented in `assets/visual-system/TELEGRAM_TEST_RUNBOOK.md`.
+- `mapping.json` remains intentionally absent. There is no Go integration and
+  no claim that v10 is a production replacement until the fresh client test is
+  approved and a separate deterministic production-pack mapping design exists.
+
 ---
 
 ## 0. Source brief
