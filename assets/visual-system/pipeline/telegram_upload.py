@@ -52,9 +52,14 @@ WHAT THIS SCRIPT DOES, IN ORDER
 5. Prints a plain-language pass/fail summary. Does NOT touch any game
    code, table, or existing sticker set.
 
-Re-running: safe. If the set already exists (same short_name), this
-script adds any missing stickers to it rather than failing outright,
-but will not delete or recreate what's already there.
+Re-running: safe. Uses replaceStickerInSet for any icon already present
+(matched against mapping.json), so re-running after a design change
+(e.g. static -> animated) actually updates it instead of piling on a
+duplicate. Icons with a WEBM in assets/visual-system/animated/<name>/
+upload as format="video"; everything else uploads as format="static"
+from png/. Never deletes anything — if the set already has more
+stickers than tracked icons (the pre-existing duplicate mess, see log
+§10), this script leaves that alone and prints a note.
 """
 
 import os
@@ -157,98 +162,116 @@ def send_verification_message(mapping):
     print("icon's PNG content or delete it from the set first via deleteStickerFromSet.")
 
 
-def main():
-    # If a previous run already got through the upload/create-set phase
-    # (mapping.json exists with all 10 icons), don't redo that — Telegram
-    # will just bounce duplicate-sticker errors. Go straight to sending
-    # the verification message so a fix to *that* step alone is a fast
-    # re-run, not a full re-upload.
-    if MAPPING_PATH.exists():
-        with open(MAPPING_PATH) as f:
-            existing = json.load(f)
-        if set(existing.keys()) == set(ICONS.keys()):
-            print(f"Found complete {MAPPING_PATH.name} from a previous run — "
-                  f"skipping upload/create, sending verification message only.")
-            send_verification_message(existing)
-            return
+def upload_one(name, emoji):
+    """Upload a single icon's file (video if animated, else static PNG),
+    returning (file_id, format_str) for use in addStickerToSet/
+    replaceStickerInSet/createNewStickerSet."""
+    is_animated = name in ANIMATED_ICONS
+    if is_animated:
+        path = ANIMATED_DIR / name / f"{name}.webm"
+        fmt = "video"
+    else:
+        path = PNG_DIR / f"{name}_100.png"
+        fmt = "static"
+    if not path.exists():
+        print(f"  SKIP {name}: {path} not found")
+        return None
+    print(f"  Uploading {name} ({fmt}, {path.name})...")
+    with open(path, "rb") as f:
+        uploaded = call(
+            "uploadStickerFile",
+            user_id=OWNER_ID,
+            sticker_format=fmt,
+            files={"sticker": f},
+        )
+    return uploaded["file_id"], fmt
 
+
+def main():
     me = call("getMe")
     bot_username = me["username"]
     set_name = f"vagabond_pilot_by_{bot_username}"
     print(f"Bot: @{bot_username}  |  Sticker set short_name: {set_name}")
 
+    # Does the set already exist? If so, fetch it so we can replace
+    # (not duplicate) any icon that's already there — this is the fix
+    # for the "known mess" in VAGABOND_VISUAL_SYSTEM_LOG.md §10: an
+    # earlier double-run used addStickerToSet, which doesn't reject
+    # repeats the way createNewStickerSet rejects a repeat set name.
+    try:
+        existing_set = call("getStickerSet", name=set_name)
+        # Telegram's custom-emoji stickers don't carry our icon name back,
+        # so we rely on upload order matching ICONS order — same
+        # assumption mapping.json already makes. If mapping.json is
+        # stale/missing, fall back to treating the set as empty (adds
+        # only; won't dedupe, but also won't crash).
+        existing_names = []
+        if MAPPING_PATH.exists():
+            with open(MAPPING_PATH) as f:
+                existing_names = list(json.load(f).keys())
+        existing_file_ids = {
+            n: s["file_id"]
+            for n, s in zip(existing_names, existing_set["stickers"])
+        }
+        print(f"Set {set_name} already exists with {len(existing_set['stickers'])} "
+              f"stickers; {len(existing_file_ids)} matched to known icon names.")
+    except RuntimeError:
+        existing_set = None
+        existing_file_ids = {}
+        print(f"Set {set_name} does not exist yet — will create it.")
+
     mapping = {}
-    stickers_payload = []
+    created_set = existing_set is not None
 
     for name, emoji in ICONS.items():
-        png_path = PNG_DIR / f"{name}_100.png"
-        if not png_path.exists():
-            print(f"  SKIP {name}: {png_path} not found (run build_icons.py first)")
+        result = upload_one(name, emoji)
+        if result is None:
             continue
-        print(f"  Uploading {name} ({png_path.name})...")
-        with open(png_path, "rb") as f:
-            uploaded = call(
-                "uploadStickerFile",
-                user_id=OWNER_ID,
-                sticker_format="static",
-                files={"sticker": f},
-            )
-        file_id = uploaded["file_id"]
-        stickers_payload.append({"name": name, "file_id": file_id, "emoji": emoji})
+        file_id, fmt = result
+        sticker_obj = json.dumps({"sticker": file_id, "format": fmt, "emoji_list": [emoji]})
 
-    if not stickers_payload:
-        print("Nothing uploaded — nothing to create a set from. Aborting.")
-        sys.exit(1)
-
-    # Try creating the set with the first sticker; add the rest after.
-    first = stickers_payload[0]
-    try:
-        call(
-            "createNewStickerSet",
-            user_id=OWNER_ID,
-            name=set_name,
-            title="The Vagabond (Pilot)",
-            sticker_type="custom_emoji",
-            stickers=json.dumps([{
-                "sticker": first["file_id"],
-                "format": "static",
-                "emoji_list": [first["emoji"]],
-            }]),
-        )
-        print(f"Created sticker set {set_name} with {first['name']}.")
-        remaining = stickers_payload[1:]
-    except RuntimeError as e:
-        if "already exists" in str(e) or "name is already occupied" in str(e):
-            print(f"Set {set_name} already exists — will add any missing stickers to it.")
-            remaining = stickers_payload
-        else:
-            raise
-
-    for item in remaining:
-        try:
+        if not created_set:
             call(
-                "addStickerToSet",
+                "createNewStickerSet",
                 user_id=OWNER_ID,
                 name=set_name,
-                sticker=json.dumps({
-                    "sticker": item["file_id"],
-                    "format": "static",
-                    "emoji_list": [item["emoji"]],
-                }),
+                title="The Vagabond (Pilot)",
+                sticker_type="custom_emoji",
+                stickers=f"[{sticker_obj}]",
             )
-            print(f"  Added {item['name']} to set.")
-        except RuntimeError as e:
-            print(f"  WARNING: could not add {item['name']}: {e}")
+            print(f"Created sticker set {set_name} with {name}.")
+            created_set = True
+        elif name in existing_file_ids:
+            call(
+                "replaceStickerInSet",
+                user_id=OWNER_ID,
+                name=set_name,
+                old_sticker=existing_file_ids[name],
+                sticker=sticker_obj,
+            )
+            print(f"  Replaced {name} in set (was static/stale, now {fmt}).")
+        else:
+            try:
+                call("addStickerToSet", user_id=OWNER_ID, name=set_name, sticker=sticker_obj)
+                print(f"  Added {name} to set.")
+            except RuntimeError as e:
+                print(f"  WARNING: could not add {name}: {e}")
 
     # Pull the finished set back to read the real custom_emoji_id per sticker.
     full_set = call("getStickerSet", name=set_name)
-    # Telegram returns stickers in upload order; zip against our name list.
-    for meta, sticker in zip(stickers_payload, full_set["stickers"]):
-        mapping[meta["name"]] = sticker["custom_emoji_id"]
+    for name, sticker in zip(ICONS.keys(), full_set["stickers"]):
+        mapping[name] = sticker["custom_emoji_id"]
 
     with open(MAPPING_PATH, "w") as f:
         json.dump(mapping, f, indent=2, sort_keys=True)
     print(f"Wrote {MAPPING_PATH} ({len(mapping)} icons).")
+
+    if len(full_set["stickers"]) > len(ICONS):
+        print(f"NOTE: set has {len(full_set['stickers'])} stickers but only "
+              f"{len(ICONS)} icons are tracked — the pre-existing duplicate "
+              f"mess (log §10) is still there. Use deleteStickerFromSet by "
+              f"hand (or via a short follow-up script) to trim it; this "
+              f"script deliberately never deletes anything on its own.")
 
     send_verification_message(mapping)
 
