@@ -2,11 +2,14 @@
 
 **Read this before touching anything under `assets/visual-system/`.** This
 is the working log for the **Visual Identity workstream** — replacing
-Unicode emoji with an original custom-emoji set, and (longer-term) the
-game's full brand system: logos, social assets, sticker packs, and
-animated variants. It is maintained by a Claude session working
-directly with the project owner (Asiwaju) in chat, iterating on art
-direction turn by turn.
+Unicode emoji with an original custom-emoji set, and the game's full
+brand system: logos, social assets, sticker packs, and animated
+variants. As of v7 (§6), the project owner made explicit that this is
+the actual roadmap, not a someday-maybe extension — see §7 and the v7
+change-log entry before assuming "pilot icons only" is still the
+scope. It is maintained by a Claude session working directly with the
+project owner (Asiwaju) in chat, iterating on art direction turn by
+turn.
 
 This file is **not** `PROJECT_MASTER_PLAN.md` or
 `SPACEHUNT_PHASE7_LOG.md`. Those are gameplay/engine workstreams. This
@@ -63,7 +66,7 @@ the ocean in one sitting; it produces worse art, not more of it.
 | Emoji usage audit (`internal/`, `*.go`, `*.md`, `*.sql`) | **Done** — 173 unique emoji, 1,962 occurrences, 46 files. Script not yet committed (was a one-off `python3` scan; worth productionizing if the full 173 gets built out — see §7). |
 | Art direction / style guide | **Done, v5.** Multi-tone (2, occasionally 3, palette colors per icon) locked in — see §2. |
 | Pilot icon batch (10 of 173), static | **Done, v3.** SVG + PNG (100/128/256/512px) in `assets/visual-system/`. |
-| Pilot icon batch (10 of 173), animated | **Done, v6 — all 10.** WEBM/VP9/alpha, 100×100, ≤3s loop, each with its own bespoke motion (not a uniform pulse) — see §10 v6 entry. `electricity` (v5) + `warning`, `failure`, `shield`, `transport`, `ai_mech`, `gear`, `satellite`, `combat`, `scrap` (v6). Render-unverified in real Telegram — see §8, unchanged. |
+| Pilot icon batch (10 of 173), animated | **Code done, v6. Verification split: only `electricity` confirmed animating in real Telegram (v4). The other 9 (v6) are pushed to the repo but have NOT been uploaded or seen in Telegram yet** — see v7 in §6. Don't read "pushed" as "done" for these 9. |
 | Remaining ~163 icons | **Not started.** Next candidate once the animated pilot batch is confirmed in real Telegram (§8). |
 | Telegram custom-emoji sticker-set upload script | **Written, updated for animated icons, still unrun** (§8/§10 — this sandbox cannot reach `api.telegram.org`). `telegram_upload.py` now uploads video-format for any icon with a WEBM and falls back to static PNG otherwise, and replaces (not duplicates) anything already in the set. |
 | Go source: swap literal emoji → `custom_emoji_id` entities | **Not started.** Needs `mapping.json` populated by an actual `telegram_upload.py` run (owner-side) and a helper in `internal/bot` — proposed but not built, see §7. |
@@ -182,7 +185,7 @@ assets/visual-system/
 ├── mapping.json          NOT YET CREATED — written by telegram_upload.py
 │   once the project owner actually runs it (§8)
 └── reference/
-    ├── telegram-premium-emoji-reference.mp4   the actual clip the
+    ├── telegram-premium-emoji-reference.mp4   the first clip the
     │   project owner sent to explain the target rendering quality
     │   (Telegram's own Premium animated emoji, incl. the crystal
     │   ball). Kept as the raw video, not just a written description
@@ -191,6 +194,13 @@ assets/visual-system/
     │   soft top light, colored glow) only — see §2 and the explicit
     │   "rejected directions" note about not copying the actual
     │   character designs shown in it.
+    ├── premium-emoji-reference-2-full-range.mp4   second clip (v7),
+    │   a wider sweep of Telegram's Premium emoji picker — full
+    │   illustrated character stickers (a boxer mid-punch), large
+    │   expressive symbol emoji (giant eyes), a ghost, more. Raised a
+    │   real gap: this is more illustrated/character-driven than the
+    │   current geometric icon set. See v7 in §6 before assuming the
+    │   current pipeline can close that gap by just adding color.
     └── stills/
         ├── crystal-ball-emoji-picker.png   frame ~15s, the icon that
         │   prompted this whole v3 pass — study this one first.
@@ -387,6 +397,60 @@ ground truth, not this log's interpretation of it. 25MB video +
   live `vagabond_pilot_by_<bot>` set (§10) is still there — the
   updated script now detects and reports it but deliberately never
   deletes anything on its own.
+
+- **v7 (this session, iteration 9) — honesty correction + scope
+  expansion, no art changes yet.** Project owner pushed back hard on
+  how prior sessions' summaries read — "pushed," "done," "confirmed
+  working" language sat next to icons that were, in fact, still static
+  or still unverified in real Telegram. That critique is fair and
+  worth stating plainly rather than re-explaining away: **as of this
+  entry, only `electricity` has ever been confirmed animating in a
+  real Telegram client (v4). The other 9 icons animated in v6 are
+  pushed to the repo but have never been uploaded or seen in Telegram
+  — "pushed to git" and "verified" are not the same claim, and future
+  entries in this log should not conflate them.**
+  Project owner also sent a second, wider-ranging capture of
+  Telegram's own Premium emoji picker (archived as
+  `reference/premium-emoji-reference-2-full-range.mp4`) — not just the
+  crystal ball this time but a sweep across many Premium emoji:
+  full illustrated character stickers (e.g. a boxer mid-punch),
+  large expressive symbol emoji (giant googly eyes), objects, a ghost.
+  Worth naming the honest gap this exposes: those are richer,
+  more illustrated, more *character*-driven pieces of art than
+  anything in the current icon set, which is deliberately
+  geometric/hardware-vocabulary (§2's construction rules — gradients,
+  rivets, glass-dome highlight). The current pipeline is good at what
+  it does (clean, cohesive, genuinely premium-reading *industrial*
+  icons) but hasn't been asked to produce character illustration, and
+  a fully procedural shared-`<defs>` SVG system has real limits there
+  — a boxer mid-punch needs actual figure/pose design, not a
+  parameterized gradient shape. This should be treated as a real
+  constraint to design around (richer per-icon illustration, possibly
+  less sharing from the common `<defs>` for anything figure-based),
+  not glossed over the way the "static vs animated" gap almost was
+  in v3.1–v4.
+
+  **Scope, explicitly widened by the project owner:** this workstream
+  is no longer "10 pilot icons, maybe eventually more." It's the whole
+  Vagabond visual identity system — full 173-icon custom-emoji set,
+  Telegram sticker packs, an ecosystem logo, and a social media asset
+  kit (banners, profile art, announcement templates) — all built to
+  the same premium bar as the reference material. §7's "unscoped
+  backlog, one deliverable per session" framing still holds as the
+  *execution* discipline (doing all of it simultaneously produces
+  worse art, not more of it — that observation hasn't changed), but
+  §7 should no longer be read as "maybe someday." It's the actual
+  roadmap now; treat it as ordered work, not speculative ideas.
+  Immediate next concrete steps, in order: (1) project owner runs the
+  updated `telegram_upload.py` and actually confirms all 10 animated
+  icons in a real client — the log should not claim v6 is "done" until
+  that happens; (2) once confirmed, raise the icon art quality itself
+  per this session's feedback (richer detail, not just the multi-tone
+  color rule from v5/v6, which technically already answers "add gold
+  lightning to electricity" but hasn't been judged against the new,
+  higher character-art reference yet); (3) only then decide whether to
+  scale the icon set to 173, start the logo, or start the sticker pack
+  — see §7, now promoted from backlog to roadmap.
 
 ---
 
