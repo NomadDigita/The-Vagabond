@@ -75,19 +75,32 @@ def utf16_len(text: str) -> int:
 def validate_slug(slug: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{1,30}", slug):
         raise SystemExit("--set-slug must start with a letter and contain only letters, digits, and underscores (2-31 characters).")
-    return slug.lower()
+    slug = slug.lower()
+    if "__" in slug or slug.endswith("_"):
+        raise SystemExit("--set-slug cannot contain consecutive underscores or end in an underscore, because Telegram appends `_by_<bot_username>`.")
+    return slug
 
 
 def call(api: str, method: str, **kwargs):
     files = kwargs.pop("files", None)
     try:
         response = requests.post(f"{api}/{method}", data=kwargs, files=files, timeout=45)
-        response.raise_for_status()
+    except requests.RequestException as error:
+        # Do not include str(error): requests commonly includes the full URL,
+        # which embeds the bot token by design.
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+        suffix = f" (HTTP {status_code})" if status_code is not None else ""
+        raise RuntimeError(f"{method} transport failure{suffix}.") from None
+    try:
         payload = response.json()
-    except (requests.RequestException, ValueError) as error:
-        raise RuntimeError(f"{method} network/response failure: {error}") from error
+    except ValueError as error:
+        raise RuntimeError(f"{method} returned a non-JSON response (HTTP {response.status_code}).") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{method} returned a non-object JSON response (HTTP {response.status_code}).")
     if not payload.get("ok"):
         raise TelegramAPIError(method, payload)
+    if not response.ok:
+        raise RuntimeError(f"{method} returned HTTP {response.status_code} with an invalid success payload.")
     return payload["result"]
 
 
@@ -164,7 +177,10 @@ def main() -> None:
         raise SystemExit("--owner-id / TG_OWNER_ID must be numeric.")
     api = f"https://api.telegram.org/bot{token}"
     bot = call(api, "getMe")
-    set_name = f"{slug}_by_{bot['username']}"
+    bot_username = bot.get("username")
+    if not isinstance(bot_username, str) or not bot_username:
+        raise RuntimeError("getMe returned a bot without a username. Set a username in @BotFather before creating a sticker set.")
+    set_name = f"{slug}_by_{bot_username}"
     if len(set_name) > 64:
         raise SystemExit(f"Fresh set name is too long ({len(set_name)} > 64): {set_name}")
     if get_set_if_missing_only(api, set_name) is not None:
@@ -177,10 +193,13 @@ def main() -> None:
     if len(stickers) != 1:
         raise RuntimeError(f"Fresh set assertion failed: expected one sticker, found {len(stickers)}. No mapping was written.")
     sticker = stickers[0]
+    custom_emoji_id = sticker.get("custom_emoji_id")
+    if not isinstance(custom_emoji_id, str) or not custom_emoji_id:
+        raise RuntimeError("Fresh set assertion failed: Telegram returned no custom_emoji_id. No mapping was written.")
     manifest = write_manifest(set_name, sticker, file_id)
-    send_verification_message(api, owner_id, sticker["custom_emoji_id"])
+    send_verification_message(api, owner_id, custom_emoji_id)
     print(f"Created fresh test set: {set_name}")
-    print(f"custom_emoji_id: {sticker['custom_emoji_id']}")
+    print(f"custom_emoji_id: {custom_emoji_id}")
     print(f"Wrote deterministic test manifest: {manifest}")
     print("Telegram client review is now required; this is not production approval.")
 
