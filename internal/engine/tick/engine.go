@@ -1552,8 +1552,14 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
-		var activeWeather string
-		_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+		// Phase 7 (item 12): world events are now per-continent. Scope
+		// this to the attacker's own region - always present (unlike
+		// defenderID, which is null for AI/rogue-nest raids) and it's
+		// the attacking fleet's own systems (targeting, mech corrosion)
+		// executing the operation.
+		var attackerRegion string
+		_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.attackerID).Scan(&attackerRegion)
+		activeWeather := world.ActiveEventFor(ctx, tx, attackerRegion)
 
 		orbitalBonus := 0.0
 		if defenderOrbitalBuffActive {
@@ -1616,6 +1622,14 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		case "acid_rain":
 			totMechs = totMechs / 2
 			weatherNotice = "\n⚠️ ACID RAIN ACTIVE: Corrosive rain detected! Armored Mech defensive structures degraded by 50%."
+		case "emp":
+			// EMP hits electronics-dependent systems hard - a flat, non-random offense penalty.
+			offenseRatingModifier *= 0.60
+			weatherNotice = "\n⚠️ EMP ACTIVE: Electromagnetic pulse degraded fleet targeting systems! Offense rating reduced by 40%."
+		case "sandstorm":
+			// Sandstorm degrades visibility/targeting - similar shape to Solar Flare's variance, but a straight reduction rather than a swing.
+			offenseRatingModifier *= 0.85
+			weatherNotice = "\n⚠️ SANDSTORM ACTIVE: Reduced visibility hampered target acquisition! Offense rating reduced by 15%."
 		}
 
 		if r.attackerRations <= 0 || r.attackerAmmo <= 0 {

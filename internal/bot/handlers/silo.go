@@ -96,7 +96,7 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {

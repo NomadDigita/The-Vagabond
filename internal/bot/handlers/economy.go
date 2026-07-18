@@ -83,7 +83,7 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 
 	selector.Inline(selector.Row(btnVault, btnMarket))
 
-	return c.Send(panelText, selector, keyboards.EconomyNavigation())
+	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 // buttons directly into the Vault or Market sub-panels, so players don't
 // have to hunt through the bottom reply-keyboard menu to get there.
@@ -153,7 +153,7 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 		selector.Row(btnBuyHydrogen),
 	)
 
-	return c.Send(panelText, selector, keyboards.EconomyNavigation())
+	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {

@@ -451,12 +451,135 @@ un-instrumented, by design.
 
 ---
 
+### CRITICAL REGRESSION FOUND AND FIXED: inline keyboard vs. persistent keyboard conflict
+
+The player reported "all inline keyboards removed or none of it is
+showing except in Factory" right after the item-3 continuation commit
+above shipped. Root cause: Telegram's Bot API allows exactly ONE
+`reply_markup` per message - an inline keyboard, OR a persistent
+`ReplyKeyboardMarkup`, never both. telebot's `extractOptions` reflects
+this: when a `c.Send(...)` call is given more than one
+`*telebot.ReplyMarkup` argument, the LAST one silently overwrites the
+others rather than merging them. Every fix in the "item 3, continued"
+commit above (and it turns out several older fixes too, going back to
+`5bc1d81` and earlier - `boss.go`, `economy.go` x2, `exchange.go`,
+`onboarding.go`, `rebellion.go`, `research.go`, `silo.go`) wrote
+`c.Send(panelText, selector, keyboards.XNavigation())` - passing both
+the inline-button selector AND a persistent nav keyboard. The nav
+keyboard, being last, always won, which is why the persistent bottom
+bar *did* correctly update on every affected panel (that part of item 3
+genuinely worked) but every one of those panels' own inline action
+buttons silently vanished at the same time.
+
+Confirmed via the actual `github.com/go-telebot/telebot` v3.3.8 source
+(cloned directly from GitHub, since `gopkg.in` itself isn't reachable
+in this sandbox) - `extractOptions` in `options.go` does exactly this:
+`case *ReplyMarkup: opts.ReplyMarkup = opt.copy()` on every match, no
+merge logic. `ReplyMarkup`'s own struct in `markup.go` confirms
+`InlineKeyboard` and `ReplyKeyboard` are just two fields on the *same*
+struct - one message picks one or the other, matching the real
+Telegram Bot API's `reply_markup` union type.
+
+**The fix**: `Factory`'s handlers (`internal/bot/handlers/factory.go`)
+had it right the whole time and were never touched by any of this -
+that's why the player still saw its inline buttons working. Its
+top-level entry (`HandleFactoryPanel`) sends the persistent keyboard
+alone (no inline selector); its sub-panels (`HandleRecruitPanel`, etc.)
+then send inline-only, relying on the fact that a message with no
+`reply_markup` at all leaves whatever persistent keyboard was already
+showing untouched. `combat.go`'s `HandleRaidBoard` also already did
+this correctly and pre-dates item 3 entirely - it sends a short
+"⚔️ Syncing tactical coordinate systems..." message with
+`CombatNavigation()` first, then the real dashboard with just its
+inline selector.
+
+Added `internal/bot/handlers/navhelper.go` with `sendPanelWithNav(c,
+caption, nav, text, selector)`, which does exactly that split as one
+call: a short captioned message plants the persistent keyboard, then
+the real panel content follows with just its inline buttons. Re-fixed
+every one of the 25 broken call sites:
+- 17 from this session's item-3 continuation: `agent.go`, `arena.go`,
+  `camp.go` x3, `clan.go` x3 (one clan.go site - `HandleBoard` - plus
+  `combat.go`'s `HandleRaidBoard`, `renderDraftCustomizerHUD`'s
+  non-callback branch, and `renderExpeditionPanel` turned out to
+  already be correctly covered by an existing prior send or mid-flow
+  context and were reverted to inline-only instead of given the
+  two-message treatment - see inline comments at each), `ether.go`,
+  `hero.go`, `profile.go`.
+- 8 pre-existing ones from earlier sessions, never caught until now:
+  `boss.go`, `economy.go` x2, `exchange.go`, `onboarding.go`,
+  `rebellion.go`, `research.go`, `silo.go`.
+
+Verified this time with an actual full compile, not just `gofmt`:
+cloned `github.com/go-telebot/telebot` at `v3.3.8` directly (bypassing
+the blocked `gopkg.in` vanity import) into a scratch directory, added a
+temporary local `replace` directive to `go.mod`, ran `go build ./...`
+and `go vet ./...` across the *entire* repository - both clean - then
+fully reverted `go.mod`/`go.sum` back to their committed state before
+committing (confirmed via `git diff go.mod go.sum` showing nothing).
+This is a stronger verification than any prior session in this log had
+available and is worth repeating for future sessions hitting the same
+`gopkg.in` block: `git clone https://github.com/go-telebot/telebot
+--branch v<version>`, add `replace gopkg.in/telebot.v3 =>
+<local path>` to `go.mod` temporarily, build, then revert `go.mod`
+before committing.
+
+### Item 12: per-continent world events (EMP, Supply Crisis, Disease, Sandstorm)
+
+World events were previously one global "weather front"
+(`world_state.active_weather`, a single row) affecting every player
+identically. Rebuilt on top of `world_events`, a table that already
+existed with a working expiry-cleanup tick phase but had nothing ever
+inserting into it - dead scaffolding until now.
+
+- Migration `025_spacehunt_phase7_regional_world_events.sql`: adds
+  `world_events.continent`, scoped to the same
+  Africa/Europe/Asia/Americas quadrant scheme `coordinates.region`
+  already uses for spawn placement. `world_state.active_weather` is
+  left in place as harmless legacy - nothing reads or writes it
+  anymore as of this change.
+- `internal/engine/world/weather.go` rewritten: rolls each continent
+  independently (10% chance/tick once clear), persists an active event
+  for 2 hours, writes a "conditions have cleared" headline when one
+  naturally expires. Event pool grew from 3 to 7: `solar_flare`,
+  `radiation_storm`, `acid_rain` (original three) plus `emp`,
+  `supply_crisis`, `disease`, `sandstorm`.
+- `internal/engine/world/events.go` (new): `ActiveEventFor(ctx, q,
+  continent)` for single-camp lookups, `ActiveEventsByContinent(ctx,
+  q)` for batch lookups (used by the passive resource tick, which
+  processes every encampment in one pass and would otherwise pay for
+  one query per camp). Both take a `Queryer` interface satisfied by
+  either `*sql.DB` or `*sql.Tx`.
+- Every former consumer of the single global `active_weather` column
+  now resolves its own encampment's continent via
+  `coordinates.region` and looks its event up through these helpers:
+  `internal/engine/tick/engine.go` (combat resolution - scoped to the
+  attacker's own region, since `defenderID` is null for AI/rogue-nest
+  raids but `attackerID` never is), `internal/engine/resource/resource.go`
+  (passive generation - added a `Region` field to `EncampmentState` and
+  joined `coordinates` into the batch query), `internal/bot/handlers/combat.go`
+  (march timing, using the `myRegion` value already resolved there),
+  `internal/bot/handlers/camp.go` (construction flavor text), and
+  `internal/bot/handlers/world.go` (the Wasteland Radio feed, now shows
+  one line per continent via the new `weatherLine` helper instead of a
+  single global status).
+- New mechanical effects: EMP zeroes electricity generation and applies
+  a flat 40% offense penalty in combat; Disease raises rations
+  consumption 50%; Sandstorm slows marching and applies a 15% offense
+  penalty; Supply Crisis is flavor/economy-facing only for now (no
+  Market Exchange price-modifier wiring yet - flagged for whoever picks
+  up the economy side next).
+
+Verified via the same full `go build ./...` / `go vet ./...` pass
+described above.
+
+---
+
 ## 4. Next in line (recommended order)
 
-1. Item 12 — expand world events beyond weather (Acid Rain/Radiation
-   Storm already exist; add EMP/Supply Crisis/Disease/Sandstorm,
-   scope to continent rather than global).
-2. Item 10/11 — world exploration + diplomacy (biggest remaining
-   item, needs new schema; do this after the smaller items above so
-   the schema design benefits from everything else being settled).
-3. Item 13 — Admin panel consolidation (mechanical, do last).
+1. Item 10/11 — world exploration + diplomacy (biggest remaining
+   item, needs new schema).
+2. Item 13 — Admin panel consolidation (mechanical, do last).
+3. Wire Supply Crisis into the Market Exchange's actual sale-price
+   calculation (currently flavor-only - see item 12 above).
+

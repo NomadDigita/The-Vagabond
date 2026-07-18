@@ -69,10 +69,10 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 		selector.Row(btnJoin3),
 	)
 
-	// Inline buttons and the persistent bottom keyboard are independent
-	// ReplyMarkup roles - passing both is safe and required, matching the
-	// fix applied across the rest of the item-3 keyboard audit.
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	// Inline buttons and the persistent bottom keyboard need two
+	// separate messages - Telegram only allows one reply_markup type
+	// per message, so they can never be combined into a single send.
+	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
 }
 
 // HandleJoinQueueCallback handles inserting the player into the matchmaking table

@@ -131,7 +131,7 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	panelText += "━━━━━━━━━━━━━━━━━━━━━━"
 	selector.Inline(rows...)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 // HandleUpgradeTechCallback manages spending neuro cores to level up research nodes

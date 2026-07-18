@@ -105,7 +105,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 		selector.Row(btnGarrison),
 	)
 
-	return c.Send(dashboard, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), dashboard, selector)
 }
 
 // HandleGarrisonPanel shows the player's current garrison reservation

@@ -102,7 +102,7 @@ func (h *RebellionHandler) HandleRebellionPanel(c telebot.Context) error {
 	btnDonate := selector.Data(fmt.Sprintf("💰 Donate %.0f Scrap", donationAmount), "rebellion_donate")
 	selector.Inline(selector.Row(btnDonate))
 
-	return c.Send(panelText, selector, keyboards.MainNavigation())
+	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
 func (h *RebellionHandler) HandleRebellionDonateCallback(c telebot.Context) error {

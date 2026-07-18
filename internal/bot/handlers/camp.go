@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"gopkg.in/telebot.v3"
 )
 
@@ -132,7 +133,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 		selector.Row(btnUpgradeGen, btnUpgradeCamp),
 	)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 // defenseModule describes one Defense Grid structure. All of these ride on
@@ -336,7 +337,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 		selector.Row(btnToggleAlert),
 	)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
@@ -513,7 +514,7 @@ func (h *CampHandler) HandleMutationsPanel(c telebot.Context) error {
 		selector.Row(btnMutateSalvage, btnMutateBio),
 	)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
@@ -608,8 +609,10 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
-	var activeWeather string
-	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+	// Phase 7 (item 12): per-continent world events.
+	var campRegion string
+	_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", campID).Scan(&campRegion)
+	activeWeather := world.ActiveEventFor(ctx, tx, campRegion)
 
 	isAdmin := h.IsAdmin(sender.ID)
 	

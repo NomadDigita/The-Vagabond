@@ -76,7 +76,7 @@ func (h *ProfileHandler) HandleSettings(c telebot.Context) error {
 	btnStorage := selector.Data("📦 Toggle Storage Alerts", "settings_toggle", "storage")
 	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage))
 
-	return c.Send(panelText, selector, keyboards.MainNavigation())
+	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
 func onOff(b bool) string {

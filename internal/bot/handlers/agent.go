@@ -130,7 +130,7 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		selector.Row(btnModeBuilder, btnModeMilitary),
 	)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {

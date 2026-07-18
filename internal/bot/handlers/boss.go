@@ -85,7 +85,7 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	panelText += "👹━━━━━━━━━━━━━━━━━━━━━━👹"
 	selector.Inline(buttonRows...)
 
-	return c.Send(panelText, selector, keyboards.MainNavigation())
+	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
 // HandleAttackBossCallback commits the caller's ENTIRE current standing

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"gopkg.in/telebot.v3"
 )
 
@@ -29,20 +30,13 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	var totalSurvivors int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalSurvivors)
 
-	var activeWeather string
-	_ = h.DB.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+	// Phase 7 (item 12): world events are per-continent now, so this
+	// feed shows a line per continent instead of one global status.
+	continentWeather := world.ActiveEventsByContinent(ctx, h.DB)
 
-	// Explicit climate indicators mapping to explain the precise mechanical penalties
 	var weatherText string
-	switch activeWeather {
-	case "solar_flare":
-		weatherText = "⚡ SOLAR FLARE (ACTIVE Spikes)\n   ⚡ Outpost Solar Generators: Operating at 200% efficiency.\n   🤖 Targeting Interference: Scrambles radar locking systems (Accuracy fluctuates on battle ticks).\n   ⚠️ Automation: Offline agent tasking suspended."
-	case "radiation_storm":
-		weatherText = "☢️ RADIATION STORM (Fallout Sweep)\n   💀 Biological Decay: Regional morale decay rates doubled.\n   ⚔️ Infantry Morale Penalty: Base troop offense ratings reduced by 25%.\n   ⚡ Solar Power Drop: Solar panels output only 50% power."
-	case "acid_rain":
-		weatherText = "🌧️ ACID RAIN (Corrosive Precipitation)\n   🏗️ Construction delays: Structural upgrade times doubled (+100% duration).\n   🔩 Mechanical Corrosion: Armored Mech defense structures degraded by 50%."
-	default:
-		weatherText = "☀️ NOMINAL CONDITIONS\n   Planetary atmospheric baselines stable. No active debuffs."
+	for _, continent := range world.Continents {
+		weatherText += fmt.Sprintf("%s: %s\n", continent, weatherLine(continentWeather[continent]))
 	}
 
 	currentTime := time.Now().UTC().Format("15:04:05")

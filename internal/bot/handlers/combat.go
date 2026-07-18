@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"gopkg.in/telebot.v3"
 )
@@ -186,7 +187,7 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
 
 	selector.Inline(buttons...)
-	return c.Send(dashboard, selector, keyboards.CombatNavigation())
+	return c.Send(dashboard, selector)
 }
 
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
@@ -380,7 +381,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
 }
 
 // HandleAutoScanToggle toggles the SpaceHunt-style "Automatic Scan" job:
@@ -537,7 +538,7 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	btnSpy := selector.Data("🛰️ Intercept Signal", "spy_action", tID)
 
 	selector.Inline(selector.Row(btnRaid, btnSpy))
-	return c.Send(report, selector, keyboards.CombatNavigation())
+	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), report, selector)
 }
 
 func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
@@ -1003,7 +1004,7 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	if c.Callback() != nil {
 		return c.Edit(panelText, selector)
 	}
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	return c.Send(panelText, selector)
 }
 
 // draftUnitAliases maps the free-text unit names a player might type in
@@ -1331,8 +1332,9 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		WHERE e.user_id = $1 FOR UPDATE`
 	_ = tx.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myRegion, &myX, &myY)
 
-	var activeWeather string
-	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+	// Phase 7 (item 12): per-continent world events. myRegion (the
+	// attacker's own outpost region) is already resolved above.
+	activeWeather := world.ActiveEventFor(ctx, tx, myRegion)
 
 	var heroID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", myCampID).Scan(&heroID)
@@ -1403,6 +1405,8 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		marchingMinutes *= 0.7
 	case "acid_rain":
 		marchingMinutes *= 2.0
+	case "sandstorm":
+		marchingMinutes *= 1.4
 	}
 
 	var attackerSpeedTechLvl int = 1
@@ -1476,12 +1480,16 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		
 		weatherStatus := "Baseline parameters nominal."
 		switch activeWeather {
-case "radiation_storm":
+		case "radiation_storm":
 			weatherStatus = "⚠️ Radiation fallout warnings active over sector grids."
 		case "solar_flare":
 			weatherStatus = "⚡ Electromagnetic solar interference warning. Accuracy variance applied."
 		case "acid_rain":
 			weatherStatus = "🌧️ Corrosive precipitation active. Mechs structure structural integrity hazard."
+		case "emp":
+			weatherStatus = "🌩️ EMP burst detected. Electronics-dependent systems degraded."
+		case "sandstorm":
+			weatherStatus = "🌪️ Sandstorm active. Navigation and targeting accuracy reduced."
 		}
 		
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("📡 ANALYSIS ENGINE: WEATHER VECTORS...\n[▰▰▰▰▱▱▱▱▱▱] 40%%\n🌍 Weather Status: %s", weatherStatus))
@@ -1715,5 +1723,5 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 	btnAbort := selector.Data("↩️ Abort", "exp_action", "abort", raidID)
 	selector.Inline(selector.Row(btnSpeed, btnAbort))
 
-	return c.Send(panelText, selector, keyboards.CombatNavigation())
+	return c.Send(panelText, selector)
 }

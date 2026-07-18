@@ -479,6 +479,14 @@ func executeStartupMigrations(db *sql.DB) {
 
 		`CREATE INDEX IF NOT EXISTS idx_world_events_expires ON world_events(expires_at);`,
 
+		// Phase 7 (item 12): world events are now scoped per-continent
+		// instead of one global front, matching coordinates.region's
+		// existing Africa/Europe/Asia/Americas quadrant scheme. The
+		// column is nullable-safe (backfilled 'Global' for any legacy
+		// rows) so this is a pure additive migration.
+		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS continent VARCHAR(50) NOT NULL DEFAULT 'Global';`,
+		`CREATE INDEX IF NOT EXISTS idx_world_events_continent ON world_events(continent, expires_at);`,
+
 		`CREATE TABLE IF NOT EXISTS campaign_drafts (
 			user_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
 			target_id VARCHAR(50) NOT NULL,

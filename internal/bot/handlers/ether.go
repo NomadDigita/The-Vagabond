@@ -79,7 +79,7 @@ func (h *EtherHandler) HandleEtherShop(c telebot.Context) error {
 	panelText += "🔮━━━━━━━━━━━━━━━━━━━━━━🔮"
 	selector.Inline(buttons...)
 
-	return c.Send(panelText, selector, keyboards.CampNavigation())
+	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *EtherHandler) HandleEtherConvertCallback(c telebot.Context) error {

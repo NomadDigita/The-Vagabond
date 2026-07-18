@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 
+	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
@@ -43,11 +44,14 @@ type EncampmentState struct {
 	TechCenterLvl     int
 	MetalMineLvl      int
 	CrystalMineLvl    int
+	Region            string
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
-	var activeWeather string
-	_ = tx.QueryRowContext(ctx, "SELECT active_weather FROM world_state WHERE id = 1").Scan(&activeWeather)
+	// Phase 7 (item 12): world events are per-continent now. Fetch every
+	// continent's active event once (cheap, small result set) instead of
+	// re-querying per encampment inside the loop below.
+	continentWeather := world.ActiveEventsByContinent(ctx, tx)
 
 	query := `
 		SELECT 
@@ -68,9 +72,11 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'technology_center'), 0) as tech_center_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'metal_mine'), 0) as metal_mine_lvl,
 			COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = e.id AND m.type = 'crystal_mine'), 0) as crystal_mine_lvl,
-			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl
+			COALESCE((SELECT mut.salvage_lvl FROM mutation_states mut WHERE mut.encampment_id = e.id), 1) as salvage_lvl,
+			COALESCE(c.region, '') as region
 		FROM encampments e
-		JOIN resources r ON r.encampment_id = e.id`
+		JOIN resources r ON r.encampment_id = e.id
+		JOIN coordinates c ON c.id = e.coordinate_id`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
@@ -87,6 +93,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			&s.TroopCount, &s.LoanAmount,
 			&s.BuggyCount, &s.ShipCount, &s.JetCount,
 			&s.DefenseTechLvl, &s.ProductionTechLvl, &s.WarehouseLvl, &s.ExtensionLvl, &s.SolarPanelLvl, &s.TechCenterLvl, &s.MetalMineLvl, &s.CrystalMineLvl, &s.SalvageLvl,
+			&s.Region,
 		)
 		if err != nil {
 			log.Printf("Error scanning encampment state row: %v", err)
@@ -104,11 +111,14 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
 		electricityGenerated += 0.04 * float64(s.SolarPanelLvl) // Solar Panel: independent bonus generation
 
-		switch activeWeather {
+		switch continentWeather[s.Region] {
 		case "solar_flare":
 			electricityGenerated *= 2.0
 		case "radiation_storm":
 			electricityGenerated *= 0.5
+		case "emp":
+			// EMP knocks out unshielded electronics outright, per the news headline.
+			electricityGenerated = 0
 		}
 
 		var taxDeducted float64
@@ -123,6 +133,10 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		rationsConsumed := float64(s.TroopCount) * 0.05
+		if continentWeather[s.Region] == "disease" {
+			// Disease outbreak: commanders divert extra rations to treatment, per the news headline.
+			rationsConsumed *= 1.5
+		}
 		electricityConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
 		storageCap := storagecap.Cap(s.TentLvl, s.WarehouseLvl, s.ExtensionLvl)

@@ -113,7 +113,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			selector.Row(btnWarehouse, btnManual),
 		)
 
-		return c.Send(dashboard, selector, keyboards.MainNavigation())
+		return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), dashboard, selector)
 	}
 
 	if !errors.Is(err, sql.ErrNoRows) {
