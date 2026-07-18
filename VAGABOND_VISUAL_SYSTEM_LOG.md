@@ -66,7 +66,7 @@ the ocean in one sitting; it produces worse art, not more of it.
 | Emoji usage audit (`internal/`, `*.go`, `*.md`, `*.sql`) | **Done** — 173 unique emoji, 1,962 occurrences, 46 files. Script not yet committed (was a one-off `python3` scan; worth productionizing if the full 173 gets built out — see §7). |
 | Art direction / style guide | **Done, v5.** Multi-tone (2, occasionally 3, palette colors per icon) locked in — see §2. |
 | Pilot icon batch (10 of 173), static | **Done, v3.** SVG + PNG (100/128/256/512px) in `assets/visual-system/`. |
-| Pilot icon batch (10 of 173), animated | **Code done, v6. Verification split: only `electricity` confirmed animating in real Telegram (v4). The other 9 (v6) are pushed to the repo but have NOT been uploaded or seen in Telegram yet** — see v7 in §6. Don't read "pushed" as "done" for these 9. |
+| Pilot icon batch (10 of 173), animated | **Confirmed, v6/v8.** All 10 render and animate correctly in real Telegram (confirmed by project owner, v8). Live set also has ~10 leftover static duplicates from earlier test runs — not yet cleaned up, see the new `delete_stale_stickers.py` (§10/v8). |
 | Remaining ~163 icons | **Not started.** Next candidate once the animated pilot batch is confirmed in real Telegram (§8). |
 | Telegram custom-emoji sticker-set upload script | **Written, updated for animated icons, still unrun** (§8/§10 — this sandbox cannot reach `api.telegram.org`). `telegram_upload.py` now uploads video-format for any icon with a WEBM and falls back to static PNG otherwise, and replaces (not duplicates) anything already in the set. |
 | Go source: swap literal emoji → `custom_emoji_id` entities | **Not started.** Needs `mapping.json` populated by an actual `telegram_upload.py` run (owner-side) and a helper in `internal/bot` — proposed but not built, see §7. |
@@ -449,8 +449,48 @@ ground truth, not this log's interpretation of it. 25MB video +
   color rule from v5/v6, which technically already answers "add gold
   lightning to electricity" but hasn't been judged against the new,
   higher character-art reference yet); (3) only then decide whether to
-  scale the icon set to 173, start the logo, or start the sticker pack
-  — see §7, now promoted from backlog to roadmap.
+- **v8 (this session, iteration 10) — checkpoint 1 of several: new
+  reference material, watched and logged before any art changes.**
+  Project owner confirmed all 10 v6 animated icons now render and
+  animate correctly in real Telegram (§1's "unverified" flag from v7
+  is resolved — see the updated table). Also flagged that the live
+  `vagabond_pilot_by_<bot>` set now has the 10 working animated icons
+  *plus* roughly 10 leftover static duplicates from earlier test runs
+  (§10's "known mess," still not cleaned up — see the new cleanup
+  script noted below).
+
+  Sent a third reference video, archived as
+  `reference/premium-emoji-reference-3-glossy-3d-gifts.mp4`
+  (compressed from a 141MB raw capture to 6.4MB via
+  `scale=480:-2, crf 28` — the original exceeded GitHub's 100MB
+  per-file limit and would have failed to push; resolution/bitrate
+  drop only, no cropped content). **What it actually shows, watched
+  frame-by-frame, not assumed:** mostly Telegram's paid 3D collectible
+  "Gift" figures (e.g. a boxed vinyl-figure-style "Pavel Durov" toy,
+  rendered with real box reflections and a glossy plastic-figure
+  material), plus a couple of large emoji-preview closeups — a
+  fork/knife/plate emoji with a genuinely glassy, reflective metal and
+  porcelain finish, and a spiky virus emoji with strong specular
+  highlight and soft ambient occlusion.
+
+  **Important distinction to log plainly, not blur:** the collectible
+  "Gift" figures are a different Telegram product tier from custom
+  emoji — those are (almost certainly) professionally modeled 3D
+  assets or hand-illustrated character art with real pose/likeness
+  design, not something a parameterized-gradient SVG pipeline
+  produces. This reference is genuinely useful for two narrower,
+  achievable things: (1) the *material* language — glossy highlight,
+  soft reflection, clean transparent background, "liquid glass"
+  surface read — which the existing SVG-gradient pipeline can push
+  much further than it currently does; and (2) the standing rule that
+  no two icons should reuse the same color pairing, which is a
+  bookkeeping/design-discipline fix, not a rendering-technology one.
+  Treating this video as "go build literal 3D collectible figures"
+  would be overpromising against what this pipeline can actually
+  deliver; treating it as "push the glass/glossy material further and
+  never repeat a palette" is honest and actionable. Proceeding on that
+  reading — see the next checkpoint entries for what was actually
+  built against it.
 
 ---
 
