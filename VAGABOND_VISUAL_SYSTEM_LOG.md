@@ -71,6 +71,13 @@ the upload path and could otherwise cause a destructive rerun.
   silent, two seconds, and 7.7 KiB. It is ready for an isolated fresh-set test
   but **has not yet been uploaded to Telegram or reviewed in a client.** See
   `assets/visual-system/CRYSTAL_3D_V12_DESIGN.md` for the precise record.
+- The isolated v12 fresh set was then created successfully and viewed in a
+  Telegram client. It proved delivery but failed the owner's visual-motion bar:
+  whole-object drift was too soft, while the heart and star highlights needed
+  their own visible motion. `crystal_3d_v13` is the replacement candidate,
+  documented in `assets/visual-system/CRYSTAL_3D_V13_TEST_REPORT.md`; its
+  separate rotating-heart and independent-glint animation is locally validated
+  but not yet uploaded.
 
 ---
 

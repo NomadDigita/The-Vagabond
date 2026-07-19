@@ -52,7 +52,11 @@ reference recording as an upload asset.
 5. `animated/crystal_3d_v12/crystal_3d_v12.webm`: **PASS** local validation -
    VP9, decoded alpha, 100x100, silent, 2.000 seconds, 7.7 KiB, under the
    conservative 64 KiB delivery gate.
-6. Telegram fresh-set creation and actual client review: **not yet run**.
+6. Telegram fresh-set creation and actual client review: **PASS for delivery,
+   not approved for visual quality.** Telegram created the isolated v12 set and
+   assigned a custom emoji ID; the owner reported that the whole-object drift
+   was too soft and lacked independent heart/star motion. V13 supersedes v12
+   for visual testing.
 
 ## Re-run command
 
