@@ -73,7 +73,7 @@ brief describes.
 | 10 | World exploration (continents/sectors/discovery) | **Not started** — biggest single item left; needs new schema (sectors/continents, discovery state per player) | — |
 | 11 | Diplomacy (Known Bases, friend/enemy), long battles/reinforcements | **Not started** — long-battle round cap (currently 5 rounds max, see `engine.go` `r.roundNumber >= 5` draw condition) needs revisiting once reinforcement mechanics exist | — |
 | 12 | Dynamic World Events + notification engine | **Partially exists** — `internal/engine/world/weather.go` already drives Acid Rain/Radiation Storm effects on combat (see `engine.go` weather switch); notification *dispatcher* itself (`internal/engine/notifications`) is a working 3s-poll queue, not a stub. What's missing: more event types (EMP, Supply Crisis, Disease, Sandstorm from the brief), and continent/world-scoped broadcast rather than the current single global weather state. | — |
-| 13 | Admin panel consolidation | **Not started** | — |
+| 13 | Admin panel consolidation | **Done** — every admin action now lives in exactly one shared helper, callable from both its original slash command and the consolidated `/admin` panel (previously 3 different copies of the same logic for "inject", 6 actions with no panel path at all). Guided free-text input flow for the 5 actions that need arguments; DB Reset gained a two-tap confirm it never had. | `<pending>` |
 | 9 | AI Agent files hands-off | **Exception granted for items 5/5b** — no edits to `internal/game/governor`, fleetcommander, or econadvisor. `internal/engine/agent` *was* edited (`90caeef`, `53d1916`, `e3f6e15`), but only game-limit-enforcement bugs Asiwaju explicitly directed. No other agent logic (mode selection, resource-gain rates, upkeep formulas) touched. | — |
 
 ---
@@ -633,14 +633,75 @@ touch overlapping files (`economy.go`, `combat.go`, `main.go`).
 
 ---
 
+---
+
+### Item 13: Admin panel consolidation - closes out the original Phase 7 brief
+
+Before this, every admin action was reachable through up to 3 different
+paths with copy-pasted logic that had already quietly drifted apart:
+`/admin_give`, the persistent "🪙 Inject Resources" bottom-menu button,
+and the `/admin` panel's own "inject" callback were three independent
+copies of the same 5,000-of-everything UPDATE statement - and the
+panel's copy was actually missing `neuro_cores` that the other two had.
+Six more actions (Gift Premium, Gift Resources, Set Tax Rate, Faction
+change, Broadcast, DB Reset) existed only as `/admin_*` slash commands
+with argument syntax an admin had to already know or remember, with no
+path into the panel at all. And `/admin_db_reset` - fully destructive,
+clears active raids/news/queues and redistributes every outpost's
+coordinates - had zero confirmation step.
+
+Fixed by making every `/admin_*` command's actual logic live in exactly
+one place (`do*` private helpers on `AdminHandler`: `doGiftPremium`,
+`doGiftResources`, `doSetTaxRate`, `doFactionChange`, `doBroadcast`,
+`doDBReset`, `doInjectSelf`), with both the slash command AND the
+consolidated `/admin` panel calling the same helper. The old commands
+still work completely unchanged (nothing removed, no muscle-memory
+broken); the panel just went from exposing 4 of 10 actions to all 10.
+
+For the panel path, actions needing a free-text argument (Gift Premium,
+Gift Resources, Set Tax Rate, Faction, Broadcast) now use a real guided
+flow instead of a "here's the command to type" stub: tapping the button
+prompts for the exact input needed, and the admin's next plain-text
+message is consumed as that argument. This needed a small piece of
+state - `AdminHandler.pending map[int64]string` (mutex-guarded, which
+admin is mid-flow on which action) - and a new `HandleAdminPendingInput`
+method that's chained ahead of `nlp.HandleTextMessage` in `main.go`'s
+`OnText` registration: it returns `handled=false` immediately for
+anyone (including admins) with no pending action, so this has zero
+effect on normal text handling for every other player.
+
+DB Reset also gained the confirmation step it never had: tapping
+"⚠️ Reset Database" now shows an explicit CONFIRM/Cancel pair before
+`doDBReset` actually runs, rather than executing on the first tap.
+(`/admin_db_reset` the slash command is left as-is - typing the full
+command out is itself a soft confirmation, unlike a single button tap.)
+
+This closes every item on the original Phase 7 brief (1, 1b, 2, 3, 4
+partial, 5, 5b, 6, 7, 10, 11, 12, 13). See section 1's status table
+above for the full per-item breakdown; item 4 (Hero Commander) is the
+only one still marked partial, per its own note there.
+
+Verified via the same full `go build ./...` / `go vet ./...` pass
+described throughout this log.
+
 ## 4. Next in line (recommended order)
 
-1. Item 13 — Admin panel consolidation (the only item left on the
-   original Phase 7 list).
-2. Exploration/Diplomacy follow-ups worth a look if picking this back
-   up: an in-panel /diplomacy button in EconomyNavigation (currently
-   command-only, same as /federations); a `clan_id` index on
-   `user_clans` if diplomacy queries ever show up slow in practice;
-   possibly letting Federations (not just individual Clans) hold
-   pacts, once there's real federation-level play to justify it.
+Nothing left on the original brief. Worth a look if picking this back
+up for further polish:
+1. Item 4 (Hero Commander)'s remaining partial pieces - explicit
+   "which hero leads this raid" picker UI, per-hero XP-from-battles-led,
+   ability unlocks beyond the existing superpower.
+2. Exploration/Diplomacy follow-ups: an in-panel `/diplomacy` button in
+   `EconomyNavigation` (currently command-only, same as `/federations`);
+   a `clan_id` index on `user_clans` if diplomacy queries ever show up
+   slow in practice; possibly letting Federations (not just individual
+   Clans) hold pacts, once there's real federation-level play to
+   justify it.
+3. A full keyboard/UI audit sweep is still worth doing exhaustively one
+   more time now that the two-message `sendPanelWithNav` pattern exists
+   everywhere it's needed - the discipline going forward should be: any
+   NEW panel with both inline buttons and a section transition uses
+   `sendPanelWithNav`, never a bare `c.Send(text, selector,
+   someNavKeyboard)` (see the CRITICAL REGRESSION section above for why
+   that specific shape is always wrong).
 

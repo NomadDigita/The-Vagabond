@@ -1011,7 +1011,19 @@ func main() {
 	bot.Handle("🏗️ Infrastructure Grid", camp.HandleInfrastructureGridPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
-	bot.Handle(telebot.OnText, nlp.HandleTextMessage)
+	// Phase 7 (item 13): admin panel consolidation's guided-input flow.
+	// If the sender is an admin mid-flow on a button that needs a
+	// free-text argument (e.g. "Gift Premium"), consume this message as
+	// that argument instead of falling through to normal NLP parsing.
+	// Everyone else (and any admin with no pending action) is completely
+	// unaffected - HandleAdminPendingInput returns handled=false
+	// immediately for them.
+	bot.Handle(telebot.OnText, func(c telebot.Context) error {
+		if handled, err := admin.HandleAdminPendingInput(c); handled {
+			return err
+		}
+		return nlp.HandleTextMessage(c)
+	})
 
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
