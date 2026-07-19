@@ -55,6 +55,25 @@ the upload path and could otherwise cause a destructive rerun.
 
 ---
 
+## v12 crystal correction - 2026-07-19
+
+- The project owner rejected the v10 Oracle visual direction for the intended
+  crystal asset. Oracle remains a technical Blender/Telegram pipeline proof;
+  it is not the approved crystal art direction.
+- `pipeline/render_crystal_3d_v12.py` and its editable Blender source define
+  a new, crystal-first Vagabond asset: violet liquid-glass sphere, compact gold
+  pedestal, luminous internal facets, and animated star glints. It is an
+  original rebuild informed by the owner's owned reference, not an upload of
+  the phone recording or a copy of a third-party Telegram asset.
+- The Blender source saved successfully, but an isolated one-frame EEVEE render
+  failed to write any PNG after more than a minute and was stopped. Therefore
+  **v12 has no rendered WebM, has not been locally media-validated, and has
+  not been uploaded to Telegram.** See
+  `assets/visual-system/CRYSTAL_3D_V12_DESIGN.md` for the precise record and
+  rerun commands.
+
+---
+
 ## 0. Source brief
 
 Requested directly by the project owner, in chat, across several
