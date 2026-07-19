@@ -9,7 +9,7 @@ import (
 
 func sampleSnapshot() devconsole.Snapshot {
 	return devconsole.Snapshot{
-		WindowDays:        7,
+		WindowDays: 7,
 		NewPlayers: []devconsole.NewPlayer{
 			{Username: "newbie99", FirstName: "Alex", JoinedAt: "2026-07-15 14:32 UTC", HomeContinent: "Asia"},
 			{Username: "", FirstName: "Sam", JoinedAt: "2026-07-16 09:10 UTC", HomeContinent: ""},

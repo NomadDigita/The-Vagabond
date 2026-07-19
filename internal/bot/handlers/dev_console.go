@@ -47,6 +47,13 @@ func buildDevConsoleKeyboard(windowDays int) *telebot.ReplyMarkup {
 	return selector
 }
 
+func buildBalanceKeyboard(windowDays int) *telebot.ReplyMarkup {
+	selector := &telebot.ReplyMarkup{}
+	btnRefresh := selector.Data("🔄 Refresh", "balance_report_refresh", strconv.Itoa(windowDays))
+	selector.Inline(selector.Row(btnRefresh))
+	return selector
+}
+
 func (h *DevConsoleHandler) renderReport(ctx context.Context, adminID int64, windowDays int) (string, *telebot.ReplyMarkup, error) {
 	rec, err := h.Console.Recommend(ctx, adminID, windowDays)
 	if err != nil {
@@ -114,4 +121,94 @@ func (h *DevConsoleHandler) HandleDevConsoleRefreshCallback(c telebot.Context) e
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Report refreshed."})
 	return c.Send(text, keyboard)
+}
+
+// ── /admin_ask <question> ────────────────────────────────────────────
+//
+// Admin-only. Natural-language question about game state, answered
+// via the classify → execute → answer flow in devconsole.Ask. See
+// devconsole/queries.go's doc comment for the safety model: the model
+// never writes or executes SQL, only picks from a fixed whitelist of
+// read-only queries.
+func (h *DevConsoleHandler) HandleAdminAsk(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+
+	question := strings.TrimSpace(c.Message().Payload)
+	if question == "" {
+		return c.Send("Usage: /admin_ask <question>\n\nExamples:\n  /admin_ask how many new players this week?\n  /admin_ask who are the top 10 players right now?\n  /admin_ask is anything unusual happening with the economy?")
+	}
+
+	_ = c.Notify(telebot.Typing)
+	ctx := context.Background()
+
+	rec, err := h.Console.Ask(ctx, sender.ID, question)
+	if err != nil {
+		return c.Send("⚠️ The AI Developer Console couldn't answer that: " + err.Error())
+	}
+
+	return c.Send(devconsole.FormatAnswerForTelegram(rec))
+}
+
+// ── /balance_report [days] ───────────────────────────────────────────
+//
+// Admin-only. Real unit usage/outcome correlations from completed
+// raids, with AI commentary. See devconsole/balance.go's doc comment
+// for the correlational-not-causal framing this is built around.
+func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	if !h.IsAdmin(sender.ID) {
+		return c.Send("❌ Access Denied: Authorized administrators only.")
+	}
+	_ = c.Notify(telebot.Typing)
+
+	windowDays := defaultReportWindowDays
+	if arg := strings.TrimSpace(c.Message().Payload); arg != "" {
+		if n, err := strconv.Atoi(arg); err == nil && n > 0 {
+			windowDays = n
+		}
+	}
+
+	ctx := context.Background()
+	rec, err := h.Console.RecommendBalance(ctx, sender.ID, windowDays)
+	if err != nil {
+		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: " + err.Error())
+	}
+
+	return c.Send(devconsole.FormatBalanceForTelegram(rec), buildBalanceKeyboard(windowDays))
+}
+
+// ── callback: balance_report_refresh ─────────────────────────────────
+func (h *DevConsoleHandler) HandleBalanceReportRefreshCallback(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	if !h.IsAdmin(sender.ID) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied."})
+	}
+
+	windowDays := defaultReportWindowDays
+	if args := c.Args(); len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(args[0])); err == nil && n > 0 {
+			windowDays = n
+		}
+	}
+
+	ctx := context.Background()
+	rec, err := h.Console.RecommendBalance(ctx, sender.ID, windowDays)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Report unavailable: " + err.Error()})
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Refreshed."})
+	return c.Send(devconsole.FormatBalanceForTelegram(rec), buildBalanceKeyboard(windowDays))
 }

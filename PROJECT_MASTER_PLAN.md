@@ -1311,6 +1311,68 @@ PR by the project owner since the last session, confirmed via `git
 log` before starting — no rebasing of stacked feature branches was
 needed this session).
 
+### Phase J expansion: natural-language admin queries + balance-suggestion tooling (following session)
+
+The project owner explicitly asked for the two capabilities ADR-019
+had deliberately left out of the first Phase J pass. Built as an
+addition to the same `devconsole` package (three new files:
+`queries.go`, `nlquery.go`, `balance.go`), not a new phase — same
+Feature (`ai_developer_console`), same admin-only gate.
+
+**ADR-020: the model never writes or executes SQL — it only ever
+picks a name from a fixed whitelist plus two bounded integers.** This
+is the load-bearing safety decision for natural-language admin
+queries. `queries.go` defines `queryIntents`, a fixed map of 9
+read-only intent names (`new_players`, `top_players`, `active_users`,
+`totals`, `economy_snapshot`, `combat_stats`, `clan_stats`,
+`world_state`, `recent_news`) to already-written, parameterized
+`SELECT` queries. The flow (`nlquery.go`'s `Ask`) is two separate AI
+calls, not one:
+1. **Classify** — given the admin's free-text question and the
+   whitelist description, the model returns `{"intent": "...", "days":
+   N, "limit": N}`.
+2. **Execute** — `IsKnownIntent` rejects anything not in the literal
+   whitelist outright (verified by
+   `TestParseClassification_UnknownIntentStillRejectedByIsKnownIntent`,
+   which feeds a SQL-injection-shaped intent value through the real
+   parser and confirms it's still refused); `days`/`limit` are clamped
+   to `[1,90]`/`[1,25]` (`ClampDays`/`ClampLimit`) regardless of what
+   the model returned. `RunIntent` then runs exactly one predetermined
+   query — the model's output is never concatenated into SQL at any
+   point.
+3. **Answer** — a second call receives the admin's original question
+   plus the real query-result text (never anything the model wrote)
+   and produces the final grounded natural-language answer.
+
+Two calls cost more than every other phase's single call, but there's
+no safe single-call design here: compressing to one call would mean
+either letting the model's raw output drive execution (unsafe) or
+answering before the real numbers exist (ungrounded). New command:
+`/admin_ask <question>` (admin-only).
+
+**Balance-suggestion tooling (`balance.go`)** computes real
+usage/outcome statistics per mobilizable unit type
+(`soldiers_mobilized` through `wraiths_mobilized` on `raid_forces`)
+across completed raids: usage rate (% of raids that unit type appears
+in) and apparent win rate when used (reusing the same stolen-resources
+heuristic as `battleanalyst`/`fleetcommander`). **This is
+correlational, not causal, and the system prompt says so explicitly**
+— a unit's high apparent win rate could mean it's strong, or could
+simply mean better players favor it; `BalanceSystemPrompt` forbids the
+model from stating a unit is "overpowered"/"underpowered" as fact, and
+`TestBalanceSystemPrompt_WarnsAgainstCausalClaims` checks that
+constraint is actually present in the prompt text, not just intended.
+New command: `/balance_report [days]` (admin-only).
+
+**Verification:** 34 new tests — 22 in `nlquery_test.go` (classifier/
+answer/clamp/whitelist coverage, including the adversarial
+SQL-injection-shaped-intent test above) plus 12 in `balance_test.go`.
+169 → 203 total, all passing, confirmed by a fresh full-suite run this
+session. Full `go build ./... && go vet ./... && go test ./...` clean
+for the whole repo. Branched as `phase-j2-admin-console-tools`,
+stacked on the already-pushed `phase-j-dev-console` branch (not yet
+merged at the start of this session).
+
 ### Roadmap status: all ten phases (A–J) complete
 
 Every phase on the original AI Systems Roadmap (§3's table) is now
@@ -1379,6 +1441,21 @@ way Phase J itself was scoped.
   this report to imply real-world geolocation without adding real data
   collection for it first — and consider the privacy implications of
   doing so before building it.
+- **`/admin_ask`'s query whitelist is intentionally small (9 intents)**
+  (see ADR-020 in §3). A question that doesn't map to any of them gets
+  a "couldn't match that" reply, not a best-effort guess — by design,
+  since guessing would mean either inventing a query or letting the
+  model's output drive execution more loosely. Adding a new intent
+  means adding both a `queryIntents` entry and a `RunIntent` case
+  together — never let the classification step alone "unlock" a query
+  that doesn't already exist in `RunIntent`.
+- **`/balance_report`'s unit stats are correlational, not causal** (see
+  ADR-020 / `balance.go`'s doc comment in §3): a unit's apparent win
+  rate when used doesn't isolate the unit's own strength from who
+  tends to use it. Treat every output as "worth a human balance
+  designer looking into," never as a verdict — the system prompt
+  enforces this on the model's side, but a human reader should apply
+  the same skepticism.
 - **Static cost table will go stale.** `internal/ai/cost.go`'s
   `pricePerMillionTokens` map needs periodic manual updates as
   Anthropic (and future providers) change pricing. Consider moving
@@ -1707,6 +1784,27 @@ way Phase J itself was scoped.
   on the original AI Systems Roadmap are complete** — see §3's new
   "Roadmap status" note for what that does and doesn't mean going
   forward.
+- **Following session:** Phase J expanded with the two capabilities
+  ADR-019 had deliberately deferred — the project owner asked for them
+  directly. Natural-language admin queries (`/admin_ask <question>`):
+  built as a two-call classify-then-answer flow rather than one call,
+  specifically so the model's output is NEVER SQL or anything
+  concatenated into a query — it only ever picks a name from a 9-entry
+  fixed whitelist (`queries.go`) plus two integers clamped to safe
+  bounds, documented as ADR-020. Tested adversarially: a
+  classification response containing a SQL-injection-shaped intent
+  value is still rejected by `IsKnownIntent` regardless of how
+  "validly" it parsed as JSON. Balance-suggestion tooling
+  (`/balance_report [days]`): real per-unit usage/win-rate correlations
+  from completed raids' `raid_forces` data, with the system prompt
+  explicitly forbidding the model from stating a unit is
+  over/underpowered as fact from what is admittedly correlational, not
+  causal, data — checked by a test that greps the actual prompt text
+  for that constraint rather than just trusting it was written in.
+  34 new tests (169 → 203, all passing). Full `go build ./... && go
+  vet ./... && go test ./...` confirmed clean for the whole repo.
+  Branched as `phase-j2-admin-console-tools`, stacked on the
+  already-pushed (not yet merged) `phase-j-dev-console` branch.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
