@@ -509,6 +509,64 @@ Phase E — see that phase's note for why).
 
 ---
 
+## 1.9 Critical Fix: Truncated Responses Were Indistinguishable From Genuinely Unparseable Ones (following session)
+
+ADR-015 closed the "prose-wrapped or mis-escaped but otherwise valid
+JSON" failure mode, but it left a related, narrower case unaddressed:
+when a real provider's response was cut off **mid-object** — because
+it hit the `MaxTokens` cap before finishing — `ExtractJSONObject`
+correctly reports `found=false` (there's no balanced object to
+extract), and every package's `ParseRecommendation` falls back to raw
+text exactly as it would for a response that never contained JSON at
+all (a refusal, an off-topic reply, etc.). Both cases produced the
+same generic "⚠️ Couldn't parse the AI's structured response" message,
+even though a truncated response is a distinguishable, more actionable
+situation — the model was on the right track, it simply ran out of
+room.
+
+### Fix
+
+Two parts, both scoped to the same root cause:
+
+1. **Raise `MaxTokens` from 1024 to 2048** in all four packages
+   (`governor.go`, `commander.go`, `advisor.go`, `planner.go`) —
+   reduces how often the model hits the cap before finishing a
+   normal-length recommendation in the first place.
+2. **Distinguish truncation from other unparseable responses.** Added
+   `ai.WasTruncated(text)` to `internal/ai/jsonrecovery.go`: it re-runs
+   the same string/escape-aware brace scan as `ExtractJSONObject`, and
+   reports `true` only when an opening `{` was found but the braces
+   never balanced by the end of the text — the structural signature of
+   a `MaxTokens` cutoff, as opposed to prose with no JSON object at
+   all. All four `ParseRecommendation` functions now set a new
+   `Truncated bool` field on their fallback `Recommendation` using
+   this helper, and all four `FormatForTelegram` functions show a more
+   specific "⚠️ The AI's response got cut off before it finished —
+   showing the partial reply below" message when `Truncated` is true,
+   instead of the generic parse-failure notice.
+
+This is deliberately *not* a fix that tries to salvage a partial
+object (e.g. auto-closing dangling braces and guessing at missing
+fields) — a truncated response is definitionally missing information
+the player needs (e.g. `priority_actions` cut off halfway through), so
+showing the raw partial text with an honest "cut off" label is more
+trustworthy than fabricating a complete-looking but silently
+incomplete result.
+
+**Verification:** 5 new tests in `internal/ai/jsonrecovery_test.go`
+(unclosed object, unclosed nested object, valid complete object
+correctly reported as not truncated, plain prose with no `{` at all
+correctly reported as not truncated, object left open via an
+unterminated string) plus 2 new regression tests per feature package
+(8 total) confirming both the `Truncated` flag itself and the new
+Telegram message. 100 tests total (was 87), all passing. Full `go
+build ./... && go vet ./... && go test ./...` confirmed clean for the
+whole repo (same sandbox-only, reverted-before-commit `go.mod` replace
+workaround as Phases E and the §1.8 fix — see those sessions' notes
+for why).
+
+---
+
 ## 2. Architecture Decision Records (ADRs)
 
 **ADR-001: `internal/ai` has zero dependency on game packages.**
@@ -668,6 +726,60 @@ JSON-Schema-validating retry loop before Phase F/J — it closes today's
 observed failure mode; a model that returns genuinely-wrong-shaped
 JSON (right syntax, wrong fields) still needs that future work.
 
+**ADR-016: Truncation detection (`ai.WasTruncated`) is a separate
+helper from `ExtractJSONObject`, not a third return value bolted onto
+it.** `ExtractJSONObject` is called on every `ParseRecommendation`
+attempt, including the common, fully-successful case, so its signature
+and hot-path logic are kept minimal and unchanged. `WasTruncated` is
+only ever called after `ExtractJSONObject` has already returned
+`found=false` — a comparatively rare path — so paying the small cost
+of a second, independent brace-scan there (rather than threading extra
+state through the first scan) keeps `ExtractJSONObject` itself easier
+to reason about and leaves every existing call site untouched. The
+trade-off: if a future caller needed truncation info on the *success*
+path too, this would need revisiting — not a real need today.
+
+**ADR-017: Battle Analyst (Phase F) covers raids and arena battles
+only, not World Bosses — confirmed by re-auditing the schema, not
+inherited from an earlier session's claim.** A schema audit done
+before writing any Phase F code (grepping every `DELETE
+FROM`/`ON CONFLICT ... DO UPDATE` touching the relevant tables in
+`internal/engine/tick/engine.go`) found `raids` (`state = 'completed'`
+rows) and `arena_battles` are genuinely durable, but
+`world_boss_attacks` rows are deleted once survivors return home and
+`world_boss_contributions` rows are deleted the moment a boss is
+defeated — neither retains cross-engagement history today. Building
+Battle Analyst's `Snapshot` around World Boss data that doesn't
+durably exist would have meant either silently analyzing only
+whatever boss is currently mid-fight (misleading — that's not
+"history") or fabricating a shape around data that isn't there. Scope
+was narrowed instead, and the gap is documented in §4 as real schema
+work for a future session, not hidden or worked around with
+placeholder data. A related, smaller decision made the same session:
+Battle Analyst's defender-side "apparent win" heuristic (attacker
+stole nothing) is a natural inverse of Fleet Commander's existing
+attacker-side heuristic (some resources stolen) rather than a new,
+unrelated proxy — keeping the two packages' win/loss judgment
+philosophically consistent even though they're independently
+implemented (per the same package-isolation trade-off as every other
+Phase B+ package).
+
+**ADR-018: `coordinates.danger_level` is excluded from Galaxy
+Advisor's `Snapshot` — it's stored but mechanically dead, and building
+advice around dead data would be misleading.** Grepping every
+reference before writing Phase H's `Snapshot` found `danger_level` is
+only ever written (randomized 1-5) when a new coordinate is inserted
+(`internal/bot/handlers/onboarding.go`, `jobs.go`) and never read by
+any tick-engine or handler logic — no combat, resource, or event
+calculation consults it. This is the same category of state
+`world_state.active_weather` was in before SpaceHunt Phase 7 wired up
+`world_events` (stored, plausible-looking, but disconnected from
+anything that actually happens in-game). Feeding it to the model would
+produce advice that sounds grounded in a real risk signal but isn't —
+worse than simply not mentioning it. If a future session makes
+`danger_level` mechanically meaningful (e.g. affecting raid outcomes
+near a coordinate), Galaxy Advisor should pick it up then, not before.
+
 ## 3. Full AI Systems Roadmap (Phases A–J)
 
 | Phase | Name | Status | Depends on |
@@ -677,10 +789,10 @@ JSON (right syntax, wrong fields) still needs that future work.
 | C | AI Fleet Commander | Done (PvE rogue-nest target only; PvP target lookup deferred, see §4) | A |
 | D | AI Economy Advisor | Done | A |
 | E | AI Research Planner | Done | A |
-| F | AI Battle Analyst | Not started | A |
-| G | AI Guild Assistant | Not started | A |
-| H | AI Dynamic Galaxy | Not started | A |
-| I | AI NPC Intelligence | Not started | A, ideally after G |
+| F | AI Battle Analyst | Done (raids + arena only; World Boss history excluded, see ADR-017) | A |
+| G | AI Guild Assistant | Done (Leader-only; see §3 "What Phase G built") | A |
+| H | AI Dynamic Galaxy | Done (see §3 "What Phase H built") | A |
+| I | AI NPC Intelligence | Done (see §3 "What Phase I built") | A, ideally after G |
 | J | AI Developer Console | Not started | A |
 
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
@@ -847,33 +959,333 @@ first-time dependency downloads is unchanged and still worth noting to
 whoever runs the real deploy (they should have normal internet access,
 so it's expected to be a non-issue there).
 
+### What Phase F built
+
+```
+internal/game/battleanalyst/
+├── prompt.go         Pure logic: RaidStats/ArenaStats/Snapshot types,
+│                      Pattern/Recommendation types, SystemPrompt,
+│                      deterministic BuildUserPrompt, ParseRecommendation
+│                      (fence tolerance + fallback, Truncated flag baked
+│                      in from the start per ADR-016), FormatForTelegram.
+├── prompt_test.go     13 passing unit tests, zero DB/network dependency
+│                      (prompt determinism/content, empty-history paths,
+│                      attacker-vs-defender stolen-value asymmetry, JSON
+│                      parse/fallback/truncation, Telegram formatting).
+└── analyst.go         Analyst: BuildSnapshot (reads completed raids from
+                        both the attacker and defender side, plus
+                        arena_battles matched by current username),
+                        Recommend (calls ai.Service.Complete, persists to
+                        ai_memory scope "battle_analyst").
+```
+
+New command: `/battle_analyst` (any player — read-only analysis of
+their accumulated raid and arena combat record; no goal/argument, since
+this looks backward at everything that already happened rather than
+steering toward one forward-looking goal). Inline keyboard: a single
+refresh button (no per-goal buttons, unlike Research Planner — see
+ADR-017). No new DB table — reads existing `raids` and `arena_battles`.
+Never changes any raid, arena battle, or unit itself.
+
+**Scope decided by re-auditing the actual schema, not by trusting an
+earlier session's notes.** Before writing any code, this session
+re-confirmed which tables are genuinely durable history by grepping
+every `DELETE FROM`/`ON CONFLICT ... DO UPDATE` touching `raids`,
+`world_boss_attacks`, `world_boss_contributions`, and `arena_battles`
+in `internal/engine/tick/engine.go`. Result: `raids` rows with
+`state = 'completed'` persist (matching what `fleetcommander` already
+relies on); `arena_battles` rows are never deleted; but
+`world_boss_attacks` rows are deleted once survivors return home, and
+`world_boss_contributions` rows are deleted the moment a boss is
+defeated — neither retains any history across completed engagements.
+See ADR-017 for why this means Battle Analyst covers raids (both
+sides) and arena only, not World Bosses, at least until/unless a
+future session adds a durable World Boss history table.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_battle_analyst`, verified by a new
+`TestMockPlaceholder_ParsesForBattleAnalyst` case in
+`placeholder_test.go`. Combined with `battleanalyst`'s own 13 tests,
+this phase adds 14 new tests (100 → 114 total, all passing).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo, using the same sandbox-only,
+reverted-before-commit `go.mod` replace workaround as every prior
+session since Phase E (see that phase's note for why it's needed and
+why it's safe to revert).
+
+### What Phase G built
+
+```
+internal/game/guildassistant/
+├── prompt.go          Pure logic: Applicant/WarRecord/Snapshot types,
+│                       RecruitmentCall/Recommendation types,
+│                       SystemPrompt, deterministic BuildUserPrompt,
+│                       ParseRecommendation (fence tolerance + fallback,
+│                       Truncated flag baked in per ADR-016),
+│                       FormatForTelegram.
+├── prompt_test.go      13 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content,
+│                       empty-state paths, JSON parse/fallback/
+│                       truncation, Telegram formatting).
+└── assistant.go        Assistant: BuildSnapshot (reads the caller's
+                         clan roster/combined level/military power via
+                         the same soldiers*10+mechs*150 formula
+                         HandleAllianceStatsCallback already uses, plus
+                         pending clan_applications enriched with
+                         applicant level, plus durable clan_wars
+                         history), Recommend (calls
+                         ai.Service.Complete, persists to ai_memory
+                         scope "guild_assistant").
+```
+
+New command: `/guild_assistant` — **Leader-only**, unlike every prior
+Phase B-F command. Every other clan-leadership decision in
+`internal/bot/handlers/clan.go` (accepting/rejecting applicants,
+declaring war, kicking/promoting members) is already gated to
+`role = "Leader"`; recruitment and war strategy fall in that same
+bucket, so `Assistant.BuildSnapshot` returns a distinct `ErrNotLeader`
+(as well as `ErrNoClan` for players not in a clan at all) rather than
+silently serving a regular member clan-wide leadership information
+that isn't theirs to act on. Inline keyboard: a single refresh button
+(no per-goal buttons, matching Battle Analyst's reasoning — this looks
+at whatever the clan's current state is, not one steerable goal). No
+new DB table — reads existing `clans`, `user_clans`, `clan_applications`,
+`clan_wars`, `encampments`, `workshop_inventory`. Never accepts/rejects
+an applicant, declares a war, or changes membership itself.
+
+**Scope decided by reading the real "clans" system before writing any
+code**, the same discipline Phase F used: `migrations/017_spacehunt_
+phase2_guild_extras.sql` confirmed the guild feature (tables `clans`,
+`user_clans`, `clan_applications`, `clan_wars`) already exists on
+`main` from the parallel SpaceHunt branch, with a hard 15-member cap
+and a "Leader"/"Soldier" role model (no separate Officer tier).
+Grepping every `DELETE FROM` touching those tables confirmed
+`clan_wars` rows are never deleted (durable win/loss history, unlike
+Phase F's World Boss tables), while `clan_applications` rows are
+deleted on accept/reject (current pending state only, which is exactly
+what's needed here — no history claim made about past decisions).
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_guild_assistant`, verified by a new
+`TestMockPlaceholder_ParsesForGuildAssistant` case. Combined with
+`guildassistant`'s own 13 tests, this phase adds 14 new tests (114 →
+128 total, all passing).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo. Also rebased both the
+still-open `critical-fix-truncation-flag` and `phase-f-battle-analyst`
+branches onto `main` first this session, since `main` had moved
+forward (SpaceHunt visual-system commits) since they were last pushed
+— confirmed both rebase cleanly and still build/test clean before
+starting Phase G on top of them.
+
+### What Phase H built
+
+```
+internal/game/galaxyadvisor/
+├── prompt.go          Pure logic: ContinentStatus/Snapshot types,
+│                       Action/Recommendation types, SystemPrompt,
+│                       deterministic BuildUserPrompt (including its
+│                       own eventEffect mechanical-effect-text mapping
+│                       for all 7 event types + nominal), ParseRecommendation
+│                       (fence tolerance + fallback, Truncated flag baked
+│                       in per ADR-016), FormatForTelegram.
+├── prompt_test.go      13 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content, no-news
+│                       and unrecognized-event-type paths, JSON parse/
+│                       fallback/truncation, Telegram formatting).
+└── advisor.go          Advisor: BuildSnapshot (reads the caller's home
+                         continent via encampments→coordinates.region,
+                         every continent's active event via the shared
+                         internal/engine/world.ActiveEventsByContinent/
+                         Continents helpers the tick engine and world-
+                         feed panel already use, and the same 5 most
+                         recent world_news headlines
+                         HandleWorldFeed's own panel shows), Recommend
+                         (calls ai.Service.Complete, persists to
+                         ai_memory scope "galaxy_advisor").
+```
+
+New command: `/galaxy_advisor` (any player — read-only briefing on
+their home continent's current world event plus the wider galaxy's
+environmental state across all four continents; no goal/argument,
+since — like Battle Analyst and Guild Assistant — this reasons about
+whatever the current state is, not one steerable goal). Inline
+keyboard: a single refresh button. No new DB table — reads existing
+`world_events`/`world_news`/`coordinates`/`encampments` through the
+already-shared `internal/engine/world` helpers rather than
+reimplementing that lookup. Never changes any world event, marches any
+fleet, or queues any construction itself.
+
+**Genuinely cross-cutting, matching how §3 already flagged this
+phase.** Every prior package (B-G) reasons about one player's base,
+fleet, one raid target, economy, research, combat record, or clan.
+This one is the first to reason about *shared* state — the same
+per-continent world events every player on that continent sees — and
+explicitly looks across all four continents together (`galaxy_outlook`
+in the JSON shape), not just the player's own, so a player can also
+reason about whether another continent is a better target right now.
+
+**Schema audit done before writing any code**, the same discipline as
+Phases F and G: read `internal/engine/world/events.go` and
+`weather.go` (added by the parallel SpaceHunt branch's Phase 7 item 12,
+`migrations/025`) to confirm world events are already resolved
+independently per continent with existing exported helpers this phase
+could reuse directly, rather than re-querying `world_events` by hand.
+Also checked whether `coordinates.danger_level` was worth including as
+a signal — it isn't: grepping every reference confirmed it's written
+(randomized 1-5) on new-coordinate insert but never read by any game
+mechanic, the same "stored but mechanically dead" state
+`world_state.active_weather` was in before Phase 7 wired up
+`world_events`. Excluded from `Snapshot` as a result; see ADR-018.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_dynamic_galaxy`, verified by a new
+`TestMockPlaceholder_ParsesForGalaxyAdvisor` case. Combined with
+`galaxyadvisor`'s own 13 tests, this phase adds 14 new tests. A fresh
+full-suite count this session verified 141 tests total, all passing
+(see Change Log for the exact before/after — a minor discrepancy was
+found in Phase G's own recorded count while verifying this, tracked in
+§4 rather than silently corrected).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo. Rebased all three still-open
+branches (`critical-fix-truncation-flag`, `phase-f-battle-analyst`,
+`phase-g-guild-assistant`) onto `main` first, since `main` had again
+moved forward (SpaceHunt Phase 7 regional world events landed) since
+they were last pushed — all three rebase cleanly and still build/test
+clean before starting Phase H on top of them.
+
+### What Phase I built
+
+```
+internal/game/npcintel/
+├── prompt.go          Pure logic: NestProfile/FleetProfile/Snapshot
+│                       types, UnitVerdict/Recommendation types,
+│                       SystemPrompt (encodes the combat engine's real
+│                       hard-counter rules explicitly), deterministic
+│                       BuildUserPrompt, ParseRecommendation (fence
+│                       tolerance + fallback, Truncated flag baked in
+│                       per ADR-016), FormatForTelegram.
+├── prompt_test.go      14 passing unit tests, zero DB/network
+│                       dependency (prompt determinism/content,
+│                       Warlord-present and no-fleet paths, JSON
+│                       parse/fallback/truncation, Telegram formatting).
+└── intel.go            Intel: BuildSnapshot (scales the Rogue Drone
+                         Nest via the same content.RogueNestComposition
+                         Fleet Commander and /recon_ai already use, and
+                         reads the player's own mobile fleet from
+                         workshop_inventory), Recommend (calls
+                         ai.Service.Complete, persists to ai_memory
+                         scope "npc_intel").
+```
+
+New command: `/npc_intel` (any player — a composition-specific
+tactical read of the Rogue Drone Nest against their own current mobile
+fleet). Inline keyboard: a single refresh button. No new DB tables or
+game content — reuses `content.RogueNestComposition`/`ThreatTier`
+directly and reads existing `encampments`/`workshop_inventory`. Never
+launches a raid or moves any unit.
+
+**What this phase actually is, and isn't.** The Vagabond has exactly
+one NPC/hostile-AI entity — the Rogue Drone Nest
+(`internal/game/content.RogueNestComposition`) — not a roster of
+distinct NPCs, so "AI NPC Intelligence" could easily have collapsed
+into a second copy of Fleet Commander's existing attack/no-attack call.
+It deliberately doesn't: Fleet Commander (Phase C) already answers
+"should I attack this Nest at all"; this phase answers a different,
+previously-unaddressed question — "given I might attack, which of my
+own units help or hurt against *this specific* Nest's composition." That
+distinction is only meaningful because the combat engine has real
+hard-counter mechanics (Destroyer/Wraith vs. the Nest's drones+jets,
+Bomber vs. a turreted Defense Grid, the Nest's own Guardians countering
+Bombers right back, and three of its five turret types scaling against
+specific attacker unit types) that the static `/recon_ai` report
+already shows as raw numbers but never interprets. Those mechanics are
+listed explicitly in `SystemPrompt` — read directly from
+`internal/engine/tick/engine.go`'s combat resolution comments before
+writing a line of this package's code — rather than left for the model
+to guess at or invent.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_npc_intelligence`, verified by a new
+`TestMockPlaceholder_ParsesForNPCIntel` case. Combined with
+`npcintel`'s own 14 tests, this phase adds 14 new tests (141 → 155
+total, all passing — recounted fresh this session, continuing the
+practice started in Phase H's write-up rather than trusting a prior
+session's arithmetic).
+
+**Process note:** this session initially wrote all of Phase I's code
+directly on `main` by mistake (forgot to check out a feature branch
+first) before any of it was committed. Caught before anything was
+committed or pushed — the new files were moved onto a proper branch
+stacked on `phase-h-dynamic-galaxy` before continuing, and `main` was
+left untouched. Also rebased all four still-open branches
+(`critical-fix-truncation-flag` through `phase-h-dynamic-galaxy`) onto
+`main` again this session, since `main` had moved forward again
+(SpaceHunt Phase 7 items 10/11: World Exploration + Clan Diplomacy)
+since they were last pushed — all four rebase cleanly.
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo.
+
 ### Recommended next task
 
-**Phase F — AI Battle Analyst**, per the priority order already laid
-out in §3's table, with one open question to resolve first: **check
-whether real battle/combat log data now exists** from the parallel
-SpaceHunt branch's Phase 6/7 combat work (this branch's `git log`
-shows SpaceHunt commits like "Phase 7 (part 2): real Battle Logistics"
-and "Rogue AI scaling" landing on `main` well after this branch's
-Phase D merge — read `internal/game/battlereport` and any SpaceHunt
-combat-log tables before designing Phase F's `Snapshot`, the same way
-this phase started by reading `internal/bot/handlers/research.go`).
-Phase F needs that real data to analyze; building it against
-placeholder/imagined battle data would be wasted work.
-
-After F: G (Guild Assistant, needs guild data from SpaceHunt Phase 2 —
-coordinate with that branch per §8 before building), then H onward,
-which are more cross-cutting.
+**Phase J — AI Developer Console**, the last phase on the roadmap.
+This one is different in kind from every prior phase — it's aimed at
+the game's operators/admins rather than players, so read
+`internal/bot/handlers/admin.go` and whatever admin-only tooling
+already exists before designing its scope, the same schema/logic-first
+discipline used for every phase since F. Consider explicitly with the
+project owner what "AI Developer Console" should mean in practice
+(e.g. natural-language querying of live game state for debugging,
+AI-assisted content/balance suggestions, or something else) before
+committing to a `Snapshot` shape, since this phase's name is the
+vaguest of the ten and least grounded in an existing player-facing
+system already read this session.
 
 ---
 
 ## 4. Known Issues / Technical Debt
 
-- **Full binary was never compiled this session** (see §1 — sandbox
-  network couldn't reach `proxy.golang.org`/`gopkg.in`). The
-  `cmd/bot/main.go` wiring edits are believed correct (mirrors the
-  exact pattern every other handler uses) but must be confirmed with a
-  real `go build ./...` before deploying.
+- **World Boss engagement history is not durable in the current
+  schema** (see ADR-017 and the "What Phase F built" note in §3): `world_boss_attacks` rows are
+  deleted once survivors return home, and `world_boss_contributions`
+  rows are deleted the moment a boss is defeated. Battle Analyst
+  (Phase F) therefore only covers raids and arena battles. If a future
+  session wants World Boss pattern analysis, it needs a new durable
+  history table (e.g. an append-only `world_boss_attack_log`) added
+  first — this is real schema work, not something Phase F itself could
+  work around.
+- **Arena/raid win-loss stats rely on heuristics, not authoritative
+  outcome columns.** Battle Analyst's defender-side "apparent win" (no
+  resources stolen) and Fleet Commander's existing attacker-side
+  "apparent win" (some resources stolen) are both proxies for a real
+  outcome column `raids` doesn't have — see ADR-009's original note on
+  this for Fleet Commander, now shared by Battle Analyst too. Also,
+  Battle Analyst's arena stats match by the player's *current*
+  Telegram username (since `arena_battles` stores usernames as plain
+  strings, not a `user_id` foreign key) — a player who changed their
+  username after a past arena battle will have that battle silently
+  excluded. Both are acceptable proxies today; replace if/when the
+  SpaceHunt combat branch adds authoritative columns.
+- **`coordinates.danger_level` is stored but mechanically dead** (see
+  ADR-018): randomized on insert, never read by any game logic. Galaxy
+  Advisor (Phase H) deliberately excludes it rather than presenting it
+  as a real signal. If it's ever wired up mechanically, revisit.
+- **Minor test-count discrepancy found while verifying Phase H.** Phase
+  G's own write-up claimed 128 tests total after that phase; a fresh
+  count this session (before adding any Phase H tests) found 127. The
+  likely cause: `guildassistant`'s package has 12 tests, not the 13
+  originally claimed in that session's notes — an off-by-one in
+  counting, not a missing test or a functional gap (every behavior
+  that write-up described is still covered; re-reading
+  `prompt_test.go` confirms 12 distinct `func Test...` cases). Left as
+  a recorded discrepancy rather than silently edited into Phase G's
+  already-committed history; Phase H's own numbers in this document
+  are based on a fresh, verified count (127 → 141) rather than trusting
+  the prior session's arithmetic.
 - **Static cost table will go stale.** `internal/ai/cost.go`'s
   `pricePerMillionTokens` map needs periodic manual updates as
   Anthropic (and future providers) change pricing. Consider moving
@@ -1063,6 +1475,117 @@ which are more cross-cutting.
   last-resort case. 22 new tests (14 in `internal/ai`, 2 regression
   tests each in governor/fleetcommander/econadvisor/researchplanner).
   65 → 87 total, all passing.
+- **Following session:** Critical fix (§1.9, ADR-016): distinguished
+  responses truncated mid-object (hit `MaxTokens`) from genuinely
+  unparseable ones, which previously showed the player the same
+  generic "couldn't parse" message. Added `ai.WasTruncated`; wired a
+  new `Truncated bool` field through all four packages'
+  `ParseRecommendation`/`FormatForTelegram`; raised `MaxTokens`
+  1024→2048 in all four packages to reduce how often truncation
+  happens at all. 13 new tests (5 in `internal/ai`, 2 regression tests
+  each in governor/fleetcommander/econadvisor/researchplanner). 87 →
+  100 total, all passing. Recommended next task remains Phase F.
+- **Following session:** Phase F (AI Battle Analyst) implemented: pure
+  prompt/parsing logic (`prompt.go`, 13 passing unit tests, `Truncated`
+  handling baked in from the start per ADR-016), DB-backed
+  orchestration (`analyst.go`) reading completed raids from both the
+  attacker and defender side plus `arena_battles` matched by current
+  username, 1 new bot command (`/battle_analyst`, single refresh
+  button, no goal selection — this phase looks backward at the whole
+  combat record rather than steering toward one forward-looking goal),
+  no new tables. A schema audit done before writing any code (per §3's
+  own instruction to check real data first) found World Boss
+  engagement history is not durable in the current schema — see
+  ADR-017 for why this narrowed Battle Analyst's scope to raids and
+  arena only, and §4 for the follow-up work that would fix that. Mock
+  provider given a matching placeholder JSON case, verified by 1 new
+  test in `placeholder_test.go`. 14 new tests total (100 → 114, all
+  passing). Full `go build ./... && go vet ./... && go test ./...`
+  confirmed clean for the whole repo this session (same sandbox-only
+  go.mod workaround as every session since Phase E). Recommended next
+  task updated to Phase G.
+- **Following session:** Phase G (AI Guild Assistant) implemented:
+  pure prompt/parsing logic (`prompt.go`, 13 passing unit tests,
+  `Truncated` handling baked in per ADR-016), DB-backed orchestration
+  (`assistant.go`) reading the caller's clan roster/military
+  power/pending applicants (enriched with applicant level) plus
+  durable `clan_wars` history, 1 new bot command (`/guild_assistant`,
+  Leader-only — unlike every prior Phase B-F command, since
+  recruitment/war strategy are already Leader-gated decisions
+  elsewhere in `clan.go`). Confirmed the guild system
+  (`clans`/`user_clans`/`clan_applications`/`clan_wars`) already exists
+  on `main` from the parallel SpaceHunt branch by reading
+  `migrations/017_spacehunt_phase2_guild_extras.sql` and `clan.go`
+  before writing any Phase G code, then confirmed via `DELETE FROM`
+  grepping that `clan_wars` (unlike Phase F's World Boss tables) is
+  genuinely durable history. Also rebased the still-open
+  `critical-fix-truncation-flag` and `phase-f-battle-analyst` branches
+  onto `main` (which had moved forward with SpaceHunt visual-system
+  commits) before starting Phase G on top of them — both rebased
+  cleanly. Mock provider given a matching placeholder JSON case,
+  verified by 1 new test. 14 new tests total (114 → 128, all passing).
+  Full `go build ./... && go vet ./... && go test ./...` confirmed
+  clean for the whole repo this session. Recommended next task updated
+  to Phase H.
+- **Following session:** Phase H (AI Dynamic Galaxy) implemented: pure
+  prompt/parsing logic (`prompt.go`, 13 passing unit tests, `Truncated`
+  handling baked in per ADR-016, plus its own event→mechanical-effect
+  text mapping for all 7 event types), DB-backed orchestration
+  (`advisor.go`) reusing the existing shared
+  `internal/engine/world.ActiveEventsByContinent`/`Continents` helpers
+  and the same 5-headline `world_news` query
+  `HandleWorldFeed`'s panel already uses, 1 new bot command
+  (`/galaxy_advisor`, single refresh button). This is the first phase
+  to reason about shared per-continent state rather than one player's
+  own base/fleet/economy/research/combat/clan — matches how §3 already
+  flagged it as more cross-cutting. Read
+  `internal/engine/world/events.go` and `weather.go` (added by the
+  parallel SpaceHunt branch's Phase 7 item 12) before writing any code,
+  confirming reusable exported helpers already existed rather than
+  re-querying `world_events` by hand. Checked `coordinates.danger_level`
+  as a candidate signal and found it mechanically dead (written, never
+  read) — excluded per ADR-018. While verifying test counts, found a
+  minor discrepancy in Phase G's own recorded total (claimed 128;
+  fresh count found 127 before this session's additions — see §4);
+  Phase H's own numbers use the freshly-verified count. Mock provider
+  given a matching placeholder JSON case, verified by 1 new test. 14
+  new tests total (127 → 141, all passing). Full `go build ./... && go
+  vet ./... && go test ./...` confirmed clean for the whole repo. Also
+  rebased all three still-open branches
+  (`critical-fix-truncation-flag`, `phase-f-battle-analyst`,
+  `phase-g-guild-assistant`) onto `main` again this session (SpaceHunt
+  Phase 7 regional world events had landed) before starting Phase H on
+  top of them — all three rebase cleanly. Recommended next task updated
+  to Phase I.
+- **Following session:** Phase I (AI NPC Intelligence) implemented:
+  pure prompt/parsing logic (`prompt.go`, 14 passing unit tests,
+  `Truncated` handling baked in per ADR-016), DB-backed orchestration
+  (`intel.go`) scaling the Rogue Drone Nest via the existing
+  `content.RogueNestComposition`/`ThreatTier` helpers Fleet Commander
+  and `/recon_ai` already use and reading the player's own mobile
+  fleet from `workshop_inventory`, 1 new bot command (`/npc_intel`,
+  single refresh button). Deliberately scoped to NOT duplicate Fleet
+  Commander's existing attack/no-attack call: this phase instead reads
+  the combat engine's real hard-counter mechanics (Destroyer/Wraith
+  vs. drones+jets, Bomber vs. turreted Defense Grids countered by
+  Guardians, per-turret-type scaling against specific attacker unit
+  types) straight from `internal/engine/tick/engine.go`'s combat
+  resolution comments and gives a composition-specific tactical read
+  the static `/recon_ai` report never provided. Mock provider given a
+  matching placeholder JSON case, verified by 1 new test. 14 new tests
+  total (141 → 155, all passing). Full `go build ./... && go vet
+  ./... && go test ./...` confirmed clean for the whole repo.
+  Mid-session process note: all of this phase's code was initially
+  written directly on `main` by mistake (forgot to check out a feature
+  branch); caught before anything was committed, moved onto a proper
+  branch stacked on `phase-h-dynamic-galaxy`, `main` left untouched.
+  Also rebased all four still-open branches onto `main` again
+  (SpaceHunt Phase 7 items 10/11: World Exploration + Clan Diplomacy
+  had landed) before starting Phase I on top of them — all four
+  rebase cleanly. Recommended next task updated to Phase J, flagged as
+  needing explicit scope discussion with the project owner before
+  building (vaguest phase name on the roadmap, least grounded in an
+  existing player-facing system).
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 

@@ -109,6 +109,45 @@ func placeholderJSON(feature string) string {
 			"cores_available": 0,
 			"notes": "Not evaluated — placeholder mode."
 		}`
+	case "ai_battle_analyst":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real analysis of this player's raid/arena combat record.",
+			"key_patterns": [
+				{"observation": "configure_provider", "evidence": "This is mock output.", "suggestion": "See /ai_status for setup instructions."}
+			],
+			"recommended_focus": "Not evaluated — placeholder mode.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
+	case "ai_guild_assistant":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real recruitment/war analysis for this clan.",
+			"recruitment_calls": [
+				{"username": "configure_provider", "recommendation": "undecided", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"war_insight": "Not evaluated — placeholder mode.",
+			"recommended_focus": "Not evaluated — placeholder mode.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
+	case "ai_dynamic_galaxy":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real galaxy briefing.",
+			"home_continent_advice": "Not evaluated — placeholder mode.",
+			"galaxy_outlook": "Not evaluated — placeholder mode.",
+			"recommended_actions": [
+				{"action": "configure_provider", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"notes": "Not evaluated — placeholder mode."
+		}`
+	case "ai_npc_intelligence":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real tactical read on this Rogue Nest.",
+			"nest_reading": "Not evaluated — placeholder mode.",
+			"fleet_composition_advice": [
+				{"unit": "configure_provider", "verdict": "fine", "reason": "This is mock output. See /ai_status for setup instructions."}
+			],
+			"key_risk": "Not evaluated — placeholder mode.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}

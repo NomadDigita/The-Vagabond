@@ -7,18 +7,21 @@ against a duplicate-filled sticker set, which cannot safely recover an icon
 name -> custom_emoji_id mapping.
 
 Required only with --apply:
-    TG_BOT_TOKEN  BotFather token, set locally and never committed.
-    TG_OWNER_ID   Numeric Telegram ID of the Premium owner/test account.
+    --prompt-token  Recommended: hidden local BotFather-token prompt.
+    --owner-id       Numeric Telegram ID of the Premium owner/test account.
+    TG_BOT_TOKEN / TG_OWNER_ID remain supported as local-only fallbacks.
 
 Examples:
     python assets/visual-system/pipeline/telegram_fresh_test_set.py
     python assets/visual-system/pipeline/telegram_fresh_test_set.py \
-      --apply --set-slug vagabond_v10_oracle_test
+      --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID \
+      --set-slug vagabond_v10_oracle_test
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -52,6 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Perform Telegram API calls; default is dry-run.")
     parser.add_argument("--set-slug", default="vagabond_v10_oracle_test", help="Fresh set prefix; bot suffix is appended automatically.")
+    parser.add_argument("--prompt-token", action="store_true", help="Prompt for the bot token without echoing or storing it in an environment variable.")
+    parser.add_argument("--owner-id", help="Numeric Telegram owner/test-account ID; overrides TG_OWNER_ID for this run only.")
     return parser.parse_args()
 
 
@@ -70,19 +75,32 @@ def utf16_len(text: str) -> int:
 def validate_slug(slug: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{1,30}", slug):
         raise SystemExit("--set-slug must start with a letter and contain only letters, digits, and underscores (2-31 characters).")
-    return slug.lower()
+    slug = slug.lower()
+    if "__" in slug or slug.endswith("_"):
+        raise SystemExit("--set-slug cannot contain consecutive underscores or end in an underscore, because Telegram appends `_by_<bot_username>`.")
+    return slug
 
 
 def call(api: str, method: str, **kwargs):
     files = kwargs.pop("files", None)
     try:
         response = requests.post(f"{api}/{method}", data=kwargs, files=files, timeout=45)
-        response.raise_for_status()
+    except requests.RequestException as error:
+        # Do not include str(error): requests commonly includes the full URL,
+        # which embeds the bot token by design.
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+        suffix = f" (HTTP {status_code})" if status_code is not None else ""
+        raise RuntimeError(f"{method} transport failure{suffix}.") from None
+    try:
         payload = response.json()
-    except (requests.RequestException, ValueError) as error:
-        raise RuntimeError(f"{method} network/response failure: {error}") from error
+    except ValueError as error:
+        raise RuntimeError(f"{method} returned a non-JSON response (HTTP {response.status_code}).") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{method} returned a non-object JSON response (HTTP {response.status_code}).")
     if not payload.get("ok"):
         raise TelegramAPIError(method, payload)
+    if not response.ok:
+        raise RuntimeError(f"{method} returned HTTP {response.status_code} with an invalid success payload.")
     return payload["result"]
 
 
@@ -148,13 +166,21 @@ def main() -> None:
         print("The apply run aborts if the exact set already exists; it never replaces or appends to a set.")
         return
 
-    token = os.environ.get("TG_BOT_TOKEN")
-    owner_id = os.environ.get("TG_OWNER_ID")
+    token = getpass.getpass("Paste BotFather token locally (input hidden): ") if args.prompt_token else os.environ.get("TG_BOT_TOKEN", "")
+    token = token.strip()
+    owner_id = (args.owner_id or os.environ.get("TG_OWNER_ID", "")).strip()
     if not token or not owner_id:
-        raise SystemExit("--apply requires TG_BOT_TOKEN and TG_OWNER_ID to be set locally.")
+        raise SystemExit("--apply requires --prompt-token (recommended) or TG_BOT_TOKEN, plus --owner-id or TG_OWNER_ID.")
+    if not re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{20,}", token):
+        raise SystemExit("The bot token has an invalid shape. Generate a fresh token in @BotFather and enter it only at the hidden prompt.")
+    if not owner_id.isdecimal():
+        raise SystemExit("--owner-id / TG_OWNER_ID must be numeric.")
     api = f"https://api.telegram.org/bot{token}"
     bot = call(api, "getMe")
-    set_name = f"{slug}_by_{bot['username']}"
+    bot_username = bot.get("username")
+    if not isinstance(bot_username, str) or not bot_username:
+        raise RuntimeError("getMe returned a bot without a username. Set a username in @BotFather before creating a sticker set.")
+    set_name = f"{slug}_by_{bot_username}"
     if len(set_name) > 64:
         raise SystemExit(f"Fresh set name is too long ({len(set_name)} > 64): {set_name}")
     if get_set_if_missing_only(api, set_name) is not None:
@@ -167,10 +193,13 @@ def main() -> None:
     if len(stickers) != 1:
         raise RuntimeError(f"Fresh set assertion failed: expected one sticker, found {len(stickers)}. No mapping was written.")
     sticker = stickers[0]
+    custom_emoji_id = sticker.get("custom_emoji_id")
+    if not isinstance(custom_emoji_id, str) or not custom_emoji_id:
+        raise RuntimeError("Fresh set assertion failed: Telegram returned no custom_emoji_id. No mapping was written.")
     manifest = write_manifest(set_name, sticker, file_id)
-    send_verification_message(api, owner_id, sticker["custom_emoji_id"])
+    send_verification_message(api, owner_id, custom_emoji_id)
     print(f"Created fresh test set: {set_name}")
-    print(f"custom_emoji_id: {sticker['custom_emoji_id']}")
+    print(f"custom_emoji_id: {custom_emoji_id}")
     print(f"Wrote deterministic test manifest: {manifest}")
     print("Telegram client review is now required; this is not production approval.")
 

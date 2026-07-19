@@ -72,6 +72,12 @@ type Recommendation struct {
 	// FellBackToRawText is true when JSON parsing failed and Summary
 	// holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
+	// Truncated is true when the fallback happened because the
+	// model's response was cut off mid-object (almost always meaning
+	// MaxTokens was hit before the model finished), as opposed to the
+	// response never containing a recognizable JSON object at all.
+	// See ADR-016 in PROJECT_MASTER_PLAN.md.
+	Truncated bool
 }
 
 // SystemPrompt is the fixed instruction given to the model for every
@@ -129,7 +135,7 @@ func BuildUserPrompt(s Snapshot) string {
 func ParseRecommendation(text string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &Recommendation{Summary: text, FellBackToRawText: true}
+		return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 	}
 
 	var rec Recommendation
@@ -147,7 +153,7 @@ func ParseRecommendation(text string) *Recommendation {
 		return &rec
 	}
 
-	return &Recommendation{Summary: text, FellBackToRawText: true}
+	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
 // FormatForTelegram renders a Recommendation as a plain-text message
@@ -157,7 +163,11 @@ func FormatForTelegram(rec *Recommendation) string {
 	b.WriteString("🧠 AI PLANET GOVERNOR\n\n")
 
 	if rec.FellBackToRawText {
-		b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+		if rec.Truncated {
+			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+		} else {
+			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+		}
 		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
 		return b.String()
 	}

@@ -104,7 +104,7 @@ func (g *Governor) Recommend(ctx context.Context, userID int64) (*Recommendation
 		UserID:      userID,
 		System:      SystemPrompt,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: userPrompt}},
-		MaxTokens:   1024,
+		MaxTokens:   2048,
 		Temperature: 0.3,
 		JSONMode:    true,
 	})

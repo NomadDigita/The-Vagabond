@@ -22,9 +22,13 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
+	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
+	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
+	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
+	"github.com/NomadDigita/The-Vagabond/internal/game/npcintel"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -876,6 +880,22 @@ func main() {
 	aiResearchPlanner := researchplanner.New(db, aiService)
 	researchPlannerHandler := handlers.NewResearchPlannerHandler(aiResearchPlanner)
 
+	// --- AI Battle Analyst wiring (Phase F, independent AI roadmap branch) ---
+	aiBattleAnalyst := battleanalyst.New(db, aiService)
+	battleAnalystHandler := handlers.NewBattleAnalystHandler(aiBattleAnalyst)
+
+	// --- AI Guild Assistant wiring (Phase G, independent AI roadmap branch) ---
+	aiGuildAssistant := guildassistant.New(db, aiService)
+	guildAssistantHandler := handlers.NewGuildAssistantHandler(aiGuildAssistant)
+
+	// --- AI Dynamic Galaxy wiring (Phase H, independent AI roadmap branch) ---
+	aiGalaxyAdvisor := galaxyadvisor.New(db, aiService)
+	galaxyAdvisorHandler := handlers.NewGalaxyAdvisorHandler(aiGalaxyAdvisor)
+
+	// --- AI NPC Intelligence wiring (Phase I, independent AI roadmap branch) ---
+	aiNPCIntel := npcintel.New(db, aiService)
+	npcIntelHandler := handlers.NewNPCIntelHandler(aiNPCIntel)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -963,6 +983,14 @@ func main() {
 	bot.Handle("/research_planner", researchPlannerHandler.HandleResearchPlanner)
 	bot.Handle("\fresearch_refresh", researchPlannerHandler.HandleResearchPlannerRefreshCallback)
 	bot.Handle("\fresearch_goal", researchPlannerHandler.HandleResearchPlannerGoalCallback)
+	bot.Handle("/battle_analyst", battleAnalystHandler.HandleBattleAnalyst)
+	bot.Handle("\fbattle_analyst_refresh", battleAnalystHandler.HandleBattleAnalystRefreshCallback)
+	bot.Handle("/guild_assistant", guildAssistantHandler.HandleGuildAssistant)
+	bot.Handle("\fguild_assistant_refresh", guildAssistantHandler.HandleGuildAssistantRefreshCallback)
+	bot.Handle("/galaxy_advisor", galaxyAdvisorHandler.HandleGalaxyAdvisor)
+	bot.Handle("\fgalaxy_advisor_refresh", galaxyAdvisorHandler.HandleGalaxyAdvisorRefreshCallback)
+	bot.Handle("/npc_intel", npcIntelHandler.HandleNPCIntel)
+	bot.Handle("\fnpc_intel_refresh", npcIntelHandler.HandleNPCIntelRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)
