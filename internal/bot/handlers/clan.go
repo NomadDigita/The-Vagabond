@@ -402,12 +402,22 @@ func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 	defer tx.Rollback()
 
 	var leaderRole string
-	_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole)
+	var myClanID string
+	_ = tx.QueryRowContext(ctx, "SELECT role, clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole, &myClanID)
 	if leaderRole != "Leader" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1", targetID)
+	// BUGFIX: this used to DELETE by targetID alone, with no check that
+	// the target actually belongs to the acting leader's own clan. A
+	// stale "Kick" button (e.g. the member left and joined a different
+	// clan between opening Manage Members and tapping Kick) could
+	// remove someone from an unrelated clan's roster entirely. The
+	// clan_id match makes this a no-op instead of a cross-clan kick.
+	res, _ := tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1 AND clan_id = $2", targetID, myClanID)
+	if n, _ := res.RowsAffected(); n == 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
+	}
 
 	alertMsg := "🚪 ALLIANCE NOTICE: You have been removed from the alliance roster by the Clan Leader."
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
@@ -431,12 +441,19 @@ func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
 	defer tx.Rollback()
 
 	var leaderRole string
-	_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole)
+	var myClanID string
+	_ = tx.QueryRowContext(ctx, "SELECT role, clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole, &myClanID)
 	if leaderRole != "Leader" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE user_clans SET role = 'Co-Leader' WHERE user_id = $1", targetID)
+	// BUGFIX: same cross-clan gap as HandleKickMemberCallback above -
+	// verify the target is actually in the acting leader's own clan
+	// before promoting them, rather than trusting targetID alone.
+	res, _ := tx.ExecContext(ctx, "UPDATE user_clans SET role = 'Co-Leader' WHERE user_id = $1 AND clan_id = $2", targetID, myClanID)
+	if n, _ := res.RowsAffected(); n == 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
+	}
 
 	alertMsg := "🛡️ CONGRATULATIONS: You have been promoted to Co-Leader within your alliance!"
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)

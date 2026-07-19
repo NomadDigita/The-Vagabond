@@ -218,6 +218,15 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 		return c.Send("❌ Only your Clan's King can join a Federation.")
 	}
 
+	// BUGFIX: HandleFoundFederation already blocks founding while in a
+	// Federation, but this had no equivalent check - a King could
+	// silently switch Federations without ever running /fed_leave.
+	var existingFed sql.NullString
+	_ = h.DB.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", clanID).Scan(&existingFed)
+	if existingFed.Valid {
+		return c.Send("❌ Your Clan is already part of a Federation. Use /fed_leave first.")
+	}
+
 	var fedID string
 	err = h.DB.QueryRowContext(ctx, "SELECT id FROM federations WHERE LOWER(name) = LOWER($1)", name).Scan(&fedID)
 	if err != nil {

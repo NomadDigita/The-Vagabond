@@ -1222,6 +1222,15 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			var qu queuedUser
 			var soldiers, mechs int
 			if err := rows.Scan(&qu.userID, &qu.enteredAt, &qu.username, &soldiers, &mechs); err == nil {
+				// BUGFIX: powerRating was declared but never computed or
+				// used anywhere in this function - every arena match
+				// was actually being decided by pure queue order (first
+				// half of the FIFO-matched group always "won", the rest
+				// always "lost"), completely ignoring the soldiers/mechs
+				// this query goes to the trouble of fetching. Weighting
+				// mirrors the wider game's general soldier:mech power
+				// ratio (mechs are the far more expensive, stronger unit).
+				qu.powerRating = soldiers + mechs*5
 				participants = append(participants, qu)
 			}
 		}
@@ -1231,8 +1240,48 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			requiredCount := e.requiredMatchCount(b)
 			matched := participants[:requiredCount]
 
-			winners := matched[:requiredCount/2]
-			losers := matched[requiredCount/2:]
+			// BUGFIX: this used to be `winners := matched[:requiredCount/2]`
+			// / `losers := matched[requiredCount/2:]` - i.e. whoever queued
+			// first always won, every single match, regardless of army
+			// strength. Now: shuffle into two random (not queue-order)
+			// teams of equal size, total each team's powerRating, and
+			// roll a power-weighted coin flip - stronger teams are more
+			// likely to win, but it's not a guaranteed stomp, matching
+			// the RNG-with-a-thumb-on-the-scale pattern used by the main
+			// raid combat resolution elsewhere in this file.
+			shuffled := make([]queuedUser, len(matched))
+			copy(shuffled, matched)
+			rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+			teamA := shuffled[:requiredCount/2]
+			teamB := shuffled[requiredCount/2:]
+
+			var powerA, powerB int
+			for _, p := range teamA {
+				powerA += p.powerRating
+			}
+			for _, p := range teamB {
+				powerB += p.powerRating
+			}
+
+			// Both teams get a small combat-power floor so a 0-army team
+			// (e.g. a fresh outpost with no troops yet) doesn't create a
+			// division-by-zero and always has *some* chance, however slim.
+			if powerA <= 0 {
+				powerA = 1
+			}
+			if powerB <= 0 {
+				powerB = 1
+			}
+
+			winProbA := float64(powerA) / float64(powerA+powerB)
+
+			var winners, losers []queuedUser
+			if rand.Float64() < winProbA {
+				winners, losers = teamA, teamB
+			} else {
+				winners, losers = teamB, teamA
+			}
 
 			lootWon := 100.0
 			switch b {
@@ -1498,6 +1547,46 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			newCrystal, _ := storagecap.Clamp(curCrystal, r.stolenCrystal, attackerCap)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, metal = $2, crystal = $3 WHERE encampment_id = $4", newScrap, newMetal, newCrystal, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+
+			// BUGFIX: co-op helper survivors were never credited home on
+			// a NATURAL raid completion - only the manual "abort" path
+			// in combat.go's HandleExpeditionActions did this. Every
+			// helper who joined a raid that simply ran its course (won
+			// or lost normally) had their surviving soldiers/mechs
+			// permanently vanish into an orphaned raid_coop_members row.
+			// raid_coop_members.soldiers_contributed/mechs_contributed
+			// already reflects post-casualty survivor counts by this
+			// point (updated during battle resolution above), so this
+			// is a straight credit-back, same shape as the primary
+			// attacker's just above.
+			rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", r.id)
+			if errCoop == nil {
+				type coopSurvivor struct {
+					campID   string
+					soldiers int
+					mechs    int
+				}
+				var survivors []coopSurvivor
+				for rowsCoop.Next() {
+					var s coopSurvivor
+					if scanErr := rowsCoop.Scan(&s.campID, &s.soldiers, &s.mechs); scanErr == nil {
+						survivors = append(survivors, s)
+					}
+				}
+				rowsCoop.Close()
+
+				for _, s := range survivors {
+					_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", s.soldiers, s.mechs, s.campID)
+
+					var helperUserID int64
+					_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", s.campID).Scan(&helperUserID)
+					if helperUserID != 0 {
+						helperAlert := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your contributed forces survived the co-op campaign and have returned safely to your own base (+%d Soldiers, +%d Mechs).", s.soldiers, s.mechs)
+						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", helperUserID, helperAlert)
+					}
+				}
+				_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", r.id)
+			}
 
 			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap, +%.1f Metal, +%.1f Crystal!", r.stolenScrap, r.stolenMetal, r.stolenCrystal)
 			queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"

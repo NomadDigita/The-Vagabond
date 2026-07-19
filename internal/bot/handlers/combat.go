@@ -1537,7 +1537,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🚀 Expedition deployed!"})
-	return c.Send(fmt.Sprintf("🚀 Raiders deployed! Deployed: %d Soldiers, %d Mechs over [%s Route]. Check Expedition Radar for travel progress.", mobSoldiers, mobMechs, routeType), keyboards.MainNavigation())
+	return c.Send(fmt.Sprintf("🚀 Raiders deployed! Deployed: %d Soldiers, %d Mechs over [%s Route]. Check Expedition Radar for travel progress.", mobSoldiers, mobMechs, routeType), keyboards.CombatNavigation())
 }
 
 func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {

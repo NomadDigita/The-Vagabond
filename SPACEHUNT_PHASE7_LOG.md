@@ -705,3 +705,127 @@ up for further polish:
    someNavKeyboard)` (see the CRITICAL REGRESSION section above for why
    that specific shape is always wrong).
 
+---
+
+## 5. Full codebase audit (requested outside the Phase 7 item list)
+
+Asiwaju asked for a full pass over every line of non-visual code,
+emphasizing battle formats (raids, co-op, arena, world bosses, spying,
+scanning) plus Admin/Clan/Federation. This section documents what was
+found, fixed, checked-and-clean, or knowingly left unaudited, so a
+future session doesn't have to guess what this pass covered.
+
+### Bugs found and fixed
+
+1. **Co-op raid survivors lost on natural completion (critical).**
+   `internal/engine/tick/engine.go`'s raid `"returning" -> "completed"`
+   phase credited the primary attacker's survivors home via
+   `raid_forces`, but never touched `raid_coop_members` at all - only
+   the manual "abort" path in `combat.go`'s `HandleExpeditionActions`
+   credited helpers back. Every co-op raid that simply ran its course
+   (won or lost normally, the overwhelmingly common case) silently
+   erased every helper's surviving soldiers/mechs into an orphaned row
+   that was never read again. Fixed: added the same credit-back +
+   notify + `DELETE FROM raid_coop_members` the abort path already had,
+   right after the primary attacker's own credit-back.
+
+2. **Arena battles decided by queue order, not army strength
+   (critical).** `processArenaMatchmaking`'s `queuedUser` struct had a
+   `powerRating int` field that was declared but never assigned or
+   read anywhere in the file - confirmed via `grep` (zero other hits)
+   and confirmed no `sort.Slice` call exists in the function. The
+   query even fetches each participant's `soldiers`/`mechs` specifically
+   to compute this, then threw the values away: `winners :=
+   matched[:requiredCount/2]` / `losers := matched[requiredCount/2:]`
+   meant whoever queued first (by FIFO position within the matched
+   group) always won every single 1v1/2v2/3v3 match, unconditionally.
+   Fixed: `powerRating` is now actually computed (`soldiers +
+   mechs*5`), matched participants are shuffled into two random teams
+   (not queue-order halves), and the winner is a power-weighted
+   probabilistic roll (stronger team more likely to win, not a
+   guaranteed stomp) rather than a deterministic split.
+
+3. **Clan Kick/Promote had no same-clan check on the target (TOCTOU
+   gap).** Both `HandleKickMemberCallback` and
+   `HandlePromoteMemberCallback` verified the *acting* leader's role
+   but ran `DELETE`/`UPDATE ... WHERE user_id = $1` on the target with
+   no `clan_id` filter at all. A stale "Kick"/"Promote" button (e.g.
+   the target left and joined a different Clan between opening Manage
+   Members and tapping the button) could silently affect an unrelated
+   Clan's roster. Fixed both to require `AND clan_id = $2` (the acting
+   leader's own clan), responding with "no longer in your alliance"
+   if the row match fails instead of silently no-op'ing on the wrong
+   clan.
+
+4. **Federation join/found inconsistency.** `HandleFoundFederation`
+   already blocked founding while already in a Federation
+   ("`Use /fed_leave first`"); `HandleJoinFederation` had no equivalent
+   check, letting a King silently switch Federations without ever
+   running `/fed_leave`. Added the same guard for consistency.
+
+5. **Keyboard mismatch on raid launch.** The raid-deployment
+   confirmation message (`HandleConfirmHangarLaunchCallback`'s final
+   send) switched the persistent bottom bar to `MainNavigation`, even
+   though its own text tells the player to "Check Expedition Radar for
+   travel progress" - a Combat panel. Fixed to `CombatNavigation`.
+
+### Checked and confirmed clean (no bug found)
+
+- **Spy/Espionage** (`HandleSpyCallback`, `HandleLaunchInterceptor`,
+  `resolvePendingEspionageMissions`): outbound scan -> return-leg ->
+  interceptable-window -> landing lifecycle is coherent, intercept
+  window is correctly enforced against `resolve_time`, already had a
+  documented comment about the earlier fix.
+- **World Boss** (`HandleAttackBossCallback`, `payoutWorldBossLoot`,
+  the marching/returning tick phases): damage/retaliation/return-march
+  and proportional loot-by-damage-contribution split are all correct.
+- **Clan War declaration** (`HandleDeclareClanWarCallback`): correct
+  clan scoping throughout, `clan_wars.status` defaults to `'active'`
+  at the schema level as the code assumes.
+- **Clan application accept/reject** (`HandleApplicationDecisionCallback`):
+  already correctly scopes every query by `clan_id`, unlike the
+  Kick/Promote bug above - this was the reference pattern used to fix
+  those two.
+- **Rebellion donations, Deconstruct** (bulk and single-unit paths):
+  straightforward resource math, no sign errors or missing locks found.
+- **ICBM/Piercing Missile vs. the AI Rogue Drone Nest**: both handlers
+  have a `targetCampID == "ai_drone_nest"` branch that's dead code -
+  the Silo panel's target list only ever queries the real `encampments`
+  table (`WHERE e.id != $1`), so this branch is unreachable through the
+  UI. Not a live bug, just leftover defensive code from a
+  never-implemented "nuke the AI nest" path. Left as-is (removing it
+  would be pure cleanup, not a fix, and touching dead code carries more
+  risk than value here).
+
+### Hardening note (not fixed - flagged for judgment call)
+
+`combat.go`'s `HandleExpeditionActions` (Speed Up / Abort on an
+outbound raid) never checks that the caller's own camp matches the
+raid's `attacker_id` - it trusts `raidID` alone. In practice this isn't
+exploitable through the normal UI: the Speed Up/Abort buttons are only
+ever generated inside `HandleExpeditionRadar`'s `WHERE r.attacker_id =
+$1` query (the caller's own camp), and Telegram scopes inline buttons
+to the private chat they were sent in, so no other player's client ever
+receives a button carrying someone else's `raidID`. Still inconsistent
+with the rest of the codebase's belt-and-suspenders ownership checks
+elsewhere (every other raid/spy/boss handler re-derives the camp from
+`sender.ID` rather than trusting an ID out of the callback args alone).
+Worth adding a `sender.ID` -> `attacker_id` match check as defense in
+depth if this function is ever touched again, but not urgent enough to
+justify a standalone commit for it alone.
+
+### Not yet covered by this pass
+
+Given the size of the codebase (~20,000 lines across handlers/engine),
+this pass prioritized combat/battle formats and Admin/Clan/Federation
+per the request, verified everything it touched with a real
+`go build ./...` + `go vet ./...` (not just `gofmt`), but did not
+exhaustively re-read every line of: `economy.go`/`exchange.go` beyond
+what Phase 7 items 3/12 already touched, `research.go`/`silo.go` beyond
+the Piercing Missile/ICBM check above, `hero.go`/`camp.go` beyond the
+keyboard audit, `factory.go`, `profile.go`, `jobs.go`, `onboarding.go`,
+or any of the `internal/game/*advisor*`/`internal/game/*intel*`/etc. AI
+advisor packages (a different workstream's territory, per the
+established hands-off convention). A dedicated follow-up pass on those
+would be reasonable if more issues are suspected there.
+
