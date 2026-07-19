@@ -153,7 +153,13 @@ def setup_scene(samples: int, frames: int):
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    # EEVEE_NEXT stalls in this Windows headless Blender build, even for a
+    # single opaque sphere.  Cycles CPU completes reliably and preserves the
+    # glass/refraction and native RGBA film needed for a Telegram WebM.
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = False
     scene.render.resolution_x = scene.render.resolution_y = 100
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
@@ -161,8 +167,6 @@ def setup_scene(samples: int, frames: int):
     scene.render.film_transparent = True
     scene.render.fps, scene.frame_start, scene.frame_end = FPS, 1, frames
     scene.view_settings.look = "AgX - Medium High Contrast"
-    if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
-        scene.eevee.taa_render_samples = samples
     world = bpy.data.worlds.new("Crystal studio void")
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = rgba("06030C")

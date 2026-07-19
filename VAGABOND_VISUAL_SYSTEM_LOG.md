@@ -65,12 +65,12 @@ the upload path and could otherwise cause a destructive rerun.
   pedestal, luminous internal facets, and animated star glints. It is an
   original rebuild informed by the owner's owned reference, not an upload of
   the phone recording or a copy of a third-party Telegram asset.
-- The Blender source saved successfully, but an isolated one-frame EEVEE render
-  failed to write any PNG after more than a minute and was stopped. Therefore
-  **v12 has no rendered WebM, has not been locally media-validated, and has
-  not been uploaded to Telegram.** See
-  `assets/visual-system/CRYSTAL_3D_V12_DESIGN.md` for the precise record and
-  rerun commands.
+- EEVEE was isolated as the headless Windows render failure and replaced for
+  this asset with Cycles CPU. The approved crystal now has a transparent,
+  animated `crystal_3d_v12.webm`, locally validated as VP9, alpha, 100x100,
+  silent, two seconds, and 7.7 KiB. It is ready for an isolated fresh-set test
+  but **has not yet been uploaded to Telegram or reviewed in a client.** See
+  `assets/visual-system/CRYSTAL_3D_V12_DESIGN.md` for the precise record.
 
 ---
 

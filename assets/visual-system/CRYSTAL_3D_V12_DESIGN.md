@@ -40,21 +40,24 @@ reference recording as an upload asset.
 
 ## Verification record - 2026-07-19
 
-1. Python syntax for the renderer script: **PASS**.
-2. Blender scene/source generation: **PASS** (`crystal_3d_v12.blend`, 918,379
-   bytes).
-3. First-frame EEVEE render: **NOT COMPLETE**. A one-frame, one-sample,
-   100px probe consumed CPU for more than a minute without writing a PNG, so
-   it was stopped. The same behavior occurred for an isolated minimal scene;
-   this is a current local Blender-renderer failure, not a claim that the
-   v12 art is rendered or Telegram-ready.
-4. Video validation, Telegram fresh-set creation, and client review: **not
-   run** because no WebM exists yet.
+1. The initial EEVEE renderer was isolated as the failure point: it stalls in
+   this headless Windows Blender build even for a 100px opaque sphere.
+2. The Blender scene now uses Cycles CPU, which rendered a transparent
+   100x100 probe successfully at eight samples (2.30 seconds render time).
+3. The approved crystal design was generated through Codex's built-in image
+   tool on a flat chroma-key background, then locally extracted to an RGBA PNG.
+   Visual inspection confirms transparent surroundings and no dark square.
+4. `animate_transparent_still.py` creates the final WebM with a seamless,
+   reversible three-degree crystal drift. It uses local FFmpeg only.
+5. `animated/crystal_3d_v12/crystal_3d_v12.webm`: **PASS** local validation -
+   VP9, decoded alpha, 100x100, silent, 2.000 seconds, 7.7 KiB, under the
+   conservative 64 KiB delivery gate.
+6. Telegram fresh-set creation and actual client review: **not yet run**.
 
 ## Re-run command
 
-Use the repository's portable Blender and ffmpeg paths. Begin with the
-one-frame probe, then run the final command only after it writes a PNG.
+Use the repository's portable Blender and ffmpeg paths. Cycles CPU is the
+reliable local 3D renderer; do not switch this asset back to EEVEE.
 
 ```powershell
 $repo = 'C:\Users\PC\Documents\Codex\2026-07-18\nomaddigita-the-vagabond-https-github-com\work\The-Vagabond'
@@ -62,10 +65,12 @@ $blender = 'C:\Users\PC\Documents\Codex\2026-07-18\nomaddigita-the-vagabond-http
 $ffmpeg = 'C:\Users\PC\Documents\Codex\2026-07-18\nomaddigita-the-vagabond-https-github-com\work\toolcache\ffmpeg\bin\ffmpeg.exe'
 
 & $blender --factory-startup -b -P "$repo\assets\visual-system\pipeline\render_crystal_3d_v12.py" -- `
-  --frames 1 --samples 1 --no-encode --no-stills
+  --frames 1 --samples 8 --no-encode --no-stills
 
-& $blender --factory-startup -b -P "$repo\assets\visual-system\pipeline\render_crystal_3d_v12.py" -- `
-  --frames 48 --samples 32 --ffmpeg $ffmpeg
+python "$repo\assets\visual-system\pipeline\animate_transparent_still.py" `
+  "$repo\assets\visual-system\source\crystal_3d_v12_alpha.png" `
+  --output "$repo\assets\visual-system\animated\crystal_3d_v12\crystal_3d_v12.webm" `
+  --ffmpeg $ffmpeg
 ```
 
 Then validate the generated WebM and use the isolated fresh-set uploader;
