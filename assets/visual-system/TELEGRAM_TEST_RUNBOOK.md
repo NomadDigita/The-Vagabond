@@ -36,9 +36,11 @@ Inspect the no-network plan first:
 python assets/visual-system/pipeline/telegram_fresh_test_set.py
 ```
 
-When the printed source filename, SHA-256, and new test-set name look right,
-apply it once with a unique slug. The token is requested through Python's
-hidden local prompt and is never written to a file or environment variable:
+When the printed source filename and SHA-256 look right, apply it once with a
+unique slug. The script creates the set and attaches the video in a single
+multipart `createNewStickerSet` request; it does not probe, append to, replace,
+or delete an existing set. The token is requested through Python's hidden local
+prompt and is never written to a file or environment variable:
 
 ```powershell
 python assets/visual-system/pipeline/telegram_fresh_test_set.py `
@@ -46,10 +48,23 @@ python assets/visual-system/pipeline/telegram_fresh_test_set.py `
   --set-slug vagabond_v10_oracle_test
 ```
 
-The script aborts if that set name exists. Pick a new slug for a new test;
-never reuse it to replace or append stickers. On success it writes a
-`test-results/<set-name>.json` manifest containing the exact assigned
-`custom_emoji_id` and source hash.
+Telegram rejects an existing set name. Pick a new slug for a distinct test;
+never reuse one after an uncertain create request. On success the script writes
+a local `test-results/<set-name>.json` manifest containing the exact assigned
+`custom_emoji_id` and source hash, plus a non-secret intent/recovery record.
+
+If the create response is interrupted, the script never repeats that creation
+request. It prints the exact safe recovery command instead. Once connectivity
+is back, use that command to read and verify the already-created set only:
+
+```powershell
+python assets/visual-system/pipeline/telegram_fresh_test_set.py `
+  --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID `
+  --recover-set EXACT_SET_NAME_BY_BOT_USERNAME
+```
+
+Recovery never creates, appends, replaces, or deletes stickers. It only reads
+the named set, records its `custom_emoji_id`, and re-attempts the bot DM.
 
 ## Owner visual review
 
