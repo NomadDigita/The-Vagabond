@@ -18,6 +18,11 @@ silent, at most 30fps, at most three seconds, and at most 256KiB. See the
 [official VP9 encoding guide](https://core.telegram.org/stickers/webm-vp9-encoding)
 and [Bot API sticker methods](https://core.telegram.org/bots/api#uploadstickerfile).
 
+Although Telegram's public page lists a 256KiB video limit, the live Bot API
+rejected the 71.7KiB Oracle as too large during custom-emoji set creation on
+2026-07-19. The local delivery validator therefore enforces a conservative
+**64KiB** default until that upstream discrepancy is resolved.
+
 ## Local commands
 
 From the repository root, first re-run the offline validator with the local

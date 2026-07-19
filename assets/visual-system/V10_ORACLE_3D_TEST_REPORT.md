@@ -1,7 +1,9 @@
 # v10 Oracle 3D — Render and QA Report
 
-**Status:** locally render-verified and technically ready for a fresh Telegram
-test set. **Not uploaded to Telegram. Not production-approved.**
+**Status:** locally render-verified, but Telegram rejected the original 71.7KiB
+delivery encode as too large during the fresh-set creation attempt on
+2026-07-19. A visually inspected 39.8KiB VP9-alpha delivery re-encode replaced
+it and passed the conservative 64KiB local gate. **Not production-approved.**
 
 ## What changed
 

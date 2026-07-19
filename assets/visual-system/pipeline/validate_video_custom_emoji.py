@@ -21,7 +21,12 @@ from pathlib import Path
 
 
 MAX_DURATION_SECONDS = 3.0
-MAX_BYTES = 256 * 1024
+# Telegram's public video-emoji page states 256KiB, but the live Bot API
+# rejected the 71.7KiB v10 Oracle as "file is too big" during custom-emoji set
+# creation on 2026-07-19. Keep a conservative 64KiB delivery gate until the
+# discrepancy is resolved upstream; callers can explicitly override it for
+# diagnostic work.
+DEFAULT_MAX_BYTES = 64 * 1024
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,11 +34,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("asset", type=Path)
     parser.add_argument("--ffprobe", help="Absolute path to ffprobe, or rely on PATH.")
     parser.add_argument("--ffmpeg", help="Absolute path to ffmpeg for alpha-plane decoding, or rely on PATH.")
+    parser.add_argument("--max-kib", type=int, default=DEFAULT_MAX_BYTES // 1024, help="Maximum delivery size in KiB; defaults to the conservative live-tested 64KiB gate.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.max_kib <= 0:
+        raise SystemExit("--max-kib must be positive.")
+    max_bytes = args.max_kib * 1024
     asset = args.asset.resolve()
     if not asset.is_file():
         raise SystemExit(f"Missing asset: {asset}")
@@ -67,8 +76,8 @@ def main() -> None:
         errors.append(f"duration must be >0 and <= {MAX_DURATION_SECONDS:g}s, got {duration:.3f}s")
     if audio:
         errors.append("audio stream present")
-    if asset.stat().st_size > MAX_BYTES:
-        errors.append(f"file must be <= {MAX_BYTES // 1024}KiB for this pipeline, got {asset.stat().st_size / 1024:.1f}KiB")
+    if asset.stat().st_size > max_bytes:
+        errors.append(f"file must be <= {max_bytes // 1024}KiB for this pipeline, got {asset.stat().st_size / 1024:.1f}KiB")
     # ffprobe may describe VP9-alpha as yuv420p while exposing alpha_mode=1 in
     # stream tags. Decode an RGBA frame instead of trusting either label.
     decoded = subprocess.run(
@@ -104,7 +113,7 @@ def main() -> None:
         for error in errors:
             print(f"FAIL: {error}")
         raise SystemExit(1)
-    print("PASS: VP9, decoded alpha, 100x100, silent, <=3s, and within 256KiB")
+    print(f"PASS: VP9, decoded alpha, 100x100, silent, <=3s, and within {max_bytes // 1024}KiB")
     print(f"Asset: {asset}")
     print(f"Duration: {duration:.3f}s | Size: {asset.stat().st_size / 1024:.1f}KiB")
 
