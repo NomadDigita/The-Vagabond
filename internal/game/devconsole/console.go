@@ -46,13 +46,24 @@ func New(db *sql.DB, service *ai.Service) *Console {
 	return &Console{DB: db, AI: service}
 }
 
+// windowSince returns the cutoff time for a "last N days" window,
+// defaulting to 7 if windowDays isn't positive. Shared by
+// BuildSnapshot and RunIntent so "last N days" always means the same
+// thing everywhere in this package.
+func windowSince(windowDays int) time.Time {
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+	return time.Now().UTC().AddDate(0, 0, -windowDays)
+}
+
 // BuildSnapshot loads new-player signups, top players, active-user
 // count, and recent world news for the last windowDays days.
 func (co *Console) BuildSnapshot(ctx context.Context, windowDays int) (*Snapshot, error) {
 	if windowDays <= 0 {
 		windowDays = 7
 	}
-	since := time.Now().UTC().AddDate(0, 0, -windowDays)
+	since := windowSince(windowDays)
 
 	s := Snapshot{WindowDays: windowDays}
 
