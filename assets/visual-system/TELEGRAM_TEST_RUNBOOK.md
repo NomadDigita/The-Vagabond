@@ -1,7 +1,11 @@
-# Telegram v10 Fresh-Test Runbook
+# Telegram Fresh-Test Upload Runbook
 
 Use this only after reviewing `V10_ORACLE_3D_TEST_REPORT.md`. This validates
 the Oracle in a real Telegram client without touching the duplicate-filled
+legacy pilot set.
+
+The same uploader also accepts any **owned** custom-emoji WebM through
+`--asset`; it always creates an isolated fresh test set and never alters the
 legacy pilot set.
 
 ## Preconditions
@@ -70,6 +74,34 @@ python assets/visual-system/pipeline/telegram_fresh_test_set.py `
 
 Recovery never creates, appends, replaces, or deletes stickers. It only reads
 the named set, records its `custom_emoji_id`, and re-attempts the bot DM.
+
+## Upload an owned crystal or other asset
+
+The supplied phone-screen recording is a reference, not an upload source. Use
+the actual final art file only after it has been converted to a transparent,
+100x100 VP9 WebM under the conservative 64KiB gate:
+
+```powershell
+python assets/visual-system/pipeline/validate_video_custom_emoji.py `
+  C:\path\to\your_owned_crystal.webm `
+  --ffprobe C:\path\to\ffprobe.exe `
+  --ffmpeg C:\path\to\ffmpeg.exe
+```
+
+Then create a new isolated test set for that specific asset:
+
+```powershell
+python assets/visual-system/pipeline/telegram_fresh_test_set.py `
+  --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID `
+  --set-slug vagabond_crystal_owner_test `
+  --asset C:\path\to\your_owned_crystal.webm `
+  --asset-key vagabond_crystal_v1 `
+  --emoji 🔮 `
+  --title "The Vagabond Crystal Owner Test"
+```
+
+`--asset` can be outside this repository. Its exact path and SHA-256 are
+written locally to the test manifest, but no token is ever written there.
 
 ## Owner visual review
 

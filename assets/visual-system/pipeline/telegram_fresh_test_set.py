@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or safely recover an isolated Telegram test set for Oracle v10.
+"""Create or safely recover an isolated Telegram test set for any owned asset.
 
 The normal apply path performs one direct multipart create request. It never
 uses add, replace, or delete operations, and it never probes an existing set
@@ -34,6 +34,7 @@ ASSET = {
     "emoji": "\U0001F52E",
     "format": "video",
     "path": ASSET_ROOT / "animated" / "oracle_3d_v10" / "oracle_3d_v10.webm",
+    "title": "The Vagabond \u2014 v10 Oracle 3D Test",
 }
 TOKEN_PATTERN = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")
 
@@ -66,6 +67,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt-token", action="store_true", help="Prompt for the bot token without echoing or storing it in an environment variable.")
     parser.add_argument("--owner-id", help="Numeric Telegram owner/test-account ID; overrides TG_OWNER_ID for this run only.")
     parser.add_argument("--recover-set", help="Read, verify, and message an already-created test set without creating or changing any set.")
+    parser.add_argument("--asset", type=Path, help="Owned 100x100 VP9-alpha WebM to upload; defaults to the local Oracle proof asset.")
+    parser.add_argument("--asset-key", help="Readable manifest key for --asset, for example vagabond_crystal_v1.")
+    parser.add_argument("--emoji", help="Unicode fallback emoji associated with the uploaded custom emoji; defaults to the Oracle fallback.")
+    parser.add_argument("--title", help="Fresh test-set title; defaults to the Oracle proof title.")
     return parser.parse_args()
 
 
@@ -75,6 +80,39 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def configure_asset(args: argparse.Namespace) -> None:
+    path_argument = getattr(args, "asset", None)
+    if path_argument:
+        source = Path(path_argument).expanduser().resolve()
+        if source.suffix.lower() != ".webm":
+            raise SystemExit("--asset must be a .webm file. Convert your owned source to Telegram's VP9-alpha WebM contract before uploading.")
+        if not source.is_file():
+            raise SystemExit(f"Missing --asset: {source}")
+        ASSET["path"] = source
+    key = getattr(args, "asset_key", None)
+    if key:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{1,63}", key):
+            raise SystemExit("--asset-key must start with a letter and contain only letters, digits, underscores, or hyphens.")
+        ASSET["key"] = key
+    emoji = getattr(args, "emoji", None)
+    if emoji:
+        if not emoji.strip() or utf16_len(emoji) > 20:
+            raise SystemExit("--emoji must be a non-empty short fallback emoji string.")
+        ASSET["emoji"] = emoji
+    title = getattr(args, "title", None)
+    if title:
+        if len(title) > 64:
+            raise SystemExit("--title must be 64 characters or fewer.")
+        ASSET["title"] = title
+
+
+def asset_source_label() -> str:
+    try:
+        return str(ASSET["path"].relative_to(ASSET_ROOT.parent.parent))
+    except ValueError:
+        return str(ASSET["path"])
 
 
 def utf16_len(text: str) -> int:
@@ -152,7 +190,7 @@ def create_set_directly(api: str, owner_id: str, set_name: str) -> None:
             "createNewStickerSet",
             user_id=owner_id,
             name=set_name,
-            title="The Vagabond \u2014 v10 Oracle 3D Test",
+            title=ASSET["title"],
             sticker_type="custom_emoji",
             stickers=json.dumps([sticker_input("attach://oracle_video")]),
             files={"oracle_video": (ASSET["path"].name, source, "video/webm")},
@@ -178,7 +216,7 @@ def write_journal(set_name: str, status: str, detail: str | None = None) -> Path
         "sticker_set": set_name,
         "asset": {
             "key": ASSET["key"],
-            "source": str(ASSET["path"].relative_to(ASSET_ROOT.parent.parent)),
+            "source": asset_source_label(),
             "sha256": sha256(ASSET["path"]),
         },
     }
@@ -200,7 +238,7 @@ def write_manifest(set_name: str, sticker: dict) -> Path:
         "create_mode": "direct_multipart_createNewStickerSet",
         "asset": {
             "key": ASSET["key"],
-            "source": str(ASSET["path"].relative_to(ASSET_ROOT.parent.parent)),
+            "source": asset_source_label(),
             "sha256": sha256(ASSET["path"]),
             "custom_emoji_id": sticker["custom_emoji_id"],
         },
@@ -254,6 +292,7 @@ def credentials(args: argparse.Namespace) -> tuple[str, str]:
 
 def main() -> None:
     args = parse_args()
+    configure_asset(args)
     source = ASSET["path"]
     if not source.is_file():
         raise SystemExit(f"Missing source asset: {source}")
