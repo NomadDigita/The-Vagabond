@@ -1,7 +1,11 @@
-# Telegram v10 Fresh-Test Runbook
+# Telegram Fresh-Test Upload Runbook
 
 Use this only after reviewing `V10_ORACLE_3D_TEST_REPORT.md`. This validates
 the Oracle in a real Telegram client without touching the duplicate-filled
+legacy pilot set.
+
+The same uploader also accepts any **owned** custom-emoji WebM through
+`--asset`; it always creates an isolated fresh test set and never alters the
 legacy pilot set.
 
 ## Preconditions
@@ -17,6 +21,11 @@ Telegram’s current video custom-emoji requirements are a 100x100 VP9 WebM,
 silent, at most 30fps, at most three seconds, and at most 256KiB. See the
 [official VP9 encoding guide](https://core.telegram.org/stickers/webm-vp9-encoding)
 and [Bot API sticker methods](https://core.telegram.org/bots/api#uploadstickerfile).
+
+Although Telegram's public page lists a 256KiB video limit, the live Bot API
+rejected the 71.7KiB Oracle as too large during custom-emoji set creation on
+2026-07-19. The local delivery validator therefore enforces a conservative
+**64KiB** default until that upstream discrepancy is resolved.
 
 ## Local commands
 
@@ -36,9 +45,11 @@ Inspect the no-network plan first:
 python assets/visual-system/pipeline/telegram_fresh_test_set.py
 ```
 
-When the printed source filename, SHA-256, and new test-set name look right,
-apply it once with a unique slug. The token is requested through Python's
-hidden local prompt and is never written to a file or environment variable:
+When the printed source filename and SHA-256 look right, apply it once with a
+unique slug. The script creates the set and attaches the video in a single
+multipart `createNewStickerSet` request; it does not probe, append to, replace,
+or delete an existing set. The token is requested through Python's hidden local
+prompt and is never written to a file or environment variable:
 
 ```powershell
 python assets/visual-system/pipeline/telegram_fresh_test_set.py `
@@ -46,10 +57,51 @@ python assets/visual-system/pipeline/telegram_fresh_test_set.py `
   --set-slug vagabond_v10_oracle_test
 ```
 
-The script aborts if that set name exists. Pick a new slug for a new test;
-never reuse it to replace or append stickers. On success it writes a
-`test-results/<set-name>.json` manifest containing the exact assigned
-`custom_emoji_id` and source hash.
+Telegram rejects an existing set name. Pick a new slug for a distinct test;
+never reuse one after an uncertain create request. On success the script writes
+a local `test-results/<set-name>.json` manifest containing the exact assigned
+`custom_emoji_id` and source hash, plus a non-secret intent/recovery record.
+
+If the create response is interrupted, the script never repeats that creation
+request. It prints the exact safe recovery command instead. Once connectivity
+is back, use that command to read and verify the already-created set only:
+
+```powershell
+python assets/visual-system/pipeline/telegram_fresh_test_set.py `
+  --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID `
+  --recover-set EXACT_SET_NAME_BY_BOT_USERNAME
+```
+
+Recovery never creates, appends, replaces, or deletes stickers. It only reads
+the named set, records its `custom_emoji_id`, and re-attempts the bot DM.
+
+## Upload an owned crystal or other asset
+
+The supplied phone-screen recording is a reference, not an upload source. Use
+the actual final art file only after it has been converted to a transparent,
+100x100 VP9 WebM under the conservative 64KiB gate:
+
+```powershell
+python assets/visual-system/pipeline/validate_video_custom_emoji.py `
+  C:\path\to\your_owned_crystal.webm `
+  --ffprobe C:\path\to\ffprobe.exe `
+  --ffmpeg C:\path\to\ffmpeg.exe
+```
+
+Then create a new isolated test set for that specific asset:
+
+```powershell
+python assets/visual-system/pipeline/telegram_fresh_test_set.py `
+  --apply --prompt-token --owner-id YOUR_NUMERIC_TELEGRAM_ID `
+  --set-slug vagabond_crystal_owner_test `
+  --asset C:\path\to\your_owned_crystal.webm `
+  --asset-key vagabond_crystal_v1 `
+  --emoji 🔮 `
+  --title "The Vagabond Crystal Owner Test"
+```
+
+`--asset` can be outside this repository. Its exact path and SHA-256 are
+written locally to the test manifest, but no token is ever written there.
 
 ## Owner visual review
 

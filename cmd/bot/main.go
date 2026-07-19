@@ -23,6 +23,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
+	"github.com/NomadDigita/The-Vagabond/internal/game/devconsole"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
@@ -896,6 +897,12 @@ func main() {
 	aiNPCIntel := npcintel.New(db, aiService)
 	npcIntelHandler := handlers.NewNPCIntelHandler(aiNPCIntel)
 
+	// --- AI Developer Console wiring (Phase J, independent AI roadmap branch) ---
+	// Reuses admin.AdminIDs (already parsed above) rather than re-parsing
+	// ADMIN_IDS a second time.
+	aiDevConsole := devconsole.New(db, aiService)
+	devConsoleHandler := handlers.NewDevConsoleHandler(aiDevConsole, admin.AdminIDs)
+
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
@@ -991,6 +998,8 @@ func main() {
 	bot.Handle("\fgalaxy_advisor_refresh", galaxyAdvisorHandler.HandleGalaxyAdvisorRefreshCallback)
 	bot.Handle("/npc_intel", npcIntelHandler.HandleNPCIntel)
 	bot.Handle("\fnpc_intel_refresh", npcIntelHandler.HandleNPCIntelRefreshCallback)
+	bot.Handle("/weekly_report", devConsoleHandler.HandleWeeklyReport)
+	bot.Handle("\fdev_console_refresh", devConsoleHandler.HandleDevConsoleRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/settaxrate", admin.HandleAdminSetTaxRate)

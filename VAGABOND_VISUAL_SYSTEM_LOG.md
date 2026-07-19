@@ -55,6 +55,32 @@ the upload path and could otherwise cause a destructive rerun.
 
 ---
 
+## v12 crystal correction - 2026-07-19
+
+- The project owner rejected the v10 Oracle visual direction for the intended
+  crystal asset. Oracle remains a technical Blender/Telegram pipeline proof;
+  it is not the approved crystal art direction.
+- `pipeline/render_crystal_3d_v12.py` and its editable Blender source define
+  a new, crystal-first Vagabond asset: violet liquid-glass sphere, compact gold
+  pedestal, luminous internal facets, and animated star glints. It is an
+  original rebuild informed by the owner's owned reference, not an upload of
+  the phone recording or a copy of a third-party Telegram asset.
+- EEVEE was isolated as the headless Windows render failure and replaced for
+  this asset with Cycles CPU. The approved crystal now has a transparent,
+  animated `crystal_3d_v12.webm`, locally validated as VP9, alpha, 100x100,
+  silent, two seconds, and 7.7 KiB. It is ready for an isolated fresh-set test
+  but **has not yet been uploaded to Telegram or reviewed in a client.** See
+  `assets/visual-system/CRYSTAL_3D_V12_DESIGN.md` for the precise record.
+- The isolated v12 fresh set was then created successfully and viewed in a
+  Telegram client. It proved delivery but failed the owner's visual-motion bar:
+  whole-object drift was too soft, while the heart and star highlights needed
+  their own visible motion. `crystal_3d_v13` is the replacement candidate,
+  documented in `assets/visual-system/CRYSTAL_3D_V13_TEST_REPORT.md`; its
+  separate rotating-heart and independent-glint animation is locally validated
+  but not yet uploaded.
+
+---
+
 ## 0. Source brief
 
 Requested directly by the project owner, in chat, across several

@@ -148,6 +148,15 @@ func placeholderJSON(feature string) string {
 			"key_risk": "Not evaluated — placeholder mode.",
 			"notes": "Not evaluated — placeholder mode."
 		}`
+	case "ai_developer_console":
+		return `{
+			"summary": "🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real weekly activity report.",
+			"highlights": ["configure_provider"],
+			"new_player_narrative": "Not evaluated — placeholder mode.",
+			"top_performer_narrative": "Not evaluated — placeholder mode.",
+			"recommendations_for_admins": "This is mock output. See /ai_status for setup instructions.",
+			"notes": "Not evaluated — placeholder mode."
+		}`
 	default:
 		return ""
 	}

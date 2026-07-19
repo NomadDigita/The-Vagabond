@@ -430,7 +430,7 @@ def encode_webm(ffmpeg: str | None, frames: int) -> None:
         "-b:v",
         "0",
         "-crf",
-        "32",
+        "43",
         "-deadline",
         "good",
         "-cpu-used",
