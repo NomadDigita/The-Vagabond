@@ -6,6 +6,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
+	"github.com/NomadDigita/The-Vagabond/internal/game/devconsole"
 	"github.com/NomadDigita/The-Vagabond/internal/game/econadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
@@ -108,5 +109,17 @@ func TestMockPlaceholder_ParsesForNPCIntel(t *testing.T) {
 	rec := npcintel.ParseRecommendation(resp.Text)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock NPC intel placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
+	}
+}
+
+func TestMockPlaceholder_ParsesForDevConsole(t *testing.T) {
+	p := New()
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{Feature: "ai_developer_console", JSONMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := devconsole.ParseRecommendation(resp.Text)
+	if rec.FellBackToRawText {
+		t.Fatalf("expected mock dev console placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
 }

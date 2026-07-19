@@ -793,13 +793,21 @@ near a coordinate), Galaxy Advisor should pick it up then, not before.
 | G | AI Guild Assistant | Done (Leader-only; see §3 "What Phase G built") | A |
 | H | AI Dynamic Galaxy | Done (see §3 "What Phase H built") | A |
 | I | AI NPC Intelligence | Done (see §3 "What Phase I built") | A, ideally after G |
-| J | AI Developer Console | Not started | A |
+| J | AI Developer Console | Done — scoped to weekly activity reporting per project owner's explicit brief (see §3 "What Phase J built") | A |
 
 **Progress by subsystem:** Foundation 100%. Planet Governor: recommend
 flow 100%, autopilot execution 0% (intentionally deferred). Fleet
 Commander: PvE recommend flow 100%, PvP target lookup 0% (deferred).
-Economy Advisor: 100%. Research Planner: 100%. Remaining gameplay-facing
-AI phases (F–J): 0%.
+Economy Advisor: 100%. Research Planner: 100%. Battle Analyst: 100%
+(raids + arena; World Boss excluded, see ADR-017). Guild Assistant:
+100% (Leader-only). Dynamic Galaxy: 100%. NPC Intelligence: 100%
+(tactical composition read only — deliberately not a second
+attack/no-attack call). Developer Console: 100% of its scoped brief
+(weekly activity reporting) — NOT a general natural-language admin
+query tool, content/balance engine, or anything else "developer
+console" might otherwise suggest; see ADR-019 and §4 for what remains
+genuinely unbuilt if a future session is asked for it. **All ten
+phases (A–J) on the original roadmap are now done.**
 
 ### What Phase B built
 
@@ -1230,20 +1238,91 @@ since they were last pushed — all four rebase cleanly.
 **Verification this session:** `go build ./...`, `go vet ./...`, and
 `go test ./...` all run clean, full-repo.
 
-### Recommended next task
+### What Phase J built
 
-**Phase J — AI Developer Console**, the last phase on the roadmap.
-This one is different in kind from every prior phase — it's aimed at
-the game's operators/admins rather than players, so read
-`internal/bot/handlers/admin.go` and whatever admin-only tooling
-already exists before designing its scope, the same schema/logic-first
-discipline used for every phase since F. Consider explicitly with the
-project owner what "AI Developer Console" should mean in practice
-(e.g. natural-language querying of live game state for debugging,
-AI-assisted content/balance suggestions, or something else) before
-committing to a `Snapshot` shape, since this phase's name is the
-vaguest of the ten and least grounded in an existing player-facing
-system already read this session.
+```
+internal/game/devconsole/
+├── prompt.go          Pure logic: NewPlayer/TopPlayer/Snapshot types,
+│                       Recommendation type, SystemPrompt, deterministic
+│                       BuildUserPrompt (capped-list-notice, empty-state,
+│                       and no-outpost-yet paths), ParseRecommendation
+│                       (fence tolerance + fallback, Truncated flag
+│                       baked in per ADR-016), FormatForTelegram.
+├── prompt_test.go      13 passing unit tests, zero DB/network
+│                       dependency.
+└── console.go           Console: BuildSnapshot (new-player signups via
+                          users.registered_at, top players via the
+                          same scoring.ScoreExpr the player-facing
+                          Global Ranking panel already uses, active-user
+                          count via users.last_active, recent
+                          world_news — all windowed to the last N
+                          days), Recommend (calls ai.Service.Complete,
+                          persists to ai_memory scope "dev_console").
+```
+
+New command: `/weekly_report [days]` — **admin-only**, using the exact
+same `AdminIDs`/`IsAdmin` gate every other admin-only action in
+`internal/bot/handlers/admin.go` already uses (reused via
+`admin.AdminIDs`, not re-parsed). Defaults to a 7-day window; an
+optional numeric argument overrides it. Inline keyboard: a single
+refresh button that preserves the original window. No new DB tables —
+reads existing `users`/`encampments`/`coordinates`/`world_news`. Never
+changes any player, setting, or game data.
+
+**ADR-019: scope was set explicitly by the project owner, not
+guessed at — and deliberately narrower than "AI Developer Console"
+could otherwise imply.** Every prior phase (F-I) started from an
+already-built player-facing system to ground its scope in (raids,
+clans, world events, the Rogue Nest). Phase J's name had no such
+anchor, and the session's own prior write-up flagged this explicitly
+rather than guessing. Asked directly, the project owner specified a
+concrete brief: an admin-only AI summary of recent game activity — new
+signups (name, username, join time, in-game home region), top players,
+and similar, over up to a week. This package implements exactly that
+brief and nothing broader. It is explicitly NOT a general
+natural-language admin query tool, an AI-assisted content/balance
+suggestion engine, or any other capability "developer console" might
+otherwise suggest — those remain unbuilt, and would need their own
+explicit scoping conversation if ever requested, per the same
+discipline used here.
+
+**Honest data-availability boundary, stated to the project owner
+before building:** the game collects no real-world IP or geolocation
+data for any user — there is no such column on `users`. "Where a new
+player is from" is reported as their in-game home continent (via
+`encampments` → `coordinates.region`, the same continent scheme every
+world-aware phase since H already uses), not a real-world location.
+This was surfaced as a constraint rather than silently substituted —
+building a report that implied real-world geolocation the game doesn't
+actually have would have been misleading in exactly the way ADR-017's
+and ADR-018's "don't build on data that isn't really there" precedent
+warns against.
+
+Mock provider updated with a matching placeholder JSON case for
+`ai_developer_console`, verified by a new
+`TestMockPlaceholder_ParsesForDevConsole` case. Combined with
+`devconsole`'s own 13 tests, this phase adds 14 new tests (155 → 169
+total, all passing).
+
+**Verification this session:** `go build ./...`, `go vet ./...`, and
+`go test ./...` all run clean, full-repo. Branched directly off `main`
+this time (all of Phases F–I had already been reviewed and merged via
+PR by the project owner since the last session, confirmed via `git
+log` before starting — no rebasing of stacked feature branches was
+needed this session).
+
+### Roadmap status: all ten phases (A–J) complete
+
+Every phase on the original AI Systems Roadmap (§3's table) is now
+Done. This does not mean every AI idea for the game is exhausted — §4
+lists real, intentionally-deferred gaps (Governor autopilot execution,
+Fleet Commander PvP target lookup, World Boss history, and Phase J's
+deliberately narrow scope among them) and §7 lists unscoped future
+ideas — but there is no more "next phase" to default to. Future AI work
+on this game should start from an explicit brief from the project
+owner (what should it do, for whom, grounded in which real system/data)
+rather than this document picking the next roadmap letter, the same
+way Phase J itself was scoped.
 
 ---
 
@@ -1286,6 +1365,20 @@ system already read this session.
   already-committed history; Phase H's own numbers in this document
   are based on a fresh, verified count (127 → 141) rather than trusting
   the prior session's arithmetic.
+- **Phase J (AI Developer Console) is deliberately narrower than its
+  name implies** (see ADR-019): scoped to exactly one admin-only
+  capability (weekly-style game activity reporting) per the project
+  owner's explicit brief. A general natural-language admin query tool,
+  AI-assisted content/balance suggestions, or other "developer
+  console" capabilities are NOT built and would need their own
+  explicit scoping conversation if ever wanted — don't assume Phase J
+  being "Done" means the full space implied by its name is covered.
+- **`/weekly_report`'s "new player location" is in-game continent, not
+  real-world geolocation** (see Phase J's ADR-019 write-up in §3): the
+  game collects no real IP/location data for any user. Don't extend
+  this report to imply real-world geolocation without adding real data
+  collection for it first — and consider the privacy implications of
+  doing so before building it.
 - **Static cost table will go stale.** `internal/ai/cost.go`'s
   `pricePerMillionTokens` map needs periodic manual updates as
   Anthropic (and future providers) change pricing. Consider moving
@@ -1586,6 +1679,34 @@ system already read this session.
   needing explicit scope discussion with the project owner before
   building (vaguest phase name on the roadmap, least grounded in an
   existing player-facing system).
+- **Following session:** Phase J (AI Developer Console) implemented,
+  after asking the project owner directly for scope rather than
+  guessing. Brief given: an admin-only AI summary of recent game
+  activity — new signups (name, username, join time, in-game home
+  region), top players, and similar, over up to a week. Implemented
+  exactly that: pure prompt/parsing logic (`prompt.go`, 13 passing
+  unit tests, `Truncated` handling baked in per ADR-016), DB-backed
+  orchestration (`console.go`) reading `users.registered_at`/
+  `last_active`, the same `scoring.ScoreExpr` the player-facing Global
+  Ranking panel already uses for top players, and `world_news`, all
+  windowed to the last N days (default 7). New admin-only command
+  `/weekly_report [days]`, gated with the exact same `AdminIDs`/
+  `IsAdmin` pattern `admin.go` already uses. Documented as ADR-019 that
+  this phase is deliberately narrower than "AI Developer Console"
+  could imply — a general natural-language admin query tool or
+  content/balance suggestion engine were NOT built and weren't asked
+  for. Also surfaced explicitly (to the project owner, and now in this
+  document) that the game collects no real IP/geolocation data — "new
+  player location" here means in-game home continent, not real-world
+  location. Mock provider given a matching placeholder JSON case,
+  verified by 1 new test. 14 new tests total (155 → 169, all passing).
+  Full `go build ./... && go vet ./... && go test ./...` confirmed
+  clean for the whole repo. Branched directly off `main` (Phases F–I
+  had already been reviewed and merged via PR by the project owner
+  since the last session). **With Phase J done, all ten phases (A–J)
+  on the original AI Systems Roadmap are complete** — see §3's new
+  "Roadmap status" note for what that does and doesn't mean going
+  forward.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
