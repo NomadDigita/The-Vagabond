@@ -155,6 +155,60 @@ def gear_icon():
     return layers
 
 
+def warning_icon():
+    layers = base_layers(1)
+    triangle = [[0, -185], [172, 142], [-172, 142]]
+    layers.append(layer(2, "hazard warning triangle", poly(triangle, OBSIDIAN, GOLD, 14)))
+    bar = poly([[-18, -75], [18, -75], [18, 48], [-18, 48]], RED, WHITE, 4)
+    layers.append(layer(3, "warning mark", bar, scale=key([(0, [92, 92]), (30, [115, 115]), (60, [92, 92]), (90, [115, 115]), (120, [92, 92])])))
+    dot = ellipse((35, 35), RED, WHITE, 4, transform=tr(position=(0, 92)))
+    layers.append(layer(4, "warning dot", dot))
+    return layers
+
+
+def failure_icon():
+    layers = base_layers(1)
+    slash = [[-135, -165], [-88, -165], [0, -50], [88, -165], [135, -165], [45, 0], [135, 165], [88, 165], [0, 50], [-88, 165], [-135, 165], [-45, 0]]
+    layers.append(layer(2, "fractured failure cross", poly(slash, RED, WHITE, 9), rotation=key([(0, -4), (60, 4), (120, -4)])))
+    fracture = [path([[-105, 0], [0, -28], [105, 0]], False), stroke(GOLD, 8), tr(opacity=key([(0, 20), (30, 100), (60, 20), (90, 100), (120, 20)]))]
+    layers.append(layer(3, "failure fracture", fracture))
+    return layers
+
+
+def ai_mech_icon():
+    layers = base_layers(1)
+    head = [[-150, -80], [-98, -138], [98, -138], [150, -80], [150, 92], [92, 142], [-92, 142], [-150, 92]]
+    layers.append(layer(2, "AI mech head", poly(head, OBSIDIAN, STEEL, 11)))
+    visor = poly([[-112, -30], [112, -30], [80, 45], [-80, 45]], VIOLET, CYAN, 8)
+    layers.append(layer(3, "AI scanning visor", visor))
+    scan = [path([[-88, -18], [88, -18]], False), stroke(WHITE, 9), tr(position=key([(0, [0, -10]), (60, [0, 50]), (120, [0, -10])]))]
+    layers.append(layer(4, "visor sweep", scan))
+    antenna = [path([[0, -138], [0, -195]], False), stroke(STEEL, 9), tr()]
+    layers.append(layer(5, "AI antenna", antenna))
+    signal = ellipse((28, 28), CYAN, WHITE, 4, transform=tr(position=(0, -200), opacity=key([(0, 25), (30, 100), (60, 25), (90, 100), (120, 25)])))
+    layers.append(layer(6, "AI signal", signal))
+    return layers
+
+
+def electricity_icon():
+    layers = base_layers(1)
+    bolt = [[-38, -190], [92, -190], [25, -58], [118, -58], [-78, 192], [-34, 36], [-122, 36]]
+    layers.append(layer(2, "primary energy bolt", poly(bolt, RED, GOLD, 10), scale=key([(0, [92, 92]), (24, [110, 110]), (48, [92, 92]), (84, [110, 110]), (120, [92, 92])])))
+    for i, (x, y) in enumerate(((-135, -72), (128, 18), (-102, 115))):
+        layers.append(layer(3 + i, f"electricity spark {i}", [star(30 - i * 5), fill(GOLD), tr(position=(x, y), opacity=key([(0 + i * 15, 0), (12 + i * 15, 100), (24 + i * 15, 0), (120 + i * 15, 0)]))]))
+    return layers
+
+
+def scrap_icon():
+    layers = base_layers(1)
+    pile = [[-175, 128], [-145, -15], [-72, 45], [-25, -125], [55, -38], [142, -92], [172, 128]]
+    layers.append(layer(2, "salvage pile", poly(pile, OBSIDIAN, STEEL, 10)))
+    layers.append(layer(3, "salvage plate", poly([[-132, 20], [-28, -38], [88, 25], [48, 95], [-78, 95]], VIOLET, GOLD, 7)))
+    weld = [star(48), fill(GOLD), tr(position=(18, -30), opacity=key([(0, 0), (18, 100), (36, 0), (74, 0), (92, 100), (110, 0), (120, 0)]))]
+    layers.append(layer(4, "salvage weld spark", weld))
+    return layers
+
+
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
     target=OUT/f"{key}_tgs_v14"/f"{key}_tgs_v14.tgs"
@@ -164,7 +218,7 @@ def write(key, layers):
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon}.items():
         write(key,builder())
 
 

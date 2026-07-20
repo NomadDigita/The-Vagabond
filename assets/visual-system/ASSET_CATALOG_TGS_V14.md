@@ -14,6 +14,11 @@ real game object or state, not a recolored generic badge.
 | `satellite` | Reconnaissance / communications | Angled receiver dish and emitter | Radio rings transmit from receiver | `animated/satellite_tgs_v14/satellite_tgs_v14.tgs` |
 | `shield` | Defense / protection | Six-sided Vagabond shield | Internal charge star pulses | `animated/shield_tgs_v14/shield_tgs_v14.tgs` |
 | `gear` | Crafting / mechanics | Large functional cog and hub | Cog makes a complete turn; spark catches at the rim | `animated/gear_tgs_v14/gear_tgs_v14.tgs` |
+| `warning` | Hazard / caution | Industrial warning triangle and exclamation | Mark pulses with a clear alert rhythm | `animated/warning_tgs_v14/warning_tgs_v14.tgs` |
+| `failure` | Failed action / system break | Fractured red failure cross | Break line flashes through the cross | `animated/failure_tgs_v14/failure_tgs_v14.tgs` |
+| `ai_mech` | AI / machine intelligence | Mech head, antenna, and scanning visor | Visor sweep traverses the face; antenna signal blinks | `animated/ai_mech_tgs_v14/ai_mech_tgs_v14.tgs` |
+| `electricity` | Power / energy | Heavy energy bolt with satellite sparks | Bolt surges; separate gold sparks discharge | `animated/electricity_tgs_v14/electricity_tgs_v14.tgs` |
+| `scrap` | Salvage / materials | Uneven salvage pile and welded plate | Welding spark bursts from the join | `animated/scrap_tgs_v14/scrap_tgs_v14.tgs` |
 
 ## Production rule
 
