@@ -19,6 +19,14 @@ real game object or state, not a recolored generic badge.
 | `ai_mech` | AI / machine intelligence | Mech head, antenna, and scanning visor | Visor sweep traverses the face; antenna signal blinks | `animated/ai_mech_tgs_v14/ai_mech_tgs_v14.tgs` |
 | `electricity` | Power / energy | Heavy energy bolt with satellite sparks | Bolt surges; separate gold sparks discharge | `animated/electricity_tgs_v14/electricity_tgs_v14.tgs` |
 | `scrap` | Salvage / materials | Uneven salvage pile and welded plate | Welding spark bursts from the join | `animated/scrap_tgs_v14/scrap_tgs_v14.tgs` |
+| `hq` | Terminal HQ / command centre | Tall fortified command tower and antenna | Command signal expands from the antenna | `animated/hq_tgs_v14/hq_tgs_v14.tgs` |
+| `camp` | Outpost camp | Field tent, ground line, and signal fire | Campfire flickers in the tent opening | `animated/camp_tgs_v14/camp_tgs_v14.tgs` |
+| `economy` | System economy / tax | Armoured vault with exchange hub | Hub spokes rotate like a working market mechanism | `animated/economy_tgs_v14/economy_tgs_v14.tgs` |
+| `workshop` | Heavy workshop | Stepped factory roof and conveyor | Welding spark travels the conveyor line | `animated/workshop_tgs_v14/workshop_tgs_v14.tgs` |
+| `research` | Research laboratory | Scientific flask with contained compound | Reaction star pulses inside the fluid | `animated/research_tgs_v14/research_tgs_v14.tgs` |
+| `mutation` | Mutation core | Full double-helix with gold rungs | Helix twists while rungs light in sequence | `animated/mutation_tgs_v14/mutation_tgs_v14.tgs` |
+| `mining` | Active mining | Heavy pickaxe striking a crystal ore node | Pickaxe swings; violet ore holds the impact point | `animated/mining_tgs_v14/mining_tgs_v14.tgs` |
+| `radar` | Scan targets / expedition radar | Large radar ring, sweeping wedge, and target | Sweep completes a full scan; target pings | `animated/radar_tgs_v14/radar_tgs_v14.tgs` |
 
 ## Production rule
 

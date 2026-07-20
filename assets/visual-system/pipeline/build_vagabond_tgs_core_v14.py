@@ -209,16 +209,110 @@ def scrap_icon():
     return layers
 
 
+def hq_icon():
+    layers = base_layers(1)
+    tower = [[-118, 158], [-118, -82], [-65, -148], [65, -148], [118, -82], [118, 158]]
+    layers.append(layer(2, "terminal HQ tower", poly(tower, OBSIDIAN, STEEL, 11)))
+    screen = poly([[-72, -55], [72, -55], [72, 35], [-72, 35]], VIOLET, CYAN, 7)
+    layers.append(layer(3, "terminal status screen", screen))
+    mast = [path([[0, -148], [0, -205]], False), stroke(STEEL, 9), tr()]
+    layers.append(layer(4, "HQ antenna", mast))
+    ping = ellipse((50, 50), CYAN, WHITE, 4, transform=tr(position=(0, -210), scale=key([(0, [35, 35]), (60, [120, 120]), (120, [35, 35])]), opacity=key([(0, 100), (60, 0), (120, 100)])))
+    layers.append(layer(5, "HQ signal ping", ping))
+    return layers
+
+
+def camp_icon():
+    layers = base_layers(1)
+    tent = [[-170, 140], [0, -145], [170, 140]]
+    layers.append(layer(2, "outpost tent", poly(tent, OBSIDIAN, GOLD, 11)))
+    flap = poly([[0, -145], [62, 140], [0, 140]], VIOLET, LAVENDER, 6)
+    layers.append(layer(3, "tent flap", flap))
+    fire = [star(42), fill(GOLD), tr(position=(0, 96), scale=key([(0, [75, 75]), (30, [120, 120]), (60, [75, 75]), (90, [112, 112]), (120, [75, 75])]))]
+    layers.append(layer(4, "camp fire", fire))
+    return layers
+
+
+def economy_icon():
+    layers = base_layers(1)
+    vault = ellipse((300, 300), OBSIDIAN, GOLD, 14)
+    layers.append(layer(2, "economy vault door", vault))
+    hub = ellipse((94, 94), VIOLET, LAVENDER, 8, transform=tr(rotation=key([(0, 0), (120, 360)])))
+    layers.append(layer(3, "vault hub", hub))
+    for i, angle in enumerate((0, 72, 144, 216, 288)):
+        import math
+        x, y = 105 * math.cos(math.radians(angle)), 105 * math.sin(math.radians(angle))
+        spoke = [path([[0, 0], [x, y]], False), stroke(GOLD, 10), tr(rotation=key([(0, 0), (120, 360)]))]
+        layers.append(layer(4 + i, f"vault spoke {i}", spoke))
+    return layers
+
+
+def workshop_icon():
+    layers = base_layers(1)
+    factory = [[-178, 145], [-178, -40], [-90, -40], [-90, -125], [-40, -125], [-40, -40], [40, -40], [40, -90], [95, -90], [95, -40], [178, -40], [178, 145]]
+    layers.append(layer(2, "heavy workshop", poly(factory, OBSIDIAN, GOLD, 10)))
+    conveyor = [path([[-132, 76], [132, 76]], False), stroke(STEEL, 16), tr()]
+    layers.append(layer(3, "workshop conveyor", conveyor))
+    weld = [star(38), fill(CYAN), tr(position=key([(0, [-90, 76]), (60, [90, 76]), (120, [-90, 76])]), opacity=key([(0, 20), (30, 100), (60, 20), (90, 100), (120, 20)]))]
+    layers.append(layer(4, "workshop weld", weld))
+    return layers
+
+
+def research_icon():
+    layers = base_layers(1)
+    flask = [[-72, -165], [72, -165], [54, -35], [135, 112], [90, 158], [-90, 158], [-135, 112], [-54, -35]]
+    layers.append(layer(2, "research flask", poly(flask, OBSIDIAN, STEEL, 10)))
+    fluid = poly([[-100, 78], [100, 78], [128, 120], [88, 148], [-88, 148], [-128, 120]], VIOLET, LAVENDER, 5)
+    layers.append(layer(3, "research compound", fluid, scale=key([(0, [94, 94]), (60, [108, 108]), (120, [94, 94])])))
+    molecule = [star(30), fill(CYAN), tr(position=(0, 28), opacity=key([(0, 20), (30, 100), (60, 20), (90, 100), (120, 20)]))]
+    layers.append(layer(4, "research reaction", molecule))
+    return layers
+
+
+def mutation_icon():
+    layers = base_layers(1)
+    left = [path([[-94, -170], [-18, -105], [-94, -35], [-18, 38], [-94, 115], [-18, 175]], False), stroke(LAVENDER, 16), tr()]
+    right = [path([[94, -170], [18, -105], [94, -35], [18, 38], [94, 115], [18, 175]], False), stroke(CYAN, 16), tr()]
+    layers.append(layer(2, "mutation helix left", left, rotation=key([(0, -5), (60, 5), (120, -5)])))
+    layers.append(layer(3, "mutation helix right", right, rotation=key([(0, 5), (60, -5), (120, 5)])))
+    for i, y in enumerate((-104, -35, 38, 112)):
+        rung = [path([[-45, y], [45, y]], False), stroke(GOLD, 9), tr(opacity=key([(0 + i * 12, 25), (30 + i * 12, 100), (60 + i * 12, 25), (120 + i * 12, 25)]))]
+        layers.append(layer(4 + i, f"mutation rung {i}", rung))
+    return layers
+
+
+def mining_icon():
+    layers = base_layers(1)
+    handle = [path([[-118, 152], [118, -142]], False), stroke(GOLD, 22), tr(rotation=key([(0, -7), (60, 7), (120, -7)]))]
+    head = [path([[-148, -105], [-55, -185], [18, -128], [128, -55], [72, 12]], False), stroke(STEEL, 28), tr(rotation=key([(0, -7), (60, 7), (120, -7)]))]
+    layers.append(layer(2, "mining pick handle", handle))
+    layers.append(layer(3, "mining pick head", head))
+    ore = poly([[-58, 70], [0, 8], [62, 70], [40, 148], [-42, 148]], VIOLET, LAVENDER, 7)
+    layers.append(layer(4, "mined crystal ore", ore))
+    return layers
+
+
+def radar_icon():
+    layers = base_layers(1)
+    layers.append(layer(2, "expedition radar ring", ellipse((330, 330), [0, 0, 0, 0], CYAN, 10)))
+    layers.append(layer(3, "expedition radar core", ellipse((54, 54), GOLD, WHITE, 6)))
+    sweep = poly([[0, 0], [148, -62], [148, 10]], CYAN, CYAN, 1, transform=tr(rotation=key([(0, 0), (120, 360)])))
+    layers.append(layer(4, "radar sweep", sweep))
+    target = ellipse((28, 28), RED, WHITE, 4, transform=tr(position=(92, -85), opacity=key([(0, 10), (24, 100), (48, 10), (72, 100), (120, 10)])))
+    layers.append(layer(5, "radar target", target))
+    return layers
+
+
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
     target=OUT/f"{key}_tgs_v14"/f"{key}_tgs_v14.tgs"
     target.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(target,"wb",compresslevel=9) as f: f.write(json.dumps(data,separators=(",",":")).encode())
+    target.write_bytes(gzip.compress(json.dumps(data, separators=(",", ":")).encode(), compresslevel=9, mtime=0))
     print(f"{key}: {target.stat().st_size} bytes")
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon}.items():
         write(key,builder())
 
 
