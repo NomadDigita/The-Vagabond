@@ -37,6 +37,15 @@ real game object or state, not a recolored generic badge.
 | `defense` | Base defense | Hardened bunker and traversing cannon | Cannon tracks across the horizon and flashes once | `animated/defense_tgs_v14/defense_tgs_v14.tgs` |
 | `clan` | Clan / alliance | Faction banner, pole, and crest | Banner lifts while the crest energises | `animated/clan_tgs_v14/clan_tgs_v14.tgs` |
 | `boss` | Boss encounter | Angular boss mech skull with red optical array | Both boss optics pulse in alternating threat rhythm | `animated/boss_tgs_v14/boss_tgs_v14.tgs` |
+| `warlord` | Warlord / elite command | Command crown with embedded red gem | Crown breathes while the gem charges | `animated/warlord_tgs_v14/warlord_tgs_v14.tgs` |
+| `world` | World map / global state | Planet sphere with meridian and equator | Meridian tracks across the rotating world | `animated/world_tgs_v14/world_tgs_v14.tgs` |
+| `cannon` | Tactical cannon | Traversing gun turret with muzzle flash | Barrel scans its firing arc then emits a single blast | `animated/cannon_tgs_v14/cannon_tgs_v14.tgs` |
+| `silo` | Strategic silo / nuclear state | Hardened missile-silo dome with warning core | Red core pulses inside the sealed silo | `animated/silo_tgs_v14/silo_tgs_v14.tgs` |
+| `alliance` | Alliance / cooperation | Two interlocking tactical clasps | Clasps converge and lock with a cyan spark | `animated/alliance_tgs_v14/alliance_tgs_v14.tgs` |
+| `rebellion` | Rebellion event | Raised rebel banner and signal fire | Banner waves while the signal fire pulses | `animated/rebellion_tgs_v14/rebellion_tgs_v14.tgs` |
+| `jet` | Air squadron / jets | Sharp expedition fighter silhouette | Aircraft banks and leaves a bright exhaust pulse | `animated/jet_tgs_v14/jet_tgs_v14.tgs` |
+| `commander` | Commander / profile | Armoured commander profile and insignia | Gold insignia energises across the uniform | `animated/commander_tgs_v14/commander_tgs_v14.tgs` |
+| `exploration` | Exploration / navigation | Field compass with red needle | Needle completes a decisive heading sweep | `animated/exploration_tgs_v14/exploration_tgs_v14.tgs` |
 
 ## Production rule
 

@@ -405,6 +405,96 @@ def boss_icon():
     return layers
 
 
+def warlord_icon():
+    layers = base_layers(1)
+    crown = [[-158, 112], [-158, -118], [-70, -42], [0, -160], [70, -42], [158, -118], [158, 112]]
+    layers.append(layer(2, "warlord crown", poly(crown, GOLD, WHITE, 11), scale=key([(0, [92, 92]), (60, [108, 108]), (120, [92, 92])])))
+    gem = ellipse((44, 44), RED, WHITE, 5, transform=tr(position=(0, 42), opacity=key([(0, 30), (30, 100), (60, 30), (120, 30)])))
+    layers.append(layer(3, "warlord crown gem", gem))
+    return layers
+
+
+def world_icon():
+    layers = base_layers(1)
+    layers.append(layer(2, "world sphere", ellipse((330, 330), OBSIDIAN, CYAN, 11)))
+    meridian = [path([[0, -160], [0, 160]], False), stroke(LAVENDER, 9), tr(rotation=key([(0, -25), (60, 25), (120, -25)]))]
+    equator = [path([[-155, 0], [155, 0]], False), stroke(LAVENDER, 9), tr()]
+    layers.append(layer(3, "world meridian", meridian))
+    layers.append(layer(4, "world equator", equator))
+    return layers
+
+
+def cannon_icon():
+    layers = base_layers(1)
+    turret = ellipse((210, 116), OBSIDIAN, STEEL, 10)
+    layers.append(layer(2, "tactical cannon turret", turret, pos=(256, 320)))
+    barrel = [path([[0, 44], [0, -172]], False), stroke(GOLD, 30), tr(rotation=key([(0, -10), (60, 10), (120, -10)]))]
+    layers.append(layer(3, "tactical cannon barrel", barrel))
+    blast = [star(38), fill(CYAN), tr(position=(0, -175), opacity=key([(0, 0), (28, 100), (56, 0), (120, 0)]))]
+    layers.append(layer(4, "cannon blast", blast))
+    return layers
+
+
+def silo_icon():
+    layers = base_layers(1)
+    shell = [[-118, 158], [-118, -36], [-70, -126], [0, -172], [70, -126], [118, -36], [118, 158]]
+    layers.append(layer(2, "strategic silo", poly(shell, OBSIDIAN, STEEL, 11)))
+    core = [star(46), fill(RED), tr(position=(0, 24), opacity=key([(0, 30), (30, 100), (60, 30), (120, 30)]))]
+    layers.append(layer(3, "silo warning core", core))
+    return layers
+
+
+def alliance_icon():
+    layers = base_layers(1)
+    left = poly([[-175, -58], [-70, -148], [15, -63], [-68, 35]], VIOLET, LAVENDER, 9)
+    right = poly([[175, 58], [70, 148], [-15, 63], [68, -35]], GOLD, WHITE, 9)
+    layers.append(layer(2, "alliance left clasp", left, pos=key([(0, [236, 256]), (60, [255, 256]), (120, [236, 256])])))
+    layers.append(layer(3, "alliance right clasp", right, pos=key([(0, [276, 256]), (60, [257, 256]), (120, [276, 256])])))
+    spark = [star(28), fill(CYAN), tr(opacity=key([(0, 0), (30, 100), (60, 0), (120, 0)]))]
+    layers.append(layer(4, "alliance lock", spark))
+    return layers
+
+
+def rebellion_icon():
+    layers = base_layers(1)
+    flag = poly([[-130, -150], [145, -104], [-130, -25]], RED, WHITE, 9, transform=tr(rotation=key([(0, -4), (60, 4), (120, -4)])))
+    pole = [path([[-135, -170], [-135, 170]], False), stroke(STEEL, 15), tr()]
+    layers.append(layer(2, "rebellion flag", flag))
+    layers.append(layer(3, "rebellion pole", pole))
+    flame = [star(38), fill(GOLD), tr(position=(-8, 96), opacity=key([(0, 30), (30, 100), (60, 30), (120, 30)]))]
+    layers.append(layer(4, "rebellion fire", flame))
+    return layers
+
+
+def jet_icon():
+    layers = base_layers(1)
+    jet = [[0, -185], [44, -32], [154, 70], [48, 65], [0, 168], [-48, 65], [-154, 70], [-44, -32]]
+    layers.append(layer(2, "expedition jet", poly(jet, OBSIDIAN, STEEL, 10), rotation=key([(0, -7), (60, 7), (120, -7)])))
+    exhaust = [star(32), fill(CYAN), tr(position=(0, 158), opacity=key([(0, 15), (30, 100), (60, 15), (120, 15)]))]
+    layers.append(layer(3, "jet exhaust", exhaust))
+    return layers
+
+
+def commander_icon():
+    layers = base_layers(1)
+    head = ellipse((180, 180), OBSIDIAN, STEEL, 10, transform=tr(position=(0, -38)))
+    layers.append(layer(2, "commander profile", head))
+    shoulders = poly([[-170, 162], [-110, 62], [110, 62], [170, 162]], VIOLET, LAVENDER, 9)
+    layers.append(layer(3, "commander shoulders", shoulders))
+    insignia = [star(24), fill(GOLD), tr(position=(0, 100), opacity=key([(0, 20), (30, 100), (60, 20), (120, 20)]))]
+    layers.append(layer(4, "commander insignia", insignia))
+    return layers
+
+
+def exploration_icon():
+    layers = base_layers(1)
+    compass = ellipse((300, 300), OBSIDIAN, GOLD, 10)
+    layers.append(layer(2, "exploration compass", compass))
+    needle = poly([[0, -138], [42, 28], [0, 138], [-42, 28]], RED, WHITE, 6, transform=tr(rotation=key([(0, 0), (120, 360)])))
+    layers.append(layer(3, "exploration needle", needle))
+    return layers
+
+
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
     target=OUT/f"{key}_tgs_v14"/f"{key}_tgs_v14.tgs"
@@ -414,7 +504,7 @@ def write(key, layers):
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon,"warlord":warlord_icon,"world":world_icon,"cannon":cannon_icon,"silo":silo_icon,"alliance":alliance_icon,"rebellion":rebellion_icon,"jet":jet_icon,"commander":commander_icon,"exploration":exploration_icon}.items():
         write(key,builder())
 
 
