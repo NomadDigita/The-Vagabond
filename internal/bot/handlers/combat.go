@@ -1358,8 +1358,24 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	}
 
 	totMobilized := mobSoldiers + mobMechs + mobBuggies + mobShips + mobJets + mobNukes + mobDestroyers + mobBombers + mobBC + mobDS + mobLiberators + mobWraiths
+	combatUnits := mobSoldiers + mobMechs + mobDestroyers + mobBombers + mobBC + mobDS + mobLiberators + mobWraiths
+	travelUnits := mobBuggies + mobShips + mobJets
+	walkingUnits := mobSoldiers + mobMechs + mobDestroyers + mobBombers + mobLiberators + mobWraiths
 	if totMobilized <= 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Hangar Staging Empty: Allocate at least 1 unit to deploy!"})
+	}
+	if combatUnits < 20 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Battle Doctrine Block: Deploy at least 20 combat units before launching a real war party."})
+	}
+	if walkingUnits > 0 && travelUnits <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Mobility Block: Walking forces require at least 1 travel unit (Buggy, Ship, or Jet) to guide and move the column."})
+	}
+
+	var homeHaulers, homeTankers, homeCargoMk1, homeCargoMk2, homeCargoMk3 int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers,0), COALESCE(tankers,0), COALESCE(cargo_mk1,0), COALESCE(cargo_mk2,0), COALESCE(cargo_mk3,0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&homeHaulers, &homeTankers, &homeCargoMk1, &homeCargoMk2, &homeCargoMk3)
+	resourceTransports := homeHaulers + homeTankers + homeCargoMk1 + homeCargoMk2 + homeCargoMk3
+	if resourceTransports <= 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Logistics Block: Every campaign needs at least 1 resource transport unit (Hauler, Tanker, or Cargo Ship) to carry supplies."})
 	}
 
 	var defenderName string
@@ -1440,12 +1456,18 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		marchingMinutes = 1.0
 	}
 
-	var electricity float64
-	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity)
+	var electricity, rations, metal, hydrogen float64
+	_ = tx.QueryRowContext(ctx, "SELECT electricity, rations, metal, hydrogen FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&electricity, &rations, &metal, &hydrogen)
 
-	fuelCost := 30.0
+	fuelCost := 30.0 + float64(combatUnits)*0.35 + float64(travelUnits)*1.5
 	if routeType == "safe" {
-		fuelCost = 45.0
+		fuelCost *= 1.5
+	}
+	rationCost := 20.0 + float64(combatUnits)*0.75
+	logisticsMetalCost := 10.0 + float64(totMobilized)*0.25
+	hydrogenCost := 0.0
+	if mobJets > 0 || mobBC > 0 || mobDS > 0 || mobLiberators > 0 || mobWraiths > 0 {
+		hydrogenCost = 5.0 + float64(mobJets+mobBC+mobDS+mobLiberators+mobWraiths)*1.25
 	}
 
 	var starportLvl int
@@ -1453,11 +1475,11 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	fuelDiscount := math.Min(float64(starportLvl)*0.03, 0.50)
 	fuelCost *= (1.0 - fuelDiscount)
 
-	if electricity < fuelCost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Electricity: Required %.1f cells.", fuelCost)})
+	if electricity < fuelCost || rations < rationCost || metal < logisticsMetalCost || hydrogen < hydrogenCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Campaign Supplies: Need ⚡ %.1f Electricity, 🍖 %.1f Rations, 🔩 %.1f Metal logistics, and 💧 %.1f Hydrogen.", fuelCost, rationCost, logisticsMetalCost, hydrogenCost)})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", fuelCost, myCampID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1, rations = rations - $3, metal = metal - $4, hydrogen = hydrogen - $5 WHERE encampment_id = $2", fuelCost, myCampID, rationCost, logisticsMetalCost, hydrogenCost)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE workshop_inventory 
 		SET soldiers = soldiers - $1, mechs = mechs - $2, buggies = buggies - $3, ships = ships - $4, jets = jets - $5, nukes = nukes - $6,
@@ -1476,14 +1498,14 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var insertRaid string
 	if isAI {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes) 
-			VALUES ($1, NULL, 'marching', $2, $3)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics) 
+			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0)
 			RETURNING id`
 		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes).Scan(&raidID)
 	} else {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes) 
-			VALUES ($1, $2, 'marching', $3, $4)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics) 
+			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0)
 			RETURNING id`
 		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes).Scan(&raidID)
 	}
@@ -1579,10 +1601,10 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		if state == "staged" || state == "engaged" {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Active engagements or staged lobbies cannot be speed-boosted."})
 		}
-		var scrap, dollars float64
-		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars)
-		if scrap < 500.0 || dollars < 100.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Speed up costs 500 Scrap and $100 Cash."})
+		var scrap, dollars, crystal float64
+		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars, &crystal)
+		if scrap < 2500.0 || dollars < 750.0 || crystal < 25.0 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Assets: Emergency speed-up costs 2,500 Scrap, $750 Cash, and 25 Crystal."})
 		}
 
 		diff := resolveTime.UTC().Sub(time.Now().UTC())
@@ -1590,7 +1612,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Campaign is already arriving!"})
 		}
 
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 500.0, dollars = dollars - 100.0 WHERE encampment_id = $1", attackerID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 2500.0, dollars = dollars - 750.0, crystal = crystal - 25.0 WHERE encampment_id = $1", attackerID)
 		newResolve := resolveTime.UTC().Add(-30 * time.Minute)
 		if time.Until(newResolve) < 0 {
 			newResolve = time.Now().UTC().Add(5 * time.Second)
