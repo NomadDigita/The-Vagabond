@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt-token", action="store_true", help="Prompt for the bot token without echoing or storing it in an environment variable.")
     parser.add_argument("--owner-id", help="Numeric Telegram owner/test-account ID; overrides TG_OWNER_ID for this run only.")
     parser.add_argument("--recover-set", help="Read, verify, and message an already-created test set without creating or changing any set.")
-    parser.add_argument("--asset", type=Path, help="Owned 100x100 VP9-alpha WebM to upload; defaults to the local Oracle proof asset.")
+    parser.add_argument("--asset", type=Path, help="Owned VP9-alpha WebM or validated animated TGS to upload; defaults to the local Oracle proof asset.")
     parser.add_argument("--asset-key", help="Readable manifest key for --asset, for example vagabond_crystal_v1.")
     parser.add_argument("--emoji", help="Unicode fallback emoji associated with the uploaded custom emoji; defaults to the Oracle fallback.")
     parser.add_argument("--title", help="Fresh test-set title; defaults to the Oracle proof title.")
@@ -86,11 +86,13 @@ def configure_asset(args: argparse.Namespace) -> None:
     path_argument = getattr(args, "asset", None)
     if path_argument:
         source = Path(path_argument).expanduser().resolve()
-        if source.suffix.lower() != ".webm":
-            raise SystemExit("--asset must be a .webm file. Convert your owned source to Telegram's VP9-alpha WebM contract before uploading.")
+        suffix = source.suffix.lower()
+        if suffix not in {".webm", ".tgs"}:
+            raise SystemExit("--asset must be a .webm video or .tgs animated file.")
         if not source.is_file():
             raise SystemExit(f"Missing --asset: {source}")
         ASSET["path"] = source
+        ASSET["format"] = "animated" if suffix == ".tgs" else "video"
     key = getattr(args, "asset_key", None)
     if key:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{1,63}", key):
@@ -193,7 +195,7 @@ def create_set_directly(api: str, owner_id: str, set_name: str) -> None:
             title=ASSET["title"],
             sticker_type="custom_emoji",
             stickers=json.dumps([sticker_input("attach://oracle_video")]),
-            files={"oracle_video": (ASSET["path"].name, source, "video/webm")},
+            files={"oracle_video": (ASSET["path"].name, source, "application/x-tgsticker" if ASSET["format"] == "animated" else "video/webm")},
         )
     if created is not True:
         raise RuntimeError("createNewStickerSet returned an unexpected success payload.")
@@ -255,8 +257,10 @@ def finalize_verified_set(api: str, owner_id: str, set_name: str, sticker_set: d
     if len(stickers) != 1:
         raise RuntimeError(f"Fresh set assertion failed: expected one sticker, found {len(stickers)}. No mapping was written.")
     sticker = stickers[0]
-    if sticker.get("is_video") is not True:
+    if ASSET["format"] == "video" and sticker.get("is_video") is not True:
         raise RuntimeError("Fresh set assertion failed: Telegram did not return a video custom emoji.")
+    if ASSET["format"] == "animated" and sticker.get("is_animated") is not True:
+        raise RuntimeError("Fresh set assertion failed: Telegram did not return an animated custom emoji.")
     custom_emoji_id = sticker.get("custom_emoji_id")
     if not isinstance(custom_emoji_id, str) or not custom_emoji_id:
         raise RuntimeError("Fresh set assertion failed: Telegram returned no custom_emoji_id. No mapping was written.")
