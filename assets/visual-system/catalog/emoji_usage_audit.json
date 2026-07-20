@@ -1,0 +1,5679 @@
+{
+  "source": "git HEAD tracked *.go",
+  "unique_symbols": 197,
+  "occurrences": 8150,
+  "assets": [
+    {
+      "unicode": "━",
+      "occurrences": 3740,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 159,
+          "context": "\"━━━━━━━━━━━━━━━━━━━━━━\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "─",
+      "occurrences": 1968,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 43,
+          "context": "// ── /ai_status (admin only) ────────────────────────────────────────"
+        }
+      ]
+    },
+    {
+      "unicode": "⚠️",
+      "occurrences": 322,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 90,
+          "context": "btnDBReset := selector.Data(\"⚠️ Reset Database\", \"admin_action\", \"db_reset\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 100,
+          "context": "return c.Send(\"🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\\n\\nDeploy overrides using the secure inline controls or bottom submenu deck.\\nActions marked ⚠️ are destructive and require a co"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 181,
+          "context": "btnConfirm := confirmSelector.Data(\"⚠️ CONFIRM: Wipe raids/news/queues & redistribute coordinates\", \"admin_action\", \"db_reset_confirm\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 185,
+          "context": "return c.Send(\"⚠️ Are you SURE? This clears active raids/world news/queues and redistributes every outpost's coordinates. This cannot be undone.\", confirmSelector)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 227,
+          "context": "return true, c.Send(\"⚠️ Expected `username days` - action cancelled, tap Gift Premium again to retry.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 231,
+          "context": "return true, c.Send(\"⚠️ Days must be a whole number - action cancelled, tap Gift Premium again to retry.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 238,
+          "context": "return true, c.Send(\"⚠️ Expected `username resource_type amount` - action cancelled, tap Gift Resources again to retry.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 242,
+          "context": "return true, c.Send(\"⚠️ Amount must be a number - action cancelled, tap Gift Resources again to retry.\")"
+        }
+      ]
+    },
+    {
+      "unicode": "❌",
+      "occurrences": 213,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 70,
+          "context": "return c.Send(\"❌ Access Denied: Authorized administrators only.\", keyboards.MainNavigation())"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 131,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"❌ Access Denied: Authorized administrators only.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 282,
+          "context": "return c.Send(\"❌ Access Denied: Authorized administrators only.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 298,
+          "context": "return c.Send(\"❌ Access Denied: Authorized administrators only.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 439,
+          "context": "return c.Send(\"❌ Access Denied: Authorized administrators only.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 464,
+          "context": "return \"❌ User Not Found.\", err"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 494,
+          "context": "return c.Send(\"❌ Access Denied: Authorized administrators only.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 526,
+          "context": "return \"❌ Invalid resource type specified.\", errors.New(\"invalid resource type\")"
+        }
+      ]
+    },
+    {
+      "unicode": "▰",
+      "occurrences": 104,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 36,
+          "context": "bar += \"▰\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 453,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▱▱▱▱▱▱▱▱▱] 10% - Igniting heavy engine buffers...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 457,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▰▰▰▰▰] 100% - Miner locked in position! Commencing extraction...\")"
+        }
+      ]
+    },
+    {
+      "unicode": "▱",
+      "occurrences": 98,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 26,
+          "context": "return \"▱▱▱▱▱▱▱▱▱▱\""
+        }
+      ]
+    },
+    {
+      "unicode": "🛡️",
+      "occurrences": 67,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1042,
+          "context": "bot.Handle(\"🛡️ Clan Alliances\", clan.HandleClanPanel)"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1050,
+          "context": "bot.Handle(\"🛡️ Defense Grid\", camp.HandleDefenseGridPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 375,
+          "context": "defenderAlert := fmt.Sprintf(\"🛡️ SYSTEM UPDATE: The hostile campaign marching towards your base from Outpost [%s] was aborted due to an administrative database reset.\", ar.attacker"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 156,
+          "context": "{\"anti_missile\", \"🚀🛡️\", \"Anti-Missile Battery\", \"Chance to auto-intercept incoming ICBM strikes for free.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 172,
+          "context": "\"🛡️ DEFENSE GRID CONTROL\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 203,
+          "context": "{\"small_shield\", \"🛡️\", \"Small Planetary Shield\", \"Reduces loot taken when raided (stacks with Nuclear Shields).\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 204,
+          "context": "{\"large_shield\", \"🛡️🛡️\", \"Large Planetary Shield\", \"Major reduction of loot taken when raided.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 204,
+          "context": "{\"large_shield\", \"🛡️🛡️\", \"Large Planetary Shield\", \"Major reduction of loot taken when raided.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "🚚",
+      "occurrences": 50,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 56,
+          "context": "{\"cargo_mk1\", \"🚚\", \"Cargo Ship Mk I\", \"cargo_mk1\", content.MustFindUnit(\"cargo_mk1\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 57,
+          "context": "{\"cargo_mk2\", \"🚚🚚\", \"Cargo Ship Mk II\", \"cargo_mk2\", content.MustFindUnit(\"cargo_mk2\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 57,
+          "context": "{\"cargo_mk2\", \"🚚🚚\", \"Cargo Ship Mk II\", \"cargo_mk2\", content.MustFindUnit(\"cargo_mk2\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 58,
+          "context": "{\"cargo_mk3\", \"🚚🚚🚚\", \"Cargo Ship Mk III\", \"cargo_mk3\", content.MustFindUnit(\"cargo_mk3\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 58,
+          "context": "{\"cargo_mk3\", \"🚚🚚🚚\", \"Cargo Ship Mk III\", \"cargo_mk3\", content.MustFindUnit(\"cargo_mk3\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 58,
+          "context": "{\"cargo_mk3\", \"🚚🚚🚚\", \"Cargo Ship Mk III\", \"cargo_mk3\", content.MustFindUnit(\"cargo_mk3\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 209,
+          "context": "\"🚚 Cargo Mk I: %d | 🚚🚚 Cargo Mk II: %d | 🚚🚚🚚 Cargo Mk III: %d\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 209,
+          "context": "\"🚚 Cargo Mk I: %d | 🚚🚚 Cargo Mk II: %d | 🚚🚚🚚 Cargo Mk III: %d\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "`",
+      "occurrences": 49,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 363,
+          "context": "`ALTER TABLE clans ADD COLUMN IF NOT EXISTS icon VARCHAR(10) DEFAULT '🏴';`,"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 363,
+          "context": "`ALTER TABLE clans ADD COLUMN IF NOT EXISTS icon VARCHAR(10) DEFAULT '🏴';`,"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 114,
+          "context": "return \"✍️ Reply with: `username days`\\nExample: `wanderer99 30`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 114,
+          "context": "return \"✍️ Reply with: `username days`\\nExample: `wanderer99 30`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 114,
+          "context": "return \"✍️ Reply with: `username days`\\nExample: `wanderer99 30`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 114,
+          "context": "return \"✍️ Reply with: `username days`\\nExample: `wanderer99 30`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 116,
+          "context": "return \"✍️ Reply with: `username resource_type amount`\\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores\\nExample: `wanderer99 metal 500`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 116,
+          "context": "return \"✍️ Reply with: `username resource_type amount`\\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores\\nExample: `wanderer99 metal 500`\""
+        }
+      ]
+    },
+    {
+      "unicode": "➜",
+      "occurrences": 46,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 547,
+          "context": "panelText += fmt.Sprintf(\"⚔️ %s ➜ %s [%s]\\n   Loot: ⚙️%.0f 🔩%.0f 💎%.0f\\n\\n\", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 124,
+          "context": "\"⚙️ 100 Scrap ➜ $50\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 125,
+          "context": "\"🔩 100 Metal ➜ $80\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 126,
+          "context": "\"💎 50 Crystal ➜ $120\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 127,
+          "context": "\"$100 ➜ 🔩 50 Metal\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 128,
+          "context": "\"$200 ➜ 💎 20 Crystal\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 129,
+          "context": "\"$150 ➜ 🎈 40 Hydrogen\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 74,
+          "context": "panelText += fmt.Sprintf(\"%s %.0f Ether ➜ %.0f %s\\n\", d.emoji, d.cost, d.amount, d.title)"
+        }
+      ]
+    },
+    {
+      "unicode": "🤖",
+      "occurrences": 45,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 281,
+          "context": "('The Rustlord', '🤖👹', 500000, 500000, 5000),"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 94,
+          "context": "\"🤖 Agent Status: %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 172,
+          "context": "alert := \"🤖 Cognitive Agent booted successfully!\""
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 58,
+          "context": "b.WriteString(\"🤖 AI FOUNDATION STATUS (Phase A)\\n\\n\")"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 140,
+          "context": "b.WriteString(\"🤖 YOUR AI PREFERENCES\\n\\n\")"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 56,
+          "context": "\"🤖 [3v3 Team Clash] — Active: %d players | Cost: $200.0\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 65,
+          "context": "btnJoin3 := selector.Data(\"🤖 Queue 3v3\", \"join_queue\", \"3v3\")"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 155,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.\", soldiers, mechs, bossName,"
+        }
+      ]
+    },
+    {
+      "unicode": "⚙️",
+      "occurrences": 43,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 282,
+          "context": "('Scrap Titan', '⚙️👹', 1200000, 1200000, 12000),"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 164,
+          "context": "\"⚙️ Active Goroutines: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 756,
+          "context": "\"⚙️ Active Goroutines: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 96,
+          "context": "\"⚙️ Operational Mode: %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 191,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"⚙️ Mode switched to: %s\", targetMode)})"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 83,
+          "context": "\"⚙️ [Scrap Heap] — Level %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 117,
+          "context": "\"⚙️ [Scrap Heap Lvl %d] -> Cost: %d Scrap\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 127,
+          "context": "btnUpgradeHeap := selector.Data(fmt.Sprintf(\"⚙️ Heap (%d)\", heapLvl+1), \"upgrade_mod\", \"scrap_heap\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🛰️",
+      "occurrences": 43,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1029,
+          "context": "bot.Handle(\"🛰️ Server Metrics\", admin.HandleAdminMetrics)"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1037,
+          "context": "bot.Handle(\"🛰️ Scan Targets\", combat.HandleTargetMatrix)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 89,
+          "context": "btnMetrics := selector.Data(\"🛰️ Server Metrics\", \"admin_action\", \"server_metrics\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 171,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🛰️ Memory telemetry fetched!\"})"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 708,
+          "context": "\"🛰️ SYSTEM BROADCAST (DEVELOPER MSG):\\n\\n%s\","
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 142,
+          "context": "btnSpy := selector.Data(fmt.Sprintf(\"🛰️ Spy [%d]\", i+1), \"spy_action\", t.id)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 252,
+          "context": "outboundText = \"🛰️ OUTBOUND: Radar clean. No active offensive marching forces detected.\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 313,
+          "context": "spyText += fmt.Sprintf(\"🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\\n   Uplink Status: Decrypting (%ds remaining)\\n\\n\", edName, timeLeft)"
+        }
+      ]
+    },
+    {
+      "unicode": "⚔️",
+      "occurrences": 41,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1022,
+          "context": "bot.Handle(\"⚔️ Tactical Combat\", combat.HandleRaidBoard)"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 54,
+          "context": "\"⚔️ [1v1 Duel] — Active: %d players | Cost: $50.0\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 63,
+          "context": "btnJoin1 := selector.Data(\"⚔️ Queue 1v1\", \"join_queue\", \"1v1\")"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 75,
+          "context": "\"%s %s\\n%s  %.0f / %.0f HP\\n💰 Loot Pool: $%.0f  |  ⚔️ Danger: %.0f%%  |  %s\\n\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 122,
+          "context": "panelText += fmt.Sprintf(\"\\n⚔️ AT WAR with %s!\\n📊 Score: %.0f - %.0f\\n\", activeWarOpponent, warScoreMine, warScoreTheirs)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 140,
+          "context": "btnDeclare := selector.Data(\"⚔️ Declare War\", \"declare_clan_war\", clanID.String)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 494,
+          "context": "\"⚔️ Accumulated Military Power: %d Power Rating\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 547,
+          "context": "panelText += fmt.Sprintf(\"⚔️ %s ➜ %s [%s]\\n   Loot: ⚙️%.0f 🔩%.0f 💎%.0f\\n\\n\", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)"
+        }
+      ]
+    },
+    {
+      "unicode": "💎",
+      "occurrences": 38,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 84,
+          "context": "btnGiftPremium := selector.Data(\"💎 Gift Premium\", \"admin_action\", \"gift_premium\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 477,
+          "context": "\"💎 PREMIUM STATUS GRANTED!\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 82,
+          "context": "licenseText = \"💎 PREMIUM GRANTED\""
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 84,
+          "context": "licenseText = fmt.Sprintf(\"💎 PREMIUM (Expires: %s)\", premiumUntil.Time.UTC().Format(\"2006-01-02\"))"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 104,
+          "context": "\"💎 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 122,
+          "context": "btnModeCollectorPrecious := selector.Data(\"💎 Precious\", \"set_agent_mode\", \"collector_precious\", senderIDStr)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 207,
+          "context": "{\"crystal_mine\", \"💎\", \"Crystal Mine\", \"Passive Crystal generation every tick.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 318,
+          "context": "\"💎 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "⚡",
+      "occurrences": 37,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1027,
+          "context": "bot.Handle(\"⚡ Force Master Tick\", admin.HandleAdminTick)"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1154,
+          "context": "log.Println(\"⚡ Keep-Alive Pinger succeeded. Instance held awake.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 82,
+          "context": "btnTick := selector.Data(\"⚡ Force Tick\", \"admin_action\", \"tick\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 141,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"⚡ Master game tick successfully triggered!\"})"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 188,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"⚡ Executing...\"})"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 288,
+          "context": "return c.Send(\"⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered.\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 429,
+          "context": "return \"⚡ ADMIN SYSTEM OVERRIDE: Database reset completed. Testing news cleared, queues flushed, active raids returned, and all coordinates redistributed securely.\", nil"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 484,
+          "context": "return fmt.Sprintf(\"⚡ ADMIN OVERRIDE: Granted %d days of Premium License to @%s.\", days, targetUser), nil"
+        }
+      ]
+    },
+    {
+      "unicode": "🔩",
+      "occurrences": 37,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 206,
+          "context": "{\"metal_mine\", \"🔩\", \"Metal Mine\", \"Passive Metal generation every tick.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 317,
+          "context": "\"🔩 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 326,
+          "context": "btnMetal := selector.Data(\"🔩 Metal\", \"mine_action\", \"metal\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 648,
+          "context": "_, _ = c.Bot().Edit(msg, fmt.Sprintf(\"🏗️ STRUCTURAL STRESSTESTS...\\n[▰▰▰▰▰▱▱▱▱▱] 50%%\\n🔩 Build modifiers: %s\", buildDelay))"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 714,
+          "context": "_, _ = c.Bot().Edit(msg, fmt.Sprintf(\"🏗️ STRUCTURAL STRESSTESTS...\\n[▰▰▰▰▰▱▱▱▱▱] 50%%\\n🔩 Build modifiers: %s\", buildDelay))"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 547,
+          "context": "panelText += fmt.Sprintf(\"⚔️ %s ➜ %s [%s]\\n   Loot: ⚙️%.0f 🔩%.0f 💎%.0f\\n\\n\", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 65,
+          "context": "\"⚙️ Scrap: %.1f  |  🔩 Metal: %.1f\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 125,
+          "context": "\"🔩 100 Metal ➜ $80\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🪖",
+      "occurrences": 35,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1047,
+          "context": "bot.Handle(\"🪖 Recruit Troops\", factory.HandleRecruitPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 106,
+          "context": "\"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 124,
+          "context": "btnModeMilitary := selector.Data(\"🪖 Military\", \"set_agent_mode\", \"military\", senderIDStr)"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 155,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.\", soldiers, mechs, bossName,"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 496,
+          "context": "\"🪖 Combined Infantry: %d Soldiers\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 418,
+          "context": "\"🪖 Soldiers: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 942,
+          "context": "\"🪖 Soldiers: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 967,
+          "context": "btnPlusSol := selector.Data(\"🪖 +Soldier\", \"adjust_draft\", \"soldier\", \"inc\")"
+        }
+      ]
+    },
+    {
+      "unicode": "✅",
+      "occurrences": 31,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 182,
+          "context": "btnCancel := confirmSelector.Data(\"✅ Cancel\", \"admin_action\", \"db_reset_cancel\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 193,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"✅ Cancelled - no changes made.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 62,
+          "context": "b.WriteString(fmt.Sprintf(\"  • %s — available ✅\\n\", p.Name()))"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 73,
+          "context": "state := \"✅ enabled\""
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 121,
+          "context": "return c.Send(fmt.Sprintf(\"✅ %s is now %s globally.\", feature, map[bool]string{true: \"ENABLED\", false: \"DISABLED\"}[enabled]))"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 172,
+          "context": "return c.Send(fmt.Sprintf(\"✅ %s is now %s for you.\", feature, map[bool]string{true: \"ON\", false: \"OFF\"}[enabled]))"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 273,
+          "context": "btnAccept := selector.Data(\"✅ Accept\", \"clan_app_accept\", strconv.FormatInt(userID, 10), clanID)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 327,
+          "context": "_, _ = tx.ExecContext(ctx, \"INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)\", targetID, \"✅ APPLICATION ACCEPTED: Welcome to your new Clan!\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📡",
+      "occurrences": 30,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1020,
+          "context": "bot.Handle(\"📡 Terminal HQ\", onboarding.HandleStart)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 88,
+          "context": "btnBroadcast := selector.Data(\"📡 Broadcast\", \"admin_action\", \"broadcast\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 727,
+          "context": "return fmt.Sprintf(\"📡 Broadcast successfully queued to %d users.\", len(targets)), nil"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 198,
+          "context": "{\"radar\", \"📡\", \"Radar\", \"Improves early-warning intel and counter-espionage odds.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 314,
+          "context": "\"📡 Idle Alerts Option: %s\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 285,
+          "context": "inboundText = \"📡 Static: Scanner interference detected.\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 319,
+          "context": "spyText += fmt.Sprintf(\"📡 INCOMING ESPIONAGE BREACH: Rival %s\\n   Uplink Status: Intercept Window (%ds remaining)\\n\\n\", eaName, timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 321,
+          "context": "spyText += fmt.Sprintf(\"📡 RETREAT INTERCEPT WINDOW: Rival %s\\n   Status: Chase Chase Chase! (%ds remaining)\\n\\n\", eaName, timeLeft)"
+        }
+      ]
+    },
+    {
+      "unicode": "☢️",
+      "occurrences": 27,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1045,
+          "context": "bot.Handle(\"☢️ Strategic Silo\", silo.HandleSiloPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 495,
+          "context": "\"☢️ Crystal Stock: %.1f kg | 🧠 Neuro Cores: %.0f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 572,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 SYNTHESIZING CELLULAR ADAPTATIONS...\\n[▰▰▰▰▰▱▱▱▱▱] 60%\\n☢️ Crystal radiation fallout stabilized.\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 953,
+          "context": "\"☢️ Nukes: %d / %d active\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 990,
+          "context": "btnPlusNuke := selector.Data(\"☢️ +Nuke\", \"adjust_draft\", \"nuke\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 991,
+          "context": "btnMinusNuke := selector.Data(\"☢️ -Nuke\", \"adjust_draft\", \"nuke\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 39,
+          "context": "{\"nuke\", \"☢️\", \"Nuclear Device\", \"nukes\", map[string]float64{\"metal\": 1000.0, \"crystal\": 244.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 55,
+          "context": "{\"piercing_missile\", \"🎯☢️\", \"Piercing Missile\", \"piercing_missiles\", content.MustFindUnit(\"piercing_missile\").DeconstructRefund()},"
+        }
+      ]
+    },
+    {
+      "unicode": "🏗️",
+      "occurrences": 25,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1051,
+          "context": "bot.Handle(\"🏗️ Infrastructure Grid\", camp.HandleInfrastructureGridPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 105,
+          "context": "\"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 123,
+          "context": "btnModeBuilder := selector.Data(\"🏗️ Builder\", \"set_agent_mode\", \"builder\", senderIDStr)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 113,
+          "context": "\"🏗️ STRUCTURAL UPGRADE PANEL\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 220,
+          "context": "panelText := \"🏗️━━━━━━━━━━━━━━━━━━━━━━🏗️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 220,
+          "context": "panelText := \"🏗️━━━━━━━━━━━━━━━━━━━━━━🏗️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 221,
+          "context": "\"🏗️ INFRASTRUCTURE GRID 🏗️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 221,
+          "context": "\"🏗️ INFRASTRUCTURE GRID 🏗️\\n\" +"
+        }
+      ]
+    },
+    {
+      "unicode": "🚀",
+      "occurrences": 24,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 155,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.\", soldiers, mechs, bossName,"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 156,
+          "context": "{\"anti_missile\", \"🚀🛡️\", \"Anti-Missile Battery\", \"Chance to auto-intercept incoming ICBM strikes for free.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 200,
+          "context": "{\"starport\", \"🚀\", \"Starport\", \"Reduces fuel cost for launching raids.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 234,
+          "context": "outboundText += fmt.Sprintf(\"🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\\n   Target: %s\\n   Arrival: %s (%ds remaining)\\n\\n\", index, dName, resTime.UTC().Format(\"15:04:05\"), timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 955,
+          "context": "\"🚀 [Direct Route] — Base travel speed. Alerts defenders.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 993,
+          "context": "btnConfirmDirect := selector.Data(\"🚀 Launch Direct\", \"confirm_launch\", targetCampID, \"direct\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1493,
+          "context": "newsHeadline := fmt.Sprintf(\"🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].\", sender.FirstName, defenderName, routeType)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1533,
+          "context": "_, _ = c.Bot().Edit(msg, \"📡 SECURE TRANSMISSION ESTABLISHED...\\n[▰▰▰▰▰▰▰▰▰▰] 100%\\n🚀 Handshake complete! Campaign deployed. Coordinates locked on targeting scanners.\")"
+        }
+      ]
+    },
+    {
+      "unicode": "👥",
+      "occurrences": 23,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1032,
+          "context": "bot.Handle(\"👥 Hero Commander\", hero.HandleHeroPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 162,
+          "context": "\"👥 Total Survivors: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 753,
+          "context": "\"👥 Total Survivors: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 55,
+          "context": "\"👥 [2v2 Skirmish] — Active: %d players | Cost: $100.0\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 64,
+          "context": "btnJoin2 := selector.Data(\"👥 Queue 2v2\", \"join_queue\", \"2v2\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 312,
+          "context": "\"👥 Miners Stationed: %d / %d active | Idle: %d miners\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 321,
+          "context": "\"👥 Recruit Miner -> Cost: %d Scrap\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 116,
+          "context": "\"👥 Commanders Enlisted: %d / 15\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "💀",
+      "occurrences": 23,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 71,
+          "context": "status = \"💀 DEFEATED (respawning...)\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 130,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"💀 This boss has already been defeated and is respawning!\"})"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 949,
+          "context": "\"🌑💀 Doomsday Rigs: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 981,
+          "context": "btnPlusDS := selector.Data(\"🌑💀 +Doomsday Rig\", \"adjust_draft\", \"deathstar\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 982,
+          "context": "btnMinusDS := selector.Data(\"🌑💀 -Doomsday Rig\", \"adjust_draft\", \"deathstar\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 44,
+          "context": "{\"deathstar\", \"🌑💀\", \"Doomsday Rig\", \"deathstars\", content.MustFindUnit(\"deathstar\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 105,
+          "context": "\"🌑💀 Doomsday Rigs: %d / %d (cap rises with Outpost level)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 118,
+          "context": "\"🌑💀 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal, 🧠%.0f Neuro Cores ➜ %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "📋",
+      "occurrences": 23,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 665,
+          "context": "panelText := \"📋━━━━━━━━━━━━━━━━━━━━━━📋\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 665,
+          "context": "panelText := \"📋━━━━━━━━━━━━━━━━━━━━━━📋\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 667,
+          "context": "\"📋━━━━━━━━━━━━━━━━━━━━━━📋\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 667,
+          "context": "\"📋━━━━━━━━━━━━━━━━━━━━━━📋\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 703,
+          "context": "panelText += \"\\n📋━━━━━━━━━━━━━━━━━━━━━━📋\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 703,
+          "context": "panelText += \"\\n📋━━━━━━━━━━━━━━━━━━━━━━📋\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 417,
+          "context": "\"📋 GARRISON DETECTED:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 941,
+          "context": "\"📋 DRAFTED FORCES STOCKPILES:\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🏆",
+      "occurrences": 22,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1009,
+          "context": "bot.Handle(\"🏆 Global Ranking\", ranking.HandleRankingPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 574,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 COMMITTING CELLULAR MUTATIONS...\\n[▰▰▰▰▰▰▰▰▰▰] 100%\\n🏆 Genetic structure realigned successfully!\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 650,
+          "context": "_, _ = c.Bot().Edit(msg, \"🏗️ SECURING PERIMETERS...\\n[▰▰▰▰▰▰▰▰▰▰] 100%\\n🏆 Blueprint committed! Foundations laid down successfully.\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 656,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🏆 Outpost Core upgraded to Level %d!\", campLvl+1)})"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 716,
+          "context": "_, _ = c.Bot().Edit(msg, \"🏗️ SECURING PERIMETERS...\\n[▰▰▰▰▰▰▰▰▰▰] 100%\\n🏆 Blueprint committed! Foundations laid down successfully.\")"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 493,
+          "context": "\"🏆 Collective Outpost Level: Level %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 878,
+          "context": "\"🏆 The Clan with the highest score when the war ends claims victory and a shared spoils reward!\","
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 261,
+          "context": "_, _ = tx.ExecContext(ctx, \"INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, '🏆 COMMANDER LEVEL UP: Your Hero commander has successfully reached Level ' || $2::tex"
+        }
+      ]
+    },
+    {
+      "unicode": "🎯",
+      "occurrences": 22,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 153,
+          "context": "{\"gauss_cannon\", \"🎯\", \"Gauss Cannon\", \"Heavy anti-armor turret. Strong defense bonus.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 55,
+          "context": "{\"piercing_missile\", \"🎯☢️\", \"Piercing Missile\", \"piercing_missiles\", content.MustFindUnit(\"piercing_missile\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 108,
+          "context": "\"🎯☢️ Piercing Missiles: %d\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 114,
+          "context": "\"💥 [Destroyer] ➜ 🔩800 Metal, 💎55 Crystal ➜ 🎯 Hard-counters Drones/Jets\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 123,
+          "context": "\"🎯☢️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 151,
+          "context": "btnCraftPiercing := selector.Data(\"🎯☢️ Forge Piercing Missile\", \"craft_item\", \"piercing_missile\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 471,
+          "context": "successAlert = \"🎯☢️ Piercing Missile assembled - ready for Silo launch!\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 522,
+          "context": "\"🎯☢️ Piercing Missiles: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🧭",
+      "occurrences": 21,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1044,
+          "context": "bot.Handle(\"🧭 World Exploration\", exploration.HandleExplorePanel)"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 84,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 84,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 85,
+          "context": "\"🧭 WORLD EXPLORATION: EXPEDITION EN ROUTE\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 86,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 86,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 90,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\","
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 90,
+          "context": "\"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\","
+        }
+      ]
+    },
+    {
+      "unicode": "🔄",
+      "occurrences": 21,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/battle_analyst.go",
+          "line": 28,
+          "context": "btnRefresh := selector.Data(\"🔄 Refresh Analysis\", \"battle_analyst_refresh\")"
+        },
+        {
+          "path": "internal/bot/handlers/battle_analyst.go",
+          "line": 89,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🔄 Analysis refreshed.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/dev_console.go",
+          "line": 45,
+          "context": "btnRefresh := selector.Data(\"🔄 Refresh Report\", \"dev_console_refresh\", strconv.Itoa(windowDays))"
+        },
+        {
+          "path": "internal/bot/handlers/dev_console.go",
+          "line": 52,
+          "context": "btnRefresh := selector.Data(\"🔄 Refresh\", \"balance_report_refresh\", strconv.Itoa(windowDays))"
+        },
+        {
+          "path": "internal/bot/handlers/dev_console.go",
+          "line": 122,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🔄 Report refreshed.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/dev_console.go",
+          "line": 212,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🔄 Refreshed.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/economy_advisor.go",
+          "line": 24,
+          "context": "btnRefresh := selector.Data(\"🔄 Refresh Analysis\", \"econ_refresh\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy_advisor.go",
+          "line": 81,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🔄 Analysis refreshed.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "💥",
+      "occurrences": 21,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 827,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"💥 Alliance dissolved!\"})"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 278,
+          "context": "inboundText += fmt.Sprintf(\"💥 BASE SIEGE UNDERWAY!\\n   Invading Force: Outpost [%s]\\n   Silo Impact Window: %s (%ds remaining)\\n\\n⚠️ TIP: Repair defensive modules immediately!\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 745,
+          "context": "_, _ = c.Bot().Send(attackerUser, \"💥 SPY INTERCEPTED: Your spy satellite was intercepted and destroyed by defender air defense interceptor systems! Telemetry lost.\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 944,
+          "context": "\"💥 Destroyers: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 971,
+          "context": "btnPlusDestroyer := selector.Data(\"💥 +Destroyer\", \"adjust_draft\", \"destroyer\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 972,
+          "context": "btnMinusDestroyer := selector.Data(\"💥 -Destroyer\", \"adjust_draft\", \"destroyer\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 40,
+          "context": "{\"destroyer\", \"💥\", \"Destroyer\", \"destroyers\", map[string]float64{\"metal\": 320.0, \"crystal\": 22.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 103,
+          "context": "\"💥 Destroyers: %d  |  🛩️ Bombers: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🏦",
+      "occurrences": 19,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1023,
+          "context": "bot.Handle(\"🏦 System Economy\", econ.HandleEconPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 67,
+          "context": "\"🏦 BANK VAULT SNAPSHOT:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 73,
+          "context": "\"🏦 [Financial Vault] — Deposit, borrow, repay, and convert Scrap/Metal/Crystal into Cash\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 82,
+          "context": "btnVault := selector.Data(\"🏦 Financial Vault\", \"trade_hub_nav\", \"vault\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 116,
+          "context": "\"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 116,
+          "context": "\"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 118,
+          "context": "\"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 118,
+          "context": "\"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🏴",
+      "occurrences": 18,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 363,
+          "context": "`ALTER TABLE clans ADD COLUMN IF NOT EXISTS icon VARCHAR(10) DEFAULT '🏴';`,"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 68,
+          "context": "\"🏴 SECTOR ALLIANCE NETWORK 🏴\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 68,
+          "context": "\"🏴 SECTOR ALLIANCE NETWORK 🏴\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 114,
+          "context": "\"🏴 CLAN HUD: %s 🏴\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 114,
+          "context": "\"🏴 CLAN HUD: %s 🏴\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 158,
+          "context": "\"🏴 BROWSE CLANS 🏴\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 158,
+          "context": "\"🏴 BROWSE CLANS 🏴\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 183,
+          "context": "panelText += fmt.Sprintf(\"%s %d. 🏴 %s (%d/15) — 🏅 %.0f pts\\n\", medalFor(rank), rank, name, members, score)"
+        }
+      ]
+    },
+    {
+      "unicode": "🔍",
+      "occurrences": 18,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 77,
+          "context": "panelText += \"\\n🔍 Browse existing clans with /clans, or found your own:\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 81,
+          "context": "btnBrowse := selector.Data(\"🔍 Browse Clans\", \"browse_clans\", \"0\")"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 157,
+          "context": "panelText := \"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 157,
+          "context": "panelText := \"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 159,
+          "context": "\"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 159,
+          "context": "\"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 197,
+          "context": "panelText += \"\\n🔍━━━━━━━━━━━━━━━━━━━━━━🔍\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 197,
+          "context": "panelText += \"\\n🔍━━━━━━━━━━━━━━━━━━━━━━🔍\""
+        }
+      ]
+    },
+    {
+      "unicode": "📊",
+      "occurrences": 18,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 122,
+          "context": "panelText += fmt.Sprintf(\"\\n⚔️ AT WAR with %s!\\n📊 Score: %.0f - %.0f\\n\", activeWarOpponent, warScoreMine, warScoreTheirs)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 132,
+          "context": "btnStats := selector.Data(\"📊 Alliance Stats\", \"clan_stats\", clanID.String)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 490,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 490,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 492,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 492,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 498,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 498,
+          "context": "\"📊━━━━━━━━━━━━━━━━━━━━━━📊\","
+        }
+      ]
+    },
+    {
+      "unicode": "👑",
+      "occurrences": 18,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 450,
+          "context": "reportText += fmt.Sprintf(\"👑 WARLORD DETECTED: Faction Superpower - %s\\n\", nest.HeroSuperpower)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 948,
+          "context": "\"🚢👑 Battlecruisers: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 979,
+          "context": "btnPlusBC := selector.Data(\"🚢👑 +Battlecruiser\", \"adjust_draft\", \"battlecruiser\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 980,
+          "context": "btnMinusBC := selector.Data(\"🚢👑 -Battlecruiser\", \"adjust_draft\", \"battlecruiser\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 43,
+          "context": "{\"battlecruiser\", \"🚢👑\", \"Battlecruiser\", \"battlecruisers\", content.MustFindUnit(\"battlecruiser\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 104,
+          "context": "\"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 117,
+          "context": "\"🚢👑 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 145,
+          "context": "btnCraftBC := selector.Data(\"🚢👑 Forge Battlecruiser\", \"craft_item\", \"battlecruiser\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🌐",
+      "occurrences": 17,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 370,
+          "context": "icon VARCHAR(10) DEFAULT '🌐',"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 46,
+          "context": "panelText := \"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 46,
+          "context": "panelText := \"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 48,
+          "context": "\"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 48,
+          "context": "\"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 81,
+          "context": "\"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\""
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 81,
+          "context": "\"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\""
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 109,
+          "context": "\"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🧠",
+      "occurrences": 17,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1033,
+          "context": "bot.Handle(\"🧠 Automation Agent\", agentH.HandleAgent)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 165,
+          "context": "\"🧠 Allocated Memory: %.2f MB\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 757,
+          "context": "\"🧠 Allocated Memory: %.2f MB\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 90,
+          "context": "\"🧠 COGNITIVE AGENT MODULE [PRO]\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 495,
+          "context": "\"☢️ Crystal Stock: %.1f kg | 🧠 Neuro Cores: %.0f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 497,
+          "context": "\"🧠 [Synaptic Accel Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 508,
+          "context": "btnMutateSynaptic := selector.Data(fmt.Sprintf(\"🧠 Synaptic (%d)\", synaptic+1), \"mutate_mod\", \"synaptic\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 570,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 SPLICING GENETIC STRANDS...\\n[▰▱▱▱▱▱▱▱▱▱] 20%\\n🧠 Neuro-synaptic pathways opened.\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📦",
+      "occurrences": 17,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1040,
+          "context": "bot.Handle(\"📦 Warehouse Reserves\", econ.HandleWarehouseReserves)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 157,
+          "context": "{\"warehouse\", \"📦\", \"Warehouse\", \"Increases resource storage capacity.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 179,
+          "context": "\"📦━━━━━━━━━━━━━━━━━━━━━━📦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 179,
+          "context": "\"📦━━━━━━━━━━━━━━━━━━━━━━📦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 180,
+          "context": "\"📦 WAREHOUSE RESERVES GRID 📦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 180,
+          "context": "\"📦 WAREHOUSE RESERVES GRID 📦\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 181,
+          "context": "\"📦━━━━━━━━━━━━━━━━━━━━━━📦\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 181,
+          "context": "\"📦━━━━━━━━━━━━━━━━━━━━━━📦\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "💰",
+      "occurrences": 16,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 86,
+          "context": "btnTaxRate := selector.Data(\"💰 Set Tax Rate\", \"admin_action\", \"tax_rate\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 627,
+          "context": "return fmt.Sprintf(\"💰 WASTELAND TAX LAW UPDATED: Daily rate is now %d%%.\", rate), nil"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 75,
+          "context": "\"%s %s\\n%s  %.0f / %.0f HP\\n💰 Loot Pool: $%.0f  |  ⚔️ Danger: %.0f%%  |  %s\\n\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 767,
+          "context": "return c.Send(fmt.Sprintf(\"⚠️ Usage: /clan_rename [new name]\\n💰 Cost: %.0f Crystal\\n📏 3-24 characters.\", clanRenameCost))"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 453,
+          "context": "reportText += \"\\n💰 Loot Yield: Metal + Crystal + Scrap (defeat scales the amount)\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 64,
+          "context": "\"💰 YOUR WALLET:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 68,
+          "context": "\"💰 Savings: %.1f Scrap | $%.1f Cash\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 182,
+          "context": "\"💰 FINANCIAL STOCK:\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "💵",
+      "occurrences": 16,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 52,
+          "context": "\"💵 Available Balance: $%.1f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 66,
+          "context": "\"💎 Crystal: %.1f  |  💵 Cash: $%.1f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 119,
+          "context": "\"💵 Available Cash: $%.1f\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 142,
+          "context": "btnSellScrap := selector.Data(\"💵 Sell 100 Scrap\", \"market_buy\", \"sell_scrap\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 143,
+          "context": "btnSellMetal := selector.Data(\"💵 Sell 100 Metal\", \"market_buy\", \"sell_metal\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 144,
+          "context": "btnSellCrystal := selector.Data(\"💵 Sell 50 Crystal\", \"market_buy\", \"sell_crystal\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 183,
+          "context": "\"💵 Available Cash: $%.1f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 342,
+          "context": "respText := fmt.Sprintf(\"💵 Exchanged 100 Scrap for $%.1f Cash!\", payout)"
+        }
+      ]
+    },
+    {
+      "unicode": "🤝",
+      "occurrences": 16,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 143,
+          "context": "btnCoop := selector.Data(fmt.Sprintf(\"🤝 Co-Op [%d]\", i+1), \"stage_coop\", t.id)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 164,
+          "context": "dashboard += \"🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 172,
+          "context": "btnJoin := selector.Data(fmt.Sprintf(\"🤝 Join %s\", aName), \"join_coop\", rID)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 236,
+          "context": "outboundText += fmt.Sprintf(\"🤝 STAGED CO-OP RAID [%d] (PREPARING):\\n   Target: %s\\n   Departure Window: %s (%ds remaining)\\n\\n\", index, dName, resTime.UTC().Format(\"15:04:05\"), tim"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 781,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"🤝 Co-Op lobby staged! Aligned alliance players can join your force.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 849,
+          "context": "\"🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined your raid forces!\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 861,
+          "context": "alertMsg := fmt.Sprintf(\"🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined the raid forces! They are rallying to the lead base.\", sender.Username)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 869,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🤝 Joint forces rally initiated! marching to lead base.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "⛺",
+      "occurrences": 15,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1021,
+          "context": "bot.Handle(\"⛺ Outpost Camp\", camp.HandleCamp)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 163,
+          "context": "\"⛺ Total Encampments: %d\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 754,
+          "context": "\"⛺ Total Encampments: %d\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 77,
+          "context": "\"⛺ OUTPOST SECTOR SYSTEMS [LEVEL %d / 30]\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 82,
+          "context": "\"⛺ [Tent] — Level %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 116,
+          "context": "\"⛺ [Tent Lvl %d] -> Cost: %d Scrap\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 126,
+          "context": "btnUpgradeTent := selector.Data(fmt.Sprintf(\"⛺ Tent (%d)\", tentLvl+1), \"upgrade_mod\", \"tent\")"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 62,
+          "context": "if text == \"⛺ outpost camp\" || text == \"camp\" {"
+        }
+      ]
+    },
+    {
+      "unicode": "🎖️",
+      "occurrences": 15,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 117,
+          "context": "\"🎖️ Your Rank: %s\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 935,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 935,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 937,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 937,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 958,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\","
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 958,
+          "context": "\"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️\","
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 90,
+          "context": "\"🎖️ Survived Conflicts: %d battles\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "✈️",
+      "occurrences": 15,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 421,
+          "context": "\"✈️ Jets: %d\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 936,
+          "context": "\"✈️ HANGAR CUSTOM CAMPAIGN DRAFT BOARD ✈️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 936,
+          "context": "\"✈️ HANGAR CUSTOM CAMPAIGN DRAFT BOARD ✈️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 952,
+          "context": "\"✈️ Cargo Jets: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 988,
+          "context": "btnPlusJet := selector.Data(\"✈️ +Jet\", \"adjust_draft\", \"jet\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 989,
+          "context": "btnMinusJet := selector.Data(\"✈️ -Jet\", \"adjust_draft\", \"jet\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1526,
+          "context": "fleetStatus = \"✈️ Cargo Jet air transit systems fully engaged.\""
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 47,
+          "context": "{\"jet\", \"✈️\", \"Cargo Jet\", \"jets\", map[string]float64{\"metal\": 440.0, \"hydrogen\": 80.0}},"
+        }
+      ]
+    },
+    {
+      "unicode": "⛏️",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1036,
+          "context": "bot.Handle(\"⛏️ Active Mining\", camp.HandleActiveMining)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 298,
+          "context": "activeQueuesText += fmt.Sprintf(\"• ⛏️ %s Miner: %ds remaining to finish extraction\\n\", strings.Title(rType), timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 308,
+          "context": "\"⛏️ HEAVY EXTRACTION WORKSTATION [PRO]\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 450,
+          "context": "msg, err := c.Bot().Send(c.Recipient(), \"⛏️ COUPLING EXTRACTION DRILLS...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 453,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▱▱▱▱▱▱▱▱▱] 10% - Igniting heavy engine buffers...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 455,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▱▱▱▱▱] 50% - Calibrating resource selectors...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 457,
+          "context": "_, _ = c.Bot().Edit(msg, \"⛏️ POSITIONING MINERS...\\n[▰▰▰▰▰▰▰▰▰▰] 100% - Miner locked in position! Commencing extraction...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 463,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"⛏️ Miner deployed! %s extraction in progress (5m)...\", mineType)})"
+        }
+      ]
+    },
+    {
+      "unicode": "🚗",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1048,
+          "context": "bot.Handle(\"🚗 Logistics Vehicles\", factory.HandleVehiclesPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 950,
+          "context": "\"🚗 Buggies: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 983,
+          "context": "btnPlusBuggy := selector.Data(\"🚗 +Buggy\", \"adjust_draft\", \"buggy\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 984,
+          "context": "btnMinusBuggy := selector.Data(\"🚗 -Buggy\", \"adjust_draft\", \"buggy\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1523,
+          "context": "fleetStatus = \"🚗 Buggy logistics speed multiplier applied (+25%% speed).\""
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 45,
+          "context": "{\"buggy\", \"🚗\", \"Scrap Buggy\", \"buggies\", map[string]float64{\"metal\": 48.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 205,
+          "context": "\"🚗 LOGISTICS HANGAR FORGE\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 207,
+          "context": "\"🚗 Scrap Buggies: %d | ⛵ Clipper Ships: %d | ✈️ Cargo Jets: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🔧",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 76,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real building/upgrade analysis for this base.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 87,
+          "context": "\"reasoning\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real fleet-vs-target analysis. 'wait' is shown here only as a safe default, not a genuine recommendati"
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 93,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real ROI/market analysis for this base.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 103,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real research-order analysis for this base.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 114,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real analysis of this player's raid/arena combat record.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 123,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real recruitment/war analysis for this clan.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 133,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real galaxy briefing.\","
+        },
+        {
+          "path": "internal/ai/providers/mock/provider.go",
+          "line": 143,
+          "context": "\"summary\": \"🔧 PLACEHOLDER (no live AI configured) — set an API key to get a real tactical read on this Rogue Nest.\","
+        }
+      ]
+    },
+    {
+      "unicode": "↩️",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 363,
+          "context": "coopAlert := \"↩️ ALLIANCE NOTICE: Ongoing campaign has been aborted due to an administrative database reset. Your contributed forces have returned safely.\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 371,
+          "context": "attackerAlert := fmt.Sprintf(\"↩️ SYSTEM UPDATE: Your ongoing campaign against Outpost [%s] has been aborted due to an administrative database reset. Remaining forces have returned "
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 238,
+          "context": "outboundText += fmt.Sprintf(\"↩️ RETURN MARCH [%d] (RETURNING):\\n   Target: %s\\n   Base Arrival: %s (%ds remaining)\\n\\n\", index, dName, resTime.UTC().Format(\"15:04:05\"), timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 243,
+          "context": "btnAbort := selector.Data(fmt.Sprintf(\"↩️ Abort [%d]\", index), \"exp_action\", \"abort\", rID)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 315,
+          "context": "spyText += fmt.Sprintf(\"↩️ SATELLITE RETURNING: Carrying Intel from %s\\n   Arrival Status: Downlinking (%ds remaining)\\n\\n\", edName, timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 358,
+          "context": "bossText += fmt.Sprintf(\"↩️ BOSS ASSAULT (RETURNING): Target: %s\\n   Base Arrival: %s (%ds remaining)\\n\\n\", bossName, resolveTime.UTC().Format(\"15:04:05\"), timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1630,
+          "context": "cancelAlert := \"↩️ CO-OP STAGE CANCELLED: The lobby creator has dismantled the campaign. Your contributed forces have returned safely to base.\""
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1639,
+          "context": "return c.Send(\"↩️ Co-Op lobby dismantled. All draft troops and helper contributions have returned safely.\", keyboards.MainNavigation())"
+        }
+      ]
+    },
+    {
+      "unicode": "🦅",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 946,
+          "context": "\"🦅 Liberators: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 975,
+          "context": "btnPlusLiberator := selector.Data(\"🦅 +Liberator\", \"adjust_draft\", \"liberator\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 976,
+          "context": "btnMinusLiberator := selector.Data(\"🦅 -Liberator\", \"adjust_draft\", \"liberator\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 51,
+          "context": "{\"liberator\", \"🦅\", \"Liberator\", \"liberators\", content.MustFindUnit(\"liberator\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 106,
+          "context": "\"🦅 Liberators: %d  |  👻 Wraiths: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 119,
+          "context": "\"🦅 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 147,
+          "context": "btnCraftLiberator := selector.Data(\"🦅 Forge Liberator\", \"craft_item\", \"liberator\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📜",
+      "occurrences": 14,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 525,
+          "context": "\"📜━━━━━━━━━━━━━━━━━━━━━━📜\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 525,
+          "context": "\"📜━━━━━━━━━━━━━━━━━━━━━━📜\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 527,
+          "context": "\"📜━━━━━━━━━━━━━━━━━━━━━━📜\\n\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 527,
+          "context": "\"📜━━━━━━━━━━━━━━━━━━━━━━📜\\n\\n\","
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 556,
+          "context": "panelText += \"📜━━━━━━━━━━━━━━━━━━━━━━📜\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 556,
+          "context": "panelText += \"📜━━━━━━━━━━━━━━━━━━━━━━📜\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 692,
+          "context": "panelText += fmt.Sprintf(\"%s %s (%d/15)\\n📜 %s\\n\\n\", icon, name, members, desc)"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 112,
+          "context": "\"📜 %s\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "👹",
+      "occurrences": 13,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 267,
+          "context": "emoji VARCHAR(10) DEFAULT '👹',"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 281,
+          "context": "('The Rustlord', '🤖👹', 500000, 500000, 5000),"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 282,
+          "context": "('Scrap Titan', '⚙️👹', 1200000, 1200000, 12000),"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 283,
+          "context": "('Apex Wraith', '☠️👹', 3000000, 3000000, 30000)"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1006,
+          "context": "bot.Handle(\"👹 World Bosses\", boss.HandleBossPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 48,
+          "context": "panelText := \"👹━━━━━━━━━━━━━━━━━━━━━━👹\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 48,
+          "context": "panelText := \"👹━━━━━━━━━━━━━━━━━━━━━━👹\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 50,
+          "context": "\"👹━━━━━━━━━━━━━━━━━━━━━━👹\\n\\n\" +"
+        }
+      ]
+    },
+    {
+      "unicode": "👻",
+      "occurrences": 13,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 947,
+          "context": "\"👻 Wraiths: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 977,
+          "context": "btnPlusWraith := selector.Data(\"👻 +Wraith\", \"adjust_draft\", \"wraith\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 978,
+          "context": "btnMinusWraith := selector.Data(\"👻 -Wraith\", \"adjust_draft\", \"wraith\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 52,
+          "context": "{\"wraith\", \"👻\", \"Wraith\", \"wraiths\", content.MustFindUnit(\"wraith\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 106,
+          "context": "\"🦅 Liberators: %d  |  👻 Wraiths: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 120,
+          "context": "\"👻 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 148,
+          "context": "btnCraftWraith := selector.Data(\"👻 Forge Wraith\", \"craft_item\", \"wraith\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 444,
+          "context": "successAlert = \"👻 Wraith forged successfully - cloaking field online!\""
+        }
+      ]
+    },
+    {
+      "unicode": "💱",
+      "occurrences": 12,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1046,
+          "context": "bot.Handle(\"💱 Market Exchange\", exchange.HandleExchangePanel)"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 103,
+          "context": "\"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Metal, +5.0 Hydrogen.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 121,
+          "context": "btnModeCollectorOmega := selector.Data(\"💱 Collector Ω\", \"set_agent_mode\", \"collector_omega\", senderIDStr)"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 62,
+          "context": "\"💱 THE TRADE HUB 💱\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 62,
+          "context": "\"💱 THE TRADE HUB 💱\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 123,
+          "context": "\"💱 CONVERSION RATES:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exchange.go",
+          "line": 75,
+          "context": "\"💱 PLAYER AUCTION MARKET EXCHANGE\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/exchange.go",
+          "line": 144,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"💱 Listing posted successfully on exchange!\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🚢",
+      "occurrences": 12,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 948,
+          "context": "\"🚢👑 Battlecruisers: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 979,
+          "context": "btnPlusBC := selector.Data(\"🚢👑 +Battlecruiser\", \"adjust_draft\", \"battlecruiser\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 980,
+          "context": "btnMinusBC := selector.Data(\"🚢👑 -Battlecruiser\", \"adjust_draft\", \"battlecruiser\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 43,
+          "context": "{\"battlecruiser\", \"🚢👑\", \"Battlecruiser\", \"battlecruisers\", content.MustFindUnit(\"battlecruiser\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 104,
+          "context": "\"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 117,
+          "context": "\"🚢👑 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 145,
+          "context": "btnCraftBC := selector.Data(\"🚢👑 Forge Battlecruiser\", \"craft_item\", \"battlecruiser\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 360,
+          "context": "successAlert = \"🚢👑 BATTLECRUISER LAUNCHED! The pride of your fleet stands ready!\""
+        }
+      ]
+    },
+    {
+      "unicode": "🌑",
+      "occurrences": 12,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 949,
+          "context": "\"🌑💀 Doomsday Rigs: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 981,
+          "context": "btnPlusDS := selector.Data(\"🌑💀 +Doomsday Rig\", \"adjust_draft\", \"deathstar\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 982,
+          "context": "btnMinusDS := selector.Data(\"🌑💀 -Doomsday Rig\", \"adjust_draft\", \"deathstar\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 44,
+          "context": "{\"deathstar\", \"🌑💀\", \"Doomsday Rig\", \"deathstars\", content.MustFindUnit(\"deathstar\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 105,
+          "context": "\"🌑💀 Doomsday Rigs: %d / %d (cap rises with Outpost level)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 118,
+          "context": "\"🌑💀 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal, 🧠%.0f Neuro Cores ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 146,
+          "context": "btnCraftDS := selector.Data(\"🌑💀 Forge Doomsday Rig\", \"craft_item\", \"deathstar\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 378,
+          "context": "successAlert = fmt.Sprintf(\"🌑💀👑 THE DOOMSDAY RIG IS OPERATIONAL! (%d/%d) The Wasteland trembles at its shadow!\", currentDS+1, maxDS)"
+        }
+      ]
+    },
+    {
+      "unicode": "🌍",
+      "occurrences": 12,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1518,
+          "context": "_, _ = c.Bot().Edit(msg, fmt.Sprintf(\"📡 ANALYSIS ENGINE: WEATHER VECTORS...\\n[▰▰▰▰▱▱▱▱▱▱] 40%%\\n🌍 Weather Status: %s\", weatherStatus))"
+        },
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 119,
+          "context": "return c.Send(fmt.Sprintf(\"🌍✅ PLANET EXTENDED! Storage capacity +1000 permanently (extension level %d). Next extension: %.0f Metal, %.0f Crystal.\", extensionLvl+1, metalCost*2, cry"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 95,
+          "context": "\"🌍 Territory: Encampment located in [%s]\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 325,
+          "context": "\"🌍 GLOBAL WASTELAND STATISTICS 🌍\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 325,
+          "context": "\"🌍 GLOBAL WASTELAND STATISTICS 🌍\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 444,
+          "context": "\"🌍 DISCOVERED DESTINATIONS 🌍\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 444,
+          "context": "\"🌍 DISCOVERED DESTINATIONS 🌍\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 41,
+          "context": "\"🌍 GLOBAL WASTELAND RANKING 🌍\\n\" +"
+        }
+      ]
+    },
+    {
+      "unicode": "🧬",
+      "occurrences": 11,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1035,
+          "context": "bot.Handle(\"🧬 Mutation Core\", camp.HandleMutationsPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 491,
+          "context": "\"🧬 GENETIC MUTATION CORE\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 501,
+          "context": "\"🧬 [Biospheric Adaptation Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 510,
+          "context": "btnMutateBio := selector.Data(fmt.Sprintf(\"🧬 Bio (%d)\", bio+1), \"mutate_mod\", \"bio\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 567,
+          "context": "msg, errAnim := c.Bot().Send(c.Recipient(), \"🧬 EXTRACTING CELLULAR NUCLEI FOR MUTATION...\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 570,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 SPLICING GENETIC STRANDS...\\n[▰▱▱▱▱▱▱▱▱▱] 20%\\n🧠 Neuro-synaptic pathways opened.\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 572,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 SYNTHESIZING CELLULAR ADAPTATIONS...\\n[▰▰▰▰▰▱▱▱▱▱] 60%\\n☢️ Crystal radiation fallout stabilized.\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 574,
+          "context": "_, _ = c.Bot().Edit(msg, \"🧬 COMMITTING CELLULAR MUTATIONS...\\n[▰▰▰▰▰▰▰▰▰▰] 100%\\n🏆 Genetic structure realigned successfully!\")"
+        }
+      ]
+    },
+    {
+      "unicode": "👁️",
+      "occurrences": 11,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 444,
+          "context": "reportText += fmt.Sprintf(\"🛡️🤖 Guardians: %d | 👁️ Observers: %d\\n\", nest.Guardians, nest.Observers)"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 53,
+          "context": "{\"observer\", \"👁️\", \"Observer\", \"observers\", content.MustFindUnit(\"observer\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 107,
+          "context": "\"👁️ Observers: %d  |  🛡️🤖 Guardians: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 121,
+          "context": "\"👁️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 149,
+          "context": "btnCraftObserver := selector.Data(\"👁️ Build Observer\", \"craft_item\", \"observer\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 453,
+          "context": "successAlert = \"👁️ Observer satellite deployed to garrison!\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 447,
+          "context": "\"👁️ PREVIOUSLY SCOUTED RIVALS:\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 521,
+          "context": "\"👁️ Observers: %d | 🛡️🤖 Guardians: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🛩️",
+      "occurrences": 11,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 945,
+          "context": "\"🛩️ Bombers: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 973,
+          "context": "btnPlusBomber := selector.Data(\"🛩️ +Bomber\", \"adjust_draft\", \"bomber\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 974,
+          "context": "btnMinusBomber := selector.Data(\"🛩️ -Bomber\", \"adjust_draft\", \"bomber\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 41,
+          "context": "{\"bomber\", \"🛩️\", \"Bomber\", \"bombers\", map[string]float64{\"metal\": 520.0, \"crystal\": 24.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 103,
+          "context": "\"💥 Destroyers: %d  |  🛩️ Bombers: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 115,
+          "context": "\"🛩️ [Bomber] ➜ 🔩1300 Metal, 💎60 Crystal ➜ 🏰 Hard-counters Turrets\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 143,
+          "context": "btnCraftBomber := selector.Data(\"🛩️ Forge Bomber\", \"craft_item\", \"bomber\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 342,
+          "context": "successAlert = \"🛩️ Bomber assembled successfully!\""
+        }
+      ]
+    },
+    {
+      "unicode": "🏭",
+      "occurrences": 10,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1024,
+          "context": "bot.Handle(\"🏭 Heavy Workshop\", factory.HandleFactoryPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 50,
+          "context": "\"🏭 HEAVY WORKSHOP SECTOR SYSTEMS\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 97,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 97,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 99,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 99,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 124,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\","
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 124,
+          "context": "\"🏭━━━━━━━━━━━━━━━━━━━━━━🏭\","
+        }
+      ]
+    },
+    {
+      "unicode": "🚨",
+      "occurrences": 10,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 875,
+          "context": "\"🚨⚔️ CLAN WAR DECLARED! ⚔️🚨\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 875,
+          "context": "\"🚨⚔️ CLAN WAR DECLARED! ⚔️🚨\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 276,
+          "context": "inboundText += fmt.Sprintf(\"🚨 INBOUND INVASION WARNING!\\n   Hostile Force: Outpost [%s]\\n   March Arrival: %s (%ds remaining)\\n\\n\", attackerName, resolveTime.UTC().Format(\"15:04:05"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1540,
+          "context": "\"🚨 RADAR ALERT: HOSTILE RAID INBOUND!\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 111,
+          "context": "\"🛰️ [Tactical Drone] ➜ 🔩100 Metal, 💎10 Crystal ➜ 🕵️ Spy Satellite / 🚨 Interceptor\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 68,
+          "context": "\"🚨 Incoming Raid Alerts: %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 75,
+          "context": "btnRaid := selector.Data(\"🚨 Toggle Raid Alerts\", \"settings_toggle\", \"raid\")"
+        },
+        {
+          "path": "internal/bot/handlers/silo.go",
+          "line": 161,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🚨 ICBM INTERCEPTED: Target's Anti-Missile Battery shot it down!\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "⛵",
+      "occurrences": 10,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 951,
+          "context": "\"⛵ Clipper Ships: %d / %d active\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 986,
+          "context": "btnPlusShip := selector.Data(\"⛵ +Ship\", \"adjust_draft\", \"ship\", \"inc\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 987,
+          "context": "btnMinusShip := selector.Data(\"⛵ -Ship\", \"adjust_draft\", \"ship\", \"dec\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1528,
+          "context": "fleetStatus = \"⛵ Clipper Ship sea transit structures secured.\""
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 46,
+          "context": "{\"ship\", \"⛵\", \"Clipper Ship\", \"ships\", map[string]float64{\"metal\": 120.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 207,
+          "context": "\"🚗 Scrap Buggies: %d | ⛵ Clipper Ships: %d | ✈️ Cargo Jets: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 212,
+          "context": "\"⛵ [Clipper Ship] — Cost: 300 Metal (Required to cross oceans)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 229,
+          "context": "btnCraftShip := selector.Data(\"⛵ Craft Ship\", \"craft_item\", \"ship\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🕊️",
+      "occurrences": 10,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1391,
+          "context": "return c.Respond(&telebot.CallbackResponse{Text: \"🕊️ DIPLOMATIC IMMUNITY: Your Clan has an active pact with the target's Clan. Break it with /break_pact first if you wish to attack"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 41,
+          "context": "return \"🕊️ Non-Aggression Pact\""
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 58,
+          "context": "panelText := \"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 58,
+          "context": "panelText := \"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 59,
+          "context": "\"🕊️ CLAN DIPLOMACY\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 60,
+          "context": "\"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 60,
+          "context": "\"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 115,
+          "context": "\"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\""
+        }
+      ]
+    },
+    {
+      "unicode": "💳",
+      "occurrences": 10,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 69,
+          "context": "\"💳 Debt: %.1f Scrap | $%.1f Cash\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 122,
+          "context": "\"💳 Credit Debt: %.1f Scrap | $%.1f Cash\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 138,
+          "context": "btnBorrowScrap := selector.Data(\"💳 Borrow 100 Scrap\", \"bank_action\", \"borrow_scrap\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 139,
+          "context": "btnBorrowCash := selector.Data(\"💳 Borrow $100 Cash\", \"bank_action\", \"borrow_cash\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 140,
+          "context": "btnRepayScrap := selector.Data(\"💳 Repay 100 Scrap\", \"bank_action\", \"repay_scrap\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 141,
+          "context": "btnRepayCash := selector.Data(\"💳 Repay $100 Cash\", \"bank_action\", \"repay_cash\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 251,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"💳 Borrowed 100 Scrap.\"})"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 260,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"💳 Borrowed $100 Cash.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🪙",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1028,
+          "context": "bot.Handle(\"🪙 Inject Resources\", admin.HandleAdminGive)"
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1041,
+          "context": "bot.Handle(\"🪙 Financial Vault\", econ.HandleFinancialVault)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 83,
+          "context": "btnInject := selector.Data(\"🪙 Inject 5000 (Self)\", \"admin_action\", \"inject\")"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 564,
+          "context": "// \"🪙 Inject Resources\" bottom-menu button, and the consolidated /admin"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 117,
+          "context": "\"🪙 BANK VAULT & CREDIT PAYBACK 🪙\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 117,
+          "context": "\"🪙 BANK VAULT & CREDIT PAYBACK 🪙\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 107,
+          "context": "if text == \"🪙 financial vault\" {"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 82,
+          "context": "btnVault := menu.Text(\"🪙 Financial Vault\")"
+        }
+      ]
+    },
+    {
+      "unicode": "♻️",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1049,
+          "context": "bot.Handle(\"♻️ Deconstruct Units\", deconstruct.HandleDeconstructPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 146,
+          "context": "return c.Send(fmt.Sprintf(\"♻️ Scrapped %d %s%s! Recovered: %s\", scrapped, target.title, note, refundSummary))"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 171,
+          "context": "\"♻️ DECONSTRUCTION BAY\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 296,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"♻️ %s scrapped! Recovered: %s\", target.title, refundSummary)})"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 72,
+          "context": "\"♻️ Your Scrap Reserves: %.0f\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 101,
+          "context": "btnDeconstruct := menu.Text(\"♻️ Deconstruct Units\")"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 356,
+          "context": "\"♻️ Estimated Scrap: %.0f\\n\\n\"+"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 2222,
+          "context": "fmt.Sprintf(\"♻️ %.0f Scrap\", primaryShare),"
+        }
+      ]
+    },
+    {
+      "unicode": "🎁",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 85,
+          "context": "btnGiftResources := selector.Data(\"🎁 Gift Resources\", \"admin_action\", \"gift_resources\")"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 406,
+          "context": "fmt.Sprintf(\"🎁 REFERRAL BONUS: %s joined using your code! You both received 500 Metal, 200 Crystal, 100 Neuro Cores.\", sender.FirstName))"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 134,
+          "context": "\"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 134,
+          "context": "\"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 136,
+          "context": "\"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 136,
+          "context": "\"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 140,
+          "context": "\"🎁 Reward per referral: 500 Metal + 200 Crystal + 100 Neuro Cores\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 141,
+          "context": "\"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\","
+        }
+      ]
+    },
+    {
+      "unicode": "🛠️",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 102,
+          "context": "\"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 120,
+          "context": "btnModeCollector := selector.Data(\"🛠️ Collector\", \"set_agent_mode\", \"collector\", senderIDStr)"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 216,
+          "context": "\"🛠️ [Recovery Rig] — Cost: 600 Metal, 50 Iron (-15%% mechanical casualties)\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 233,
+          "context": "btnCraftRig := selector.Data(\"🛠️ Craft Recovery Rig\", \"craft_item\", \"rig\")"
+        },
+        {
+          "path": "internal/bot/handlers/governor.go",
+          "line": 33,
+          "context": "toggleLabel := \"🛠️ Autopilot: OFF (tap to enable preference)\""
+        },
+        {
+          "path": "internal/bot/handlers/governor.go",
+          "line": 35,
+          "context": "toggleLabel = \"🛠️ Autopilot: ON (tap to disable preference)\""
+        },
+        {
+          "path": "internal/bot/handlers/silo.go",
+          "line": 223,
+          "context": "\"🛠️ Structural Damage: Your [%s] level dropped by 1.\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/silo.go",
+          "line": 340,
+          "context": "\"🛠️ Structural Damage: Every turret type (Light/Heavy Laser, Gauss Cannon, Ion Cannon, Plasma Turret) dropped 1 level.\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "⏳",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 74,
+          "context": "panelText += fmt.Sprintf(\"\\n⏳ You have %d pending application(s) awaiting Leader approval.\\n\", pendingCount)"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 106,
+          "context": "panelText += \"\\n⏳ PENDING PROPOSALS:\\n\" + pendingText"
+        },
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 140,
+          "context": "return c.Send(fmt.Sprintf(\"⏳ Teleport is on cooldown for another %.1f hours.\", remaining.Hours()))"
+        },
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 328,
+          "context": "return c.Send(fmt.Sprintf(\"⏳ Solar panels still recharging - %.0f minutes left.\", remaining.Minutes()))"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1351,
+          "context": "alert := fmt.Sprintf(\"⏳ ARENA QUEUE TIMEOUT\\n\\nNo equivalent opponents were found for the %s queue. Your entry fee of $%.0f has been refunded.\", b, refundDollars)"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 2269,
+          "context": "\"⏳ Return march engaged, arriving in %.0f minutes.\","
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 2327,
+          "context": "\"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).\","
+        },
+        {
+          "path": "internal/game/battlereport/battlereport.go",
+          "line": 146,
+          "context": "msg += \"\\n\\n⏳ Next skirmish round resolves on the next clock tick.\""
+        }
+      ]
+    },
+    {
+      "unicode": "📬",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 125,
+          "context": "panelText += fmt.Sprintf(\"\\n📬 %d pending application(s) - review them below!\\n\", pendingApps)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 136,
+          "context": "btnApps := selector.Data(fmt.Sprintf(\"📬 Applications (%d)\", pendingApps), \"clan_apps\", clanID.String)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 230,
+          "context": "alertMsg := fmt.Sprintf(\"📬 NEW CLAN APPLICATION: %s wants to join %s! Review it via /clan.\", senderName, clanName)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 259,
+          "context": "panelText := \"📬━━━━━━━━━━━━━━━━━━━━━━📬\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 259,
+          "context": "panelText := \"📬━━━━━━━━━━━━━━━━━━━━━━📬\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 261,
+          "context": "\"📬━━━━━━━━━━━━━━━━━━━━━━📬\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 261,
+          "context": "\"📬━━━━━━━━━━━━━━━━━━━━━━📬\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 282,
+          "context": "panelText += \"📬━━━━━━━━━━━━━━━━━━━━━━📬\""
+        }
+      ]
+    },
+    {
+      "unicode": "📝",
+      "occurrences": 9,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 38,
+          "context": "return c.Send(fmt.Sprintf(\"📝 YOUR DESCRIPTION:\\n\\\"%s\\\"\\n\\nUsage: /description [text] (max 200 characters)\", current))"
+        },
+        {
+          "path": "internal/game/battleanalyst/prompt.go",
+          "line": 203,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        },
+        {
+          "path": "internal/game/devconsole/balance.go",
+          "line": 147,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        },
+        {
+          "path": "internal/game/devconsole/nlquery.go",
+          "line": 165,
+          "context": "fmt.Fprintf(&b, \"\\n\\n📝 %s\", rec.Caveats)"
+        },
+        {
+          "path": "internal/game/devconsole/prompt.go",
+          "line": 217,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        },
+        {
+          "path": "internal/game/galaxyadvisor/prompt.go",
+          "line": 209,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        },
+        {
+          "path": "internal/game/guildassistant/prompt.go",
+          "line": 218,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        },
+        {
+          "path": "internal/game/npcintel/prompt.go",
+          "line": 237,
+          "context": "fmt.Fprintf(&b, \"📝 %s\\n\", rec.Notes)"
+        }
+      ]
+    },
+    {
+      "unicode": "🏛️",
+      "occurrences": 8,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1026,
+          "context": "bot.Handle(\"🏛️ Admin Terminal\", admin.HandleAdminPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 100,
+          "context": "return c.Send(\"🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\\n\\nDeploy overrides using the secure inline controls or bottom submenu deck.\\nActions marked ⚠️ are destructive and require a co"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 119,
+          "context": "\"🏛️ [Core Outpost Lvl %d] -> Cost: %d Scrap\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 129,
+          "context": "btnUpgradeCamp := selector.Data(fmt.Sprintf(\"🏛️ Core (%d)\", campLvl+1), \"upgrade_mod\", \"camp_core\")"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 313,
+          "context": "\"🏛️ Max Miner Capacity Cap: %d miners (Level %d Core)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 47,
+          "context": "\"🏛️ FEDERATIONS OF THE WASTELAND 🏛️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 47,
+          "context": "\"🏛️ FEDERATIONS OF THE WASTELAND 🏛️\\n\" +"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 19,
+          "context": "btnAdmin := menu.Text(\"🏛️ Admin Terminal\")"
+        }
+      ]
+    },
+    {
+      "unicode": "⬅️",
+      "occurrences": 8,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1052,
+          "context": "bot.Handle(\"⬅️ Back to HQ\", onboarding.HandleStart)"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 126,
+          "context": "if text == \"⬅️ back to hq\" {"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 255,
+          "context": "\"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\\n\" +"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 44,
+          "context": "btnBack := menu.Text(\"⬅️ Back to HQ\")"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 66,
+          "context": "btnBack := menu.Text(\"⬅️ Back to HQ\")"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 85,
+          "context": "btnBack := menu.Text(\"⬅️ Back to HQ\")"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 102,
+          "context": "btnBack := menu.Text(\"⬅️ Back to HQ\")"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 120,
+          "context": "btnBack := menu.Text(\"⬅️ Back to HQ\")"
+        }
+      ]
+    },
+    {
+      "unicode": "💡",
+      "occurrences": 8,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 454,
+          "context": "\"💡 This composition is fixed to your current level - grow stronger, and the Nest grows with you.\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 112,
+          "context": "panelText += \"\\n💡 A Clan King can propose an alliance with /ally [clan_name], or a\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 65,
+          "context": "\"💡 Ether trickles in slowly from Technology research over time.\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 80,
+          "context": "panelText += \"\\n💡 A Clan King can found a Federation with /fed_found [name], join one with /fed_join [name], or leave with /fed_leave.\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 255,
+          "context": "\"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\\n\" +"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 357,
+          "context": "\"💡 Use /scout %s for a full manual intel report.\","
+        },
+        {
+          "path": "internal/game/battleanalyst/prompt.go",
+          "line": 194,
+          "context": "fmt.Fprintf(&b, \"%d. %s\\n   📎 %s\\n   💡 %s\\n\", i+1, p.Observation, p.Evidence, p.Suggestion)"
+        },
+        {
+          "path": "internal/game/galaxyadvisor/prompt.go",
+          "line": 203,
+          "context": "fmt.Fprintf(&b, \"%d. %s\\n   💡 %s\\n\", i+1, a.Action, a.Reason)"
+        }
+      ]
+    },
+    {
+      "unicode": "🔮",
+      "occurrences": 8,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 61,
+          "context": "\"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 61,
+          "context": "\"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 63,
+          "context": "\"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 63,
+          "context": "\"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 64,
+          "context": "\"🔮 Your Ether: %.2f\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 79,
+          "context": "panelText += \"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\""
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 79,
+          "context": "panelText += \"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\""
+        },
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 40,
+          "context": "return \"🔮\""
+        }
+      ]
+    },
+    {
+      "unicode": "☠️",
+      "occurrences": 7,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 283,
+          "context": "('Apex Wraith', '☠️👹', 3000000, 3000000, 30000)"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 49,
+          "context": "\"☠️ WASTELAND WORLD BOSSES ☠️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 49,
+          "context": "\"☠️ WASTELAND WORLD BOSSES ☠️\\n\" +"
+        },
+        {
+          "path": "internal/engine/starvation/starvation.go",
+          "line": 58,
+          "context": "headline := fmt.Sprintf(\"☠️ GHOST MODE: Encampment [%s] has collapsed due to starvation. Location reduced to scavengable ruins.\", c.name)"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 564,
+          "context": "alertMsg := fmt.Sprintf(\"☠️🎉 BOSS SLAIN: %s\\n\\nYour cumulative %.0f damage earned you 💵 $%.2f from the loot pool.\", bossName, ct.damage, share)"
+        },
+        {
+          "path": "internal/game/content/roguenest.go",
+          "line": 116,
+          "context": "return \"☠️ EXTREME\""
+        },
+        {
+          "path": "internal/game/content/units.go",
+          "line": 105,
+          "context": "Flavor:          \"☠️👑 THE ultimate superweapon. A single Doomsday Rig outweighs an entire fleet - but the cost is catastrophic, and losing one in a failed raid is devastating. Owne"
+        }
+      ]
+    },
+    {
+      "unicode": "🧪",
+      "occurrences": 7,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1034,
+          "context": "bot.Handle(\"🧪 Research Lab\", research.HandleResearchPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 201,
+          "context": "{\"technology_center\", \"🧪\", \"Technology Center\", \"Boosts passive Ether generation rate.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 91,
+          "context": "if text == \"🧪 research lab\" {"
+        },
+        {
+          "path": "internal/bot/handlers/research.go",
+          "line": 108,
+          "context": "\"🧪 COGNITIVE RESEARCH WORKSTATION\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/research.go",
+          "line": 192,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🧪 %s upgraded to Level %d!\", targetNode.title, currentLvl+1)})"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 41,
+          "context": "btnResearch := menu.Text(\"🧪 Research Lab\") // Added for Research Lab access"
+        },
+        {
+          "path": "internal/game/researchplanner/prompt.go",
+          "line": 272,
+          "context": "b.WriteString(\"🧪 AI RESEARCH PLANNER\\n\\n\")"
+        }
+      ]
+    },
+    {
+      "unicode": "✍️",
+      "occurrences": 7,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 114,
+          "context": "return \"✍️ Reply with: `username days`\\nExample: `wanderer99 30`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 116,
+          "context": "return \"✍️ Reply with: `username resource_type amount`\\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores\\nExample: `wanderer99 metal 500`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 118,
+          "context": "return \"✍️ Reply with a whole number 0-10 (percent).\\nExample: `5`\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 120,
+          "context": "return \"✍️ Reply with `steel_vanguard` or `rust_nomads`.\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 122,
+          "context": "return \"✍️ Reply with the message to broadcast to every survivor.\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 124,
+          "context": "return \"✍️ Reply with the required input.\""
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 149,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"✍️ Check the chat for your input prompt.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🗺️",
+      "occurrences": 7,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 954,
+          "context": "\"🗺️ TACTICAL ROUTING PATHS:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 443,
+          "context": "panelText := \"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 443,
+          "context": "panelText := \"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 445,
+          "context": "\"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\\n\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 445,
+          "context": "\"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\\n\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 472,
+          "context": "panelText += \"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 472,
+          "context": "panelText += \"🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\""
+        }
+      ]
+    },
+    {
+      "unicode": "🛵",
+      "occurrences": 7,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 42,
+          "context": "{\"scout\", \"🛵\", \"Scout Walker\", \"scouts\", content.MustFindUnit(\"scout\").DeconstructRefund()},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 104,
+          "context": "\"🛵 Scout Walkers: %d  |  🚢👑 Battlecruisers: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 116,
+          "context": "\"🛵 [%s] ➜ 🔩%.0f Metal ➜ %s\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 144,
+          "context": "btnCraftScout := selector.Data(\"🛵 Build Scout\", \"craft_item\", \"scout\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 351,
+          "context": "successAlert = \"🛵 Scout Walker rolled off the assembly line!\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 517,
+          "context": "\"🛵 Scouts: %d\\n\"+"
+        },
+        {
+          "path": "internal/game/content/units.go",
+          "line": 77,
+          "context": "Emoji:           \"🛵\","
+        }
+      ]
+    },
+    {
+      "unicode": "🏟️",
+      "occurrences": 6,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1043,
+          "context": "bot.Handle(\"🏟️ Combat Arena\", arena.HandleArenaPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 48,
+          "context": "\"🏟️ COGNITIVE COMBAT MATCHMAKER\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/arena.go",
+          "line": 122,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🏟️ Successfully joined %s queue!\", bracket)})"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 64,
+          "context": "btnArena := menu.Text(\"🏟️ Combat Arena\")"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1303,
+          "context": "winAlert := fmt.Sprintf(\"🏟️ ARENA REPORT: TEAM VICTORY!\\n\\nYou won the %s team clash!\\n🏆 Reward: +$%.0f Cash credited.\", b, lootWon)"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1308,
+          "context": "loseAlert := fmt.Sprintf(\"🏟️ ARENA REPORT: TEAM DEFEAT\\n\\nYou lost the %s team clash. Keep training commander!\", b)"
+        }
+      ]
+    },
+    {
+      "unicode": "🎈",
+      "occurrences": 6,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 319,
+          "context": "\"🎈 [Pump Hydrogen] — Costs: 15.0 Electricity (+10.0 Hydrogen / miner)\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 328,
+          "context": "btnHydrogen := selector.Data(\"🎈 Hydrogen\", \"mine_action\", \"hydrogen\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 129,
+          "context": "\"$150 ➜ 🎈 40 Hydrogen\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 147,
+          "context": "btnBuyHydrogen := selector.Data(\"🎈 Buy 40 Hydrogen ($150)\", \"market_buy\", \"buy_hydrogen\")"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 191,
+          "context": "\"🎈 Hydrogen: %.1f L\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 409,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🎈 Purchased 40 L of Hydrogen Fuel!\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🚛",
+      "occurrences": 6,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/deconstruct.go",
+          "line": 48,
+          "context": "{\"hauler\", \"🚛\", \"Resource Hauler\", \"haulers\", map[string]float64{\"metal\": 220.0}},"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 208,
+          "context": "\"🚛 Resource Haulers: %d | 🛢️ Fuel Tankers: %d | 🔧 Recovery Rigs: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 214,
+          "context": "\"🚛 [Resource Hauler] — Cost: 500 Metal, 50 Oil (+5,000 battle loot cap)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 231,
+          "context": "btnCraftHauler := selector.Data(\"🚛 Craft Hauler\", \"craft_item\", \"hauler\")"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 410,
+          "context": "successAlert = \"🚛 Resource Hauler constructed successfully!\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 524,
+          "context": "\"🚛 Haulers: %d | 🛡️ Tankers: %d | 🔧 Rigs: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🏪",
+      "occurrences": 6,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 61,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 61,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 63,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 63,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 75,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\","
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 75,
+          "context": "\"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\","
+        }
+      ]
+    },
+    {
+      "unicode": "🚩",
+      "occurrences": 6,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 66,
+          "context": "\"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 66,
+          "context": "\"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 68,
+          "context": "\"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 68,
+          "context": "\"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 99,
+          "context": "panelText += \"\\n🚩━━━━━━━━━━━━━━━━━━━━━━🚩\""
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 99,
+          "context": "panelText += \"\\n🚩━━━━━━━━━━━━━━━━━━━━━━🚩\""
+        }
+      ]
+    },
+    {
+      "unicode": "✊",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1007,
+          "context": "bot.Handle(\"✊ The Rebellion\", rebellion.HandleRebellionPanel)"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 67,
+          "context": "\"✊ CONTACT THE REBELLION ✊\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 67,
+          "context": "\"✊ CONTACT THE REBELLION ✊\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 152,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"✊ The Rebellion thanks you! +%.0f Neuro Cores received.\", reward)})"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 18,
+          "context": "btnRebellion := menu.Text(\"✊ The Rebellion\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📻",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1039,
+          "context": "bot.Handle(\"📻 Wasteland Radio\", world.HandleWorldFeed)"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 102,
+          "context": "if text == \"📻 wasteland radio\" {"
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 78,
+          "context": "\"📻 WASTELAND BROADCAST RADIO\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 205,
+          "context": "headline := fmt.Sprintf(\"📻 OUTPOST BROADCAST: Encampment [%s] dispatched message: %q\", campName, broadcastMsg)"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 63,
+          "context": "btnNews := menu.Text(\"📻 Wasteland Radio\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🟢",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 77,
+          "context": "statusLabel = \"🟢 ACTIVE (RUNNING...)\""
+        },
+        {
+          "path": "internal/bot/handlers/boss.go",
+          "line": 69,
+          "context": "status := \"🟢 ACTIVE\""
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 80,
+          "context": "systemState := \"🟢 SECURE (NOMINAL)\""
+        },
+        {
+          "path": "internal/game/content/roguenest.go",
+          "line": 124,
+          "context": "return \"🟢 LOW\""
+        },
+        {
+          "path": "internal/game/npcintel/prompt_test.go",
+          "line": 70,
+          "context": "s := npcintel.Snapshot{PlayerLevel: 3, Nest: npcintel.NestProfile{ThreatTier: \"🟢 LOW\"}}"
+        }
+      ]
+    },
+    {
+      "unicode": "🛒",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 320,
+          "context": "\"🛒 MINER SHOP DECK:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 407,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🛒 Miner successfully recruited!\"})"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 70,
+          "context": "\"🛒 PLAYER MARKET SNAPSHOT:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 74,
+          "context": "\"🛒 [Market Exchange] — Buy and sell directly with other survivors\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 83,
+          "context": "btnMarket := selector.Data(\"🛒 Market Exchange\", \"trade_hub_nav\", \"market\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📉",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 344,
+          "context": "respText += \"\\n📉 Supply Crisis: sale prices depressed.\""
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 359,
+          "context": "respText += \"\\n📉 Supply Crisis: sale prices depressed.\""
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 374,
+          "context": "respText += \"\\n📉 Supply Crisis: sale prices depressed.\""
+        },
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 58,
+          "context": "return \"📉 Supply Crisis - Market Exchange sale prices depressed.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 138,
+          "context": "return fmt.Sprintf(\"📉 SUPPLY CRISIS: Logistics networks across %s are in disarray. Market Exchange sale prices are depressed until conditions improve.\", continent)"
+        }
+      ]
+    },
+    {
+      "unicode": "📍",
+      "occurrences": 5,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/exploration.go",
+          "line": 127,
+          "context": "panelText += fmt.Sprintf(\"📍 %s (%s)\\n   Reward: %s %.0f %s\\n\\n\", name, siteType, rewardEmoji(rewardType), rewardAmount, rewardType)"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 97,
+          "context": "\"📍 Location: [X: %d, Y: %d]\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 419,
+          "context": "\"📍 Location Coordinates: [X: %d, Y: %d]\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 463,
+          "context": "panelText += fmt.Sprintf(\"📍 %s [%d, %d]\\n\", name, x, y)"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 355,
+          "context": "\"📍 Coordinates: [%d, %d]\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🛸",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1038,
+          "context": "bot.Handle(\"🛸 Expedition Radar\", combat.HandleExpeditionRadar)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 372,
+          "context": "\"🛸 ONGOING EVENTS: EXPEDITION RADAR HUD\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 99,
+          "context": "if text == \"🛸 expedition radar\" || text == \"radar\" {"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 62,
+          "context": "btnRadar := menu.Text(\"🛸 Expedition Radar\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🔴",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 75,
+          "context": "statusLabel := \"🔴 STANDBY (OFFLINE)\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 152,
+          "context": "{\"heavy_laser\", \"🔴\", \"Heavy Laser\", \"Solid anti-personnel turret. Moderate defense bonus.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 82,
+          "context": "systemState = \"🔴 WARNING (HOSTILE RAID IN TRANSIT)\""
+        },
+        {
+          "path": "internal/game/content/roguenest.go",
+          "line": 118,
+          "context": "return \"🔴 SEVERE\""
+        }
+      ]
+    },
+    {
+      "unicode": "☀️",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 199,
+          "context": "{\"solar_panel\", \"☀️\", \"Solar Panel\", \"Generates bonus Electricity independent of your Generator.\"},"
+        },
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 339,
+          "context": "return c.Send(fmt.Sprintf(\"☀️✅ SUNLIGHT GATHERED! +%.0f Electricity harvested manually.\", gain))"
+        },
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 64,
+          "context": "return \"☀️ Nominal - no active debuffs.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 66,
+          "context": "headline := fmt.Sprintf(\"☀️ ENVIRONMENTAL REPORT: %s over %s has cleared. Regional sectors have returned to nominal baseline conditions.\", eventLabel(eventType), continent)"
+        }
+      ]
+    },
+    {
+      "unicode": "🏅",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 183,
+          "context": "panelText += fmt.Sprintf(\"%s %d. 🏴 %s (%d/15) — 🏅 %.0f pts\\n\", medalFor(rank), rank, name, members, score)"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 70,
+          "context": "panelText += fmt.Sprintf(\"%s %d. %s %s — 🏴 %d Clans, 👥 %d Members, 🏅 %.0f pts\\n\", medalFor(rank), rank, icon, name, clanCount, memberCount, score)"
+        },
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 59,
+          "context": "panelText += fmt.Sprintf(\"%s %d. %s — 🏅 %.0f pts\\n\", medalFor(rank), rank, name, score)"
+        },
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 107,
+          "context": "panelText += fmt.Sprintf(\"%s %d. 🏴 %s (%d/8) — 🏅 %.0f pts\\n\", medalFor(rank), rank, name, members, score)"
+        }
+      ]
+    },
+    {
+      "unicode": "📨",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 185,
+          "context": "btn := selector.Data(fmt.Sprintf(\"📨 Apply to %s\", name), \"clan_apply\", clanID)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 233,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"📨 Application sent to %s! Awaiting Leader approval.\", clanName)})"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 693,
+          "context": "btn := selector.Data(fmt.Sprintf(\"📨 Apply to %s\", name), \"clan_apply\", clanID)"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 167,
+          "context": "return c.Send(\"📨 Feedback received - thank you for helping improve The Vagabond!\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🔢",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 939,
+          "context": "\"🔢 Bulk Step: %s (tap 🔢 Step to cycle x1 → x10 → x100 → MAX)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 939,
+          "context": "\"🔢 Bulk Step: %s (tap 🔢 Step to cycle x1 → x10 → x100 → MAX)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 965,
+          "context": "btnStepToggle := selector.Data(fmt.Sprintf(\"🔢 Step: %s (tap to cycle)\", stepLabel), \"adjust_draft\", \"step\", \"cycle\")"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1225,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"🔢 Bulk step set to %s.\", label)})"
+        }
+      ]
+    },
+    {
+      "unicode": "🌧️",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1511,
+          "context": "weatherStatus = \"🌧️ Corrosive precipitation active. Mechs structure structural integrity hazard.\""
+        },
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 54,
+          "context": "return \"🌧️ Acid Rain - build times doubled, Mechs -50% defense.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 134,
+          "context": "return fmt.Sprintf(\"🌧️ ACID RAIN ALERT: Highly corrosive precipitation over %s is slowing down logistics. Active construction projects running at reduced speed.\", continent)"
+        },
+        {
+          "path": "internal/game/galaxyadvisor/prompt_test.go",
+          "line": 21,
+          "context": "\"🌧️ ACID RAIN ALERT: Highly corrosive precipitation over Europe.\","
+        }
+      ]
+    },
+    {
+      "unicode": "🌩️",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1513,
+          "context": "weatherStatus = \"🌩️ EMP burst detected. Electronics-dependent systems degraded.\""
+        },
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 56,
+          "context": "return \"🌩️ EMP - automation and electricity generation offline.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 136,
+          "context": "return fmt.Sprintf(\"🌩️ EMP BURST WARNING: A regional electromagnetic pulse over %s has knocked out unshielded electronics. Automation Agents standing down; Electricity generation o"
+        },
+        {
+          "path": "internal/game/galaxyadvisor/prompt_test.go",
+          "line": 20,
+          "context": "\"🌩️ EMP BURST WARNING: A regional electromagnetic pulse over Asia has knocked out unshielded electronics.\","
+        }
+      ]
+    },
+    {
+      "unicode": "🥫",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 184,
+          "context": "\"🥫 SURVIVAL MATERIALS:\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/economy.go",
+          "line": 186,
+          "context": "\"🥫 Food Rations: %.1f\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 100,
+          "context": "\"🥫 Rations: %.1f\\n\"+"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1076,
+          "context": "\"🥫 Rations: %.1f\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "✨",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 62,
+          "context": "\"✨ THE ETHER SHOP ✨\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 62,
+          "context": "\"✨ THE ETHER SHOP ✨\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 141,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf(\"✨ Converted %.1f Ether into %.0f %s!\", effectiveCost, deal.amount, deal.title)})"
+        },
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 180,
+          "context": "return c.Send(fmt.Sprintf(\"🌀✨ TELEPORT COMPLETE! Your outpost now stands at [%d, %d] in a %s biome.\", newX, newY, biome))"
+        }
+      ]
+    },
+    {
+      "unicode": "🔇",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 195,
+          "context": "return c.Send(\"🔇 This player has muted you - your message wasn't delivered.\")"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 240,
+          "context": "return c.Send(fmt.Sprintf(\"🔇 %s has been muted. Their messages will no longer reach you.\", targetUsername))"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 260,
+          "context": "panelText := \"🔇 MUTED PLAYERS:\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 266,
+          "context": "panelText += fmt.Sprintf(\"🔇 @%s\\n\", username)"
+        }
+      ]
+    },
+    {
+      "unicode": "░",
+      "occurrences": 4,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 120,
+          "context": "rowText += \"░░ \""
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 120,
+          "context": "rowText += \"░░ \""
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 136,
+          "context": "mapHUD += \"LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\\n\\n\""
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 136,
+          "context": "mapHUD += \"LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\\n\\n\""
+        }
+      ]
+    },
+    {
+      "unicode": "🔨",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "cmd/bot/main.go",
+          "line": 1031,
+          "context": "bot.Handle(\"🔨 Structural Upgrades\", camp.HandleStructuralUpgrades)"
+        },
+        {
+          "path": "internal/bot/handlers/nlp.go",
+          "line": 76,
+          "context": "if text == \"🔨 structural upgrades\" {"
+        },
+        {
+          "path": "internal/bot/keyboards/navigation.go",
+          "line": 36,
+          "context": "btnUpgrade := menu.Text(\"🔨 Structural Upgrades\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🔌",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 116,
+          "context": "toggleLabel = \"🔌 Shutdown Agent\""
+        },
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 174,
+          "context": "alert = \"🔌 Cognitive Agent shut down.\""
+        },
+        {
+          "path": "internal/engine/agent/agent.go",
+          "line": 92,
+          "context": "\"🔌 AGENT DEACTIVATED\\n\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🔕",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 274,
+          "context": "subStatus := \"🔕 Unsubscribed\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 278,
+          "context": "toggleAlertLabel = \"🔕 Unsubscribe from Idle Alerts\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 369,
+          "context": "text := \"🔕 Unsubscribed from idle miner alerts.\""
+        }
+      ]
+    },
+    {
+      "unicode": "🔔",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 275,
+          "context": "toggleAlertLabel := \"🔔 Subscribe to Idle Alerts\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 277,
+          "context": "subStatus = \"🔔 Subscribed\""
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 371,
+          "context": "text = \"🔔 Subscribed to idle miner alerts! You will be warned if workers remain idle.\""
+        }
+      ]
+    },
+    {
+      "unicode": "🦾",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 499,
+          "context": "\"🦾 [Cybernetic Salvage Lvl %d / 5] (Cost: 20 Crystal, 5 Neuro)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 509,
+          "context": "btnMutateSalvage := selector.Data(fmt.Sprintf(\"🦾 Salvage (%d)\", salvage+1), \"mutate_mod\", \"salvage\")"
+        },
+        {
+          "path": "internal/bot/handlers/research.go",
+          "line": 43,
+          "context": "{\"military\", \"military_tech_lvl\", \"🦾\", \"Weapons\", \"Multiplies Mech and offensive unit combat ratings.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "⚒️",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 78,
+          "context": "\"⚒️ /clan_create [name]\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 109,
+          "context": "\"⚒️ MANUFACTURING BLUEPRINTS ⚒️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 109,
+          "context": "\"⚒️ MANUFACTURING BLUEPRINTS ⚒️\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🚪",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 144,
+          "context": "btnLeave := selector.Data(\"🚪 Leave Clan\", \"leave_clan\", clanID.String)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 422,
+          "context": "alertMsg := \"🚪 ALLIANCE NOTICE: You have been removed from the alliance roster by the Clan Leader.\""
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 830,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🚪 Left alliance.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "📏",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 720,
+          "context": "return c.Send(\"⚠️ Usage: /clan_create [name]\\n📏 3-24 characters.\")"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 767,
+          "context": "return c.Send(fmt.Sprintf(\"⚠️ Usage: /clan_rename [new name]\\n💰 Cost: %.0f Crystal\\n📏 3-24 characters.\", clanRenameCost))"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 185,
+          "context": "\"✏️ RENAME OUTPOST\\n\\nUsage: /name [new name]\\n\\n💰 Cost: %.0f Crystal + $%.0f\\n📏 3-20 characters, letters/numbers/spaces/hyphens only.\\n\\n⚠️ This changes your public display name e"
+        }
+      ]
+    },
+    {
+      "unicode": "🎉",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 754,
+          "context": "return c.Send(fmt.Sprintf(\"🛡️🎉 CLAN ESTABLISHED: \\\"%s\\\"! You are its Leader. Use /clans to see it listed, or /clan for your HUD.\", name))"
+        },
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 196,
+          "context": "return c.Send(fmt.Sprintf(\"🌐🎉 FEDERATION FOUNDED: \\\"%s\\\"! Other Clan Kings can now join with /fed_join %s\", name, name))"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 564,
+          "context": "alertMsg := fmt.Sprintf(\"☠️🎉 BOSS SLAIN: %s\\n\\nYour cumulative %.0f damage earned you 💵 $%.2f from the loot pool.\", bossName, ct.damage, share)"
+        }
+      ]
+    },
+    {
+      "unicode": "💬",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 940,
+          "context": "\"💬 Text shortcut: /add <n> <unit>, /remove <n> <unit>\\n\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1060,
+          "context": "return c.Send(\"💬 Usage: /add <amount> <unit> (e.g. /add 10 soldiers) or /remove <amount> <unit>\")"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 198,
+          "context": "alertMsg := fmt.Sprintf(\"💬 MESSAGE from %s:\\n\\n%s\", sender.FirstName, messageText)"
+        }
+      ]
+    },
+    {
+      "unicode": "🌪️",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 1515,
+          "context": "weatherStatus = \"🌪️ Sandstorm active. Navigation and targeting accuracy reduced.\""
+        },
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 62,
+          "context": "return \"🌪️ Sandstorm - march times and accuracy degraded.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 142,
+          "context": "return fmt.Sprintf(\"🌪️ SANDSTORM WARNING: Visibility across %s sectors has collapsed. Scan and Scout operations report degraded intel accuracy.\", continent)"
+        }
+      ]
+    },
+    {
+      "unicode": "🏋️",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 92,
+          "context": "\"🏋️ [Train Commander] — Cost: 50 Scrap (+20 XP)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 99,
+          "context": "btnTrain := selector.Data(\"🏋️ Train Commander\", \"hero_action\", \"train\")"
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 266,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🏋️ Commander training completed successfully! +20 XP.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "💊",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 93,
+          "context": "\"💊 [Heal Injury] — Cost: 50 Rations (Heals sustained scars)\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 100,
+          "context": "btnHeal := selector.Data(\"💊 Heal Injury\", \"hero_action\", \"heal\")"
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 274,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"💊 Injuries fully cured! Commander is in perfect health.\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🏠",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 9,
+          "context": "navCaptionMain    = \"🏠 Returning to Outpost HQ...\""
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 510,
+          "context": "\"🏠 GARRISONED (at base):\\n\"+"
+        },
+        {
+          "path": "internal/game/galaxyadvisor/prompt.go",
+          "line": 194,
+          "context": "fmt.Fprintf(&b, \"🏠 Home continent: %s\\n\\n\", rec.HomeContinentAdvice)"
+        }
+      ]
+    },
+    {
+      "unicode": "🟠",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/game/content/roguenest.go",
+          "line": 120,
+          "context": "return \"🟠 HIGH\""
+        },
+        {
+          "path": "internal/game/npcintel/prompt_test.go",
+          "line": 14,
+          "context": "ThreatTier:     \"🟠 HIGH\","
+        },
+        {
+          "path": "internal/game/npcintel/prompt_test.go",
+          "line": 45,
+          "context": "\"🟠 HIGH\","
+        }
+      ]
+    },
+    {
+      "unicode": "💭",
+      "occurrences": 3,
+      "examples": [
+        {
+          "path": "internal/game/fleetcommander/prompt.go",
+          "line": 239,
+          "context": "fmt.Fprintf(&b, \"💭 Reasoning: %s\\n\", rec.Reasoning)"
+        },
+        {
+          "path": "internal/game/guildassistant/prompt.go",
+          "line": 206,
+          "context": "fmt.Fprintf(&b, \"%s @%s — %s\\n   💭 %s\\n\", icon, call.Username, call.Recommendation, call.Reason)"
+        },
+        {
+          "path": "internal/game/npcintel/prompt.go",
+          "line": 228,
+          "context": "fmt.Fprintf(&b, \"%s %s — %s\\n   💭 %s\\n\", icon, v.Unit, v.Verdict, v.Reason)"
+        }
+      ]
+    },
+    {
+      "unicode": "💻",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 160,
+          "context": "\"💻 ADMINISTRATIVE METRICS PANEL\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 750,
+          "context": "\"💻 ADMINISTRATIVE METRICS PANEL\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🧩",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 166,
+          "context": "\"🧩 GC Cycles Executed: %d\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 758,
+          "context": "\"🧩 Total GC Cycles Executed: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "⛔",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 53,
+          "context": "return c.Send(\"⛔ Administrator access required.\")"
+        },
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 105,
+          "context": "return c.Send(\"⛔ Administrator access required.\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🟡",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 151,
+          "context": "{\"light_laser\", \"🟡\", \"Light Laser\", \"Cheap early turret. Small defense rating bonus.\"},"
+        },
+        {
+          "path": "internal/game/content/roguenest.go",
+          "line": 122,
+          "context": "return \"🟡 MODERATE\""
+        }
+      ]
+    },
+    {
+      "unicode": "👤",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 272,
+          "context": "panelText += fmt.Sprintf(\"👤 %s (@%s)\\n\", fName, username)"
+        },
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 85,
+          "context": "\"👤 Name: %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "📢",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 579,
+          "context": "broadcast := fmt.Sprintf(\"📢 %s [%s]:\\n\\n%s\", clanName, sender.FirstName, msg)"
+        },
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 596,
+          "context": "return c.Send(fmt.Sprintf(\"📢 Message broadcast to %d Clan member(s)!\", count))"
+        }
+      ]
+    },
+    {
+      "unicode": "🐲",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 356,
+          "context": "bossText += fmt.Sprintf(\"🐲 BOSS ASSAULT (MARCHING): Target: %s\\n   ETA: %s (%ds remaining)\\n\\n\", bossName, resolveTime.UTC().Format(\"15:04:05\"), timeLeft)"
+        },
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 367,
+          "context": "bossText = \"🐲 WORLD BOSS: No active engagements.\\n\\n\""
+        }
+      ]
+    },
+    {
+      "unicode": "🧿",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 447,
+          "context": "reportText += fmt.Sprintf(\"🧿 Nuclear Shields: %d\\n\", nest.Shields)"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 2159,
+          "context": "defenderNotes = append(defenderNotes, fmt.Sprintf(\"🧿 Nuclear Shields: %d active.\", defenderShields))"
+        }
+      ]
+    },
+    {
+      "unicode": "🛍️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/exchange.go",
+          "line": 63,
+          "context": "btnBuy := selector.Data(fmt.Sprintf(\"🛍️ Buy [%d]\", index), \"buy_listing\", listID)"
+        },
+        {
+          "path": "internal/bot/handlers/exchange.go",
+          "line": 220,
+          "context": "_ = c.Respond(&telebot.CallbackResponse{Text: \"🛍️ Materials acquired successfully!\"})"
+        }
+      ]
+    },
+    {
+      "unicode": "🦠",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 60,
+          "context": "return \"🦠 Disease Outbreak - rations consumption elevated.\""
+        },
+        {
+          "path": "internal/engine/world/weather.go",
+          "line": 140,
+          "context": "return fmt.Sprintf(\"🦠 DISEASE OUTBREAK: An unidentified pathogen is spreading through %s outposts. Rations consumption elevated as commanders divert stock to treatment.\", continent"
+        }
+      ]
+    },
+    {
+      "unicode": "📖",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 110,
+          "context": "btnManual := selector.Data(\"📖 Survival Manual\", \"view_manual\")"
+        },
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 242,
+          "context": "\"📖 SURVIVAL TRAINING MANUAL & TUTORIAL\\n\" +"
+        }
+      ]
+    },
+    {
+      "unicode": "🎛️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 66,
+          "context": "\"🎛️ ADVANCED GAMEPLAY SETTINGS 🎛️\\n\"+"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 66,
+          "context": "\"🎛️ ADVANCED GAMEPLAY SETTINGS 🎛️\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🗞️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 288,
+          "context": "\"🗞️ LATEST WASTELAND EVENTS 🗞️\\n\" +"
+        },
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 288,
+          "context": "\"🗞️ LATEST WASTELAND EVENTS 🗞️\\n\" +"
+        }
+      ]
+    },
+    {
+      "unicode": "💹",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/research_planner.go",
+          "line": 27,
+          "context": "researchplanner.GoalEconomy:  \"💹 Economy\","
+        },
+        {
+          "path": "internal/game/econadvisor/prompt.go",
+          "line": 192,
+          "context": "b.WriteString(\"💹 AI ECONOMY ADVISOR\\n\\n\")"
+        }
+      ]
+    },
+    {
+      "unicode": "⚖️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/research_planner.go",
+          "line": 28,
+          "context": "researchplanner.GoalBalanced: \"⚖️ Balanced\","
+        },
+        {
+          "path": "internal/game/devconsole/balance.go",
+          "line": 121,
+          "context": "b.WriteString(\"⚖️ AI DEVELOPER CONSOLE — BALANCE COMMENTARY\\n\\n\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🏢",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 124,
+          "context": "rowText += \"🏢 \""
+        },
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 136,
+          "context": "mapHUD += \"LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\\n\\n\""
+        }
+      ]
+    },
+    {
+      "unicode": "🏳️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 409,
+          "context": "fmt.Sprintf(\"🏳️ %s was already defeated by another survivor before your forces arrived. Turning back - no fight, no losses.\", m.bossName))"
+        },
+        {
+          "path": "internal/game/fleetcommander/prompt.go",
+          "line": 212,
+          "context": "string(ActionRetreat):   \"🏳️\","
+        }
+      ]
+    },
+    {
+      "unicode": "🍖",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1167,
+          "context": "fmt.Sprintf(\"🍖 RATIONS RUNNING LOW: Your marching force toward [%s] is down to %.0f%% rations.\", ex.defenderName, newRations))"
+        },
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 1170,
+          "context": "fmt.Sprintf(\"🍖❌ OUT OF RATIONS: Your force marching on [%s] has run out of rations! Combat strength will suffer until they return.\", ex.defenderName))"
+        }
+      ]
+    },
+    {
+      "unicode": "🖥️",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/game/devconsole/nlquery.go",
+          "line": 151,
+          "context": "b.WriteString(\"🖥️ AI DEVELOPER CONSOLE\\n\\n\")"
+        },
+        {
+          "path": "internal/game/devconsole/prompt.go",
+          "line": 185,
+          "context": "b.WriteString(\"🖥️ AI DEVELOPER CONSOLE — GAME ACTIVITY REPORT\\n\\n\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📈",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/game/econadvisor/prompt.go",
+          "line": 216,
+          "context": "fmt.Fprintf(&b, \"📈 Market timing: %s\\n\", rec.MarketTiming)"
+        },
+        {
+          "path": "internal/game/governor/prompt.go",
+          "line": 187,
+          "context": "fmt.Fprintf(&b, \"📈 Expected impact: %s\\n\", rec.ExpectedImpact)"
+        }
+      ]
+    },
+    {
+      "unicode": "🔀",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/game/fleetcommander/prompt.go",
+          "line": 216,
+          "context": "string(ActionSplit):     \"🔀\","
+        },
+        {
+          "path": "internal/game/fleetcommander/prompt.go",
+          "line": 244,
+          "context": "fmt.Fprintf(&b, \"🔀 Suggested split: %s\\n\", rec.SuggestedSplit)"
+        }
+      ]
+    },
+    {
+      "unicode": "❔",
+      "occurrences": 2,
+      "examples": [
+        {
+          "path": "internal/game/guildassistant/prompt.go",
+          "line": 199,
+          "context": "icon := \"❔\""
+        },
+        {
+          "path": "internal/game/npcintel/prompt.go",
+          "line": 219,
+          "context": "icon := \"❔\""
+        }
+      ]
+    },
+    {
+      "unicode": "🎭",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/admin.go",
+          "line": 87,
+          "context": "btnFaction := selector.Data(\"🎭 Change My Faction\", \"admin_action\", \"faction\")"
+        }
+      ]
+    },
+    {
+      "unicode": "🏷️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/agent.go",
+          "line": 95,
+          "context": "\"🏷️ License: %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🚫",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ai_status.go",
+          "line": 75,
+          "context": "state = \"🚫 disabled\""
+        }
+      ]
+    },
+    {
+      "unicode": "🔵",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 154,
+          "context": "{\"ion_cannon\", \"🔵\", \"Ion Cannon\", \"Anti-drone/anti-air turret. Strong defense bonus.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "🟣",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 155,
+          "context": "{\"plasma_turret\", \"🟣\", \"Plasma Turret\", \"Top-tier turret. Massive defense bonus.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "🛬",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 197,
+          "context": "{\"hangar\", \"🛬\", \"Hangar\", \"Increases maximum unit capacity (+20 per level).\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "📶",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/camp.go",
+          "line": 202,
+          "context": "{\"trade_beacon\", \"📶\", \"Trade Beacon\", \"Discounts Ether Shop conversion costs.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "🐺",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🐻",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦁",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🐯",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦂",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🐍",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦇",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦉",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🐗",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦖",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦍",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🐉",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦌",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🦊",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/clan.go",
+          "line": 507,
+          "context": "var randomAnimalIcons = []string{\"🦅\", \"🐺\", \"🐻\", \"🦁\", \"🐯\", \"🦂\", \"🐍\", \"🦇\", \"🦉\", \"🐗\", \"🦖\", \"🦍\", \"🐉\", \"🦌\", \"🦊\"}"
+        }
+      ]
+    },
+    {
+      "unicode": "🔫",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 428,
+          "context": "reportText += fmt.Sprintf(\"🔫 Light Laser: Lvl %d\\n\", nest.LightLaserLvl)"
+        }
+      ]
+    },
+    {
+      "unicode": "🔥",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 431,
+          "context": "reportText += fmt.Sprintf(\"🔥 Heavy Laser: Lvl %d\\n\", nest.HeavyLaserLvl)"
+        }
+      ]
+    },
+    {
+      "unicode": "🧲",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 434,
+          "context": "reportText += fmt.Sprintf(\"🧲 Gauss Cannon: Lvl %d\\n\", nest.GaussCannonLvl)"
+        }
+      ]
+    },
+    {
+      "unicode": "☄️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/combat.go",
+          "line": 440,
+          "context": "reportText += fmt.Sprintf(\"☄️ Plasma Turret: Lvl %d\\n\", nest.PlasmaTurretLvl)"
+        }
+      ]
+    },
+    {
+      "unicode": "💔",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/diplomacy.go",
+          "line": 269,
+          "context": "return c.Send(fmt.Sprintf(\"🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.\", targetName))"
+        }
+      ]
+    },
+    {
+      "unicode": "⚗️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ether.go",
+          "line": 66,
+          "context": "\"⚗️ CONVERSION DEALS:\\n\","
+        }
+      ]
+    },
+    {
+      "unicode": "🕵️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 111,
+          "context": "\"🛰️ [Tactical Drone] ➜ 🔩100 Metal, 💎10 Crystal ➜ 🕵️ Spy Satellite / 🚨 Interceptor\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🏰",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 115,
+          "context": "\"🛩️ [Bomber] ➜ 🔩1300 Metal, 💎60 Crystal ➜ 🏰 Hard-counters Turrets\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🛢️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/factory.go",
+          "line": 208,
+          "context": "\"🚛 Resource Haulers: %d | 🛢️ Fuel Tankers: %d | 🔧 Recovery Rigs: %d\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🔒",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/federation.go",
+          "line": 151,
+          "context": "return c.Send(fmt.Sprintf(\"⚠️ Usage: /fed_found [name]\\n💰 Cost: %.0f Crystal\\n🔒 Only your Clan's King can found a Federation.\", federationFoundCost))"
+        }
+      ]
+    },
+    {
+      "unicode": "🎗️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 86,
+          "context": "\"🎗️ Psychological Trait: %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🩺",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/hero.go",
+          "line": 87,
+          "context": "\"🩺 Injuries Sustained: %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🌀",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/jobs.go",
+          "line": 180,
+          "context": "return c.Send(fmt.Sprintf(\"🌀✨ TELEPORT COMPLETE! Your outpost now stands at [%d, %d] in a %s biome.\", newX, newY, biome))"
+        }
+      ]
+    },
+    {
+      "unicode": "🏕️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/navhelper.go",
+          "line": 10,
+          "context": "navCaptionCamp    = \"🏕️ Accessing Outpost Command...\""
+        }
+      ]
+    },
+    {
+      "unicode": "✏️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/onboarding.go",
+          "line": 185,
+          "context": "\"✏️ RENAME OUTPOST\\n\\nUsage: /name [new name]\\n\\n💰 Cost: %.0f Crystal + $%.0f\\n📏 3-20 characters, letters/numbers/spaces/hyphens only.\\n\\n⚠️ This changes your public display name e"
+        }
+      ]
+    },
+    {
+      "unicode": "🔑",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 138,
+          "context": "\"🔑 Your Referral Code: %s\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🔊",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 244,
+          "context": "return c.Send(fmt.Sprintf(\"🔊 %s has been unmuted.\", targetUsername))"
+        }
+      ]
+    },
+    {
+      "unicode": "🌎",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/profile.go",
+          "line": 331,
+          "context": "\"🌎 ECONOMY-WIDE TOTALS:\\n\"+"
+        }
+      ]
+    },
+    {
+      "unicode": "🥇",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 26,
+          "context": "return \"🥇\""
+        }
+      ]
+    },
+    {
+      "unicode": "🥈",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 28,
+          "context": "return \"🥈\""
+        }
+      ]
+    },
+    {
+      "unicode": "🥉",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/ranking.go",
+          "line": 30,
+          "context": "return \"🥉\""
+        }
+      ]
+    },
+    {
+      "unicode": "🌟",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 28,
+          "context": "return \"🌟\", \"Rebel Hero\""
+        }
+      ]
+    },
+    {
+      "unicode": "🔰",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/rebellion.go",
+          "line": 36,
+          "context": "return \"🔰\", \"Recruit\""
+        }
+      ]
+    },
+    {
+      "unicode": "🩹",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/research.go",
+          "line": 39,
+          "context": "{\"integrity\", \"integrity_tech_lvl\", \"🩹\", \"Integrity\", \"Reduces casualties suffered by your units in combat.\"},"
+        }
+      ]
+    },
+    {
+      "unicode": "📰",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/bot/handlers/world.go",
+          "line": 63,
+          "context": "newsText += \"📰 LATEST SECTOR BROADCAST REPORTS:\\n\""
+        }
+      ]
+    },
+    {
+      "unicode": "⌛",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/engine/tick/engine.go",
+          "line": 718,
+          "context": "log.Println(\"⌛ Processing master game tick pass...\")"
+        }
+      ]
+    },
+    {
+      "unicode": "📎",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/battleanalyst/prompt.go",
+          "line": 194,
+          "context": "fmt.Fprintf(&b, \"%d. %s\\n   📎 %s\\n   💡 %s\\n\", i+1, p.Observation, p.Evidence, p.Suggestion)"
+        }
+      ]
+    },
+    {
+      "unicode": "🚁",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/battlereport/battlereport.go",
+          "line": 28,
+          "context": "// \"37🚁 Bomber. 14💥 Destroyer.\" Units with a zero count are omitted."
+        }
+      ]
+    },
+    {
+      "unicode": "🆕",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/devconsole/prompt.go",
+          "line": 208,
+          "context": "fmt.Fprintf(&b, \"🆕 New players: %s\\n\\n\", rec.NewPlayerNarrative)"
+        }
+      ]
+    },
+    {
+      "unicode": "🚧",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/econadvisor/prompt.go",
+          "line": 213,
+          "context": "fmt.Fprintf(&b, \"🚧 Bottlenecks: %s\\n\", rec.Bottlenecks)"
+        }
+      ]
+    },
+    {
+      "unicode": "🔭",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/fleetcommander/prompt.go",
+          "line": 214,
+          "context": "string(ActionScout):     \"🔭\","
+        }
+      ]
+    },
+    {
+      "unicode": "🌌",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/galaxyadvisor/prompt.go",
+          "line": 179,
+          "context": "b.WriteString(\"🌌 AI DYNAMIC GALAXY ADVISOR\\n\\n\")"
+        }
+      ]
+    },
+    {
+      "unicode": "⬆️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/npcintel/prompt.go",
+          "line": 222,
+          "context": "icon = \"⬆️\""
+        }
+      ]
+    },
+    {
+      "unicode": "⬇️",
+      "occurrences": 1,
+      "examples": [
+        {
+          "path": "internal/game/npcintel/prompt.go",
+          "line": 224,
+          "context": "icon = \"⬇️\""
+        }
+      ]
+    }
+  ]
+}
