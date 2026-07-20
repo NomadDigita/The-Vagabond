@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/worldintel"
 	"gopkg.in/telebot.v3"
 )
 
@@ -57,9 +58,10 @@ func (h *ExplorationHandler) HandleExplorePanel(c telebot.Context) error {
 	}
 
 	var campID, campRegion string
+	var scouts int
 	err := h.DB.QueryRowContext(ctx,
-		"SELECT e.id, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.user_id = $1", sender.ID).
-		Scan(&campID, &campRegion)
+		"SELECT e.id, c.region, COALESCE(w.scouts, 0) FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id LEFT JOIN workshop_inventory w ON w.encampment_id = e.id WHERE e.user_id = $1", sender.ID).
+		Scan(&campID, &campRegion, &scouts)
 	if err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
@@ -109,8 +111,10 @@ func (h *ExplorationHandler) HandleExplorePanel(c telebot.Context) error {
 			"🧭 WORLD EXPLORATION: %s SECTOR\n"+
 			"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\n"+
 			"Dispatch an expedition to an undiscovered site before a rival\n"+
-			"outpost claims it first. Cost: %.0f Rations, %.0f Metal.\n\n",
+			"outpost claims it first. Cost: %.0f Rations, %.0f Metal.\n"+
+			"Recon capability: %d Scout Walker(s) | New-contact chance: %.0f%%.\n\n",
 		campRegion, explorationDispatchRationsCost, explorationDispatchMetalCost,
+		scouts, worldintel.ExplorationDiscoveryChance(scouts)*100,
 	)
 
 	selector := &telebot.ReplyMarkup{}

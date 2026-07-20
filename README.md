@@ -51,12 +51,17 @@ exists" has grown a lot past the original engine. As of this writing:
   control so a player can't accidentally draft away their entire home
   defense.
 - **Battle Logistics**: raids require a real war party (20+ combat units,
-  transport support, and travel units for walking forces), consume scaled
+  staged transport support, and travel units for walking forces), consume scaled
   launch supplies, and drain carried rations, ammunition, electricity, and
   logistics equipment in the field; running dry triggers warnings and can
   force auto-retreat before reaching the target. Active agents now consume
   2.0 base Electricity per tick before upgrades, making automation a real
   operational expense.
+- **Discovery-gated world intelligence**: outposts and the Rogue Drone Nest
+  are hidden until an exploration expedition or route sighting establishes
+  contact. Scout Walkers improve discovery odds; target selection and launch
+  checks enforce the same rule server-side. Incoming-raid warnings are issued
+  once at a defender's radar-derived proximity threshold, not at launch.
 - **Bulk unit selection**: a cycling `x1 → x10 → x100 → MAX` step
   control on the raid draft board, plus `/add`, `/remove`, and bulk
   `/deconstruct` text commands, so building a 500-Soldier army doesn't
@@ -96,6 +101,7 @@ workstreams that deliberately don't touch the same code:
 |---|---|---|
 | **SpaceHunt gameplay** (combat, economy, heroes, world, UX) | Everything under "What's actually in the game" above | [`SPACEHUNT_PHASE7_LOG.md`](./SPACEHUNT_PHASE7_LOG.md) |
 | **AI systems** (`internal/ai/`, Governor, Fleet Commander, Economy Advisor) | Provider-agnostic AI infra + AI-driven gameplay features built on it | [`PROJECT_MASTER_PLAN.md`](./PROJECT_MASTER_PLAN.md) |
+| **Living-world continuation** (discovery, routes, encounters, camps, AI civilizations) | The MMO extension of the gameplay workstream | [`MMO_WORLD_EVOLUTION_PLAN.md`](./MMO_WORLD_EVOLUTION_PLAN.md) |
 
 If you're picking this repo up cold — human or AI — read whichever of
 those two matches what you're about to touch **before** writing code.

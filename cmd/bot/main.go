@@ -259,6 +259,14 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS bombers_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS battlecruisers_mobilized INT DEFAULT 0;`,
 		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS deathstars_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS ships_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS jets_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS nukes_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS haulers_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS tankers_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS cargo_mk1_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS cargo_mk2_mobilized INT DEFAULT 0;`,
+		`ALTER TABLE raid_forces ADD COLUMN IF NOT EXISTS cargo_mk3_mobilized INT DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS tax_law (
 			id INT PRIMARY KEY DEFAULT 1,
@@ -524,6 +532,45 @@ func executeStartupMigrations(db *sql.DB) {
 			resolve_time TIMESTAMP WITH TIME ZONE NOT NULL
 		);`,
 
+		// MMO living-world Phase 2: discoveries are directional and are
+		// the authoritative gate for target visibility and raid launch.
+		// target_key supports non-encampment world targets while AI
+		// civilizations are migrated onto persistent settlements.
+		`CREATE TABLE IF NOT EXISTS encampment_discoveries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			observer_encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			target_encampment_id UUID REFERENCES encampments(id) ON DELETE CASCADE,
+			target_key VARCHAR(100),
+			discovery_method VARCHAR(50) NOT NULL,
+			discovered_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_seen_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT encampment_discoveries_one_target CHECK (
+				(target_encampment_id IS NOT NULL AND target_key IS NULL)
+				OR (target_encampment_id IS NULL AND target_key IS NOT NULL)
+			)
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_encampment_discoveries_encampment_target
+			ON encampment_discoveries(observer_encampment_id, target_encampment_id)
+			WHERE target_encampment_id IS NOT NULL;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_encampment_discoveries_system_target
+			ON encampment_discoveries(observer_encampment_id, target_key)
+			WHERE target_key IS NOT NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_encampment_discoveries_observer_recent
+			ON encampment_discoveries(observer_encampment_id, last_seen_at DESC);`,
+
+		// Route snapshots make proximity-based radar notices deterministic
+		// and prepare active campaigns for the later road-event phases.
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS origin_x INT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS origin_y INT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS destination_x INT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS destination_y INT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS origin_region VARCHAR(50);`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS destination_region VARCHAR(50);`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS radar_alert_sent_at TIMESTAMP WITH TIME ZONE;`,
+		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending
+			ON raids(resolve_time)
+			WHERE state = 'marching' AND defender_id IS NOT NULL AND radar_alert_sent_at IS NULL;`,
+
 		// Phase 7 (item 11): Diplomacy. Mirrors clan_wars's clan_a/clan_b
 		// shape, but for peaceful pacts instead of conflicts. A pact only
 		// takes effect (blocks raids - see combat.go's launch check) once
@@ -556,6 +603,11 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS bombers INT DEFAULT 0;`,
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS battlecruisers INT DEFAULT 0;`,
 		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS deathstars INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS haulers INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS tankers INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS cargo_mk1 INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS cargo_mk2 INT DEFAULT 0;`,
+		`ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS cargo_mk3 INT DEFAULT 0;`,
 
 		`CREATE OR REPLACE FUNCTION notify_realtime_event() 
 		RETURNS trigger AS $$

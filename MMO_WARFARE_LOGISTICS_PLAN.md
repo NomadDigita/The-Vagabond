@@ -1,6 +1,7 @@
 # MMO Warfare, Exploration, and Logistics Plan
 
-Status: Phase 1 implementation in progress (2026-07-20).
+Status: Phases 1-2 complete; road encounters, camps/convoys, and AI
+civilizations remain pending (2026-07-20).
 
 ## Current Architecture Baseline
 
@@ -99,3 +100,15 @@ Milestones:
 - Active expedition attrition now drains carried electricity and logistics supplies in addition to rations and ammunition; threshold notifications and critical forced retreat cover both food/ammo and power/logistics failures.
 - Raid victories now loot multiple resources: Scrap, Metal, rare Crystal, Rations, Electricity, Hydrogen, Neuro Cores, and Dollars. Crystal and Neuro Cores use lower loot multipliers to preserve rarity and value.
 - Agent electricity upkeep increased from 0.2 to 2.0 base Electricity per tick before research/mutation reductions. Design opinion: 0.2 was too small for MMO logistics because automation should feel powerful but operationally expensive.
+- Phase 1 transport rule hardened: Haulers, Tankers, and Cargo Ships are now
+  staged in the actual campaign draft and stored on `raid_forces`; merely
+  owning one at home no longer satisfies the launch rule. Return settlement
+  restores all staged support units, including previously omitted ships, jets,
+  nukes, and logistics vehicles.
+- Phase 2 discovery gate complete: exploration records directional first
+  contact with outposts or the Rogue Nest, Scout Walkers increase the contact
+  chance, route proximity creates reciprocal discoveries, and the target
+  matrix plus both launch callbacks enforce discovery server-side.
+- Incoming raid warnings are now capability- and proximity-based. They queue
+  once after a force crosses the defender's radar threshold instead of
+  revealing a raid at departure or sending a duplicate alert every tick.
