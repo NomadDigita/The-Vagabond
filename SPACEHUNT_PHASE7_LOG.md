@@ -913,5 +913,34 @@ counter-espionage - boosting the odds an Interceptor Drone shoots down
 an incoming spy satellite (was NOT wired in until the fix just above).
 It is not built for navigating/exploring the world map at all.
 
+---
+
+## 7. MMO living-world continuation (2026-07-20)
+
+The original Phase 7 brief remains closed. The ongoing MMO continuation is
+tracked in `MMO_WORLD_EVOLUTION_PLAN.md`, which is now the source of truth for
+the phases after this log.
+
+Completed in the first continuation increment:
+
+- Added directional, persistent discovery records and made the Tactical Target
+  Matrix discovery-gated. Exploration can discover rival outposts or the Rogue
+  Drone Nest; Scout Walkers now improve that chance. Both draft creation and
+  final launch validate discovery, so callback IDs do not bypass visibility.
+- Added immutable route snapshots and a route-sighting tick. Passing close to
+  a previously unknown outpost creates reciprocal discovery and notifications.
+  This is knowledge only; response-window road encounters are deliberately
+  left for the next phase rather than simulated with an unsafe instant fight.
+- Replaced immediate/per-tick incoming-raid alerts with one queued
+  radar-proximity warning derived from the defender's Radar, Scouts, and
+  Observers. Stealth reduces the warning range but is not perfect invisibility.
+- Closed a logistics consistency bug: transport support is now staged in the
+  actual campaign and all tracked mobile/support units are restored by normal
+  return settlement. Older code could deduct ships, jets, nukes, or transport
+  vehicles at launch without crediting them back.
+
+Verification for this increment: `gofmt`, `go test -run=^$` for the changed
+tick and handler packages, and `go test ./internal/game/worldintel` all pass.
+
 Verified via the same full `go build ./...` / `go vet ./...` pass used
 throughout this log.

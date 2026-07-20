@@ -80,7 +80,7 @@ var Units = []Unit{
 		AttackRating:    2.0,
 		Cost:            map[string]float64{"metal": 70.0},
 		DeconstructRate: 0.40,
-		Flavor:          "🔍 Cheap, fast recon walker. Extends Radar range and shortens enemy incoming-raid warning delay when garrisoned.",
+		Flavor:          "🔍 Cheap, fast recon walker. Extends home radar warning range and raises the chance that a completed World Exploration expedition discovers a new outpost or AI contact.",
 	},
 	{
 		Key:             "battlecruiser",

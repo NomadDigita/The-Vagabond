@@ -18,6 +18,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
+	"github.com/NomadDigita/The-Vagabond/internal/game/worldintel"
 )
 
 type Engine struct {
@@ -256,7 +257,7 @@ func (e *Engine) spawnExplorationSites(ctx context.Context, tx *sql.Tx) error {
 // claimed for every expedition whose resolve_time has passed.
 func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT d.id, d.site_id, d.encampment_id, d.user_id, s.site_name, s.reward_type, s.reward_amount
+		SELECT d.id, d.site_id, d.encampment_id, d.user_id, s.site_name, s.reward_type, s.reward_amount, s.continent
 		FROM exploration_dispatches d
 		JOIN exploration_sites s ON s.id = d.site_id
 		WHERE d.resolve_time <= CURRENT_TIMESTAMP`)
@@ -272,11 +273,12 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 		siteName     string
 		rewardType   string
 		rewardAmount float64
+		continent    string
 	}
 	var dispatches []resolvedDispatch
 	for rows.Next() {
 		var d resolvedDispatch
-		if err := rows.Scan(&d.id, &d.siteID, &d.encampmentID, &d.userID, &d.siteName, &d.rewardType, &d.rewardAmount); err == nil {
+		if err := rows.Scan(&d.id, &d.siteID, &d.encampmentID, &d.userID, &d.siteName, &d.rewardType, &d.rewardAmount, &d.continent); err == nil {
 			dispatches = append(dispatches, d)
 		}
 	}
@@ -298,10 +300,76 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 		_, _ = tx.ExecContext(ctx, "UPDATE exploration_sites SET claimed_by = $1, claimed_at = CURRENT_TIMESTAMP WHERE id = $2", d.encampmentID, d.siteID)
 		_, _ = tx.ExecContext(ctx, "DELETE FROM exploration_dispatches WHERE id = $1", d.id)
 
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", d.userID,
-			fmt.Sprintf("🧭✅ EXPEDITION SUCCESSFUL: Your outpost has claimed %s! +%.0f %s credited to your reserves.", d.siteName, d.rewardAmount, d.rewardType))
+		discoveryNote, discoveryErr := e.resolveExplorationDiscovery(ctx, tx, d.encampmentID, d.continent)
+		if discoveryErr != nil {
+			log.Printf("Failed resolving world discovery for exploration dispatch %s: %v", d.id, discoveryErr)
+		}
+
+		message := fmt.Sprintf("🧭✅ EXPEDITION SUCCESSFUL: Your outpost has claimed %s! +%.0f %s credited to your reserves.", d.siteName, d.rewardAmount, d.rewardType)
+		if discoveryNote != "" {
+			message += "\n\n" + discoveryNote
+		}
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", d.userID, message)
 	}
 	return nil
+}
+
+// resolveExplorationDiscovery turns a completed site expedition into a
+// possible first-contact event. It deliberately selects only a target the
+// explorer does not already know, so retrying a tick cannot manufacture
+// duplicate notifications or reset intelligence timestamps.
+func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, observerCampID string, continent string) (string, error) {
+	var scouts int
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(scouts, 0) FROM workshop_inventory WHERE encampment_id = $1", observerCampID).Scan(&scouts); err != nil && err != sql.ErrNoRows {
+		return "", fmt.Errorf("reading exploration scouts: %w", err)
+	}
+	if rand.Float64() >= worldintel.ExplorationDiscoveryChance(scouts) {
+		return "", nil
+	}
+
+	var targetCampID, targetName, targetOwner string
+	err := tx.QueryRowContext(ctx, `
+		SELECT e.id, e.name, u.first_name
+		FROM encampments e
+		JOIN users u ON u.telegram_id = e.user_id
+		JOIN coordinates c ON c.id = e.coordinate_id
+		WHERE e.id <> $1
+		  AND c.region = $2
+		  AND NOT EXISTS (
+				SELECT 1 FROM encampment_discoveries d
+				WHERE d.observer_encampment_id = $1 AND d.target_encampment_id = e.id
+			)
+		ORDER BY c.danger_level ASC, e.established_at ASC
+		LIMIT 1`, observerCampID, continent).Scan(&targetCampID, &targetName, &targetOwner)
+	if err == nil {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method)
+			VALUES ($1, $2, 'exploration') ON CONFLICT DO NOTHING`, observerCampID, targetCampID)
+		if err != nil {
+			return "", fmt.Errorf("recording discovered encampment: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected > 0 {
+			return fmt.Sprintf("📡 FIRST CONTACT: Your survey team discovered Outpost [%s], commanded by %s. It is now available in the Tactical Target Matrix.", targetName, targetOwner), nil
+		}
+		return "", nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("selecting undiscovered encampment: %w", err)
+	}
+
+	// A new world can have no other player outpost in its sector. In that
+	// case an expedition may instead triangulate the existing Rogue Nest;
+	// it is still hidden until this explicit discovery occurs.
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO encampment_discoveries (observer_encampment_id, target_key, discovery_method)
+		VALUES ($1, $2, 'exploration') ON CONFLICT DO NOTHING`, observerCampID, worldintel.RogueDroneNestKey)
+	if err != nil {
+		return "", fmt.Errorf("recording discovered AI contact: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		return "📡 FIRST CONTACT: Your survey team triangulated a Rogue Drone Nest. Recon and skirmish controls are now available in the Tactical Target Matrix.", nil
+	}
+	return "", nil
 }
 
 // autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
@@ -724,6 +792,7 @@ func (e *Engine) ProcessTick() {
 		{"resources", func(ctx context.Context, tx *sql.Tx) error { return e.resourceProcessor.RunResourcePass(ctx, tx) }},
 		{"agents", func(ctx context.Context, tx *sql.Tx) error { return e.agentProcessor.RunAgentPass(ctx, tx) }},
 		{"logistics_consumption", e.applyActiveLogisticsConsumption},
+		{"route_discovery", e.discoverRouteContacts},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},
@@ -1454,39 +1523,204 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 	return nil
 }
 
-func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
-	queryAllMarching := `
-		SELECT r.id, r.resolve_time, ea.name, COALESCE(ed.user_id, 0), COALESCE(ed.name, 'Rogue Drone Nest'), rf.route_type
+// discoverRouteContacts reveals nearby outposts as an expedition passes them.
+// This phase establishes knowledge only; Phase 4 will layer response-window
+// road encounters and field combat on the same route snapshots.
+func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.attacker_id, ea.user_id, COALESCE(r.defender_id::text, ''), r.state,
+		       r.resolve_time, COALESCE(r.base_march_minutes, 15.0),
+		       r.origin_x, r.origin_y, r.destination_x, r.destination_y,
+		       r.origin_region, r.destination_region
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
-		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		JOIN raid_forces rf ON rf.raid_id = r.id
-		WHERE r.state = 'marching'`
+		WHERE r.state IN ('marching', 'returning')
+		  AND r.origin_x IS NOT NULL AND r.origin_y IS NOT NULL
+		  AND r.destination_x IS NOT NULL AND r.destination_y IS NOT NULL
+		  AND r.origin_region IS NOT NULL AND r.destination_region IS NOT NULL
+		  AND r.resolve_time > CURRENT_TIMESTAMP`)
+	if err != nil {
+		return fmt.Errorf("querying route discovery candidates: %w", err)
+	}
+	defer rows.Close()
 
-	rowsMarch, errMarch := tx.QueryContext(ctx, queryAllMarching)
-	if errMarch == nil {
-		defer rowsMarch.Close()
-		for rowsMarch.Next() {
-			var rID string
-			var resTime time.Time
-			var attName, defName, routeType string
-			var defUserID int64
-			if err := rowsMarch.Scan(&rID, &resTime, &attName, &defUserID, &defName, &routeType); err == nil {
-				if routeType != "stealth" && resTime.UTC().After(time.Now().UTC()) {
-					timeLeft := int(time.Until(resTime.UTC()).Seconds())
-					if timeLeft > 0 && defUserID != 0 {
-						proximityAlert := fmt.Sprintf(
-							"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
-								"Hostile Force: Outpost [%s]\n"+
-								"Threat Distance Status: %ds remaining until direct impact.",
-							attName, timeLeft,
-						)
-						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defUserID, proximityAlert)
-					}
-				}
-			}
+	type movingRaid struct {
+		attackerID        string
+		attackerUserID    int64
+		defenderID        string
+		state             string
+		resolveTime       time.Time
+		baseMinutes       float64
+		originX, originY  int
+		destinationX      int
+		destinationY      int
+		originRegion      string
+		destinationRegion string
+	}
+	var raids []movingRaid
+	for rows.Next() {
+		var raid movingRaid
+		if err := rows.Scan(&raid.attackerID, &raid.attackerUserID, &raid.defenderID, &raid.state,
+			&raid.resolveTime, &raid.baseMinutes, &raid.originX, &raid.originY,
+			&raid.destinationX, &raid.destinationY, &raid.originRegion, &raid.destinationRegion); err != nil {
+			return fmt.Errorf("scanning route discovery candidate: %w", err)
 		}
-		rowsMarch.Close()
+		raids = append(raids, raid)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating route discovery candidates: %w", err)
+	}
+
+	for _, raid := range raids {
+		if raid.baseMinutes <= 0 {
+			continue
+		}
+		remainingFraction := math.Min(1, math.Max(0, time.Until(raid.resolveTime.UTC()).Minutes()/raid.baseMinutes))
+		progress := 1 - remainingFraction
+		if raid.state == "returning" {
+			progress = remainingFraction
+		}
+		currentX := int(math.Round(float64(raid.originX) + float64(raid.destinationX-raid.originX)*progress))
+		currentY := int(math.Round(float64(raid.originY) + float64(raid.destinationY-raid.originY)*progress))
+		currentRegion := raid.originRegion
+		if progress >= 0.5 {
+			currentRegion = raid.destinationRegion
+		}
+
+		var contactID, contactName string
+		var contactUserID int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT e.id, e.name, e.user_id
+			FROM encampments e
+			JOIN coordinates c ON c.id = e.coordinate_id
+			WHERE e.id <> $1
+			  AND ($2 = '' OR e.id::text <> $2)
+			  AND c.region = $3
+			  AND ABS(c.x - $4) + ABS(c.y - $5) <= 1
+			  AND NOT EXISTS (
+				SELECT 1 FROM encampment_discoveries d
+				WHERE d.observer_encampment_id = $1 AND d.target_encampment_id = e.id
+			)
+			ORDER BY ABS(c.x - $4) + ABS(c.y - $5), e.established_at
+			LIMIT 1`, raid.attackerID, raid.defenderID, currentRegion, currentX, currentY).Scan(&contactID, &contactName, &contactUserID)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("locating route contact: %w", err)
+		}
+
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method)
+			VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, raid.attackerID, contactID)
+		if err != nil {
+			return fmt.Errorf("recording outbound route contact: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			continue
+		}
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", raid.attackerUserID,
+			fmt.Sprintf("📡 ROUTE CONTACT: Your expedition passed close enough to discover Outpost [%s]. It is now visible in the Tactical Target Matrix.", contactName))
+
+		// Being seen is reciprocal knowledge. The contact has not been
+		// attacked yet, but knows a foreign force crossed its road.
+		result, err = tx.ExecContext(ctx, `
+			INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method)
+			VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, contactID, raid.attackerID)
+		if err != nil {
+			return fmt.Errorf("recording reciprocal route contact: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected == 1 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", contactUserID,
+				"📡 ROUTE CONTACT: Your sensors detected a foreign expedition moving near your outpost. Its commander has now discovered your location.")
+		}
+	}
+	return nil
+}
+
+// emitRaidRadarWarnings issues one proximity warning, not a warning per game
+// tick. The threshold is evaluated against the defender's actual radar and
+// garrisoned recon capability, so attackers are not announced at launch.
+func (e *Engine) emitRaidRadarWarnings(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id, r.resolve_time, COALESCE(r.base_march_minutes, 15.0),
+		       ea.name, ed.user_id, rf.route_type,
+		       COALESCE((SELECT m.level FROM modules m WHERE m.encampment_id = ed.id AND m.type = 'radar'), 0),
+		       COALESCE((SELECT wi.scouts FROM workshop_inventory wi WHERE wi.encampment_id = ed.id), 0),
+		       COALESCE((SELECT wi.observers FROM workshop_inventory wi WHERE wi.encampment_id = ed.id), 0)
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		JOIN encampments ed ON ed.id = r.defender_id
+		JOIN raid_forces rf ON rf.raid_id = r.id
+		WHERE r.state = 'marching'
+		  AND r.radar_alert_sent_at IS NULL
+		  AND r.resolve_time > CURRENT_TIMESTAMP`)
+	if err != nil {
+		return fmt.Errorf("querying pending raid radar warnings: %w", err)
+	}
+	defer rows.Close()
+
+	type pendingRadarAlert struct {
+		raidID       string
+		resolveTime  time.Time
+		baseMinutes  float64
+		attackerName string
+		defenderID   int64
+		routeType    string
+		radarLevel   int
+		scouts       int
+		observers    int
+	}
+	var alerts []pendingRadarAlert
+	for rows.Next() {
+		var alert pendingRadarAlert
+		if err := rows.Scan(&alert.raidID, &alert.resolveTime, &alert.baseMinutes,
+			&alert.attackerName, &alert.defenderID, &alert.routeType,
+			&alert.radarLevel, &alert.scouts, &alert.observers); err != nil {
+			return fmt.Errorf("scanning pending raid radar warning: %w", err)
+		}
+		alerts = append(alerts, alert)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating pending raid radar warnings: %w", err)
+	}
+
+	for _, alert := range alerts {
+		remaining := time.Until(alert.resolveTime.UTC()).Minutes()
+		warningAt := worldintel.RadarWarningMinutes(alert.baseMinutes, alert.radarLevel, alert.scouts, alert.observers, alert.routeType)
+		if warningAt <= 0 || remaining > warningAt {
+			continue
+		}
+
+		// The conditional update is the idempotency guard: even if multiple
+		// bot processes overlap, only the process that marks the row sends
+		// the defender notification.
+		result, err := tx.ExecContext(ctx, `
+			UPDATE raids SET radar_alert_sent_at = CURRENT_TIMESTAMP
+			WHERE id = $1 AND radar_alert_sent_at IS NULL`, alert.raidID)
+		if err != nil {
+			return fmt.Errorf("marking raid radar warning sent: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			continue
+		}
+
+		proximityAlert := fmt.Sprintf(
+			"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
+				"Hostile Force: Outpost [%s]\n"+
+				"Estimated impact: %d minute(s). Your radar network detected it at the current warning range.",
+			alert.attackerName, int(math.Ceil(remaining)),
+		)
+		if _, err := tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", alert.defenderID, proximityAlert); err != nil {
+			return fmt.Errorf("queueing raid radar warning: %w", err)
+		}
+	}
+	return nil
+}
+
+func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
+	if err := e.emitRaidRadarWarnings(ctx, tx); err != nil {
+		return err
 	}
 
 	query := `
@@ -1567,10 +1801,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if r.state == "returning" {
-			var soldiersMob, mechsMob, destroyersMob, bombersMob, bcMob, dsMob, liberatorsMob, wraithsMob int
-			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob, &liberatorsMob, &wraithsMob)
+			var soldiersMob, mechsMob, buggiesMob, shipsMob, jetsMob, nukesMob, destroyersMob, bombersMob, bcMob, dsMob, liberatorsMob, wraithsMob int
+			var haulersMob, tankersMob, cargoMk1Mob, cargoMk2Mob, cargoMk3Mob int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(ships_mobilized, 0), COALESCE(jets_mobilized, 0), COALESCE(nukes_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0), COALESCE(haulers_mobilized, 0), COALESCE(tankers_mobilized, 0), COALESCE(cargo_mk1_mobilized, 0), COALESCE(cargo_mk2_mobilized, 0), COALESCE(cargo_mk3_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &buggiesMob, &shipsMob, &jetsMob, &nukesMob, &destroyersMob, &bombersMob, &bcMob, &dsMob, &liberatorsMob, &wraithsMob, &haulersMob, &tankersMob, &cargoMk1Mob, &cargoMk2Mob, &cargoMk3Mob)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7, liberators = liberators + $8, wraiths = wraiths + $9 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob, liberatorsMob, wraithsMob)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, buggies = buggies + $3, ships = ships + $4, jets = jets + $5, nukes = nukes + $6, destroyers = destroyers + $7, bombers = bombers + $8, battlecruisers = battlecruisers + $9, deathstars = deathstars + $10, liberators = liberators + $11, wraiths = wraiths + $12, haulers = haulers + $13, tankers = tankers + $14, cargo_mk1 = cargo_mk1 + $15, cargo_mk2 = cargo_mk2 + $16, cargo_mk3 = cargo_mk3 + $17 WHERE encampment_id = $18", soldiersMob, mechsMob, buggiesMob, shipsMob, jetsMob, nukesMob, destroyersMob, bombersMob, bcMob, dsMob, liberatorsMob, wraithsMob, haulersMob, tankersMob, cargoMk1Mob, cargoMk2Mob, cargoMk3Mob, r.attackerID)
 			var curScrap, curMetal, curCrystal, curRations, curElectricity, curHydrogen, curNeuroCores, curDollars float64
 			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, rations, electricity, hydrogen, neuro_cores, dollars FROM resources WHERE encampment_id = $1", r.attackerID).Scan(&curScrap, &curMetal, &curCrystal, &curRations, &curElectricity, &curHydrogen, &curNeuroCores, &curDollars)
 			attackerCap := storagecap.CapFor(ctx, tx, r.attackerID)
