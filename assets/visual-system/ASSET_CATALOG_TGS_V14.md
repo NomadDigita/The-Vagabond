@@ -51,6 +51,9 @@ real game object or state, not a recolored generic badge.
 | `refresh` | Refresh analysis | Rotating cycle arrow | Full clockwise refresh cycle | `animated/refresh_tgs_v14/refresh_tgs_v14.tgs` |
 | `search` | Search / clan discovery | Magnifying lens and gold handle | Lens breathes for a focused scan | `animated/search_tgs_v14/search_tgs_v14.tgs` |
 | `arena` | Combat Arena | Arena ring, structural pillar, and signal | Arena beacon pulses above the fight ring | `animated/arena_tgs_v14/arena_tgs_v14.tgs` |
+| `factory` | Heavy Factory | Industrial assembly hall and live conveyor | Cyan assembly spark runs the belt | `animated/factory_tgs_v14/factory_tgs_v14.tgs` |
+| `automation` | Automation Agent | Armoured AI head and active scan visor | Scanner traverses the machine core | `animated/automation_tgs_v14/automation_tgs_v14.tgs` |
+| `diplomacy` | Diplomacy | Diplomatic seal and envoy silhouette | Envoy lifts through the negotiating seal | `animated/diplomacy_tgs_v14/diplomacy_tgs_v14.tgs` |
 
 ## Production rule
 

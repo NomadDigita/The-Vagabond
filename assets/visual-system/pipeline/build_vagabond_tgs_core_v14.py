@@ -540,6 +540,34 @@ def arena_icon():
     layers.append(layer(4,"arena signal",spark))
     return layers
 
+def factory_icon():
+    layers=base_layers(1)
+    shell=poly([[-175,150],[-175,-45],[-95,-45],[-95,-145],[-42,-145],[-42,-45],[42,-45],[42,-105],[100,-105],[100,-45],[175,-45],[175,150]],OBSIDIAN,GOLD,10)
+    layers.append(layer(2,"factory assembly hall",shell))
+    belt=[path([[-135,88],[135,88]],False),stroke(STEEL,17),tr()]
+    layers.append(layer(3,"factory conveyor",belt))
+    spark=[star(30),fill(CYAN),tr(position=key([(0,[-105,88]),(60,[105,88]),(120,[-105,88])]))]
+    layers.append(layer(4,"factory assembly spark",spark))
+    return layers
+
+def automation_icon():
+    layers=base_layers(1)
+    head=poly([[-125,-88],[-65,-145],[65,-145],[125,-88],[125,110],[65,150],[-65,150],[-125,110]],OBSIDIAN,STEEL,11)
+    layers.append(layer(2,"automation core",head))
+    visor=poly([[-90,-35],[90,-35],[58,28],[-58,28]],VIOLET,CYAN,7)
+    layers.append(layer(3,"automation visor",visor))
+    scan=[path([[-72,0],[72,0]],False),stroke(WHITE,8),tr(position=key([(0,[0,-22]),(60,[0,30]),(120,[0,-22])]))]
+    layers.append(layer(4,"automation scan",scan))
+    return layers
+
+def diplomacy_icon():
+    layers=base_layers(1)
+    seal=ellipse((300,300),OBSIDIAN,GOLD,11)
+    layers.append(layer(2,"diplomacy seal",seal))
+    dove=poly([[-132,-25],[-20,-90],[128,-38],[45,18],[105,88],[-12,55],[-105,112],[-68,22]],LAVENDER,WHITE,7,transform=tr(rotation=key([(0,-5),(60,5),(120,-5)])))
+    layers.append(layer(3,"diplomacy envoy",dove))
+    return layers
+
 
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
@@ -550,7 +578,7 @@ def write(key, layers):
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon,"warlord":warlord_icon,"world":world_icon,"cannon":cannon_icon,"silo":silo_icon,"alliance":alliance_icon,"rebellion":rebellion_icon,"jet":jet_icon,"commander":commander_icon,"exploration":exploration_icon,"radio":radio_icon,"terminal":terminal_icon,"refresh":refresh_icon,"search":search_icon,"arena":arena_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon,"warlord":warlord_icon,"world":world_icon,"cannon":cannon_icon,"silo":silo_icon,"alliance":alliance_icon,"rebellion":rebellion_icon,"jet":jet_icon,"commander":commander_icon,"exploration":exploration_icon,"radio":radio_icon,"terminal":terminal_icon,"refresh":refresh_icon,"search":search_icon,"arena":arena_icon,"factory":factory_icon,"automation":automation_icon,"diplomacy":diplomacy_icon}.items():
         write(key,builder())
 
 
