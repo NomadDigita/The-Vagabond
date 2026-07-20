@@ -711,7 +711,18 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var radarLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'radar'", myCampID).Scan(&radarLvl)
 
-	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10 + float64(radarLvl)*0.02
+	// BUGFIX: the Observer unit's own flavor text promises it "boosts
+	// counter-espionage odds when stationed at home" (internal/game/content/units.go),
+	// but this formula never referenced observers at all - the unit's
+	// stated purpose was simply never wired in. 3% per Observer, capped
+	// at 30%, mirrors the same shape as its (separate, smaller) raid
+	// early-warning bonus elsewhere, just weighted higher since
+	// counter-espionage is this unit's actual primary purpose.
+	var observers int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(observers, 0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&observers)
+	observerBonus := math.Min(float64(observers)*0.03, 0.30)
+
+	interceptChance := 0.50 + float64(defenderTechLvl-attackerTechLvl)*0.10 + float64(radarLvl)*0.02 + observerBonus
 
 	if resolved {
 		interceptChance -= 0.20

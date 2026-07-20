@@ -829,3 +829,89 @@ advisor packages (a different workstream's territory, per the
 established hands-off convention). A dedicated follow-up pass on those
 would be reasonable if more issues are suspected there.
 
+## 6. Follow-up from direct player reports (post-audit)
+
+Asiwaju reported two more issues after using the game with the section
+5 fixes live: two dead buttons, and "no real battle" against the AI
+Rogue Drone Nest specifically. Both confirmed and fixed.
+
+### Two more dead buttons: "Warehouse Stocks" / "Survival Manual"
+
+Same bug class as the "Combat Arena" dead button from the item-3
+continuation commit - `onboarding.go`'s returning-player dashboard
+panel builds two inline buttons (`view_warehouse`, `view_manual`) that
+had **zero registered handler anywhere** in the codebase. Tapping them
+did nothing; telebot silently drops a callback with no matching
+`bot.Handle`. Fixed by wiring them to two panels that already existed
+and already fit perfectly - `economy.go`'s `HandleWarehouseReserves`
+and `onboarding.go`'s own `HandleHelp` - using the same "registered as
+both a command and a callback, no `c.Respond` needed" pattern
+`browse_clans` already uses elsewhere.
+
+### "No real battle" against the AI Rogue Drone Nest - investigated, root cause found and fixed
+
+This needed real investigation since the underlying combat math turned
+out to already be genuinely deep: `content.RogueNestComposition`
+scales a full Defense Grid (5 individually-typed turrets), Guardians,
+Observers, an Integrity Tech level, Nuclear Shields, and - at level 20+
+- a Warlord with a real hero superpower, all resolved through the
+*exact same* combat code path as a real player defender (confirmed by
+reading `internal/engine/tick/engine.go`'s battle resolution line by
+line). The recon report (`HandleReconAICallback`) already displays all
+of this in full detail before the player commits.
+
+The actual root cause: **the battle *outcome* report never mentioned
+any of it.** `internal/game/battlereport.Round` only ever rendered raw
+unit composition (Soldiers/Mechs/Drones/Jets) and losses - Defense
+Grid, Guardians, Observers, Shields, and the Warlord's superpower all
+silently affected the numbers behind the scenes but were completely
+invisible in the message the player actually reads after the fight.
+Recon promises a fortified nest with a named Warlord; the battle report
+reads like a bare skirmish with no trace either was ever there. That
+gap - real depth, zero visibility - is almost certainly what read as
+"no real battle."
+
+Fixed: added `AttackerNotes`/`DefenderNotes []string` to
+`battlereport.Round`, rendered right after each side's composition
+line. `engine.go`'s report construction now populates these from the
+exact same `defenderTurretLevels`/`defenderGuardians`/
+`defenderObservers`/`defenderShields`/`defenderHeroSuperpower`/
+`attackerHeroSuperpower` values already driving the actual math, so a
+battle report now reads like "Defense Grid: 4 turret level(s) engaged.
+2 Guardian(s), 3 Observer(s) dug in. Warlord's Superpower: Kinetic
+Barrier." instead of silence. This applies equally to real PvP raids
+(same gap - a defender's Defense Grid/Guardians/hero superpower were
+just as invisible in a PvP battle report as an AI one), not just AI
+Nest fights.
+
+### Related bug found while investigating: Observer's counter-espionage bonus was never wired in
+
+While tracing every `defenderObservers`/`observerBonus` reference to
+confirm the above, found that the Observer unit's own flavor text
+(`internal/game/content/units.go`) explicitly promises it "boosts
+counter-espionage odds when stationed at home" - but
+`HandleLaunchInterceptor`'s intercept-chance formula (the actual
+counter-espionage roll, deciding whether an incoming spy satellite gets
+shot down) never referenced `observers` at all, only tech level and
+Radar module level. The unit's stated primary purpose was simply never
+implemented. Fixed: added an Observer term to the intercept-chance
+formula (3% per Observer, capped at 30% - weighted higher than
+Observer's raid-defense early-warning bonus, since counter-espionage is
+this unit's actual stated purpose, not a secondary effect).
+
+### Answering the Observer question directly
+
+Observer is a garrison-only home-defense unit (`Role: RoleRecon`,
+`Column: observers`) - it never leaves base, and it is a *different*
+system from Phase 7 item 10's World Exploration (`/explore`, dispatch-
+based, uses Rations+Metal, no unit type at all) or from Scanning
+(`Scan Targets`, which uses tech level and coordinates, not Observers).
+Observer's actual job is exactly two things: (1) a small early-warning
+defense-rating bonus if you're raided (already correctly wired,
+`observerBonus` in `engine.go`'s `defenseRatingModifier`), and (2)
+counter-espionage - boosting the odds an Interceptor Drone shoots down
+an incoming spy satellite (was NOT wired in until the fix just above).
+It is not built for navigating/exploring the world map at all.
+
+Verified via the same full `go build ./...` / `go vet ./...` pass used
+throughout this log.

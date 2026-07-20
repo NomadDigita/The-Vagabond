@@ -95,9 +95,22 @@ type Round struct {
 	DefenderLosses []UnitTally
 
 	// Final-round-only fields:
-	Outcome        Outcome
-	LootLines      []string // e.g. []string{"♻️ 396000 Scrap"}
-	LootCollector  string   // who collected the battle debris (winner's name)
+	Outcome       Outcome
+	LootLines     []string // e.g. []string{"♻️ 396000 Scrap"}
+	LootCollector string   // who collected the battle debris (winner's name)
+
+	// Context notes shown right after each side's composition line -
+	// Defense Grid turret levels, Guardians/Observers, Nuclear Shields,
+	// and a Hero/Warlord's active superpower. These already factor into
+	// the actual combat math the tick engine computes (see engine.go's
+	// turretDefenseBonus/guardianBonus/observerBonus/defenderShields),
+	// but before this field existed, none of it ever reached the
+	// player-facing report - recon would show a detailed Defense Grid
+	// and a Warlord, then the actual battle outcome read like a bare
+	// soldiers-vs-soldiers skirmish with no trace of either. Optional:
+	// an empty slice renders nothing extra.
+	AttackerNotes []string
+	DefenderNotes []string
 }
 
 // Render produces the full SpaceHunt-style report text for one round.
@@ -120,6 +133,13 @@ func Render(r Round) string {
 		r.AttackerName, renderLossEmojis(r.AttackerLosses),
 		r.DefenderName, renderLossEmojis(r.DefenderLosses),
 	)
+
+	if len(r.AttackerNotes) > 0 {
+		msg += "\n" + strings.Join(r.AttackerNotes, "\n")
+	}
+	if len(r.DefenderNotes) > 0 {
+		msg += "\n" + strings.Join(r.DefenderNotes, "\n")
+	}
 
 	switch r.Outcome {
 	case OutcomeOngoing:

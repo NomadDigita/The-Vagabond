@@ -1073,6 +1073,14 @@ func main() {
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)
+	// BUGFIX: these two dashboard buttons (onboarding.go's returning-user
+	// panel) had no registered handler at all - tapping them did
+	// nothing, since telebot silently drops a callback with no matching
+	// bot.Handle. Reusing the existing HandleWarehouseReserves/HandleHelp
+	// panels, same "registered as both a command and a callback, no
+	// c.Respond needed" pattern browse_clans above already uses.
+	bot.Handle("\fview_warehouse", econ.HandleWarehouseReserves)
+	bot.Handle("\fview_manual", onboarding.HandleHelp)
 	bot.Handle("\fexplore_dispatch", exploration.HandleDispatchExpeditionCallback)
 	bot.Handle("\fdiplo_respond", diplomacy.HandleDiplomacyRespondCallback)
 	bot.Handle("\fclan_apply", clan.HandleApplyToClanCallback)

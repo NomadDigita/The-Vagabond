@@ -2142,10 +2142,41 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		// Build the SpaceHunt-style battle report. Composition reflects
 		// forces standing AT THE START of this round (before losses); loss
 		// tallies are what fell THIS round specifically.
+		// Surface what recon already promised - Defense Grid, Guardians/
+		// Observers, Nuclear Shields, and a Hero/Warlord's superpower -
+		// in the actual battle outcome, not just the pre-attack preview.
+		// These already silently factor into the combat math above
+		// (turretDefenseBonus/guardianBonus/observerBonus/defenderShields);
+		// this just makes that visible to the player reading the report.
+		var defenderNotes []string
+		if defenderTurretLevels > 0 {
+			defenderNotes = append(defenderNotes, fmt.Sprintf("🛡️ Defense Grid: %d turret level(s) engaged.", defenderTurretLevels))
+		}
+		if defenderGuardians > 0 || defenderObservers > 0 {
+			defenderNotes = append(defenderNotes, fmt.Sprintf("🤖 %d Guardian(s), 👁️ %d Observer(s) dug in.", defenderGuardians, defenderObservers))
+		}
+		if defenderShields > 0 {
+			defenderNotes = append(defenderNotes, fmt.Sprintf("🧿 Nuclear Shields: %d active.", defenderShields))
+		}
+		if defenderHeroSuperpower != "" {
+			label := "🎖️ Commander's Superpower"
+			if !r.defenderID.Valid {
+				label = "👑 Warlord's Superpower"
+			}
+			defenderNotes = append(defenderNotes, fmt.Sprintf("%s: %s.", label, defenderHeroSuperpower))
+		}
+
+		var attackerNotes []string
+		if attackerHeroSuperpower != "" {
+			attackerNotes = append(attackerNotes, fmt.Sprintf("🎖️ Commander's Superpower: %s.", attackerHeroSuperpower))
+		}
+
 		report := battlereport.Round{
-			Number:       r.roundNumber,
-			AttackerName: r.attackerName,
-			DefenderName: r.defenderName,
+			Number:        r.roundNumber,
+			AttackerName:  r.attackerName,
+			DefenderName:  r.defenderName,
+			AttackerNotes: attackerNotes,
+			DefenderNotes: defenderNotes,
 			AttackerComposition: []battlereport.UnitTally{
 				{Emoji: "🪖", Label: "Soldiers", Count: totSoldiers},
 				{Emoji: "🤖", Label: "Mechs", Count: totMechs},
