@@ -46,6 +46,11 @@ real game object or state, not a recolored generic badge.
 | `jet` | Air squadron / jets | Sharp expedition fighter silhouette | Aircraft banks and leaves a bright exhaust pulse | `animated/jet_tgs_v14/jet_tgs_v14.tgs` |
 | `commander` | Commander / profile | Armoured commander profile and insignia | Gold insignia energises across the uniform | `animated/commander_tgs_v14/commander_tgs_v14.tgs` |
 | `exploration` | Exploration / navigation | Field compass with red needle | Needle completes a decisive heading sweep | `animated/exploration_tgs_v14/exploration_tgs_v14.tgs` |
+| `radio` | Wasteland Radio | Rugged receiver with active tuning dial | Dial turns while the antenna broadcasts | `animated/radio_tgs_v14/radio_tgs_v14.tgs` |
+| `terminal` | Admin Terminal | Secure command terminal and moving prompt | Gold cursor traverses the live screen | `animated/terminal_tgs_v14/terminal_tgs_v14.tgs` |
+| `refresh` | Refresh analysis | Rotating cycle arrow | Full clockwise refresh cycle | `animated/refresh_tgs_v14/refresh_tgs_v14.tgs` |
+| `search` | Search / clan discovery | Magnifying lens and gold handle | Lens breathes for a focused scan | `animated/search_tgs_v14/search_tgs_v14.tgs` |
+| `arena` | Combat Arena | Arena ring, structural pillar, and signal | Arena beacon pulses above the fight ring | `animated/arena_tgs_v14/arena_tgs_v14.tgs` |
 
 ## Production rule
 

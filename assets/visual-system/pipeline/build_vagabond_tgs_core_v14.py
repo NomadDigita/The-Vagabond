@@ -494,6 +494,52 @@ def exploration_icon():
     layers.append(layer(3, "exploration needle", needle))
     return layers
 
+def radio_icon():
+    layers=base_layers(1)
+    box=poly([[-140,-110],[140,-110],[140,130],[-140,130]],OBSIDIAN,STEEL,10)
+    layers.append(layer(2,"wasteland radio",box))
+    dial=ellipse((104,104),VIOLET,GOLD,8,transform=tr(position=(0,25),rotation=key([(0,0),(120,360)])))
+    layers.append(layer(3,"radio dial",dial))
+    wave=[path([[135,-65],[190,-105],[205,-145]],False),stroke(CYAN,10),tr(opacity=key([(0,20),(30,100),(60,20),(120,20)]))]
+    layers.append(layer(4,"radio wave",wave))
+    return layers
+
+def terminal_icon():
+    layers=base_layers(1)
+    frame=poly([[-170,-135],[170,-135],[170,140],[-170,140]],OBSIDIAN,STEEL,11)
+    layers.append(layer(2,"admin terminal",frame))
+    screen=poly([[-132,-92],[132,-92],[132,54],[-132,54]],VIOLET,CYAN,6)
+    layers.append(layer(3,"terminal screen",screen))
+    cursor=[path([[-92,92],[-18,92]],False),stroke(GOLD,12),tr(position=key([(0,[0,0]),(60,[110,0]),(120,[0,0])]))]
+    layers.append(layer(4,"terminal cursor",cursor))
+    return layers
+
+def refresh_icon():
+    layers=base_layers(1)
+    ring=ellipse((300,300),[0,0,0,0],CYAN,16)
+    layers.append(layer(2,"refresh cycle",ring,rotation=key([(0,0),(120,360)])))
+    arrow=poly([[0,-190],[55,-115],[-55,-115]],GOLD,WHITE,6)
+    layers.append(layer(3,"refresh arrow",arrow,rotation=key([(0,0),(120,360)])))
+    return layers
+
+def search_icon():
+    layers=base_layers(1)
+    lens=ellipse((218,218),OBSIDIAN,CYAN,13,transform=tr(position=(-45,-45),scale=key([(0,[92,92]),(60,[108,108]),(120,[92,92])])))
+    layers.append(layer(2,"search lens",lens))
+    handle=[path([[38,38],[148,148]],False),stroke(GOLD,25),tr()]
+    layers.append(layer(3,"search handle",handle))
+    return layers
+
+def arena_icon():
+    layers=base_layers(1)
+    ring=ellipse((340,220),OBSIDIAN,RED,12,transform=tr(position=(0,62)))
+    layers.append(layer(2,"combat arena",ring))
+    pillars=[path([[-128,80],[-128,-125]],False),stroke(STEEL,18),tr()]
+    layers.append(layer(3,"arena pillars",pillars))
+    spark=[star(36),fill(GOLD),tr(position=(0,-75),opacity=key([(0,20),(30,100),(60,20),(120,20)]))]
+    layers.append(layer(4,"arena signal",spark))
+    return layers
+
 
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
@@ -504,7 +550,7 @@ def write(key, layers):
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon,"warlord":warlord_icon,"world":world_icon,"cannon":cannon_icon,"silo":silo_icon,"alliance":alliance_icon,"rebellion":rebellion_icon,"jet":jet_icon,"commander":commander_icon,"exploration":exploration_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon,"warlord":warlord_icon,"world":world_icon,"cannon":cannon_icon,"silo":silo_icon,"alliance":alliance_icon,"rebellion":rebellion_icon,"jet":jet_icon,"commander":commander_icon,"exploration":exploration_icon,"radio":radio_icon,"terminal":terminal_icon,"refresh":refresh_icon,"search":search_icon,"arena":arena_icon}.items():
         write(key,builder())
 
 
