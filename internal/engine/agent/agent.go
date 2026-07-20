@@ -83,7 +83,7 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 		// Calculate fuel deductions incorporating Science Tech and Biological Mutations
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
 		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10) // Cap minimum electricity upkeep at 10%
-		upkeepEnergy := 0.2 * upkeepMultiplier
+		upkeepEnergy := 2.0 * upkeepMultiplier
 
 		if a.Electricity < upkeepEnergy {
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)

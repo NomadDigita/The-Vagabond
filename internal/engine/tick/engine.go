@@ -1092,6 +1092,7 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 	queryExpeditions := `
 		SELECT r.id, r.attacker_id, r.state, r.resolve_time, ea.user_id,
 		       COALESCE(r.attacker_rations, 100.0), COALESCE(r.attacker_ammo, 100.0),
+		       COALESCE(r.attacker_electricity, 100.0), COALESCE(r.attacker_logistics, 100.0),
 		       COALESCE(r.base_march_minutes, 15.0), COALESCE(ed.name, 'Rogue Drone Nest')
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
@@ -1112,6 +1113,8 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		userID           int64
 		rations          float64
 		ammo             float64
+		electricity      float64
+		logistics        float64
 		baseMarchMinutes float64
 		defenderName     string
 	}
@@ -1120,7 +1123,7 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 	for rows.Next() {
 		var ex activeExp
 		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime, &ex.userID,
-			&ex.rations, &ex.ammo, &ex.baseMarchMinutes, &ex.defenderName); err == nil {
+			&ex.rations, &ex.ammo, &ex.electricity, &ex.logistics, &ex.baseMarchMinutes, &ex.defenderName); err == nil {
 			exps = append(exps, ex)
 		}
 	}
@@ -1154,10 +1157,14 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		// dead stub that never moved off its 100.0 default.
 		oldRations := ex.rations
 		oldAmmo := ex.ammo
+		oldElectricity := ex.electricity
+		oldLogistics := ex.logistics
 		newRations := math.Max(oldRations-4.0, 0.0)
 		newAmmo := math.Max(oldAmmo-4.0, 0.0)
+		newElectricity := math.Max(oldElectricity-3.0, 0.0)
+		newLogistics := math.Max(oldLogistics-2.0, 0.0)
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1, attacker_ammo = $2 WHERE id = $3", newRations, newAmmo, ex.id)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1, attacker_ammo = $2, attacker_electricity = $4, attacker_logistics = $5 WHERE id = $3", newRations, newAmmo, ex.id, newElectricity, newLogistics)
 
 		// Threshold-crossing notifications only (not every tick), so the
 		// player gets one heads-up at 25% and one at empty per resource,
@@ -1176,16 +1183,30 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
 				fmt.Sprintf("🎖️❌ OUT OF AMMUNITION: Your force marching on [%s] has run dry! Combat strength will suffer until they return.", ex.defenderName))
 		}
+		if oldElectricity > 25.0 && newElectricity <= 25.0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("⚡ FIELD POWER LOW: Your expedition toward [%s] is down to %.0f%% carried electricity.", ex.defenderName, newElectricity))
+		} else if oldElectricity > 0 && newElectricity <= 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("⚡❌ FIELD POWER DEPLETED: High-tech units marching on [%s] are losing effectiveness until reinforcements arrive or they return.", ex.defenderName))
+		}
+		if oldLogistics > 25.0 && newLogistics <= 25.0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🔩 LOGISTICS SUPPLIES LOW: Your expedition toward [%s] is down to %.0f%% repair/grid equipment.", ex.defenderName, newLogistics))
+		} else if oldLogistics > 0 && newLogistics <= 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+				fmt.Sprintf("🔩❌ LOGISTICS DEPLETED: Vehicles and grid equipment in the force marching on [%s] are no longer fully operational.", ex.defenderName))
+		}
 
 		// If a force runs completely dry (rations AND ammo) before it has
 		// even reached the target, it can't fight - order a forced
 		// retreat rather than let it arrive and immediately eat a -50%
 		// offense penalty in a battle it was never supplied to win.
-		if ex.state == "marching" && newRations <= 0 && newAmmo <= 0 {
+		if ex.state == "marching" && (newRations <= 0 && newAmmo <= 0 || newElectricity <= 0 && newLogistics <= 0) {
 			returnResolve := time.Now().UTC().Add(time.Duration(ex.baseMarchMinutes) * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolve, ex.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("↩️ FORCED RETREAT: Your force marching on [%s] ran completely out of supplies before arrival and has turned back.", ex.defenderName))
+				fmt.Sprintf("↩️ FORCED RETREAT: Your force marching on [%s] lost critical food/ammunition or power/logistics supplies before arrival and has turned back.", ex.defenderName))
 		}
 	}
 	return nil
@@ -1476,6 +1497,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		       COALESCE(r.stolen_scrap, 0.0) as stolen_scrap,
 		       COALESCE(r.stolen_metal, 0.0) as stolen_metal,
 		       COALESCE(r.stolen_crystal, 0.0) as stolen_crystal,
+		       COALESCE(r.stolen_rations, 0.0) as stolen_rations,
+		       COALESCE(r.stolen_electricity, 0.0) as stolen_electricity,
+		       COALESCE(r.stolen_hydrogen, 0.0) as stolen_hydrogen,
+		       COALESCE(r.stolen_neuro_cores, 0.0) as stolen_neuro_cores,
+		       COALESCE(r.stolen_dollars, 0.0) as stolen_dollars,
 		       COALESCE(r.base_march_minutes, 15.0) as base_march_minutes,
 		       COALESCE(r.attacker_rations, 100.0) as attacker_rations,
 		       COALESCE(r.attacker_ammo, 100.0) as attacker_ammo,
@@ -1493,24 +1519,29 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 	defer rows.Close()
 
 	type activeRaid struct {
-		id               string
-		attackerID       string
-		defenderID       sql.NullString
-		state            string
-		roundNumber      int
-		attackerName     string
-		attackerUserID   int64
-		defenderName     string
-		defenderUserID   int64
-		resolveTime      time.Time
-		stolenScrap      float64
-		stolenMetal      float64
-		stolenCrystal    float64
-		baseMarchMinutes float64
-		attackerRations  float64
-		attackerAmmo     float64
-		attackerLosses   int
-		defenderLosses   int
+		id                string
+		attackerID        string
+		defenderID        sql.NullString
+		state             string
+		roundNumber       int
+		attackerName      string
+		attackerUserID    int64
+		defenderName      string
+		defenderUserID    int64
+		resolveTime       time.Time
+		stolenScrap       float64
+		stolenMetal       float64
+		stolenCrystal     float64
+		stolenRations     float64
+		stolenElectricity float64
+		stolenHydrogen    float64
+		stolenNeuroCores  float64
+		stolenDollars     float64
+		baseMarchMinutes  float64
+		attackerRations   float64
+		attackerAmmo      float64
+		attackerLosses    int
+		defenderLosses    int
 	}
 
 	var raids []activeRaid
@@ -1520,7 +1551,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			&r.id, &r.attackerID, &r.defenderID, &r.state, &r.roundNumber,
 			&r.attackerName, &r.attackerUserID,
 			&r.defenderName, &r.defenderUserID, &r.resolveTime, &r.stolenScrap,
-			&r.stolenMetal, &r.stolenCrystal, &r.baseMarchMinutes,
+			&r.stolenMetal, &r.stolenCrystal, &r.stolenRations, &r.stolenElectricity,
+			&r.stolenHydrogen, &r.stolenNeuroCores, &r.stolenDollars, &r.baseMarchMinutes,
 			&r.attackerRations, &r.attackerAmmo, &r.attackerLosses, &r.defenderLosses,
 		)
 		if err == nil {
@@ -1539,13 +1571,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&soldiersMob, &mechsMob, &destroyersMob, &bombersMob, &bcMob, &dsMob, &liberatorsMob, &wraithsMob)
 
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, destroyers = destroyers + $3, bombers = bombers + $4, battlecruisers = battlecruisers + $6, deathstars = deathstars + $7, liberators = liberators + $8, wraiths = wraiths + $9 WHERE encampment_id = $5", soldiersMob, mechsMob, destroyersMob, bombersMob, r.attackerID, bcMob, dsMob, liberatorsMob, wraithsMob)
-			var curScrap, curMetal, curCrystal float64
-			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal FROM resources WHERE encampment_id = $1", r.attackerID).Scan(&curScrap, &curMetal, &curCrystal)
+			var curScrap, curMetal, curCrystal, curRations, curElectricity, curHydrogen, curNeuroCores, curDollars float64
+			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, rations, electricity, hydrogen, neuro_cores, dollars FROM resources WHERE encampment_id = $1", r.attackerID).Scan(&curScrap, &curMetal, &curCrystal, &curRations, &curElectricity, &curHydrogen, &curNeuroCores, &curDollars)
 			attackerCap := storagecap.CapFor(ctx, tx, r.attackerID)
 			newScrap, _ := storagecap.Clamp(curScrap, r.stolenScrap, attackerCap)
 			newMetal, _ := storagecap.Clamp(curMetal, r.stolenMetal, attackerCap)
 			newCrystal, _ := storagecap.Clamp(curCrystal, r.stolenCrystal, attackerCap)
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, metal = $2, crystal = $3 WHERE encampment_id = $4", newScrap, newMetal, newCrystal, r.attackerID)
+			newRations, _ := storagecap.Clamp(curRations, r.stolenRations, attackerCap)
+			newElectricity, _ := storagecap.Clamp(curElectricity, r.stolenElectricity, attackerCap)
+			newHydrogen, _ := storagecap.Clamp(curHydrogen, r.stolenHydrogen, attackerCap)
+			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, metal = $2, crystal = $3, rations = $5, electricity = $6, hydrogen = $7, neuro_cores = $8, dollars = $9 WHERE encampment_id = $4", newScrap, newMetal, newCrystal, r.attackerID, newRations, newElectricity, newHydrogen, curNeuroCores+r.stolenNeuroCores, curDollars+r.stolenDollars)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 
 			// BUGFIX: co-op helper survivors were never credited home on
@@ -1588,7 +1623,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", r.id)
 			}
 
-			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap, +%.1f Metal, +%.1f Crystal!", r.stolenScrap, r.stolenMetal, r.stolenCrystal)
+			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap, +%.1f Metal, +%.1f Crystal, +%.1f Rations, +%.1f Electricity, +%.1f Hydrogen, +%.1f Neuro Cores, +$%.1f!", r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.stolenRations, r.stolenElectricity, r.stolenHydrogen, r.stolenNeuroCores, r.stolenDollars)
 			queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
 			_, _ = tx.ExecContext(ctx, queryNotif, r.attackerUserID, alertMsg)
 			continue
@@ -2111,13 +2146,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		attackerStillStanding := (newAttSols + newAttMechs + newAttDestroyers + newAttBombers + newAttBC + newAttDS) > 0
 		defenderStillStanding := (defenseForce - defCas) > 0
 
-		var defenderScrap, defenderMetal, defenderCrystal float64
+		var defenderScrap, defenderMetal, defenderCrystal, defenderRations, defenderElectricity, defenderHydrogen, defenderNeuroCores, defenderDollars float64
 		if r.defenderID.Valid {
-			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&defenderScrap, &defenderMetal, &defenderCrystal)
+			_ = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, rations, electricity, hydrogen, neuro_cores, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", r.defenderID.String).Scan(&defenderScrap, &defenderMetal, &defenderCrystal, &defenderRations, &defenderElectricity, &defenderHydrogen, &defenderNeuroCores, &defenderDollars)
 		} else {
 			defenderScrap = 125.0
 			defenderMetal = 300.0
-			defenderCrystal = 60.0
+			defenderCrystal = 12.0
+			defenderRations = 80.0
+			defenderElectricity = 60.0
+			defenderHydrogen = 15.0
+			defenderNeuroCores = 1.0
+			defenderDollars = 25.0
 		}
 
 		var smallShieldLvl, largeShieldLvl int
@@ -2134,10 +2174,20 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		lootPercentage *= (1.0 - shieldReduction)
 		stolenScrap := defenderScrap * lootPercentage
 		stolenMetal := defenderMetal * lootPercentage
-		stolenCrystal := defenderCrystal * lootPercentage
+		stolenCrystal := defenderCrystal * lootPercentage * 0.35 // Crystal is deliberately the rarest/most valuable raid resource.
+		stolenRations := defenderRations * lootPercentage
+		stolenElectricity := defenderElectricity * lootPercentage
+		stolenHydrogen := defenderHydrogen * lootPercentage * 0.75
+		stolenNeuroCores := defenderNeuroCores * lootPercentage * 0.25
+		stolenDollars := defenderDollars * lootPercentage * 0.50
 		primaryShare := stolenScrap
 		primaryMetalShare := stolenMetal
 		primaryCrystalShare := stolenCrystal
+		primaryRationsShare := stolenRations
+		primaryElectricityShare := stolenElectricity
+		primaryHydrogenShare := stolenHydrogen
+		primaryNeuroCoresShare := stolenNeuroCores
+		primaryDollarsShare := stolenDollars
 
 		// Build the SpaceHunt-style battle report. Composition reflects
 		// forces standing AT THE START of this round (before losses); loss
@@ -2220,6 +2270,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				fmt.Sprintf("🔩 %.0f Metal", primaryMetalShare),
 				fmt.Sprintf("💎 %.0f Crystal", primaryCrystalShare),
 				fmt.Sprintf("♻️ %.0f Scrap", primaryShare),
+				fmt.Sprintf("🍖 %.0f Rations", primaryRationsShare),
+				fmt.Sprintf("⚡ %.0f Electricity", primaryElectricityShare),
+				fmt.Sprintf("💧 %.0f Hydrogen", primaryHydrogenShare),
+				fmt.Sprintf("🧠 %.1f Neuro Cores", primaryNeuroCoresShare),
+				fmt.Sprintf("💵 %.0f Dollars", primaryDollarsShare),
 			}
 			report.LootCollector = r.attackerName
 		case r.roundNumber >= 5:
@@ -2281,11 +2336,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			primaryShare = stolenScrap * primRatio
 			primaryMetalShare = stolenMetal * primRatio
 			primaryCrystalShare = stolenCrystal * primRatio
+			primaryRationsShare = stolenRations * primRatio
+			primaryElectricityShare = stolenElectricity * primRatio
+			primaryHydrogenShare = stolenHydrogen * primRatio
+			primaryNeuroCoresShare = stolenNeuroCores * primRatio
+			primaryDollarsShare = stolenDollars * primRatio
 
 			if strings.Contains(attackerHeroSuperpower, "Scrap Recovery") {
 				primaryShare *= 1.10
 				primaryMetalShare *= 1.10
 				primaryCrystalShare *= 1.10
+				primaryRationsShare *= 1.10
+				primaryElectricityShare *= 1.10
+				primaryHydrogenShare *= 1.10
+				primaryNeuroCoresShare *= 1.10
+				primaryDollarsShare *= 1.10
 			}
 
 			var haulers int
@@ -2294,7 +2359,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			var cargoMk1, cargoMk2, cargoMk3 int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(cargo_mk1, 0), COALESCE(cargo_mk2, 0), COALESCE(cargo_mk3, 0) FROM workshop_inventory WHERE encampment_id = $1", r.attackerID).Scan(&cargoMk1, &cargoMk2, &cargoMk3)
 
-			weightFactor := (primaryShare + primaryMetalShare + primaryCrystalShare) / 5000.0
+			weightFactor := (primaryShare + primaryMetalShare + primaryCrystalShare*4 + primaryRationsShare + primaryElectricityShare + primaryHydrogenShare*2 + primaryNeuroCoresShare*20 + primaryDollarsShare/10) / 5000.0
 			if haulers > 0 {
 				weightFactor *= 0.50
 			}
@@ -2319,18 +2384,18 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			returnDuration := time.Duration(returnMinutes) * time.Minute
 			resolveTime := time.Now().UTC().Add(returnDuration)
 
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, stolen_metal = $4, stolen_crystal = $5, resolve_time = $2 WHERE id = $3", primaryShare, resolveTime, r.id, primaryMetalShare, primaryCrystalShare)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, stolen_metal = $4, stolen_crystal = $5, stolen_rations = $6, stolen_electricity = $7, stolen_hydrogen = $8, stolen_neuro_cores = $9, stolen_dollars = $10, resolve_time = $2 WHERE id = $3", primaryShare, resolveTime, r.id, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare)
 
 			etaAlert := fmt.Sprintf(
 				"🚚 SALVAGE COMPLETE, RETURN MARCH ENGAGED\n\n"+
-					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 💎 %.0f Crystal home.\n"+
+					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 💎 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
 					"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).",
-				primaryShare, primaryMetalShare, primaryCrystalShare, returnMinutes, r.baseMarchMinutes,
+				primaryShare, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare, returnMinutes, r.baseMarchMinutes,
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, etaAlert)
 
 			if r.defenderID.Valid {
-				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String)
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0), rations = GREATEST(rations - $5, 0), electricity = GREATEST(electricity - $6, 0), hydrogen = GREATEST(hydrogen - $7, 0), neuro_cores = GREATEST(neuro_cores - $8, 0), dollars = GREATEST(dollars - $9, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String, stolenRations, stolenElectricity, stolenHydrogen, stolenNeuroCores, stolenDollars)
 
 				// Clan War score: if the attacker and defender belong to
 				// two clans with an active war between them, this victory

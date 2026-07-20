@@ -50,10 +50,13 @@ exists" has grown a lot past the original engine. As of this writing:
   (new in Phase 7) a manual "lock units as permanent home garrison"
   control so a player can't accidentally draft away their entire home
   defense.
-- **Battle Logistics**: raids consume rations and ammunition in the
-  field (not just at the home base), with threshold notifications and
-  auto-retreat for a force that runs completely dry before reaching
-  its target.
+- **Battle Logistics**: raids require a real war party (20+ combat units,
+  transport support, and travel units for walking forces), consume scaled
+  launch supplies, and drain carried rations, ammunition, electricity, and
+  logistics equipment in the field; running dry triggers warnings and can
+  force auto-retreat before reaching the target. Active agents now consume
+  2.0 base Electricity per tick before upgrades, making automation a real
+  operational expense.
 - **Bulk unit selection**: a cycling `x1 → x10 → x100 → MAX` step
   control on the raid draft board, plus `/add`, `/remove`, and bulk
   `/deconstruct` text commands, so building a 500-Soldier army doesn't
@@ -255,3 +258,6 @@ not the territory.
    line, the same way the existing entries are written — the next
    person (or AI) reading it shouldn't have to reverse-engineer intent
    from a diff.
+
+
+- **Battle Logistics**: raids require 20+ combat units, transport support, travel units for walking forces, launch supplies, and carried rations/ammunition/electricity/logistics that drain during expeditions.
