@@ -303,6 +303,108 @@ def radar_icon():
     return layers
 
 
+def ranking_icon():
+    layers = base_layers(1)
+    cup = [[-130, -138], [130, -138], [98, 35], [45, 82], [45, 130], [105, 130], [105, 170], [-105, 170], [-105, 130], [-45, 130], [-45, 82], [-98, 35]]
+    layers.append(layer(2, "ranking trophy", poly(cup, GOLD, WHITE, 10)))
+    shine = [star(32), fill(WHITE), tr(position=(-54, -70), opacity=key([(0, 15), (30, 100), (60, 15), (120, 15)]))]
+    layers.append(layer(3, "trophy shine", shine))
+    return layers
+
+
+def warehouse_icon():
+    layers = base_layers(1)
+    shell = [[-170, 152], [-170, -48], [0, -162], [170, -48], [170, 152]]
+    layers.append(layer(2, "armoured warehouse", poly(shell, OBSIDIAN, STEEL, 11)))
+    door = poly([[-95, 152], [-95, 8], [95, 8], [95, 152]], VIOLET, CYAN, 7)
+    layers.append(layer(3, "warehouse bay door", door, pos=key([(0, [0, 0]), (60, [0, 24]), (120, [0, 0])])))
+    return layers
+
+
+def market_icon():
+    layers = base_layers(1)
+    booth = [[-162, 148], [-162, -50], [-110, -128], [110, -128], [162, -50], [162, 148]]
+    layers.append(layer(2, "market terminal", poly(booth, OBSIDIAN, GOLD, 10)))
+    arrow_up = [path([[-70, 62], [0, -8], [70, 62]], False), stroke(CYAN, 16), tr(position=key([(0, [0, 20]), (60, [0, -15]), (120, [0, 20])]))]
+    arrow_down = [path([[-70, 5], [0, 75], [70, 5]], False), stroke(LAVENDER, 16), tr(position=key([(0, [0, -20]), (60, [0, 15]), (120, [0, -20])]))]
+    layers.append(layer(3, "market rise", arrow_up))
+    layers.append(layer(4, "market fall", arrow_down))
+    return layers
+
+
+def troops_icon():
+    layers = base_layers(1)
+    helmet = [[-150, 42], [-120, -90], [-60, -145], [60, -145], [120, -90], [150, 42], [98, 92], [-98, 92]]
+    layers.append(layer(2, "troop helmet", poly(helmet, OBSIDIAN, STEEL, 11)))
+    visor = poly([[-106, -12], [106, -12], [70, 40], [-70, 40]], RED, WHITE, 5)
+    layers.append(layer(3, "troop visor", visor, scale=key([(0, [92, 92]), (60, [105, 105]), (120, [92, 92])])))
+    return layers
+
+
+def vehicle_icon():
+    layers = base_layers(1)
+    hull = [[-178, 98], [-138, -18], [-58, -18], [-20, -78], [105, -78], [158, 8], [178, 98]]
+    layers.append(layer(2, "combat vehicle hull", poly(hull, OBSIDIAN, GOLD, 10)))
+    for i, x in enumerate((-100, 102)):
+        wheel = ellipse((62, 62), STEEL, CYAN, 6, transform=tr(position=(x, 112), rotation=key([(0, 0), (120, 360)])))
+        layers.append(layer(3 + i, f"vehicle wheel {i}", wheel))
+    return layers
+
+
+def deconstruct_icon():
+    layers = base_layers(1)
+    ring = ellipse((300, 300), [0, 0, 0, 0], LAVENDER, 15)
+    layers.append(layer(2, "deconstruction cycle", ring, rotation=key([(0, 0), (120, -360)])))
+    shard = poly([[-38, -182], [60, -115], [0, -60], [-60, -115]], RED, WHITE, 4)
+    layers.append(layer(3, "deconstruction break", shard, rotation=key([(0, 0), (120, 360)])))
+    return layers
+
+
+def infrastructure_icon():
+    layers = base_layers(1)
+    crane = [path([[-145, 158], [-145, -162], [135, -162], [28, -78]], False), stroke(GOLD, 18), tr()]
+    layers.append(layer(2, "infrastructure crane", crane))
+    hook = [path([[28, -78], [28, 48]], False), stroke(STEEL, 10), tr(position=key([(0, [0, -18]), (60, [0, 18]), (120, [0, -18])]))]
+    layers.append(layer(3, "crane lifting hook", hook))
+    block = poly([[-45, 52], [45, 52], [45, 142], [-45, 142]], VIOLET, CYAN, 6)
+    layers.append(layer(4, "raised construction block", block, pos=key([(0, [0, -18]), (60, [0, 18]), (120, [0, -18])])))
+    return layers
+
+
+def defense_icon():
+    layers = base_layers(1)
+    bunker = [[-150, 152], [-112, 20], [-55, -38], [55, -38], [112, 20], [150, 152]]
+    layers.append(layer(2, "defense bunker", poly(bunker, OBSIDIAN, STEEL, 11)))
+    cannon = [path([[0, 6], [0, -166]], False), stroke(GOLD, 24), tr(rotation=key([(0, -14), (60, 14), (120, -14)]))]
+    layers.append(layer(3, "defense cannon", cannon))
+    flash = [star(34), fill(CYAN), tr(position=key([(0, [-40, -155]), (60, [40, -155]), (120, [-40, -155])]), opacity=key([(0, 0), (30, 100), (60, 0), (120, 0)]))]
+    layers.append(layer(4, "defense muzzle flash", flash))
+    return layers
+
+
+def clan_icon():
+    layers = base_layers(1)
+    pole = [path([[-112, 168], [-112, -172]], False), stroke(STEEL, 15), tr()]
+    layers.append(layer(2, "clan banner pole", pole))
+    flag = poly([[-104, -160], [150, -112], [-104, -35]], VIOLET, GOLD, 8, transform=tr(position=key([(0, [0, 0]), (60, [0, -10]), (120, [0, 0])])))
+    layers.append(layer(3, "clan banner", flag))
+    crest = [star(32), fill(WHITE), tr(position=(-25, -103), scale=key([(0, [80, 80]), (60, [110, 110]), (120, [80, 80])]))]
+    layers.append(layer(4, "clan crest", crest))
+    return layers
+
+
+def boss_icon():
+    layers = base_layers(1)
+    head = [[-132, -104], [-70, -166], [70, -166], [132, -104], [132, 105], [70, 158], [-70, 158], [-132, 105]]
+    layers.append(layer(2, "boss mech skull", poly(head, OBSIDIAN, RED, 12)))
+    for i, x in enumerate((-55, 55)):
+        eye = ellipse((52, 42), RED, WHITE, 5, transform=tr(position=(x, -28), opacity=key([(0, 35), (30, 100), (60, 35), (120, 35)])))
+        layers.append(layer(3 + i, f"boss eye {i}", eye))
+    jaw = [path([[-76, 78], [-35, 112], [0, 78], [35, 112], [76, 78]], False), stroke(STEEL, 11), tr()]
+    layers.append(layer(5, "boss jaw", jaw))
+    return layers
+
+
 def write(key, layers):
     data={"v":"5.5.7","fr":60,"ip":0,"op":FRAMES,"w":512,"h":512,"nm":f"The Vagabond {key}","ddd":0,"assets":[],"layers":layers}
     target=OUT/f"{key}_tgs_v14"/f"{key}_tgs_v14.tgs"
@@ -312,7 +414,7 @@ def write(key, layers):
 
 
 def main():
-    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon}.items():
+    for key, builder in {"map":map_icon,"raid":raid_icon,"base":base_icon,"transport":transport_icon,"combat":combat_icon,"satellite":satellite_icon,"shield":shield_icon,"gear":gear_icon,"warning":warning_icon,"failure":failure_icon,"ai_mech":ai_mech_icon,"electricity":electricity_icon,"scrap":scrap_icon,"hq":hq_icon,"camp":camp_icon,"economy":economy_icon,"workshop":workshop_icon,"research":research_icon,"mutation":mutation_icon,"mining":mining_icon,"radar":radar_icon,"ranking":ranking_icon,"warehouse":warehouse_icon,"market":market_icon,"troops":troops_icon,"vehicle":vehicle_icon,"deconstruct":deconstruct_icon,"infrastructure":infrastructure_icon,"defense":defense_icon,"clan":clan_icon,"boss":boss_icon}.items():
         write(key,builder())
 
 

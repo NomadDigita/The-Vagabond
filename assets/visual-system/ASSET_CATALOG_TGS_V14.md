@@ -27,6 +27,16 @@ real game object or state, not a recolored generic badge.
 | `mutation` | Mutation core | Full double-helix with gold rungs | Helix twists while rungs light in sequence | `animated/mutation_tgs_v14/mutation_tgs_v14.tgs` |
 | `mining` | Active mining | Heavy pickaxe striking a crystal ore node | Pickaxe swings; violet ore holds the impact point | `animated/mining_tgs_v14/mining_tgs_v14.tgs` |
 | `radar` | Scan targets / expedition radar | Large radar ring, sweeping wedge, and target | Sweep completes a full scan; target pings | `animated/radar_tgs_v14/radar_tgs_v14.tgs` |
+| `ranking` | Leaderboard / ranking | Championship trophy | A concentrated highlight catches on the cup | `animated/ranking_tgs_v14/ranking_tgs_v14.tgs` |
+| `warehouse` | Warehouse / stored supplies | Armoured storage building and bay door | Bay door cycles open to show active supply flow | `animated/warehouse_tgs_v14/warehouse_tgs_v14.tgs` |
+| `market` | Marketplace / trade | Hardened trade terminal with opposing price arrows | Price arrows exchange places in a clean market rhythm | `animated/market_tgs_v14/market_tgs_v14.tgs` |
+| `troops` | Troop deployment | Combat helmet with a glowing tactical visor | Visor charge pulses across the helmet | `animated/troops_tgs_v14/troops_tgs_v14.tgs` |
+| `vehicle` | Ground vehicles | Armoured combat vehicle with two driven wheels | Both wheel hubs make a full turn | `animated/vehicle_tgs_v14/vehicle_tgs_v14.tgs` |
+| `deconstruct` | Deconstruct / recycle | Reverse rotating recovery ring and break shard | Recovery ring turns opposite the breaking material | `animated/deconstruct_tgs_v14/deconstruct_tgs_v14.tgs` |
+| `infrastructure` | Infrastructure building | Construction crane, hook, and lifted module | Hook and construction module rise and lower together | `animated/infrastructure_tgs_v14/infrastructure_tgs_v14.tgs` |
+| `defense` | Base defense | Hardened bunker and traversing cannon | Cannon tracks across the horizon and flashes once | `animated/defense_tgs_v14/defense_tgs_v14.tgs` |
+| `clan` | Clan / alliance | Faction banner, pole, and crest | Banner lifts while the crest energises | `animated/clan_tgs_v14/clan_tgs_v14.tgs` |
+| `boss` | Boss encounter | Angular boss mech skull with red optical array | Both boss optics pulse in alternating threat rhythm | `animated/boss_tgs_v14/boss_tgs_v14.tgs` |
 
 ## Production rule
 
