@@ -92,7 +92,7 @@ costs, they're rendered live in-bot via the Heavy Workshop panel
 
 ---
 
-## Two roadmaps, two logs
+## Three roadmaps, three logs
 
 This repo is being actively developed by two independent AI-assisted
 workstreams that deliberately don't touch the same code:

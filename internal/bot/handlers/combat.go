@@ -267,6 +267,48 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		outboundText = "🛰️ OUTBOUND: Radar clean. No active offensive marching forces detected.\n\n"
 	}
 
+	// Road encounters: pending Attack/Continue decisions for any of this
+	// commander's moving expeditions. The queued notification only tells
+	// them to check here, since plain-text notifications can't carry
+	// inline buttons.
+	roadText := ""
+	queryRoad := `
+		SELECT re.id, re.raid_a_id, re.raid_b_id, re.response_deadline,
+		       ea.name, eb.name
+		FROM road_encounters re
+		JOIN raids ra ON ra.id = re.raid_a_id
+		JOIN raids rb ON rb.id = re.raid_b_id
+		JOIN encampments ea ON ea.id = ra.attacker_id
+		JOIN encampments eb ON eb.id = rb.attacker_id
+		WHERE re.status = 'pending' AND (ra.attacker_id = $1 OR rb.attacker_id = $1)
+		ORDER BY re.response_deadline ASC`
+	rowsRoad, errRoad := h.DB.QueryContext(ctx, queryRoad, campID)
+	if errRoad == nil {
+		defer rowsRoad.Close()
+		for rowsRoad.Next() {
+			var encID, raidAID, raidBID, nameA, nameB string
+			var deadline time.Time
+			if err := rowsRoad.Scan(&encID, &raidAID, &raidBID, &deadline, &nameA, &nameB); err == nil {
+				enemyName := nameB
+				myRaidID := raidAID
+				var iAmSideA bool
+				_ = h.DB.QueryRowContext(ctx, "SELECT attacker_id = $1 FROM raids WHERE id = $2", campID, raidAID).Scan(&iAmSideA)
+				if !iAmSideA {
+					enemyName = nameA
+					myRaidID = raidBID
+				}
+				secondsLeft := int(time.Until(deadline.UTC()).Seconds())
+				if secondsLeft < 0 {
+					secondsLeft = 0
+				}
+				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Forces of [%s]\n   Decide within %ds or your column continues past them.\n\n", enemyName, secondsLeft)
+				btnAttack := selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID, myRaidID)
+				btnContinue := selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID, myRaidID)
+				buttons = append(buttons, selector.Row(btnAttack, btnContinue))
+			}
+		}
+	}
+
 	queryInbound := `
 		SELECT ea.name, r.resolve_time, r.state 
 		FROM raids r
@@ -389,10 +431,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			"%s"+
 			"%s"+
 			"%s"+
+			"%s"+
 			"📡 COGNITIVE SIGNAL SCANNER:\n"+
 			"%s\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
-		outboundText, inboundText, bossText, spyText,
+		roadText, outboundText, inboundText, bossText, spyText,
 	)
 
 	selector.Inline(buttons...)
@@ -1606,20 +1649,22 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	marchDuration := time.Duration(marchingMinutes) * time.Minute
 	resolveTime := time.Now().UTC().Add(marchDuration)
 
+	legStartedAt := time.Now().UTC()
+
 	var raidID string
 	var insertRaid string
 	if isAI {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region)
-			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
+			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9, $10, $3)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion).Scan(&raidID)
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
 	} else {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region)
-			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10)
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
+			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10, $11, $4)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion).Scan(&raidID)
+		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
 	}
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type, destroyers_mobilized, bombers_mobilized, battlecruisers_mobilized, deathstars_mobilized, liberators_mobilized, wraiths_mobilized, ships_mobilized, jets_mobilized, nukes_mobilized, haulers_mobilized, tankers_mobilized, cargo_mk1_mobilized, cargo_mk2_mobilized, cargo_mk3_mobilized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType, mobDestroyers, mobBombers, mobBC, mobDS, mobLiberators, mobWraiths, mobShips, mobJets, mobNukes, mobHaulers, mobTankers, mobCargoMk1, mobCargoMk2, mobCargoMk3)
@@ -1691,7 +1736,8 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	var state string
 	var attackerID string
 	var resolveTime time.Time
-	err = tx.QueryRowContext(ctx, "SELECT state, attacker_id, resolve_time FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state, &attackerID, &resolveTime)
+	var movementState string
+	err = tx.QueryRowContext(ctx, "SELECT state, attacker_id, resolve_time, COALESCE(movement_state, 'moving') FROM raids WHERE id = $1 FOR UPDATE", raidID).Scan(&state, &attackerID, &resolveTime, &movementState)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This expedition has already concluded."})
 	}
@@ -1702,6 +1748,10 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 
 	if state != "marching" && state != "returning" && state != "engaged" && state != "staged" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already concluded."})
+	}
+
+	if movementState == "encounter_pending" && (action == "speed" || action == "abort") {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Road Contact Active: Resolve the pending Attack/Continue decision on your Expedition Radar before ordering a speed-up or retreat."})
 	}
 
 	switch action {
@@ -1726,7 +1776,11 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			newResolve = time.Now().UTC().Add(5 * time.Second)
 		}
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
+		// A speed-up pulls the arrival clock forward, so it must also pull
+		// the route-leg clock forward by the same 30 minutes, or the next
+		// route-progress read would still show the column crawling along
+		// its old (slower) pace while its actual arrival time jumped.
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1, leg_total_minutes = GREATEST(1.0, leg_total_minutes - 30.0) WHERE id = $2", newResolve, raidID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 minutes."})
 		resolveTime = newResolve
 
@@ -1830,8 +1884,9 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		}
 
 		returnResolveTime := time.Now().UTC().Add(elapsed)
+		returnLegMinutes := elapsed.Minutes()
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1 WHERE id = $2", returnResolveTime, raidID)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1, leg_started_at = CURRENT_TIMESTAMP, leg_total_minutes = $3, movement_state = 'moving' WHERE id = $2", returnResolveTime, raidID, returnLegMinutes)
 
 		var attackerName string
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
