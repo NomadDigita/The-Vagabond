@@ -1597,13 +1597,11 @@ func resumeRoadRaids(ctx context.Context, tx *sql.Tx, primaryRaidID, secondaryRa
 }
 
 // discoverRouteContacts reveals nearby outposts as an expedition passes them.
-// This phase establishes knowledge only; Phase 4 layers response-window road
-// encounters and field combat on the same frozen route snapshots.
+// This phase establishes knowledge only; Phase 4 will layer response-window
+// road encounters and field combat on the same route snapshots.
 func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.attacker_id, ea.user_id, COALESCE(r.defender_id::text, ''), r.state,
-		       r.resolve_time, COALESCE(r.base_march_minutes, 15.0), COALESCE(r.route_progress, CASE WHEN r.state = 'returning' THEN 1.0 ELSE 0.0 END),
-		       r.route_progress_at, COALESCE(r.route_leg_minutes, r.base_march_minutes, 15.0),
 		       COALESCE(r.leg_started_at, r.created_at, CURRENT_TIMESTAMP),
 		       COALESCE(r.leg_total_minutes, r.base_march_minutes, 15.0),
 		       r.paused_at,
@@ -1612,7 +1610,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		WHERE r.state IN ('marching', 'returning')
-		  AND r.movement_state = 'moving'
 		  AND r.origin_x IS NOT NULL AND r.origin_y IS NOT NULL
 		  AND r.destination_x IS NOT NULL AND r.destination_y IS NOT NULL
 		  AND r.origin_region IS NOT NULL AND r.destination_region IS NOT NULL
@@ -1627,11 +1624,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		attackerUserID    int64
 		defenderID        string
 		state             string
-		resolveTime       time.Time
-		baseMinutes       float64
-		routeProgress     float64
-		routeProgressAt   sql.NullTime
-		routeLegMinutes   float64
 		legStartedAt      time.Time
 		legTotalMinutes   float64
 		pausedAt          sql.NullTime
@@ -1645,7 +1637,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var raid movingRaid
 		if err := rows.Scan(&raid.attackerID, &raid.attackerUserID, &raid.defenderID, &raid.state,
-			&raid.resolveTime, &raid.baseMinutes, &raid.routeProgress, &raid.routeProgressAt, &raid.routeLegMinutes, &raid.originX, &raid.originY,
 			&raid.legStartedAt, &raid.legTotalMinutes, &raid.pausedAt, &raid.originX, &raid.originY,
 			&raid.destinationX, &raid.destinationY, &raid.originRegion, &raid.destinationRegion); err != nil {
 			return fmt.Errorf("scanning route discovery candidate: %w", err)
@@ -1657,12 +1648,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	for _, raid := range raids {
-		if raid.routeLegMinutes <= 0 {
-			continue
-		}
-		progress := routeProgressAt(raid.state, raid.routeProgress, raid.routeProgressAt, raid.routeLegMinutes, raid.resolveTime, time.Now().UTC())
-		currentX := int(math.Round(float64(raid.originX) + float64(raid.destinationX-raid.originX)*progress))
-		currentY := int(math.Round(float64(raid.originY) + float64(raid.destinationY-raid.originY)*progress))
 		effectiveNow := time.Now().UTC()
 		if raid.pausedAt.Valid {
 			effectiveNow = raid.pausedAt.Time.UTC()
