@@ -1044,6 +1044,7 @@ func main() {
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
+	bot.Handle("/warehouse", econ.HandleWarehouseReserves)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
 	bot.Handle("/hero", hero.HandleHeroPanel)
@@ -1062,6 +1063,7 @@ func main() {
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
 	bot.Handle("/help", onboarding.HandleHelp)
+	bot.Handle("/guide", onboarding.HandleGuide)
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
 	bot.Handle("/admin", admin.HandleAdminPanel)
 	bot.Handle("/arena", arena.HandleArenaPanel)
@@ -1208,6 +1210,19 @@ func main() {
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
 	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
+
+	// New-survivor welcome message quick-action buttons. view_warehouse
+	// and view_manual are already registered further down (pre-existing
+	// dashboard buttons); only open_agent/open_refer are new here.
+	bot.Handle("\fopen_agent", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return agentH.HandleAgent(c)
+	})
+	bot.Handle("\fopen_refer", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return profile.HandleRefer(c)
+	})
+
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)

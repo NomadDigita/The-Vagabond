@@ -167,13 +167,13 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
-	var scrap, rations, electricity, metal, crystal, hydrogen, dollars float64
+	var scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuroCores, ether float64
 	query := `
-		SELECT scrap, rations, electricity, metal, crystal, hydrogen, dollars 
+		SELECT scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores, ether 
 		FROM resources 
 		WHERE encampment_id = $1`
 
-	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &electricity, &metal, &crystal, &hydrogen, &dollars)
+	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &electricity, &metal, &crystal, &hydrogen, &dollars, &neuroCores, &ether)
 
 	inventoryText := fmt.Sprintf(
 		"📦━━━━━━━━━━━━━━━━━━━━━━📦\n"+
@@ -188,9 +188,12 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 			"🏗️ CORE SPACEHUNT RESOURCES:\n"+
 			"🔩 Metal: %.1f tons\n"+
 			"🔮 Crystal: %.1f kg\n"+
-			"🎈 Hydrogen: %.1f L\n"+
+			"🎈 Hydrogen: %.1f L\n\n"+
+			"✨ RARE RESOURCES:\n"+
+			"🧠 Neuro Cores: %.1f\n"+
+			"✨ Ether: %.2f\n"+
 			"📦━━━━━━━━━━━━━━━━━━━━━━📦",
-		dollars, scrap, rations, electricity, metal, crystal, hydrogen,
+		dollars, scrap, rations, electricity, metal, crystal, hydrogen, neuroCores, ether,
 	)
 
 	return c.Send(inventoryText, keyboards.EconomyNavigation())

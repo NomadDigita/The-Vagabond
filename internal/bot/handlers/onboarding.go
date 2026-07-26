@@ -256,6 +256,16 @@ func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName))
 }
 
+// HandleGuide (/guide) re-sends the game briefing and getting-started
+// quickstart shown on first spawn, so a player can pull it back up any
+// time — e.g. if they skipped past it, or want to re-check the referral
+// reward numbers or agent-trial reminder.
+func (h *OnboardingHandler) HandleGuide(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+	text := gameDescriptionText + "\n\n" + gettingStartedGuideText
+	return c.Send(text, keyboards.MainNavigation())
+}
+
 func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -273,6 +283,9 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 		"• Financial Vault: Deposit Scrap to earn interest or secure emergency credit lines.\n" +
 		"• Clan Alliances: Establish or join forces (capped at 15 members). Trigger alliance wars.\n" +
 		"• Heavy Workshop: Spend heavy resources (Metal, Crystal, Hydrogen) to assemble Fusion Tanks.\n\n" +
+		"📦 /warehouse — full breakdown of all nine resources at once.\n" +
+		"🗺️ /guide — resend the game briefing + first-10-minutes quickstart.\n" +
+		"👥 /refer — get your personal invite link and referral rewards.\n\n" +
 		"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -389,16 +402,37 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			startingScrap += 1500.0
 		}
 
+		// Welcome Pack: every brand-new survivor starts with a stake in
+		// ALL nine resources, not just the three the old flow granted
+		// (Scrap/Rations/Electricity, with everything else defaulting to
+		// zero). Metal/Hydrogen/Dollars/Neuro give a real head start on
+		// early buildings and trades; Crystal and Ether stay deliberately
+		// small since they're the game's scarce/premium resources.
+		const (
+			startingNeuro    = 50.0
+			startingMetal    = 200.0
+			startingCrystal  = 20.0
+			startingHydrogen = 40.0
+			startingDollars  = 300.0
+			startingEther    = 5.0
+		)
+
 		insertRes := `
-			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores) 
-			VALUES ($1, $2, 50.00, $3, 0.00)`
-		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy)
+			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores, metal, crystal, hydrogen, dollars, ether) 
+			VALUES ($1, $2, 50.00, $3, $4, $5, $6, $7, $8, $9)`
+		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy,
+			startingNeuro, startingMetal, startingCrystal, startingHydrogen, startingDollars, startingEther)
 		if err != nil {
 			log.Printf("Failed creating resources: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Resource allocation error."})
 		}
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+
+		// 7-day Cognitive Agent (Premium) trial for every new survivor.
+		// This only ever runs inside the isNewCamp guard, so it can't be
+		// replayed to keep extending someone's trial.
+		_, _ = tx.ExecContext(ctx, "UPDATE users SET premium_until = NOW() + INTERVAL '7 days' WHERE telegram_id = $1", telegramID)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -459,22 +493,83 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		}
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})
+	if isNewCamp {
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})
 
-	welcome := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🛰️ COGNITIVE CORE BOOTED\n"+
+		welcome := fmt.Sprintf(
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Welcome to the wastes, Commander %s.\n"+
-			"Your terminal is now integrated into [%s].\n"+
-			"Your base has successfully spawned in territory: [%s]\n"+
-			"📍 Location Coordinates: [X: %d, Y: %d]\n\n"+
-			"Ready to check your commander statistics or modules.",
-		sender.FirstName, formatFactionLabel(faction), spawnedContinent, x, y,
-	)
+				"🛰️ COGNITIVE CORE BOOTED\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"Welcome to the wastes, Commander %s.\n"+
+				"Your terminal is now integrated into [%s].\n"+
+				"Your base has successfully spawned in territory: [%s]\n"+
+				"📍 Location Coordinates: [X: %d, Y: %d]\n\n"+
+				"%s\n\n"+
+				"🎁 WELCOME PACK — DEPLOYED TO YOUR WAREHOUSE\n"+
+				"⚙️ Scrap: %.0f\n"+
+				"🥫 Rations: 50\n"+
+				"⚡ Electricity Cells: %.0f\n"+
+				"🧠 Neuro Cores: 50\n"+
+				"🔩 Metal: 200\n"+
+				"🔮 Crystal: 20\n"+
+				"🎈 Hydrogen: 40\n"+
+				"💵 Dollars: 300\n"+
+				"✨ Ether: 5\n\n"+
+				"🧠 7-DAY COGNITIVE AGENT TRIAL — ACTIVATED\n"+
+				"Your Cognitive Agent (normally a Premium-only module) is unlocked "+
+				"free for the next 7 days. Set a mode in /agent and it keeps working "+
+				"your outpost even while you're offline — no charge, no card, nothing "+
+				"to cancel.\n\n"+
+				"%s",
+			sender.FirstName, formatFactionLabel(faction), spawnedContinent, x, y,
+			gameDescriptionText, startingScrap, startingEnergy, gettingStartedGuideText,
+		)
 
-	return c.Send(welcome, keyboards.MainNavigation())
+		selector := &telebot.ReplyMarkup{}
+		btnWarehouse := selector.Data("📦 Warehouse Stocks", "view_warehouse")
+		btnAgent := selector.Data("🧠 Cognitive Agent", "open_agent")
+		btnRefer := selector.Data("👥 Refer a Friend", "open_refer")
+		btnManual := selector.Data("📖 Survival Manual", "view_manual")
+		selector.Inline(
+			selector.Row(btnWarehouse, btnAgent),
+			selector.Row(btnRefer, btnManual),
+		)
+
+		return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), welcome, selector)
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction already active."})
+	return c.Send(fmt.Sprintf(
+		"Your faction is already set to %s, Commander %s. Your Welcome Pack and Cognitive Agent trial were granted "+
+			"when your outpost first spawned and can't be re-issued. Use /guide any time for a refresher on getting started.",
+		formatFactionLabel(faction), sender.FirstName,
+	), keyboards.MainNavigation())
 }
+
+// gameDescriptionText is The Vagabond's lore/premise briefing, shown to
+// every new survivor on their first spawn and available any time via
+// /guide.
+const gameDescriptionText = "🌍 THE VAGABOND — SURVIVOR'S BRIEFING\n" +
+	"The old world ended in fire and static. What's left is the Wastes: a " +
+	"fractured, tick-driven frontier where every outpost, raid, market trade, " +
+	"and alliance plays out in real time — even while you're offline. You lead " +
+	"one encampment of survivors, scavenging Scrap, Rations, and Electricity " +
+	"just to stay alive, then racing up the tech tree toward Metal, Crystal, " +
+	"Hydrogen, and the rarest resource of all, Ether. Raiders, rogue drone " +
+	"nests, and rival factions won't wait for you to catch up — so build, " +
+	"trade, ally, and fight, before the Wastes do it for you."
+
+// gettingStartedGuideText is the step-by-step quickstart, shared between the
+// first-spawn welcome message and the standalone /guide command so a player
+// can always call it back up later.
+const gettingStartedGuideText = "🗺️ GETTING STARTED — YOUR FIRST 10 MINUTES\n" +
+	"1️⃣ Tap 📦 Warehouse Stocks below to see everything in your Welcome Pack.\n" +
+	"2️⃣ Open the ⛺ Outpost Camp Menu and spend Scrap upgrading your Tent and Generator first.\n" +
+	"3️⃣ Boot your 🧠 Cognitive Agent (free for 7 days) and set it to Collector mode so it keeps gathering while you're away.\n" +
+	"4️⃣ Once you've got a few Soldiers, open ⚔️ Tactical Combat to scan for nearby targets.\n" +
+	"5️⃣ Run /refer to get your personal invite link — 50,000 Metal + 500 🔮 Crystal + 50,000 Neuro Cores per friend who joins, plus bigger milestone bonuses at 5/10/25 referrals.\n" +
+	"6️⃣ Whenever you need a refresher on any menu, /help has the full Survival Training Manual, and /guide brings this quickstart back up.\n" +
+	"━━━━━━━━━━━━━━━━━━━━━━"
 
 func formatFactionLabel(f string) string {
 	if f == "steel_vanguard" {

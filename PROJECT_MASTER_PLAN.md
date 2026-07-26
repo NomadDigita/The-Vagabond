@@ -1455,6 +1455,71 @@ passed `gofmt` syntax validation, but **run the real build/test suite
 before deploying this branch**. Branched as
 `fix/referral-system-overhaul`.
 
+**ADR-022: new-player onboarding overhaul — full welcome pack, 7-day
+Agent trial, lore briefing, and getting-started guide.** Following
+session, at project owner's request, stacked directly on top of
+`fix/referral-system-overhaul` (not `main`) so the exploit fix and
+`isNewCamp` guard weren't lost or duplicated. Three functional changes,
+all gated inside the same `isNewCamp` block used by the referral fix
+so none of this can be re-triggered by replaying the faction button:
+
+1. **Welcome Pack** — new survivors now receive starter amounts of all
+   nine resources (Scrap/Rations/Electricity as before, plus Neuro
+   Cores 50, Metal 200, Crystal 20, Hydrogen 40, Dollars 300, Ether 5).
+   Crystal and Ether kept deliberately small since they're the game's
+   scarce/premium resources — this mirrors the same reasoning as the
+   referral reward's Crystal cap in ADR-021.
+2. **7-day Cognitive Agent trial** — `users.premium_until` is set to
+   `NOW() + INTERVAL '7 days'` for every new signup, unlocking the
+   Premium-gated Agent module (`agent.go`) at no cost. Reuses the
+   existing `premium_until` column and its existing `isPremium` check
+   in `HandleAgent`/`HandleToggleAgentCallback` — no new gating logic
+   needed there.
+3. **Rich first-spawn message + `/guide`** — the terse original
+   "welcome, ready to check stats" message is replaced with a lore
+   briefing (`gameDescriptionText`), the full Welcome Pack contents,
+   the trial callout, and a numbered first-10-minutes checklist
+   (`gettingStartedGuideText`). Both are `const` strings shared with a
+   new standalone `/guide` command, so a player can pull the same
+   content back up later without re-triggering onboarding. Added four
+   quick-action inline buttons (Warehouse, Agent, Refer, Manual) to the
+   welcome message.
+
+**Bug caught and fixed during this same session, before commit:** the
+returning-user dashboard in `HandleStart` already had "📦 Warehouse
+Stocks" / "📖 Survival Manual" buttons using callback names
+`view_warehouse` / `view_manual` — and a prior session's bugfix (see
+§4/§6) had already registered handlers for them
+(`econ.HandleWarehouseReserves`, `onboarding.HandleHelp`). Initially,
+new handlers were registered for those same two names for the new
+welcome-message buttons, which would have silently shadowed the
+existing registration (`bot.Handle` on the same key overwrites the
+prior one) and left a newly-written, more-complete warehouse-display
+function as dead code. Caught before commit: removed the duplicate
+handler function entirely and pointed the new welcome message's
+buttons at the pre-existing registrations instead. The one genuine
+gap found in the process — `HandleWarehouseReserves` was missing Neuro
+Cores and Ether from its display — was fixed directly in that existing
+handler instead of duplicating it. Only `open_agent` and `open_refer`
+were genuinely new callback names requiring new registrations.
+
+**Non-onboarding replay behavior also updated:** if the (still-live,
+never-disabled) faction button is tapped again on an already-active
+account, `HandleFactionCallback` now sends a short "faction already
+active, your Welcome Pack/trial already came through, try /guide"
+message instead of re-showing the full onboarding pitch — avoids
+implying a re-grant happened when `isNewCamp` gating means it silently
+didn't.
+
+**Same verification gap as ADR-021**: no full `go build`/`go test` run
+this session either (same `proxy.golang.org` / `cloud.google.com`
+network limitation). Verified via `gofmt` syntax checks plus manual
+cross-referencing of every schema column (`hydrogen`, `dollars`,
+`neuro_cores`, `ether` all confirmed present in the `resources` table
+migration) and every callback registration against the full
+`bot.Handle` call list in `main.go`, specifically checking for
+duplicates. Branched as `feature/onboarding-overhaul`.
+
 ---
 
 ## 4. Known Issues / Technical Debt
@@ -1896,6 +1961,23 @@ before deploying this branch**. Branched as
   cross-referencing against the real source. **Run the real build/test
   suite before trusting this in production.** Branched as
   `fix/referral-system-overhaul`.
+- **Following session (core game, not AI Systems Roadmap):**
+  new-player onboarding overhaul, at project owner's request, stacked
+  on `fix/referral-system-overhaul`. New survivors now get a full
+  Welcome Pack (all 9 resources, not just 3) and a 7-day free trial of
+  the Premium-gated Cognitive Agent module, both gated inside the same
+  `isNewCamp` block the referral exploit fix uses. First-spawn message
+  rewritten with a lore briefing, full Welcome Pack listing, trial
+  callout, and a numbered getting-started checklist, plus 4 quick-
+  action buttons (Warehouse/Agent/Refer/Manual). Added standalone
+  `/guide` command reusing the same briefing/checklist text. Extended
+  the pre-existing Warehouse Reserves panel to show its 2 previously-
+  missing resources (Neuro Cores, Ether) rather than duplicating it.
+  Caught and removed a duplicate-`bot.Handle`-registration bug before
+  commit (see ADR-022) that would have silently shadowed an existing
+  handler. Same build-verification gap as the referral-fix session —
+  no full `go build`/`go test` run, `gofmt` + manual review only.
+  Documented as ADR-022. Branched as `feature/onboarding-overhaul`.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
@@ -1936,11 +2018,12 @@ before deploying this branch**. Branched as
    network access — confirm Phase A still compiles end-to-end (this
    session could only verify the `internal/ai` subtree in isolation;
    see §1 and §4).
-   - **Immediate priority:** the `fix/referral-system-overhaul` branch
-     (§1's ADR-021 / §6's most recent Change Log entry) has never had
-     a real `go build`/`go test` run against it — only `gofmt` syntax
-     checks and manual signature review. Run the real suite on that
-     branch before it's merged or deployed.
+   - **Immediate priority:** neither `fix/referral-system-overhaul`
+     nor `feature/onboarding-overhaul` (stacked on top of it) have
+     ever had a real `go build`/`go test` run against them — only
+     `gofmt` syntax checks and manual signature review (§2's ADR-021 /
+     ADR-022, §6's two most recent Change Log entries). Run the real
+     suite on both branches before either is merged or deployed.
 3. Pick up the "Recommended next task" in §3 unless the project owner
    has redirected you.
 4. Before writing code for any phase: inspect the relevant existing
