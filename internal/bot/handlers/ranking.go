@@ -46,6 +46,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	topPlayersQuery := fmt.Sprintf(`
 		SELECT e.name, %s AS score
 		FROM encampments e
+		WHERE e.is_ai_faction = FALSE
 		ORDER BY score DESC
 		LIMIT 15`, scoring.ScoreExpr)
 
@@ -68,6 +69,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	topSkilledQuery := fmt.Sprintf(`
 		SELECT e.name, %s AS mil_score
 		FROM encampments e
+		WHERE e.is_ai_faction = FALSE
 		ORDER BY mil_score DESC
 		LIMIT 5`, scoring.MilitaryScoreExpr)
 

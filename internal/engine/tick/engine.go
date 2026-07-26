@@ -797,6 +797,7 @@ func (e *Engine) ProcessTick() {
 		{"road_encounters", e.evaluateRoadEncounters},
 		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
 		{"supply_convoys", e.processSupplyConvoys},
+		{"ai_civilization_growth", e.growAICivilizations},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},
@@ -2293,6 +2294,88 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 		if userID != 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
 				"📦✅ CONVOY ARRIVED: Reinforcement supplies have reached your stranded column. The journey resumes.")
+		}
+	}
+	return nil
+}
+
+// aiCivilizationMaxSoldiersPerLevel / aiCivilizationMaxMechsPerLevel cap how
+// large an AI faction's garrison can grow relative to its level, so an
+// undisturbed AI base becomes a genuinely tougher (and more rewarding)
+// target over time without growing without bound.
+const aiCivilizationMaxSoldiersPerLevel = 25
+const aiCivilizationMaxMechsPerLevel = 4
+
+// growAICivilizations implements MMO_WORLD_EVOLUTION_PLAN.md Phase 6's
+// "gather resources, build units, expand" requirement for persistent AI
+// factions (seeded by seedAICivilizations in cmd/bot/main.go). Growth is
+// deliberately modest and capped per tick - an AI faction left alone for a
+// long time becomes a meaningfully richer, better-defended target, but a
+// player who raids it periodically can keep it suppressed, which is the
+// intended emergent dynamic rather than an ever-escalating unkillable base.
+func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id, level FROM encampments WHERE is_ai_faction = TRUE")
+	if err != nil {
+		return fmt.Errorf("querying AI civilizations: %w", err)
+	}
+	type faction struct {
+		id    string
+		level int
+	}
+	var factions []faction
+	for rows.Next() {
+		var f faction
+		if err := rows.Scan(&f.id, &f.level); err == nil {
+			factions = append(factions, f)
+		}
+	}
+	rows.Close()
+
+	for _, f := range factions {
+		storageCapacity := storagecap.CapFor(ctx, tx, f.id)
+
+		for _, res := range []struct {
+			column string
+			gain   float64
+		}{
+			{"scrap", float64(f.level) * 2.0},
+			{"metal", float64(f.level) * 1.0},
+			{"rations", float64(f.level) * 0.75},
+			{"electricity", float64(f.level) * 0.5},
+		} {
+			var current float64
+			query := fmt.Sprintf("SELECT COALESCE(%s,0) FROM resources WHERE encampment_id = $1", res.column)
+			_ = tx.QueryRowContext(ctx, query, f.id).Scan(&current)
+			newAmount, _ := storagecap.Clamp(current, res.gain, storageCapacity)
+			updateQuery := fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", res.column)
+			_, _ = tx.ExecContext(ctx, updateQuery, newAmount, f.id)
+		}
+
+		// A trickle of Crystal too, at a much lower rate - it's the
+		// rarest resource in the world, an AI faction shouldn't
+		// accumulate it quickly either.
+		var currentCrystal float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentCrystal)
+		newCrystal, _ := storagecap.Clamp(currentCrystal, float64(f.level)*0.02, storageCapacity)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = $1 WHERE encampment_id = $2", newCrystal, f.id)
+
+		// Occasionally build garrison units, capped per level.
+		if rand.Float64() < 0.05 {
+			var soldiers, mechs int
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers,0), COALESCE(mechs,0) FROM workshop_inventory WHERE encampment_id = $1", f.id).Scan(&soldiers, &mechs)
+			maxSoldiers := f.level * aiCivilizationMaxSoldiersPerLevel
+			maxMechs := f.level * aiCivilizationMaxMechsPerLevel
+			if soldiers < maxSoldiers {
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", f.id)
+			} else if mechs < maxMechs {
+				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET mechs = mechs + 1 WHERE encampment_id = $1", f.id)
+			} else if f.level < 15 {
+				// Garrison is maxed for this level - expand instead,
+				// raising the ceiling for future growth. Capped at 15 so
+				// a truly ignored AI faction doesn't become an
+				// unraidable superpower.
+				_, _ = tx.ExecContext(ctx, "UPDATE encampments SET level = level + 1 WHERE id = $1", f.id)
+			}
 		}
 	}
 	return nil

@@ -28,7 +28,7 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	ctx := context.Background()
 
 	var totalSurvivors int
-	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalSurvivors)
+	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE state != 'ai_faction'").Scan(&totalSurvivors)
 
 	// Phase 7 (item 12): world events are per-continent now, so this
 	// feed shows a line per continent instead of one global status.

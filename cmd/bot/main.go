@@ -820,6 +820,18 @@ func executeStartupMigrations(db *sql.DB) {
 		`CREATE UNIQUE INDEX IF NOT EXISTS uq_supply_convoys_active_target ON supply_convoys(target_raid_id) WHERE state = 'marching';`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS high_tech_offline BOOLEAN NOT NULL DEFAULT FALSE;`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS power_outage_ticks INT NOT NULL DEFAULT 0;`,
+
+		// --- MMO Living World Phase 6: persistent AI civilizations.
+		// AI factions are REAL encampments (with a synthetic negative-
+		// telegram_id "users" row satisfying the existing NOT NULL/UNIQUE
+		// FK, seeded once by seedAICivilizations at startup) rather than
+		// a special-cased entity, so the entire existing discovery/
+		// targeting/raiding/looting pipeline works on them for free -
+		// see MMO_WORLD_EVOLUTION_PLAN.md's Phase 6 completed-detail
+		// section for why that integration point was chosen.
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS is_ai_faction BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS ai_faction_key VARCHAR(50);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_encampments_ai_faction_key ON encampments(ai_faction_key) WHERE ai_faction_key IS NOT NULL;`,
 	}
 
 	for _, stmt := range migrations {
@@ -901,6 +913,125 @@ func relocateZeroCoordinates(db *sql.DB) {
 	}
 }
 
+// aiFactionSeed describes one persistent AI civilization to seed at
+// startup (Phase 6, MMO_WORLD_EVOLUTION_PLAN.md). Deliberately modeled as
+// a real encampments row (see migrations/032_mmo_ai_civilizations.sql for
+// why) rather than a special-cased entity, so the entire existing
+// discovery/targeting/raiding/looting pipeline handles it with zero
+// changes.
+type aiFactionSeed struct {
+	telegramID int64
+	key        string
+	name       string
+	region     string
+	level      int
+}
+
+// seedAICivilizations creates the persistent AI factions described in
+// MMO_WORLD_EVOLUTION_PLAN.md's Phase 6 if they don't already exist
+// (idempotent via ai_faction_key). Two per continent, at distinct starting
+// levels, so the world has real discoverable, raidable, growing AI-run
+// outposts instead of the single difficulty-matched "Rogue Drone Nest"
+// dummy target Phase 0-5 relied on. The Rogue Drone Nest itself is left
+// completely untouched as a fallback for a continent with no other
+// outpost at all (see resolveExplorationDiscovery in internal/engine/tick
+// /engine.go).
+func seedAICivilizations(db *sql.DB) {
+	ctx := context.Background()
+
+	seeds := []aiFactionSeed{
+		{-900001, "ai_ironclad_directive", "Ironclad Directive", "Africa", 6},
+		{-900002, "ai_sandrunner_clan", "Sandrunner Clan", "Africa", 3},
+		{-900003, "ai_veridian_compact", "Veridian Compact", "Europe", 6},
+		{-900004, "ai_ashfall_remnant", "Ashfall Remnant", "Europe", 3},
+		{-900005, "ai_lotus_dominion", "Lotus Dominion", "Asia", 6},
+		{-900006, "ai_crimson_tide_syndicate", "Crimson Tide Syndicate", "Asia", 3},
+		{-900007, "ai_frontier_collective", "Frontier Collective", "Americas", 6},
+		{-900008, "ai_dustbowl_militia", "Dustbowl Militia", "Americas", 3},
+	}
+
+	rGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for _, s := range seeds {
+		var existing string
+		err := db.QueryRowContext(ctx, "SELECT id FROM encampments WHERE ai_faction_key = $1", s.key).Scan(&existing)
+		if err == nil {
+			continue // already seeded
+		}
+		if err != sql.ErrNoRows {
+			log.Printf("AI civilization seed check failed for %s: %v", s.key, err)
+			continue
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO users (telegram_id, username, first_name, state, faction)
+			VALUES ($1, $2, $2, 'ai_faction', 'ai')
+			ON CONFLICT (telegram_id) DO NOTHING`, s.telegramID, s.name); err != nil {
+			log.Printf("AI civilization user seed failed for %s: %v", s.key, err)
+			continue
+		}
+
+		var x, y int
+		var coordID string
+		placed := false
+		for attempt := 0; attempt < 100; attempt++ {
+			switch s.region {
+			case "Africa":
+				x = rGen.Intn(991) + 10
+				y = rGen.Intn(991) + 10
+			case "Europe":
+				x = -(rGen.Intn(991) + 10)
+				y = rGen.Intn(991) + 10
+			case "Asia":
+				x = rGen.Intn(991) + 10
+				y = -(rGen.Intn(991) + 10)
+			default:
+				x = -(rGen.Intn(991) + 10)
+				y = -(rGen.Intn(991) + 10)
+			}
+			err := db.QueryRowContext(ctx, `
+				INSERT INTO coordinates (x, y, biome, danger_level, region, terrain)
+				VALUES ($1, $2, 'wasteland', $3, $4, 'plains')
+				ON CONFLICT (x, y) DO NOTHING
+				RETURNING id`, x, y, s.level, s.region).Scan(&coordID)
+			if err == nil {
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			log.Printf("AI civilization %s could not find a free coordinate after 100 attempts", s.key)
+			continue
+		}
+
+		var campID string
+		if err := db.QueryRowContext(ctx, `
+			INSERT INTO encampments (user_id, name, coordinate_id, level, is_ai_faction, ai_faction_key)
+			VALUES ($1, $2, $3, $4, TRUE, $5)
+			RETURNING id`, s.telegramID, s.name, coordID, s.level, s.key).Scan(&campID); err != nil {
+			log.Printf("AI civilization encampment seed failed for %s: %v", s.key, err)
+			continue
+		}
+
+		startScrap := float64(s.level) * 400.0
+		startMetal := float64(s.level) * 200.0
+		startRations := float64(s.level) * 150.0
+		startElectricity := float64(s.level) * 100.0
+		_, _ = db.ExecContext(ctx, `
+			INSERT INTO resources (encampment_id, scrap, metal, rations, electricity, crystal)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			campID, startScrap, startMetal, startRations, startElectricity, float64(s.level)*0.5)
+
+		startSoldiers := s.level * 15
+		startMechs := s.level * 2
+		_, _ = db.ExecContext(ctx, `
+			INSERT INTO workshop_inventory (encampment_id, soldiers, mechs, buggies)
+			VALUES ($1, $2, $3, 1)`, campID, startSoldiers, startMechs)
+
+		log.Printf("Seeded AI civilization [%s] (%s, level %d) at [%d,%d]", s.name, s.region, s.level, x, y)
+	}
+}
+
 func main() {
 	log.Println("Starting The Vagabond server initialization sequence...")
 
@@ -948,6 +1079,7 @@ func main() {
 
 	executeStartupMigrations(db)
 	relocateZeroCoordinates(db)
+	seedAICivilizations(db)
 
 	pref := telebot.Settings{
 		Token:  botToken,
