@@ -1,10 +1,11 @@
 # MMO Warfare, Exploration, and Logistics Plan
 
-Status: Phases 1-4 complete; persistent AI civilizations (Phase 5 in this
-doc's numbering) in progress (2026-07-26). Note: this document's phase
-numbers do not match `MMO_WORLD_EVOLUTION_PLAN.md`'s - this file's "Phase
-3 (Road Encounters)" is that plan's "Phase 4"; this file's "Phase 4
-(Weather/Camps)" is that plan's "Phase 5". Treat
+Status: Phases 1-4 complete (road encounters cover both expedition-vs-
+expedition and expedition-vs-base); persistent AI civilizations (Phase 5
+in this doc's numbering) remain pending (2026-07-26). Note: this
+document's phase numbers do not match `MMO_WORLD_EVOLUTION_PLAN.md`'s -
+this file's "Phase 3 (Road Encounters)" is that plan's "Phase 4"; this
+file's "Phase 4 (Weather/Camps)" is that plan's "Phase 5". Treat
 `MMO_WORLD_EVOLUTION_PLAN.md` as the authoritative phase numbering going
 forward; this file is kept for its detailed milestone/edge-case breakdown.
 
@@ -117,6 +118,12 @@ Milestones:
 - Incoming raid warnings are now capability- and proximity-based. They queue
   once after a force crosses the defender's radar threshold instead of
   revealing a raid at departure or sending a duplicate alert every tick.
+- Phase 3 road encounters complete: active outbound/returning columns that
+  meet on a route pause for a ten-minute response window. `/encounters` gives
+  both commanders Attack/Continue controls. Either attack starts a field
+  battle resolved by the established battle-report renderer; casualties update
+  the moving force, only carried raid cargo is stealable, and an annihilated
+  column turns home. A mutual Continue or timeout resumes both journeys.
 - Phase 3 (Road Encounters) complete for expedition-vs-expedition contact:
   `road_encounters` table, per-leg route-progress tracking that survives
   pauses/speed-ups without drifting, a tick pass that rolls encounters for

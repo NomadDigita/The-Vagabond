@@ -171,6 +171,18 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS ether DOUBLE PRECISION DEFAULT 0.00;`,
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS neuro_cores DOUBLE PRECISION DEFAULT 0.00;`,
 
+		// Referral system fix (2026-07-26): referral_code was never
+		// enforced unique, and the old `telegramID % 1_000_000` scheme
+		// could collide, silently misattributing referrals. Codes are
+		// now derived deterministically from the player's Telegram ID
+		// (base36), which is unique by construction, so this index just
+		// protects against any stale/legacy duplicate codes.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code) WHERE referral_code IS NOT NULL;`,
+		// Tracks the highest referral-count milestone tier (5/10/25) a
+		// player has already claimed, so milestone bonuses are granted
+		// exactly once.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_tier_claimed INT DEFAULT 0;`,
+
 		`CREATE TABLE IF NOT EXISTS modules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
@@ -567,9 +579,32 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS origin_region VARCHAR(50);`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS destination_region VARCHAR(50);`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS radar_alert_sent_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS movement_state VARCHAR(30) NOT NULL DEFAULT 'moving';`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS pause_reason TEXT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS next_route_event_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_progress DOUBLE PRECISION;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_progress_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_leg_minutes DOUBLE PRECISION;`,
+		`UPDATE raids SET route_progress = CASE WHEN state = 'returning' THEN 1.0 ELSE 0.0 END WHERE route_progress IS NULL;`,
+		`ALTER TABLE raids ALTER COLUMN route_progress SET DEFAULT 0.0;`,
+		`ALTER TABLE raids ALTER COLUMN route_progress SET NOT NULL;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid
+					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused'));
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_route_progress_range') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_route_progress_range
+					CHECK (route_progress >= 0.0 AND route_progress <= 1.0);
+			END IF;
+		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending
 			ON raids(resolve_time)
 			WHERE state = 'marching' AND defender_id IS NOT NULL AND radar_alert_sent_at IS NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_raids_active_movement
+			ON raids(state, movement_state, resolve_time)
+			WHERE state IN ('marching', 'returning');`,
 
 		// Phase 7 (item 11): Diplomacy. Mirrors clan_wars's clan_a/clan_b
 		// shape, but for peaceful pacts instead of conflicts. A pact only
@@ -769,9 +804,41 @@ func executeStartupMigrations(db *sql.DB) {
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_moving_route_scan ON raids(state) WHERE state IN ('marching', 'returning') AND movement_state = 'moving';`,
 
+		// See migrations/032_mmo_road_base_encounters.sql for the annotated
+		// version. Completes Phase 4 milestone 2 (expedition-vs-base road
+		// encounters), the "expeditions and bases" half that road_encounters
+		// above (expedition-vs-expedition only) didn't cover.
+		`CREATE TABLE IF NOT EXISTS road_base_encounters (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			location_x INT NOT NULL,
+			location_y INT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			outcome VARCHAR(20),
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			response_deadline TIMESTAMP WITH TIME ZONE NOT NULL,
+			resolved_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT road_base_encounters_status CHECK (status IN ('pending', 'resolved'))
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_road_base_encounters_pending_pair ON road_base_encounters(raid_id, encampment_id) WHERE status = 'pending';`,
+		`CREATE INDEX IF NOT EXISTS idx_road_base_encounters_pending_deadline ON road_base_encounters(response_deadline) WHERE status = 'pending';`,
+		`CREATE INDEX IF NOT EXISTS idx_road_base_encounters_raid_recent ON road_base_encounters(raid_id, created_at DESC);`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS active_base_encounter_id UUID;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'raids_active_base_encounter_id_fkey'
+			) THEN
+				ALTER TABLE raids
+					ADD CONSTRAINT raids_active_base_encounter_id_fkey
+					FOREIGN KEY (active_base_encounter_id) REFERENCES road_base_encounters(id) ON DELETE SET NULL;
+			END IF;
+		END $$;`,
+
 		// --- MMO Living World Phase 5: weather route incidents (temporary
 		// camps) + reinforcement convoys. See
-		// migrations/031_mmo_route_weather_and_reinforcement_convoys.sql
+		// migrations/033_mmo_route_weather_and_reinforcement_convoys.sql
 		// for the annotated standalone copy.
 		`CREATE TABLE IF NOT EXISTS route_incidents (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1193,6 +1260,7 @@ func main() {
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
+	bot.Handle("/warehouse", econ.HandleWarehouseReserves)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
 	bot.Handle("/hero", hero.HandleHeroPanel)
@@ -1211,6 +1279,7 @@ func main() {
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
 	bot.Handle("/help", onboarding.HandleHelp)
+	bot.Handle("/guide", onboarding.HandleGuide)
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
 	bot.Handle("/admin", admin.HandleAdminPanel)
 	bot.Handle("/arena", arena.HandleArenaPanel)
@@ -1357,6 +1426,19 @@ func main() {
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
 	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
+
+	// New-survivor welcome message quick-action buttons. view_warehouse
+	// and view_manual are already registered further down (pre-existing
+	// dashboard buttons); only open_agent/open_refer are new here.
+	bot.Handle("\fopen_agent", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return agentH.HandleAgent(c)
+	})
+	bot.Handle("\fopen_refer", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return profile.HandleRefer(c)
+	})
+
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)
@@ -1378,6 +1460,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\froad_encounter", combat.HandleRoadEncounterCallback)
+	bot.Handle("\froad_base_encounter", combat.HandleRoadBaseEncounterCallback)
 	bot.Handle("\fdispatch_convoy", combat.HandleDispatchConvoy)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)

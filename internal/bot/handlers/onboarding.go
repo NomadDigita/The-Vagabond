@@ -26,6 +26,27 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
+// generateReferralCode derives a referral code directly from a player's
+// Telegram ID. Because Telegram IDs are themselves unique, base36-encoding
+// the ID guarantees a collision-free code with no DB round-trip or retry
+// loop needed (unlike the old `telegramID % 1_000_000` scheme, which could
+// map two different players to the same code).
+func generateReferralCode(telegramID int64) string {
+	return "REF" + strings.ToUpper(strconv.FormatInt(telegramID, 36))
+}
+
+// referralMilestones defines one-time bonus payouts unlocked once a
+// referrer's total referral count reaches the given threshold, on top of
+// the standard per-referral reward.
+var referralMilestones = []struct {
+	Count                 int
+	Metal, Crystal, Neuro float64
+}{
+	{5, 25000, 250, 25000},
+	{10, 75000, 750, 75000},
+	{25, 250000, 2500, 250000},
+}
+
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -235,6 +256,16 @@ func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName))
 }
 
+// HandleGuide (/guide) re-sends the game briefing and getting-started
+// quickstart shown on first spawn, so a player can pull it back up any
+// time — e.g. if they skipped past it, or want to re-check the referral
+// reward numbers or agent-trial reminder.
+func (h *OnboardingHandler) HandleGuide(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
+	text := gameDescriptionText + "\n\n" + gettingStartedGuideText
+	return c.Send(text, keyboards.MainNavigation())
+}
+
 func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -252,6 +283,9 @@ func (h *OnboardingHandler) HandleHelp(c telebot.Context) error {
 		"• Financial Vault: Deposit Scrap to earn interest or secure emergency credit lines.\n" +
 		"• Clan Alliances: Establish or join forces (capped at 15 members). Trigger alliance wars.\n" +
 		"• Heavy Workshop: Spend heavy resources (Metal, Crystal, Hydrogen) to assemble Fusion Tanks.\n\n" +
+		"📦 /warehouse — full breakdown of all nine resources at once.\n" +
+		"🗺️ /guide — resend the game briefing + first-10-minutes quickstart.\n" +
+		"👥 /refer — get your personal invite link and referral rewards.\n\n" +
 		"💡 SYSTEM TIP: Tapping '⬅️ Back to HQ' at any time restores the mother navigation keyboard.\n" +
 		"━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -277,12 +311,18 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// Every player gets a referral code the moment their account is
+	// created (or upgraded from 'onboarding' to 'active'), instead of
+	// waiting for them to first run /refer. COALESCE on conflict means
+	// an existing code (e.g. set by an earlier session) is never
+	// clobbered.
+	newReferralCode := generateReferralCode(telegramID)
 	insertUser := `
-		INSERT INTO users (telegram_id, username, first_name, state, faction) 
-		VALUES ($1, $2, $3, 'active', $4)
+		INSERT INTO users (telegram_id, username, first_name, state, faction, referral_code) 
+		VALUES ($1, $2, $3, 'active', $4, $5)
 		ON CONFLICT (telegram_id) 
-		DO UPDATE SET faction = $4, state = 'active'`
-	_, err = tx.ExecContext(ctx, insertUser, telegramID, sender.Username, sender.FirstName, faction)
+		DO UPDATE SET faction = $4, state = 'active', referral_code = COALESCE(users.referral_code, $5)`
+	_, err = tx.ExecContext(ctx, insertUser, telegramID, sender.Username, sender.FirstName, faction, newReferralCode)
 	if err != nil {
 		log.Printf("Failed registering faction user: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database writing registration error."})
@@ -341,7 +381,9 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var campID string
 	queryCampExists := `SELECT id FROM encampments WHERE user_id = $1`
 	err = tx.QueryRowContext(ctx, queryCampExists, telegramID).Scan(&campID)
-	if errors.Is(err, sql.ErrNoRows) {
+	isNewCamp := errors.Is(err, sql.ErrNoRows)
+	var startingScrap, startingEnergy float64
+	if isNewCamp {
 		campName := fmt.Sprintf("Outpost-%d", telegramID%1000)
 		insertCamp := `
 			INSERT INTO encampments (user_id, name, coordinate_id, level) 
@@ -353,24 +395,45 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		startingScrap := 1000.0
-		startingEnergy := 250.0
+		startingScrap = 1000.0
+		startingEnergy = 250.0
 		if faction == "steel_vanguard" {
 			startingEnergy += 500.0
 		} else {
 			startingScrap += 1500.0
 		}
 
+		// Welcome Pack: every brand-new survivor starts with a stake in
+		// ALL nine resources, not just the three the old flow granted
+		// (Scrap/Rations/Electricity, with everything else defaulting to
+		// zero). Metal/Hydrogen/Dollars/Neuro give a real head start on
+		// early buildings and trades; Crystal and Ether stay deliberately
+		// small since they're the game's scarce/premium resources.
+		const (
+			startingNeuro    = 50.0
+			startingMetal    = 200.0
+			startingCrystal  = 20.0
+			startingHydrogen = 40.0
+			startingDollars  = 300.0
+			startingEther    = 5.0
+		)
+
 		insertRes := `
-			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores) 
-			VALUES ($1, $2, 50.00, $3, 0.00)`
-		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy)
+			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores, metal, crystal, hydrogen, dollars, ether) 
+			VALUES ($1, $2, 50.00, $3, $4, $5, $6, $7, $8, $9)`
+		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy,
+			startingNeuro, startingMetal, startingCrystal, startingHydrogen, startingDollars, startingEther)
 		if err != nil {
 			log.Printf("Failed creating resources: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Resource allocation error."})
 		}
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+
+		// 7-day Cognitive Agent (Premium) trial for every new survivor.
+		// This only ever runs inside the isNewCamp guard, so it can't be
+		// replayed to keep extending someone's trial.
+		_, _ = tx.ExecContext(ctx, "UPDATE users SET premium_until = NOW() + INTERVAL '7 days' WHERE telegram_id = $1", telegramID)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -378,12 +441,15 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 
 	// Referral reward: if this new survivor arrived via a referral code,
-	// grant both them and their referrer a resource bonus now that their
-	// outpost actually exists.
+	// grant both them and their referrer a resource bonus. Gated on
+	// isNewCamp so this can only ever fire once per player — previously
+	// this ran on every HandleFactionCallback invocation, letting anyone
+	// replay the still-live "join faction" button to farm free resources
+	// indefinitely.
 	var referrerID sql.NullInt64
 	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
-	if referrerID.Valid {
-		const refMetal, refCrystal, refNeuro = 500.0, 200.0, 100.0
+	if isNewCamp && referrerID.Valid {
+		const refMetal, refCrystal, refNeuro = 50000.0, 500.0, 50000.0
 
 		var curMetal, curCrystal, curNeuro float64
 		_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal, &curNeuro)
@@ -403,26 +469,108 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			refNewNeuro, _ := storagecap.Clamp(refCurNeuro, refNeuro, referrerCap)
 			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", refNewMetal, refNewCrystal, refNewNeuro, referrerCampID)
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
-				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 500 Metal, 200 Crystal, 100 Neuro Cores.", sender.FirstName))
+				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 50,000 Metal, 500 🔮 Crystal, 50,000 Neuro Cores.", sender.FirstName))
+
+			// Milestone tiers: grant a one-time bonus the first time the
+			// referrer's total referral count crosses a threshold.
+			var referralCount, tierClaimed int
+			_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE referred_by = $1", referrerID.Int64).Scan(&referralCount)
+			_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_tier_claimed, 0) FROM users WHERE telegram_id = $1", referrerID.Int64).Scan(&tierClaimed)
+
+			for _, m := range referralMilestones {
+				if referralCount >= m.Count && tierClaimed < m.Count {
+					var mCurMetal, mCurCrystal, mCurNeuro float64
+					_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", referrerCampID).Scan(&mCurMetal, &mCurCrystal, &mCurNeuro)
+					mNewMetal, _ := storagecap.Clamp(mCurMetal, m.Metal, referrerCap)
+					mNewCrystal, _ := storagecap.Clamp(mCurCrystal, m.Crystal, referrerCap)
+					mNewNeuro, _ := storagecap.Clamp(mCurNeuro, m.Neuro, referrerCap)
+					_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", mNewMetal, mNewCrystal, mNewNeuro, referrerCampID)
+					_, _ = h.DB.ExecContext(ctx, "UPDATE users SET referral_tier_claimed = $1 WHERE telegram_id = $2", m.Count, referrerID.Int64)
+					_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
+						fmt.Sprintf("🏆 REFERRAL MILESTONE: %d friends recruited! Bonus: %.0f Metal, %.0f 🔮 Crystal, %.0f Neuro Cores.", m.Count, m.Metal, m.Crystal, m.Neuro))
+					tierClaimed = m.Count
+				}
+			}
 		}
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})
+	if isNewCamp {
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})
 
-	welcome := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🛰️ COGNITIVE CORE BOOTED\n"+
+		welcome := fmt.Sprintf(
 			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Welcome to the wastes, Commander %s.\n"+
-			"Your terminal is now integrated into [%s].\n"+
-			"Your base has successfully spawned in territory: [%s]\n"+
-			"📍 Location Coordinates: [X: %d, Y: %d]\n\n"+
-			"Ready to check your commander statistics or modules.",
-		sender.FirstName, formatFactionLabel(faction), spawnedContinent, x, y,
-	)
+				"🛰️ COGNITIVE CORE BOOTED\n"+
+				"━━━━━━━━━━━━━━━━━━━━━━\n"+
+				"Welcome to the wastes, Commander %s.\n"+
+				"Your terminal is now integrated into [%s].\n"+
+				"Your base has successfully spawned in territory: [%s]\n"+
+				"📍 Location Coordinates: [X: %d, Y: %d]\n\n"+
+				"%s\n\n"+
+				"🎁 WELCOME PACK — DEPLOYED TO YOUR WAREHOUSE\n"+
+				"⚙️ Scrap: %.0f\n"+
+				"🥫 Rations: 50\n"+
+				"⚡ Electricity Cells: %.0f\n"+
+				"🧠 Neuro Cores: 50\n"+
+				"🔩 Metal: 200\n"+
+				"🔮 Crystal: 20\n"+
+				"🎈 Hydrogen: 40\n"+
+				"💵 Dollars: 300\n"+
+				"✨ Ether: 5\n\n"+
+				"🧠 7-DAY COGNITIVE AGENT TRIAL — ACTIVATED\n"+
+				"Your Cognitive Agent (normally a Premium-only module) is unlocked "+
+				"free for the next 7 days. Set a mode in /agent and it keeps working "+
+				"your outpost even while you're offline — no charge, no card, nothing "+
+				"to cancel.\n\n"+
+				"%s",
+			sender.FirstName, formatFactionLabel(faction), spawnedContinent, x, y,
+			gameDescriptionText, startingScrap, startingEnergy, gettingStartedGuideText,
+		)
 
-	return c.Send(welcome, keyboards.MainNavigation())
+		selector := &telebot.ReplyMarkup{}
+		btnWarehouse := selector.Data("📦 Warehouse Stocks", "view_warehouse")
+		btnAgent := selector.Data("🧠 Cognitive Agent", "open_agent")
+		btnRefer := selector.Data("👥 Refer a Friend", "open_refer")
+		btnManual := selector.Data("📖 Survival Manual", "view_manual")
+		selector.Inline(
+			selector.Row(btnWarehouse, btnAgent),
+			selector.Row(btnRefer, btnManual),
+		)
+
+		return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), welcome, selector)
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction already active."})
+	return c.Send(fmt.Sprintf(
+		"Your faction is already set to %s, Commander %s. Your Welcome Pack and Cognitive Agent trial were granted "+
+			"when your outpost first spawned and can't be re-issued. Use /guide any time for a refresher on getting started.",
+		formatFactionLabel(faction), sender.FirstName,
+	), keyboards.MainNavigation())
 }
+
+// gameDescriptionText is The Vagabond's lore/premise briefing, shown to
+// every new survivor on their first spawn and available any time via
+// /guide.
+const gameDescriptionText = "🌍 THE VAGABOND — SURVIVOR'S BRIEFING\n" +
+	"The old world ended in fire and static. What's left is the Wastes: a " +
+	"fractured, tick-driven frontier where every outpost, raid, market trade, " +
+	"and alliance plays out in real time — even while you're offline. You lead " +
+	"one encampment of survivors, scavenging Scrap, Rations, and Electricity " +
+	"just to stay alive, then racing up the tech tree toward Metal, Crystal, " +
+	"Hydrogen, and the rarest resource of all, Ether. Raiders, rogue drone " +
+	"nests, and rival factions won't wait for you to catch up — so build, " +
+	"trade, ally, and fight, before the Wastes do it for you."
+
+// gettingStartedGuideText is the step-by-step quickstart, shared between the
+// first-spawn welcome message and the standalone /guide command so a player
+// can always call it back up later.
+const gettingStartedGuideText = "🗺️ GETTING STARTED — YOUR FIRST 10 MINUTES\n" +
+	"1️⃣ Tap 📦 Warehouse Stocks below to see everything in your Welcome Pack.\n" +
+	"2️⃣ Open the ⛺ Outpost Camp Menu and spend Scrap upgrading your Tent and Generator first.\n" +
+	"3️⃣ Boot your 🧠 Cognitive Agent (free for 7 days) and set it to Collector mode so it keeps gathering while you're away.\n" +
+	"4️⃣ Once you've got a few Soldiers, open ⚔️ Tactical Combat to scan for nearby targets.\n" +
+	"5️⃣ Run /refer to get your personal invite link — 50,000 Metal + 500 🔮 Crystal + 50,000 Neuro Cores per friend who joins, plus bigger milestone bonuses at 5/10/25 referrals.\n" +
+	"6️⃣ Whenever you need a refresher on any menu, /help has the full Survival Training Manual, and /guide brings this quickstart back up.\n" +
+	"━━━━━━━━━━━━━━━━━━━━━━"
 
 func formatFactionLabel(f string) string {
 	if f == "steel_vanguard" {

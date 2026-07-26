@@ -108,19 +108,19 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 			"🎯☢️ Piercing Missiles: %d\n\n"+
 			"⚒️ MANUFACTURING BLUEPRINTS ⚒️\n"+
 			"🪖 [Soldier] ➜ 💰50 Rations, 🔩10 Metal ➜ ⚔️ +10 Offense\n"+
-			"🛰️ [Tactical Drone] ➜ 🔩100 Metal, 💎10 Crystal ➜ 🕵️ Spy Satellite / 🚨 Interceptor\n"+
-			"🤖 [Colossus Mech] ➜ 🔩1000 Metal, 💎70 Crystal ➜ ⚔️ +350 Offense\n"+
-			"☢️ [Nuclear Device] ➜ 🔩2500 Metal, 💎510 Crystal ➜ 💥 +1500 Detonation\n"+
-			"💥 [Destroyer] ➜ 🔩800 Metal, 💎55 Crystal ➜ 🎯 Hard-counters Drones/Jets\n"+
-			"🛩️ [Bomber] ➜ 🔩1300 Metal, 💎60 Crystal ➜ 🏰 Hard-counters Turrets\n"+
+			"🛰️ [Tactical Drone] ➜ 🔩100 Metal, 🔮10 Crystal ➜ 🕵️ Spy Satellite / 🚨 Interceptor\n"+
+			"🤖 [Colossus Mech] ➜ 🔩1000 Metal, 🔮70 Crystal ➜ ⚔️ +350 Offense\n"+
+			"☢️ [Nuclear Device] ➜ 🔩2500 Metal, 🔮510 Crystal ➜ 💥 +1500 Detonation\n"+
+			"💥 [Destroyer] ➜ 🔩800 Metal, 🔮55 Crystal ➜ 🎯 Hard-counters Drones/Jets\n"+
+			"🛩️ [Bomber] ➜ 🔩1300 Metal, 🔮60 Crystal ➜ 🏰 Hard-counters Turrets\n"+
 			"🛵 [%s] ➜ 🔩%.0f Metal ➜ %s\n"+
-			"🚢👑 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
-			"🌑💀 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal, 🧠%.0f Neuro Cores ➜ %s\n"+
-			"🦅 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
-			"👻 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
-			"👁️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
-			"🛡️🤖 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
-			"🎯☢️ [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ %s\n"+
+			"🚢👑 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
+			"🌑💀 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal, 🧠%.0f Neuro Cores ➜ %s\n"+
+			"🦅 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
+			"👻 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
+			"👁️ [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
+			"🛡️🤖 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
+			"🎯☢️ [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ %s\n"+
 			"🏭━━━━━━━━━━━━━━━━━━━━━━🏭",
 		soldiers, drones, mechs, nukes, destroyers, bombers, scouts, battlecruisers, deathstars, maxDS, liberators, wraiths, observers, guardians, piercingMissiles,
 		scoutUnit.Title, scoutUnit.Cost["metal"], scoutUnit.Flavor,
@@ -215,8 +215,8 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 			"🛡️ [Fuel Tanker] — Cost: 400 Metal, 100 Hydrogen (-20%% march fuel costs)\n"+
 			"🛠️ [Recovery Rig] — Cost: 600 Metal, 50 Iron (-15%% mechanical casualties)\n\n"+
 			"🚚 [%s] ➜ 🔩%.0f Metal ➜ Further reduces return-march loot weight penalty\n"+
-			"🚚🚚 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ Substantially reduces return-march loot weight penalty\n"+
-			"🚚🚚🚚 [%s] ➜ 🔩%.0f Metal, 💎%.0f Crystal ➜ Massively reduces return-march loot weight penalty\n"+
+			"🚚🚚 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ Substantially reduces return-march loot weight penalty\n"+
+			"🚚🚚🚚 [%s] ➜ 🔩%.0f Metal, 🔮%.0f Crystal ➜ Massively reduces return-march loot weight penalty\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
 		buggies, ships, jets, haulers, tankers, rigs, cargoMk1, cargoMk2, cargoMk3,
 		cm1Unit.Title, cm1Unit.Cost["metal"],

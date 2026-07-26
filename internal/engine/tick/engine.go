@@ -373,11 +373,9 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 	return "", nil
 }
 
-// autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
-// encampment with auto_scan_enabled, pick one random rival outpost and
-// send a lightweight scan report - automating what /scout does manually.
-// Runs on its own ~30-minute cadence via the caller, same pattern as the
-// idle miner sweep.
+// autoScanSweep refreshes intelligence on one already-discovered rival.
+// Automatic scanning must never reveal an undiscovered player: exploration
+// and route sightings remain the only ways to create first contact.
 func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.user_id
@@ -411,7 +409,9 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 			JOIN users u ON u.telegram_id = e.user_id
 			JOIN coordinates c ON c.id = e.coordinate_id
 			JOIN resources r ON r.encampment_id = e.id
-			WHERE e.id != $1
+			JOIN encampment_discoveries d ON d.target_encampment_id = e.id
+			WHERE d.observer_encampment_id = $1
+			  AND e.id != $1
 			ORDER BY RANDOM()
 			LIMIT 1`, s.campID).Scan(&targetName, &targetOwnerName, &targetX, &targetY, &targetScrap)
 		if err != nil {
@@ -793,8 +793,10 @@ func (e *Engine) ProcessTick() {
 		{"resources", func(ctx context.Context, tx *sql.Tx) error { return e.resourceProcessor.RunResourcePass(ctx, tx) }},
 		{"agents", func(ctx context.Context, tx *sql.Tx) error { return e.agentProcessor.RunAgentPass(ctx, tx) }},
 		{"logistics_consumption", e.applyActiveLogisticsConsumption},
+		{"route_recovery", e.resumeRouteRecoveries},
 		{"route_discovery", e.discoverRouteContacts},
 		{"road_encounters", e.evaluateRoadEncounters},
+		{"road_base_encounters", e.evaluateRoadBaseEncounters},
 		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
 		{"supply_convoys", e.processSupplyConvoys},
 		{"ai_civilization_growth", e.growAICivilizations},
@@ -1571,6 +1573,76 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 	return nil
 }
 
+func clampRouteProgress(progress float64) float64 {
+	return math.Min(1, math.Max(0, progress))
+}
+
+// routeProgressAt uses a frozen progress snapshot plus elapsed active travel
+// time.  Pauses never alter the snapshot, so adding time for an encounter,
+// weather, or recovery cannot move a column backwards on the map.
+func routeProgressAt(state string, progress float64, progressAt sql.NullTime, legMinutes float64, resolveTime, now time.Time) float64 {
+	if legMinutes <= 0 {
+		return clampRouteProgress(progress)
+	}
+	if progressAt.Valid {
+		elapsed := math.Max(0, now.UTC().Sub(progressAt.Time.UTC()).Minutes())
+		delta := elapsed / legMinutes
+		if state == "returning" {
+			return clampRouteProgress(progress - delta)
+		}
+		return clampRouteProgress(progress + delta)
+	}
+
+	// Pre-migration campaigns have no snapshot. Preserve their previous ETA
+	// interpretation until their next route transition writes one.
+	remaining := math.Min(1, math.Max(0, now.UTC().Sub(resolveTime.UTC()).Minutes()/-legMinutes))
+	if state == "returning" {
+		return remaining
+	}
+	return 1 - remaining
+}
+
+func (e *Engine) resumeRouteRecoveries(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL,
+			route_progress_at = CURRENT_TIMESTAMP,
+			resolve_time = CURRENT_TIMESTAMP + (
+				CASE WHEN state = 'returning'
+					THEN COALESCE(route_progress, 1.0)
+					ELSE 1.0 - COALESCE(route_progress, 0.0)
+				END * COALESCE(route_leg_minutes, base_march_minutes, 15.0) * INTERVAL '1 minute'
+			)
+		WHERE movement_state = 'battle_recovery'
+		  AND next_route_event_at IS NOT NULL
+		  AND next_route_event_at <= CURRENT_TIMESTAMP
+		  AND state IN ('marching', 'returning')`)
+	if err != nil {
+		return fmt.Errorf("resuming route recovery columns: %w", err)
+	}
+	return nil
+}
+
+// resumeRoadRaids recalculates ETA from the route snapshot on a mutually
+// continued or expired encounter. It is deliberately conditional so a stale
+// resolver cannot resume a force claimed by another active encounter.
+func resumeRoadRaids(ctx context.Context, tx *sql.Tx, primaryRaidID, secondaryRaidID string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL,
+			route_progress_at = CURRENT_TIMESTAMP,
+			resolve_time = CURRENT_TIMESTAMP + (
+				CASE WHEN state = 'returning'
+					THEN COALESCE(route_progress, 1.0)
+					ELSE 1.0 - COALESCE(route_progress, 0.0)
+				END * COALESCE(route_leg_minutes, base_march_minutes, 15.0) * INTERVAL '1 minute'
+			)
+		WHERE (id = $1 OR id = $2)
+		  AND movement_state IN ('encounter_pending', 'encounter_battle')
+		  AND state IN ('marching', 'returning')`, primaryRaidID, secondaryRaidID)
+	return err
+}
+
 // discoverRouteContacts reveals nearby outposts as an expedition passes them.
 // This phase establishes knowledge only; Phase 4 will layer response-window
 // road encounters and field combat on the same route snapshots.
@@ -1698,6 +1770,7 @@ type roadMover struct {
 	attackerName   string
 	state          string
 	pos            roadcombat.Position
+	region         string // current region (origin before the leg's midpoint, destination after)
 }
 
 // evaluateRoadEncounters implements MMO_WORLD_EVOLUTION_PLAN.md Phase 4:
@@ -1718,6 +1791,7 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 		WHERE r.state IN ('marching', 'returning')
 		  AND r.movement_state = 'moving'
 		  AND r.active_encounter_id IS NULL
+		  AND r.active_base_encounter_id IS NULL
 		  AND r.origin_x IS NOT NULL AND r.destination_x IS NOT NULL
 		ORDER BY r.id`)
 	if err != nil {
@@ -3258,7 +3332,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			report.Outcome = battlereport.OutcomeAttackerWon
 			report.LootLines = []string{
 				fmt.Sprintf("🔩 %.0f Metal", primaryMetalShare),
-				fmt.Sprintf("💎 %.0f Crystal", primaryCrystalShare),
+				fmt.Sprintf("🔮 %.0f Crystal", primaryCrystalShare),
 				fmt.Sprintf("♻️ %.0f Scrap", primaryShare),
 				fmt.Sprintf("🍖 %.0f Rations", primaryRationsShare),
 				fmt.Sprintf("⚡ %.0f Electricity", primaryElectricityShare),
@@ -3378,7 +3452,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			etaAlert := fmt.Sprintf(
 				"🚚 SALVAGE COMPLETE, RETURN MARCH ENGAGED\n\n"+
-					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 💎 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
+					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 🔮 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
 					"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).",
 				primaryShare, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare, returnMinutes, r.baseMarchMinutes,
 			)

@@ -30,13 +30,13 @@ const (
 
 // rewardEmoji gives the display icon for an exploration site's reward
 // currency, matching the icons already used for these resources
-// throughout the rest of the game (Metal 🔩, Crystal 💎, Electricity ⚡).
+// throughout the rest of the game (Metal 🔩, Crystal 🔮, Electricity ⚡).
 func rewardEmoji(rewardType string) string {
 	switch rewardType {
 	case "metal":
 		return "🔩"
 	case "crystal":
-		return "💎"
+		return "🔮"
 	case "ether":
 		return "🔮"
 	case "dollars":

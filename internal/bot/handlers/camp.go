@@ -52,7 +52,7 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	}
 
 	ctx := context.Background()
-	
+
 	var campID string
 	var campName string
 	var campLvl int
@@ -122,7 +122,7 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	
+
 	btnUpgradeTent := selector.Data(fmt.Sprintf("⛺ Tent (%d)", tentLvl+1), "upgrade_mod", "tent")
 	btnUpgradeHeap := selector.Data(fmt.Sprintf("⚙️ Heap (%d)", heapLvl+1), "upgrade_mod", "scrap_heap")
 	btnUpgradeGen := selector.Data(fmt.Sprintf("⚡ Gen (%d)", genLvl+1), "upgrade_mod", "generator")
@@ -204,7 +204,7 @@ var infrastructureModules = []defenseModule{
 	{"large_shield", "🛡️🛡️", "Large Planetary Shield", "Major reduction of loot taken when raided."},
 	{"engineering_bay", "⚙️", "Engineering Bay", "Reduces unit crafting material costs."},
 	{"metal_mine", "🔩", "Metal Mine", "Passive Metal generation every tick."},
-	{"crystal_mine", "💎", "Crystal Mine", "Passive Crystal generation every tick."},
+	{"crystal_mine", "🔮", "Crystal Mine", "Passive Crystal generation every tick."},
 }
 
 // HandleInfrastructureGridPanel renders the economy/utility building panel.
@@ -315,7 +315,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
 			"🔩 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\n"+
-			"💎 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
+			"🔮 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
 			"🎈 [Pump Hydrogen] — Costs: 15.0 Electricity (+10.0 Hydrogen / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
 			"👥 Recruit Miner -> Cost: %d Scrap",
@@ -324,7 +324,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 	btnMetal := selector.Data("🔩 Metal", "mine_action", "metal")
-	btnCrystal := selector.Data("💎 Crystal", "mine_action", "crystal")
+	btnCrystal := selector.Data("🔮 Crystal", "mine_action", "crystal")
 	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
 
 	btnBuyMiner := selector.Data(fmt.Sprintf("Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")
@@ -361,11 +361,11 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	if mineType == "toggle_alerts" {
 		var currentSub bool
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(idle_miner_notifications, FALSE) FROM users WHERE telegram_id = $1 FOR UPDATE", sender.ID).Scan(&currentSub)
-		
+
 		_, _ = tx.ExecContext(ctx, "UPDATE users SET idle_miner_notifications = $1 WHERE telegram_id = $2", !currentSub, sender.ID)
-		
+
 		_ = tx.Commit()
-		
+
 		text := "🔕 Unsubscribed from idle miner alerts."
 		if !currentSub {
 			text = "🔔 Subscribed to idle miner alerts! You will be warned if workers remain idle."
@@ -439,7 +439,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 	queryInsertQueue := `
 		INSERT INTO active_mining_queues (encampment_id, resource_type, miners_assigned, ready_at, is_completed)
 		VALUES ($1, $2, 1, $3, FALSE)`
-	
+
 	_, err = tx.ExecContext(ctx, queryInsertQueue, campID, mineType, readyAt)
 	if err != nil {
 		log.Printf("Failed registering mining queue task: %v", err)
@@ -588,7 +588,7 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	
+
 	moduleType := c.Args()[0]
 
 	var campID string
@@ -615,7 +615,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	activeWeather := world.ActiveEventFor(ctx, tx, campRegion)
 
 	isAdmin := h.IsAdmin(sender.ID)
-	
+
 	if moduleType == "camp_core" {
 		if campLvl >= 30 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Max Level reached (Level 30)."})
@@ -639,12 +639,12 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 			time.Sleep(350 * time.Millisecond)
 			_, _ = c.Bot().Edit(msg, "🏗️ ASSEMBLING MATERIALS...\n[▰▱▱▱▱▱▱▱▱▱] 15%\n⚙️ Structural frames aligned.")
 			time.Sleep(350 * time.Millisecond)
-			
+
 			buildDelay := "Nominal construct speeds."
 			if activeWeather == "acid_rain" {
 				buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
 			}
-			
+
 			_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🔩 Build modifiers: %s", buildDelay))
 			time.Sleep(350 * time.Millisecond)
 			_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")
@@ -692,7 +692,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		VALUES ($1, $2, $3, TRUE, $4)
 		ON CONFLICT (encampment_id, type)
 		DO UPDATE SET is_upgrading = TRUE, upgrade_ready_at = $4`
-	
+
 	_, err = tx.ExecContext(ctx, upsertModule, campID, moduleType, currentLvl, readyAt)
 	if err != nil {
 		log.Printf("Failed executing module upgrade: %v", err)
@@ -705,12 +705,12 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "🏗️ ASSEMBLING MATERIALS...\n[▰▱▱▱▱▱▱▱▱▱] 15%\n⚙️ Structural frames aligned.")
 		time.Sleep(350 * time.Millisecond)
-		
+
 		buildDelay := "Nominal construct speeds."
 		if activeWeather == "acid_rain" {
 			buildDelay = "⚠️ Acid Rain alert: Corrosive fallout detected (+100% build delays)."
 		}
-		
+
 		_, _ = c.Bot().Edit(msg, fmt.Sprintf("🏗️ STRUCTURAL STRESSTESTS...\n[▰▰▰▰▰▱▱▱▱▱] 50%%\n🔩 Build modifiers: %s", buildDelay))
 		time.Sleep(350 * time.Millisecond)
 		_, _ = c.Bot().Edit(msg, "🏗️ SECURING PERIMETERS...\n[▰▰▰▰▰▰▰▰▰▰] 100%\n🏆 Blueprint committed! Foundations laid down successfully.")

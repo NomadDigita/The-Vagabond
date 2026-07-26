@@ -77,6 +77,8 @@ capacity/consumption from force composition rather than fixed 100-point pools.
 
 ## Phase 2 - Discovery-gated world intelligence
 
+Status: complete (2026-07-20).
+
 Goal: no base, AI faction, or raid target is globally visible by default.
 
 Implementation milestones:
@@ -113,6 +115,11 @@ route encounter discovers one; the same rule applies to AI factions.
 
 ## Phase 3 - Geographic routes and real expedition state
 
+Status: complete (2026-07-20). Route progress is deliberately derived from
+the immutable route snapshot and current ETA rather than stored as a mutable
+second clock. `movement_state`, `pause_reason`, and `next_route_event_at`
+provide the durable state boundary for later camps and weather incidents.
+
 Goal: turn a timer-only march into a route-aware journey without replacing
 the stable raid settlement code.
 
@@ -143,6 +150,8 @@ Exit criteria: expedition radar can explain where a force is, why its ETA
 changed, which phase it is in, and whether a defender is entitled to know.
 
 ## Phase 4 - Road contacts and field battles
+
+Status: complete (2026-07-20).
 
 Goal: armies and nearby bases can meet on both outbound and return journeys.
 
@@ -269,13 +278,16 @@ operators can measure whether the loop is fair and economically sustainable.
 | 2026-07-25 | - | handoff note | A prior Codex session's transcript described Phase 3 (road encounters, weather/camps) as implemented, but `git log`/`git ls-remote` on `origin` showed only Phases 0-2 were ever merged (`0219c25`, PR #27) - that session's later work existed only in its own sandbox and was lost when its usage quota ran out before it could push. Claude picked up from the actual merged state (Phase 2 complete) rather than the transcript's claimed state. **Lesson for future sessions/developers: verify the real `git log` on `origin/main` before trusting a prior session's self-report of what's "done."** |
 | 2026-07-20 | 1 | complete and hardened | Existing `027_mmo_warfare_logistics_phase1.sql` supplies the foundation. `029_mmo_transport_staging_and_force_recovery.sql` closes the false home-inventory transport check and returns all tracked support units after a campaign. |
 | 2026-07-20 | 2 | complete | `028_mmo_world_discovery_and_radar.sql` adds directional discoveries and route snapshots. Exploration can discover rival outposts or the Rogue Nest, Scouts affect discovery odds, targets are filtered and launch-authorized by discovery, route proximity creates reciprocal knowledge, and radar warnings are sent once at capability-dependent proximity. |
+| 2026-07-20 | 3 | complete | Route snapshots, movement state, ETA-derived progress, actual staged support units, radar-proximity warnings, and route/status information in Expedition Radar are live. |
+| 2026-07-20 | 4 | complete | Active raid columns meeting within one coordinate create a 10-minute response window. `/encounters` offers Attack/Continue; either attack resolves a renderer-backed field battle, applies force casualties, delays the route, and transfers only carried raid cargo. |
+| 2026-07-20 | 5-7 | pending | Temporary camps and convoy reinforcement, persistent AI civilizations, and observability/balance tooling remain to be implemented. |
 | 2026-07-25 | 3 | complete | `030_mmo_route_legs_and_road_encounters.sql` replaces the resolve_time-derived position estimate with a stable per-leg clock (`leg_started_at`/`leg_total_minutes`, freezable via `paused_at`). Route discovery, radar warnings, and the new road-encounter scan all read position from the same `roadcombat.RouteProgress`/`CurrentPosition` functions, so a paused or delayed column no longer drifts. The expensive speed-up now shortens the leg to match its pulled-forward arrival instead of silently desyncing position from ETA. |
-| 2026-07-25 | 4 | complete (expedition-vs-expedition only) | `road_encounters` table + `evaluateRoadEncounters`/`expireRoadEncounters` tick passes detect two converging expeditions, freeze both, and open a 3-minute Attack/Continue window surfaced on the Expedition Radar panel. Attack is unilateral and resolves immediately via a new `roadcombat` field-battle model (separate from, but balance-consistent with, the base-raid resolver); mutual Continue or a timeout resumes both columns from their exact paused position via a leg-shift, never snapping back or skipping ahead. Winner captures a capped share of every `stolen_*` resource the loser carries, including Crystal. **Not yet covered:** an expedition encountering a passive third-party *base* mid-route still only creates a discovery (existing Phase 2 behavior) rather than a forced battle window - the plan's milestone 2 covers "expeditions and bases," and only the expedition-vs-expedition half is done. AI factions don't yet launch mobile expeditions (Phase 6), so all current road encounters are player-vs-player. |
-| 2026-07-25 | 5 | complete | `031_mmo_route_weather_and_reinforcement_convoys.sql` adds local route weather incidents (flood/storm/heatwave/sandstorm/emp/radiation - all six, milestone 1) reusing the existing continent-wide `world_events` table as an input signal, each with a distinct onset effect (see completed-implementation-detail below) rather than an identical pause with a different label; temporary camps pausing a column 12-36 real hours (milestone 2); dedicated resupply convoys gated on real Hauler+Tanker availability, distance-scaled cost, and a real ambush/exposure risk (milestone 3); rations/ammo depletion halting a column outright while electricity/logistics depletion instead disables high-tech contributions with a grace period before escalating to a full halt (milestone 4); and a Crystal-priced pay-to-clear-early option for camps, capped and floored (milestone 5). |
+| 2026-07-25 | 4 | complete (expedition-vs-expedition only) | `road_encounters` table + `evaluateRoadEncounters`/`expireRoadEncounters` tick passes detect two converging expeditions, freeze both, and open a 3-minute Attack/Continue window surfaced on the Expedition Radar panel. Attack is unilateral and resolves immediately via a new `roadcombat` field-battle model (separate from, but balance-consistent with, the base-raid resolver); mutual Continue or a timeout resumes both columns from their exact paused position via a leg-shift, never snapping back or skipping ahead. Winner captures a capped share of every `stolen_*` resource the loser carries, including Crystal. **Not yet covered (closed 2026-07-26, see below):** an expedition encountering a passive third-party *base* mid-route still only creates a discovery (existing Phase 2 behavior) rather than a forced battle window - the plan's milestone 2 covers "expeditions and bases," and only the expedition-vs-expedition half is done. AI factions don't yet launch mobile expeditions (Phase 6), so all current road encounters are player-vs-player. |
+| 2026-07-25 | 5 | complete | `033_mmo_route_weather_and_reinforcement_convoys.sql` adds local route weather incidents (flood/storm/heatwave/sandstorm/emp/radiation - all six, milestone 1) reusing the existing continent-wide `world_events` table as an input signal, each with a distinct onset effect (see completed-implementation-detail below) rather than an identical pause with a different label; temporary camps pausing a column 12-36 real hours (milestone 2); dedicated resupply convoys gated on real Hauler+Tanker availability, distance-scaled cost, and a real ambush/exposure risk (milestone 3); rations/ammo depletion halting a column outright while electricity/logistics depletion instead disables high-tech contributions with a grace period before escalating to a full halt (milestone 4); and a Crystal-priced pay-to-clear-early option for camps, capped and floored (milestone 5). |
 | 2026-07-26 | 5 | follow-up | Asiwaju asked for the remaining Phase 5 gaps (sandstorm/EMP/radiation as real local types, milestone 4's distinct power-failure behavior, milestone 5's priced camp bypass) closed, plus fixed the agent electricity-upkeep rate (base 2.0->5.0/tick, floor 0.2->2.0/tick) and added a new Crystal Exchange feature (convert Crystal into large quantities of any other resource, rate scaled by how commonly-needed the target resource is). All implemented this session - see the updated completed-implementation-detail section below and `internal/bot/handlers/crystal_exchange.go`. While closing these gaps, also found and fixed a real bug: dispatched supply convoys deducted their committed Hauler+Tanker at dispatch but never returned them on any outcome, permanently draining transports on every resupply run regardless of success. |
 | 2026-07-25 | - | bugfix | While building Phase 5, found and fixed two correctness bugs in the Phase 3/4 work committed earlier the same day: (1) `resolveRaidCombats` could still fire arrival/return processing on a raid frozen by `paused_at`, because only `movement_state` was checked at the UI/tick-detection layer, not at the resolve_time-driven combat-resolution layer; (2) every unfreeze path shifted `leg_started_at` forward by the pause duration but left `resolve_time` untouched, so `resolve_time` would already be overdue the instant a pause lifted, causing an immediate premature state transition regardless of true remaining leg time. Both are fixed at every pause/unfreeze site (road encounters, weather incidents, and now supply convoys) by shifting `resolve_time` in lockstep with `leg_started_at`, and by gating `resolveRaidCombats`'s query on `movement_state = 'moving'` for marching/returning rows. |
-| 2026-07-26 | 6 | partial (foundational tier) | `032_mmo_ai_civilizations.sql` + `seedAICivilizations` (cmd/bot/main.go) seed 8 persistent AI factions (2 per continent, varying start levels) as REAL `encampments` rows with a synthetic negative-telegram_id `users` row, deliberately chosen so the entire existing discovery/targeting/raiding/looting pipeline (`resolveExplorationDiscovery`, `HandleRaidBoard`, `resolveRaidCombats`, all of it) handles them with zero special-casing - satisfies milestones 1 and 2, and the exit criteria's "discovered, scouted, raided" for a fixed population. `growAICivilizations` (new tick pass) gives each faction passive resource growth, occasional garrison growth, and a level-up once garrison caps out (satisfies milestone 3's "gather, build, expand"). Rogue Drone Nest left completely untouched as the existing fallback for an empty continent (satisfies milestone 5's "no destructive conversion"). **Not done - this is the larger remaining half of Phase 6:** milestone 3's "research, explore, scout, reinforce, and raid" as ACTIVE AI-INITIATED actions. Today's AI factions are real, growing, raidable bases - they do not yet make decisions, launch their own expeditions, or ever appear on the road. Building that (an AI tick-intent loop that assesses its own resources, picks a target via the same discovery gate a player uses, and launches a real `raids` row as attacker) is a substantially larger undertaking than this pass and is the natural next increment; see the completed-implementation-detail section below for the concrete integration points a future session should use. |
-| 2026-07-26 | 7 | pending | Observability/balance tooling remains to be implemented. |
+| 2026-07-26 | 4 | complete | `032_mmo_road_base_encounters.sql` + `evaluateRoadBaseEncounters`/`expireRoadBaseEncounters` close the milestone 2 gap noted above: a moving expedition within `roadcombat.EncounterRadius` of a real player's (non-AI) base now has the same `EncounterRollChance` to open a forced Attack/Continue window, not just a passive discovery. Only the expedition's commander gets a choice (the base didn't choose to be in the road's path). Attack resolves immediately against the base's Manual Defense Garrison reserve (`workshop_inventory.garrisoned_soldiers`/`garrisoned_mechs`) as a `roadcombat.FieldForce` - deliberately no resource looting, so a full economic raid still requires the normal `/raid` flow with its existing protections (shields, pacts). Kept as a separate `road_base_encounters` table/`active_base_encounter_id` column rather than widening `road_encounters`, so the expedition-vs-expedition path is untouched. AI/seeded settlements are excluded (their own recon/skirmish flow; Phase 6 untouched).
+| 2026-07-25 | 6-7 | pending | Persistent AI civilizations and observability/balance tooling remain to be implemented. |
 
 ## Known design assumptions and edge cases
 
@@ -334,6 +346,23 @@ operators can measure whether the loop is fair and economically sustainable.
   buggies, ships, jets, nukes, and every staged logistics vehicle; previously
   several mobile units could disappear after a normal campaign.
 
+## Completed implementation detail: route state and road encounters
+
+- Raids now retain an explicit `movement_state` and optional reason alongside
+  the legacy raid lifecycle. The current implementation uses `moving`,
+  `encounter_pending`, and `encounter_battle`; the same fields will represent
+  weather pauses, camps, and convoy waits in Phase 5.
+- A route collision pauses both expeditions for a ten-minute response window,
+  adjusts their ETAs, and queues a notification directing each commander to
+  `/encounters`. Pair uniqueness applies only while an encounter is active, so
+  the same columns can meet again after a prior encounter has concluded.
+- Either commander may choose Attack; mutual Continue or timeout lets both
+  forces proceed. An attack resolves once in the tick transaction, with
+  per-unit casualties, a SpaceHunt-format field-battle report, and a 15-minute
+  route delay. A force with no combat units remaining turns home.
+- Field battles never access home-base reserves. They can take half of the
+  losing expedition's already-carried raid payload, including rare Crystal,
+  then update both moving payloads atomically.
 ## Completed implementation detail: route legs and road encounters (Phase 3/4)
 
 - New package `internal/game/roadcombat` (zero DB/Telegram dependencies,
