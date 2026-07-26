@@ -219,7 +219,10 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 
 	queryOutbound := `
-		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time, r.state, r.round_number, r.attacker_rations, r.attacker_ammo
+		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time, r.state, r.round_number, r.attacker_rations, r.attacker_ammo,
+		       COALESCE(r.origin_region, ''), COALESCE(r.origin_x, 0), COALESCE(r.origin_y, 0),
+		       COALESCE(r.destination_region, ''), COALESCE(r.destination_x, 0), COALESCE(r.destination_y, 0),
+		       COALESCE(r.movement_state, 'moving'), COALESCE(r.pause_reason, '')
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged' OR r.state = 'returning')
@@ -234,23 +237,31 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		defer rowsOut.Close()
 		index := 1
 		for rowsOut.Next() {
-			var rID, dName, rState string
+			var rID, dName, rState, originRegion, destinationRegion, movementState, pauseReason string
 			var rRound int
 			var rRations, rAmmo float64
+			var originX, originY, destinationX, destinationY int
 			var resTime time.Time
-			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo); err == nil {
+			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &movementState, &pauseReason); err == nil {
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
+				routeLine := ""
+				if originRegion != "" && destinationRegion != "" {
+					routeLine = fmt.Sprintf("   Route: [%s %d,%d] → [%s %d,%d] | Movement: %s\n", originRegion, originX, originY, destinationRegion, destinationX, destinationY, movementState)
+					if pauseReason != "" {
+						routeLine += fmt.Sprintf("   Status: %s\n", pauseReason)
+					}
+				}
 				switch rState {
 				case "marching":
-					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n   Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n%s   Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
 				case "staged":
 					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Departure Window: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
 				case "returning":
-					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n   Base Arrival: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n%s   Base Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
 				default:
 					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%ds remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), timeLeft, rRations, rAmmo)
 				}
@@ -545,6 +556,9 @@ func (h *CombatHandler) HandleAutoScanToggle(c telebot.Context) error {
 
 func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
+	if c.Sender() == nil {
+		return c.Send("❌ Unable to identify this commander.")
+	}
 
 	targetUsername := c.Message().Payload
 	if targetUsername == "" {
@@ -556,6 +570,10 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 	}
 
 	ctx := context.Background()
+	var myCampID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", c.Sender().ID).Scan(&myCampID); err != nil {
+		return c.Send("⚠️ Establish an outpost before requesting tactical intelligence.")
+	}
 
 	var tID string
 	var tName string
@@ -569,11 +587,12 @@ func (h *CombatHandler) HandleScout(c telebot.Context) error {
 		JOIN users u ON u.telegram_id = e.user_id
 		JOIN coordinates c ON c.id = e.coordinate_id
 		JOIN resources r ON r.encampment_id = e.id
-		WHERE LOWER(u.username) = LOWER($1)`
+		JOIN encampment_discoveries d ON d.target_encampment_id = e.id
+		WHERE LOWER(u.username) = LOWER($1) AND d.observer_encampment_id = $2`
 
-	err := h.DB.QueryRowContext(ctx, query, targetUsername).Scan(&tID, &tName, &tOwner, &tX, &tY, &tScrap)
+	err := h.DB.QueryRowContext(ctx, query, targetUsername, myCampID).Scan(&tID, &tName, &tOwner, &tX, &tY, &tScrap)
 	if errors.Is(err, sql.ErrNoRows) {
-		return c.Send("❌ Target Not Found: No active outpost registered to that Telegram username.")
+		return c.Send("❌ No verified intelligence is available for that callsign. Explore the world or encounter the outpost on a route first.")
 	} else if err != nil {
 		log.Printf("Scouting database scan failed: %v", err)
 		return c.Send("⚠️ Error scanning target parameters.")
@@ -603,16 +622,25 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
 	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid espionage target."})
+	}
 	targetCampID := c.Args()[0]
 
 	var myCampID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID)
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Establish an outpost first."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Decryption setup failure."})
 	}
 	defer tx.Rollback()
+	var discovered bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM encampment_discoveries WHERE observer_encampment_id = $1 AND target_encampment_id = $2)`, myCampID, targetCampID).Scan(&discovered); err != nil || !discovered {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Target is not discovered. Exploration or a route sighting is required."})
+	}
 
 	var spyDevices int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(drones, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&spyDevices)
@@ -709,10 +737,15 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid interceptor order."})
+	}
 	spyID := c.Args()[0]
 
 	var myCampID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID)
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Establish an outpost first."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -731,9 +764,13 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var attackerCampID string
 	var createdAt time.Time
 	var resolveTime time.Time
-	err = tx.QueryRowContext(ctx, "SELECT is_intercepted, resolved, spy_id, created_at, resolve_time FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted, &resolved, &attackerCampID, &createdAt, &resolveTime)
+	var targetCampID string
+	err = tx.QueryRowContext(ctx, "SELECT is_intercepted, resolved, spy_id, target_id, created_at, resolve_time FROM spy_missions WHERE id = $1 FOR UPDATE", spyID).Scan(&isIntercepted, &resolved, &attackerCampID, &targetCampID, &createdAt, &resolveTime)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Connection Closed: This satellite has already returned to orbit."})
+	}
+	if targetCampID != myCampID {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ You do not command the target of this spy mission."})
 	}
 
 	if isIntercepted {
@@ -1655,12 +1692,16 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var insertRaid string
 	if isAI {
 		insertRaid = `
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, route_progress, route_progress_at, route_leg_minutes)
+			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9, 0.0, CURRENT_TIMESTAMP, $3)
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
 			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9, $10, $3)
 			RETURNING id`
 		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
 	} else {
 		insertRaid = `
+			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, route_progress, route_progress_at, route_leg_minutes)
+			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10, 0.0, CURRENT_TIMESTAMP, $4)
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
 			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10, $11, $4)
 			RETURNING id`
@@ -1758,6 +1799,9 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	case "speed":
 		if state == "staged" || state == "engaged" {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Active engagements or staged lobbies cannot be speed-boosted."})
+		}
+		if movementState != "moving" {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Action Blocked: Resolve the active road encounter before attempting a speed-up."})
 		}
 		var scrap, dollars, crystal float64
 		_ = tx.QueryRowContext(ctx, "SELECT scrap, dollars, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&scrap, &dollars, &crystal)
@@ -1904,6 +1948,172 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
 
 	return h.renderExpeditionPanel(c, raidID, attackerName, resolveTime)
+}
+
+// HandleRoadEncounters presents response windows created when two active
+// expeditions meet on the same route. Notifications point commanders here so
+// the persistent notification queue remains transport-agnostic while the
+// player still receives authenticated inline actions.
+func (h *CombatHandler) HandleRoadEncounters(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
+	}
+
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT re.id, re.region, re.x, re.y, re.decision_deadline,
+		       CASE WHEN ra.attacker_id = $1 THEN eb.name ELSE ea.name END,
+		       CASE WHEN ra.attacker_id = $1 THEN re.primary_decision ELSE re.secondary_decision END
+		FROM road_encounters re
+		JOIN raids ra ON ra.id = re.primary_raid_id
+		JOIN raids rb ON rb.id = re.secondary_raid_id
+		JOIN encampments ea ON ea.id = ra.attacker_id
+		JOIN encampments eb ON eb.id = rb.attacker_id
+		WHERE re.state = 'pending'
+		  AND re.decision_deadline > CURRENT_TIMESTAMP
+		  AND (ra.attacker_id = $1 OR rb.attacker_id = $1)
+		ORDER BY re.decision_deadline`, campID)
+	if err != nil {
+		return c.Send("⚠️ Route-control telemetry is temporarily unavailable.")
+	}
+	defer rows.Close()
+
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
+	panel := "🛣️ ROAD ENCOUNTER COMMAND\n━━━━━━━━━━━━━━━━━━━━━━\n"
+	found := false
+	for rows.Next() {
+		var id, region, otherName, decision string
+		var x, y int
+		var deadline time.Time
+		if err := rows.Scan(&id, &region, &x, &y, &deadline, &otherName, &decision); err != nil {
+			continue
+		}
+		found = true
+		remaining := time.Until(deadline.UTC())
+		if remaining < 0 {
+			remaining = 0
+		}
+		panel += fmt.Sprintf("• Contact near [%s: %d,%d] — %s\n  Decision: %s | expires in %d min\n\n", region, x, y, otherName, decision, int(math.Ceil(remaining.Minutes())))
+		buttons = append(buttons, selector.Row(
+			selector.Data("⚔️ Attack", "road_encounter", "attack", id),
+			selector.Data("🕊️ Continue", "road_encounter", "continue", id),
+		))
+	}
+	if !found {
+		panel += "No active road encounters. Your expedition routes are currently clear."
+	}
+	selector.Inline(buttons...)
+	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panel, selector)
+}
+
+// HandleRoadEncounterDecision validates party ownership before recording an
+// attack/continue choice. One attack is sufficient to start a field battle;
+// only a mutual continue ends the encounter peacefully.
+func (h *CombatHandler) HandleRoadEncounterDecision(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 2 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid road encounter action."})
+	}
+	action, encounterID := c.Args()[0], c.Args()[1]
+	if action != "attack" && action != "continue" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid route order."})
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Route-control transaction failed."})
+	}
+	defer tx.Rollback()
+
+	var campID string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Outpost not found."})
+	}
+
+	var primaryRaidID, secondaryRaidID, primaryCamp, secondaryCamp, primaryDecision, secondaryDecision, state string
+	var deadline time.Time
+	err = tx.QueryRowContext(ctx, `
+		SELECT re.primary_raid_id, re.secondary_raid_id, ra.attacker_id, rb.attacker_id, re.primary_decision, re.secondary_decision, re.state, re.decision_deadline
+		FROM road_encounters re
+		JOIN raids ra ON ra.id = re.primary_raid_id
+		JOIN raids rb ON rb.id = re.secondary_raid_id
+		WHERE re.id = $1 FOR UPDATE`, encounterID).Scan(&primaryRaidID, &secondaryRaidID, &primaryCamp, &secondaryCamp, &primaryDecision, &secondaryDecision, &state, &deadline)
+	if err != nil || state != "pending" || !deadline.UTC().After(time.Now().UTC()) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ This road encounter has expired or already resolved."})
+	}
+
+	column := ""
+	otherCamp := ""
+	if campID == primaryCamp {
+		column, otherCamp = "primary_decision", secondaryCamp
+	} else if campID == secondaryCamp {
+		column, otherCamp = "secondary_decision", primaryCamp
+	} else {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ You do not command a force in this encounter."})
+	}
+
+	update := fmt.Sprintf("UPDATE road_encounters SET %s = $1 WHERE id = $2", column)
+	if _, err := tx.ExecContext(ctx, update, action, encounterID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not record your route order."})
+	}
+	if action == "attack" {
+		if _, err := tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'resolving' WHERE id = $1", encounterID); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not initiate field battle."})
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'encounter_battle', pause_reason = 'field battle on route' WHERE id = $1 OR id = $2", primaryRaidID, secondaryRaidID)
+	} else {
+		if campID == primaryCamp {
+			primaryDecision = action
+		} else {
+			secondaryDecision = action
+		}
+		if primaryDecision == "continue" && secondaryDecision == "continue" {
+			if _, err := tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'continued', resolved_at = CURRENT_TIMESTAMP WHERE id = $1", encounterID); err != nil {
+				return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not close the road encounter."})
+			}
+			_, _ = tx.ExecContext(ctx, `
+				UPDATE raids
+				SET movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL,
+					route_progress_at = CURRENT_TIMESTAMP,
+					resolve_time = CURRENT_TIMESTAMP + (
+						CASE WHEN state = 'returning'
+							THEN COALESCE(route_progress, 1.0)
+							ELSE 1.0 - COALESCE(route_progress, 0.0)
+						END * COALESCE(route_leg_minutes, base_march_minutes, 15.0) * INTERVAL '1 minute'
+					)
+				WHERE (id = $1 OR id = $2)
+				  AND movement_state = 'encounter_pending'
+				  AND state IN ('marching', 'returning')`, primaryRaidID, secondaryRaidID)
+		}
+	}
+
+	var otherUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", otherCamp).Scan(&otherUserID)
+	if otherUserID != 0 {
+		message := "🛣️ ROAD ENCOUNTER UPDATE: The other expedition chose to continue. Open /encounters before the response window closes."
+		if action == "attack" {
+			message = "⚔️ ROAD ENCOUNTER UPDATE: The other expedition chose ATTACK. Field battle will resolve on the next world tick."
+		}
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", otherUserID, message)
+	}
+	if err := tx.Commit(); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not finalize route order."})
+	}
+
+	if action == "attack" {
+		_ = c.Respond(&telebot.CallbackResponse{Text: "⚔️ Attack order committed. Field battle is imminent."})
+	} else {
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🕊️ Continue order committed."})
+	}
+	return h.HandleRoadEncounters(c)
 }
 
 func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
