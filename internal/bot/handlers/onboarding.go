@@ -382,6 +382,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	queryCampExists := `SELECT id FROM encampments WHERE user_id = $1`
 	err = tx.QueryRowContext(ctx, queryCampExists, telegramID).Scan(&campID)
 	isNewCamp := errors.Is(err, sql.ErrNoRows)
+	var startingScrap, startingEnergy float64
 	if isNewCamp {
 		campName := fmt.Sprintf("Outpost-%d", telegramID%1000)
 		insertCamp := `
@@ -394,8 +395,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		startingScrap := 1000.0
-		startingEnergy := 250.0
+		startingScrap = 1000.0
+		startingEnergy = 250.0
 		if faction == "steel_vanguard" {
 			startingEnergy += 500.0
 		} else {
