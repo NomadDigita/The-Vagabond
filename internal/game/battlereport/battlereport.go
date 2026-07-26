@@ -115,9 +115,9 @@ type Round struct {
 
 // Render produces the full SpaceHunt-style report text for one round.
 func Render(r Round) string {
-	roundLabel := fmt.Sprintf("💎 ROUND %d:", r.Number)
+	roundLabel := fmt.Sprintf("🔮 ROUND %d:", r.Number)
 	if r.Outcome != OutcomeOngoing {
-		roundLabel = "💎 END:"
+		roundLabel = "🔮 END:"
 	}
 
 	msg := fmt.Sprintf(

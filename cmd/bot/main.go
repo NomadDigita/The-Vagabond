@@ -171,6 +171,18 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS ether DOUBLE PRECISION DEFAULT 0.00;`,
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS neuro_cores DOUBLE PRECISION DEFAULT 0.00;`,
 
+		// Referral system fix (2026-07-26): referral_code was never
+		// enforced unique, and the old `telegramID % 1_000_000` scheme
+		// could collide, silently misattributing referrals. Codes are
+		// now derived deterministically from the player's Telegram ID
+		// (base36), which is unique by construction, so this index just
+		// protects against any stale/legacy duplicate codes.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code) WHERE referral_code IS NOT NULL;`,
+		// Tracks the highest referral-count milestone tier (5/10/25) a
+		// player has already claimed, so milestone bonuses are granted
+		// exactly once.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_tier_claimed INT DEFAULT 0;`,
+
 		`CREATE TABLE IF NOT EXISTS modules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
@@ -1032,6 +1044,7 @@ func main() {
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
+	bot.Handle("/warehouse", econ.HandleWarehouseReserves)
 	bot.Handle("/raid", combat.HandleRaidBoard)
 	bot.Handle("/agent", agentH.HandleAgent)
 	bot.Handle("/hero", hero.HandleHeroPanel)
@@ -1050,6 +1063,7 @@ func main() {
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
 	bot.Handle("/help", onboarding.HandleHelp)
+	bot.Handle("/guide", onboarding.HandleGuide)
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
 	bot.Handle("/admin", admin.HandleAdminPanel)
 	bot.Handle("/arena", arena.HandleArenaPanel)
@@ -1196,6 +1210,19 @@ func main() {
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
 	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
+
+	// New-survivor welcome message quick-action buttons. view_warehouse
+	// and view_manual are already registered further down (pre-existing
+	// dashboard buttons); only open_agent/open_refer are new here.
+	bot.Handle("\fopen_agent", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return agentH.HandleAgent(c)
+	})
+	bot.Handle("\fopen_refer", func(c telebot.Context) error {
+		_ = c.Respond(&telebot.CallbackResponse{})
+		return profile.HandleRefer(c)
+	})
+
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)

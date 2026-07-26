@@ -544,7 +544,7 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 			var stolenScrap, stolenMetal, stolenCrystal float64
 			if scanErr := rows.Scan(&attName, &defName, &state, &stolenScrap, &stolenMetal, &stolenCrystal); scanErr == nil {
 				any = true
-				panelText += fmt.Sprintf("⚔️ %s ➜ %s [%s]\n   Loot: ⚙️%.0f 🔩%.0f 💎%.0f\n\n", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)
+				panelText += fmt.Sprintf("⚔️ %s ➜ %s [%s]\n   Loot: ⚙️%.0f 🔩%.0f 🔮%.0f\n\n", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)
 			}
 		}
 		rows.Close()
