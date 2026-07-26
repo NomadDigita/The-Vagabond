@@ -45,10 +45,8 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
 
-	panelText := "👹━━━━━━━━━━━━━━━━━━━━━━👹\n" +
-		"☠️ WASTELAND WORLD BOSSES ☠️\n" +
-		"👹━━━━━━━━━━━━━━━━━━━━━━👹\n\n" +
-		"⚠️ REAL ENGAGEMENT: committing Soldiers/Mechs sends them MARCHING - they're at risk for real. The boss retaliates on arrival, and only survivors march home. Damage is shared - defeat one to split its loot pool by contribution!\n\n"
+	panelText := "☠️ " + htmlBold("WASTELAND WORLD BOSSES") + " ☠️\n" + divider + "\n\n" +
+		htmlItalic("⚠️ REAL ENGAGEMENT: committing Soldiers/Mechs sends them MARCHING - they're at risk for real. The boss retaliates on arrival, and only survivors march home. Damage is shared - defeat one to split its loot pool by contribution!") + "\n\n"
 
 	rows, err := h.DB.QueryContext(ctx, "SELECT id, name, emoji, max_hp, current_hp, loot_pool_dollars, retaliation_rating FROM world_bosses ORDER BY max_hp ASC")
 	if err != nil {
@@ -72,8 +70,9 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 		}
 
 		panelText += fmt.Sprintf(
-			"%s %s\n%s  %.0f / %.0f HP\n💰 Loot Pool: $%.0f  |  ⚔️ Danger: %.0f%%  |  %s\n\n",
-			emoji, name, hpBar(curHP, maxHP), curHP, maxHP, lootPool, retaliation, status,
+			"%s %s\n%s\n💰 Loot Pool: %s  |  ⚔️ Danger: %s  |  %s\n\n",
+			emoji, htmlBold(name), htmlCode(fmt.Sprintf("%s %.0f/%.0f HP", hpBar(curHP, maxHP), curHP, maxHP)),
+			htmlCode(fmt.Sprintf("$%.0f", lootPool)), htmlCode(fmt.Sprintf("%.0f%%", retaliation)), status,
 		)
 
 		if curHP > 0 {
@@ -82,10 +81,10 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 		}
 	}
 
-	panelText += "👹━━━━━━━━━━━━━━━━━━━━━━👹"
+	panelText += divider
 	selector.Inline(buttonRows...)
 
-	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
 // HandleAttackBossCallback commits the caller's ENTIRE current standing

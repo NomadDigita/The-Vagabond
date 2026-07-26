@@ -73,20 +73,27 @@ func (h *CampHandler) HandleCamp(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap)
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"⛺ OUTPOST SECTOR SYSTEMS [LEVEL %d / 30]\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Outpost Name: %s\n"+
-			"Available Scrap: %.1f\n\n"+
-			"FACILITY MODULES:\n"+
-			"⛺ [Tent] — Level %d\n"+
-			"⚙️ [Scrap Heap] — Level %d\n"+
-			"⚡ [Generator] — Level %d\n\n"+
-			"Select options on your bottom menu deck to trigger upgrades, check automation, view heroes, or actively mine.",
-		campLvl, campName, scrap, tentLvl, heapLvl, genLvl,
+		divider+"\n"+
+			"⛺ %s\n"+
+			divider+"\n"+
+			"📛 Outpost Name: %s\n"+
+			"⚙️ Available Scrap: %s\n\n"+
+			"%s\n"+
+			"⛺ Tent — %s\n"+
+			"🗑️ Scrap Heap — %s\n"+
+			"⚡ Generator — %s\n\n"+
+			"%s",
+		htmlBold(fmt.Sprintf("OUTPOST SECTOR SYSTEMS [LEVEL %d / 30]", campLvl)),
+		htmlEscape(campName),
+		htmlCode(fmt.Sprintf("%.1f", scrap)),
+		htmlBold("FACILITY MODULES"),
+		htmlCode(fmt.Sprintf("Lvl %d", tentLvl)),
+		htmlCode(fmt.Sprintf("Lvl %d", heapLvl)),
+		htmlCode(fmt.Sprintf("Lvl %d", genLvl)),
+		htmlItalic("Select options on your bottom menu deck to trigger upgrades, check automation, view heroes, or actively mine."),
 	)
 
-	return c.Send(panelText, keyboards.CampNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.CampNavigation())
 }
 
 func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {

@@ -44,18 +44,23 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&dollars)
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🏟️ COGNITIVE COMBAT MATCHMAKER\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Register in the automated queues to match against other active outposts.\n\n"+
-			"SURVIVAL CAPITAL:\n"+
-			"💵 Available Balance: $%.1f\n\n"+
-			"QUEUE METRICS:\n"+
-			"⚔️ [1v1 Duel] — Active: %d players | Cost: $50.0\n"+
-			"👥 [2v2 Skirmish] — Active: %d players | Cost: $100.0\n"+
-			"🤖 [3v3 Team Clash] — Active: %d players | Cost: $200.0\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		dollars, q1, q2, q3,
+		"🏟️ %s\n"+divider+"\n"+
+			"%s\n\n"+
+			"%s\n"+
+			"💵 Available Balance: %s\n\n"+
+			"%s\n"+
+			"⚔️ 1v1 Duel — Active: %s | Cost: $50.0\n"+
+			"👥 2v2 Skirmish — Active: %s | Cost: $100.0\n"+
+			"🤖 3v3 Team Clash — Active: %s | Cost: $200.0\n"+
+			divider,
+		htmlBold("COGNITIVE COMBAT MATCHMAKER"),
+		htmlItalic("Register in the automated queues to match against other active outposts."),
+		htmlBold("SURVIVAL CAPITAL"),
+		htmlCode(fmt.Sprintf("$%.1f", dollars)),
+		htmlBold("QUEUE METRICS"),
+		htmlCode(fmt.Sprintf("%d players", q1)),
+		htmlCode(fmt.Sprintf("%d players", q2)),
+		htmlCode(fmt.Sprintf("%d players", q3)),
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -72,7 +77,7 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 	// Inline buttons and the persistent bottom keyboard need two
 	// separate messages - Telegram only allows one reply_markup type
 	// per message, so they can never be combined into a single send.
-	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
 }
 
 // HandleJoinQueueCallback handles inserting the player into the matchmaking table

@@ -37,12 +37,10 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
 
-	panelText := "🏆━━━━━━━━━━━━━━━━━━━━━━🏆\n" +
-		"🌍 GLOBAL WASTELAND RANKING 🌍\n" +
-		"🏆━━━━━━━━━━━━━━━━━━━━━━🏆\n\n"
+	panelText := "🏆 " + htmlBold("GLOBAL WASTELAND RANKING") + " 🏆\n" + divider + "\n\n"
 
 	// ── Top Players ────────────────────────────────────────────────
-	panelText += "👑 TOP SURVIVORS:\n"
+	panelText += "👑 " + htmlBold("TOP SURVIVORS") + "\n"
 	topPlayersQuery := fmt.Sprintf(`
 		SELECT e.name, %s AS score
 		FROM encampments e
@@ -57,7 +55,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 			var name string
 			var score float64
 			if scanErr := rows.Scan(&name, &score); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. %s — 🏅 %.0f pts\n", medalFor(rank), rank, name, score)
+				panelText += fmt.Sprintf("%s %d. %s — 🏅 %s pts\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
@@ -65,7 +63,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	}
 
 	// ── Top Skilled (military-only) ───────────────────────────────
-	panelText += "\n⚔️ TOP SKILLED (Military Might):\n"
+	panelText += "\n⚔️ " + htmlBold("TOP SKILLED (Military Might)") + "\n"
 	topSkilledQuery := fmt.Sprintf(`
 		SELECT e.name, %s AS mil_score
 		FROM encampments e
@@ -80,7 +78,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 			var name string
 			var score float64
 			if scanErr := rows2.Scan(&name, &score); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. %s — ⚔️ %.0f Combat Rating\n", medalFor(rank), rank, name, score)
+				panelText += fmt.Sprintf("%s %d. %s — ⚔️ %s Combat Rating\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
@@ -88,7 +86,7 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	}
 
 	// ── Top Guilds ──────────────────────────────────────────────────
-	panelText += "\n🛡️ TOP GUILDS:\n"
+	panelText += "\n🛡️ " + htmlBold("TOP GUILDS") + "\n"
 	topGuildsQuery := fmt.Sprintf(`
 		SELECT cl.name, COUNT(uc.user_id) AS members, COALESCE(SUM(%s), 0) AS total_score
 		FROM clans cl
@@ -106,14 +104,14 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 			var members int
 			var score float64
 			if scanErr := rows3.Scan(&name, &members, &score); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. 🏴 %s (%d/8) — 🏅 %.0f pts\n", medalFor(rank), rank, name, members, score)
+				panelText += fmt.Sprintf("%s %d. 🏴 %s %s — 🏅 %s pts\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("(%d/8)", members)), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
 		rows3.Close()
 	}
 
-	panelText += "\n🏆━━━━━━━━━━━━━━━━━━━━━━🏆"
+	panelText += "\n" + divider
 
-	return c.Send(panelText, keyboards.MainNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.MainNavigation())
 }

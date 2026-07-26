@@ -46,13 +46,11 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"🏭 HEAVY WORKSHOP SECTOR SYSTEMS\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Outpost Name: Military Engineering Hangar\n\n" +
-		"Select options on your bottom menu deck to recruit troops or craft logistics vehicles."
+	panelText := "🏭 " + htmlBold("HEAVY WORKSHOP SECTOR SYSTEMS") + "\n" + divider + "\n" +
+		"📛 Outpost Name: " + htmlCode("Military Engineering Hangar") + "\n\n" +
+		htmlItalic("Select options on your bottom menu deck to recruit troops or craft logistics vehicles.")
 
-	return c.Send(panelText, keyboards.WorkshopNavigation())
+	return c.Send(panelText, gopkg.ModeHTML, keyboards.WorkshopNavigation())
 }
 
 func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {

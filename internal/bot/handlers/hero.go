@@ -77,22 +77,29 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	}
 
 	dashboard := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"👥 CO-ORDINATOR COMMANDER HUD [LEVEL %d]\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Your leader remembers every clash, scar, and survival outcome.\n\n"+
-			"COMMANDER STATUS:\n"+
+		"👥 %s\n"+divider+"\n"+
+			"%s\n\n"+
+			"%s\n"+
 			"👤 Name: %s\n"+
 			"🎗️ Psychological Trait: %s\n"+
 			"🩺 Injuries Sustained: %s\n"+
 			"⚡ Faction Superpower: %s\n"+
-			"📊 Training Progress: %d / 100 XP\n"+
-			"🎖️ Survived Conflicts: %d battles\n\n"+
-			"COMMANDER TRAINING MODULES:\n"+
-			"🏋️ [Train Commander] — Cost: 50 Scrap (+20 XP)\n"+
-			"💊 [Heal Injury] — Cost: 50 Rations (Heals sustained scars)\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		lvl, heroName, heroTrait, heroInjuries, heroSuperpower, xp, battlesSurvived,
+			"📊 Training Progress: %s\n"+
+			"🎖️ Survived Conflicts: %s\n\n"+
+			"%s\n"+
+			"🏋️ Train Commander — Cost: 50 Scrap (+20 XP)\n"+
+			"💊 Heal Injury — Cost: 50 Rations (Heals sustained scars)\n"+
+			divider,
+		htmlBold(fmt.Sprintf("CO-ORDINATOR COMMANDER HUD [LEVEL %d]", lvl)),
+		htmlItalic("Your leader remembers every clash, scar, and survival outcome."),
+		htmlBold("COMMANDER STATUS"),
+		htmlEscape(heroName),
+		htmlEscape(heroTrait),
+		htmlEscape(heroInjuries),
+		htmlEscape(heroSuperpower),
+		htmlCode(fmt.Sprintf("%d / 100 XP", xp)),
+		htmlCode(fmt.Sprintf("%d battles", battlesSurvived)),
+		htmlBold("COMMANDER TRAINING MODULES"),
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -105,7 +112,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 		selector.Row(btnGarrison),
 	)
 
-	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), dashboard, selector)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), dashboard, selector)
 }
 
 // HandleGarrisonPanel shows the player's current garrison reservation

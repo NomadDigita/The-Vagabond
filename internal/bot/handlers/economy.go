@@ -118,22 +118,25 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &dollars)
 
 	panelText := fmt.Sprintf(
-		"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\n"+
-			"🪙 BANK VAULT & CREDIT PAYBACK 🪙\n"+
-			"🏦━━━━━━━━━━━━━━━━━━━━━━🏦\n"+
-			"💵 Available Cash: $%.1f\n"+
-			"⚙️ Scrap Reserves: %.1f\n\n"+
-			"🏦 Vault Savings: %.1f Scrap | $%.1f Cash\n"+
-			"💳 Credit Debt: %.1f Scrap | $%.1f Cash\n\n"+
-			"💱 CONVERSION RATES:\n"+
+		"🪙 %s 🪙\n"+divider+"\n"+
+			"💵 Available Cash: %s\n"+
+			"⚙️ Scrap Reserves: %s\n\n"+
+			"🏦 Vault Savings: %s\n"+
+			"💳 Credit Debt: %s\n\n"+
+			"%s\n"+
 			"⚙️ 100 Scrap ➜ $50\n"+
 			"🔩 100 Metal ➜ $80\n"+
 			"🔮 50 Crystal ➜ $120\n"+
 			"$100 ➜ 🔩 50 Metal\n"+
 			"$200 ➜ 🔮 20 Crystal\n"+
 			"$150 ➜ 🎈 40 Hydrogen\n"+
-			"🏦━━━━━━━━━━━━━━━━━━━━━━🏦",
-		dollars, scrap, bankBalance, bankBalanceCash, loanAmount, loanCash,
+			divider,
+		htmlBold("BANK VAULT & CREDIT PAYBACK"),
+		htmlCode(fmt.Sprintf("$%.1f", dollars)),
+		htmlCode(fmt.Sprintf("%.1f", scrap)),
+		htmlCode(fmt.Sprintf("%.1f Scrap | $%.1f Cash", bankBalance, bankBalanceCash)),
+		htmlCode(fmt.Sprintf("%.1f Scrap | $%.1f Cash", loanAmount, loanCash)),
+		htmlBold("💱 CONVERSION RATES"),
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -160,7 +163,7 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 		selector.Row(btnBuyHydrogen),
 	)
 
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {

@@ -74,20 +74,20 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 	}
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"📻 WASTELAND BROADCAST RADIO\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Universal Coordinate Time: [%s]\n"+
-			"Active commanders on local frequencies: %d lines\n\n"+
-			"🌍 DYNAMIC CLIMATE FORECAST:\n"+
+		"📻 %s\n"+divider+"\n"+
+			"🕐 Universal Coordinate Time: %s\n"+
+			"👥 Active commanders on local frequencies: %s\n\n"+
+			"%s\n"+
 			"%s\n\n"+
 			"%s"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Listen to the static. The wastes are breathing.",
-		currentTime, totalSurvivors, weatherText, newsText,
+			divider+"\n"+
+			htmlItalic("Listen to the static. The wastes are breathing."),
+		htmlBold("WASTELAND BROADCAST RADIO"),
+		htmlCode(currentTime), htmlCode(fmt.Sprintf("%d lines", totalSurvivors)),
+		htmlBold("🌍 DYNAMIC CLIMATE FORECAST"), htmlEscape(weatherText), htmlEscape(newsText),
 	)
 
-	return c.Send(panelText, keyboards.CombatNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.CombatNavigation())
 }
 
 // HandleSectorMap displays close coordinates sector maps and neighboring settlements
@@ -105,12 +105,12 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 		return c.Send("⚠️ Access Denied: Establish your camp first using /start.")
 	}
 
-	mapHUD := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"🧭 SPATIAL CARTOGRAPHY SECTOR MAP\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Your outpost radar scans the coordinates nearby:\n\n"
+	mapHUD := "🧭 " + htmlBold("SPATIAL CARTOGRAPHY SECTOR MAP") + "\n" + divider + "\n" +
+		htmlItalic("Your outpost radar scans the coordinates nearby:") + "\n\n"
 
-	// Render the immediate 3x3 grid around player coordinates
+	// Render the immediate 3x3 grid around player coordinates, wrapped in
+	// a monospace block so the columns stay aligned on every device.
+	grid := ""
 	for y := myY + 1; y >= myY-1; y-- {
 		rowText := "  "
 		for x := myX - 1; x <= myX+1; x++ {
@@ -129,12 +129,13 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 				}
 			}
 		}
-		mapHUD += rowText + "\n"
+		grid += rowText + "\n"
 	}
+	mapHUD += grid
 
-	mapHUD += fmt.Sprintf("\nCURRENT LOCATION: Sector [%d, %d] (%s Territory Quadrant)\n", myX, myY, myRegion)
-	mapHUD += "LEGEND:  ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\n\n"
-	mapHUD += "📡 NEIGHBORING SECTOR DISCOVERIES:\n"
+	mapHUD += fmt.Sprintf("\n📍 CURRENT LOCATION: %s\n", htmlCode(fmt.Sprintf("Sector [%d, %d] (%s Territory Quadrant)", myX, myY, myRegion)))
+	mapHUD += "🔑 LEGEND: ⛺ Outpost Base | 🏢 Ruins | 💀 Wasteland | ░░ Fog\n\n"
+	mapHUD += "📡 " + htmlBold("NEIGHBORING SECTOR DISCOVERIES") + "\n"
 
 	// Fetch regional quadrant neighbor outposts
 	rows, err := h.DB.QueryContext(ctx, "SELECT e.name, u.first_name, c.x, c.y, c.region FROM encampments e JOIN users u ON u.telegram_id = e.user_id JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id != $1 LIMIT 3", campID)
@@ -145,15 +146,16 @@ func (h *WorldHandler) HandleSectorMap(c telebot.Context) error {
 			var name, owner, region string
 			var x, y int
 			if err := rows.Scan(&name, &owner, &x, &y, &region); err == nil {
-				mapHUD += fmt.Sprintf("[%d] Outpost: %s (%s Quadrant)\n    Commander: %s | Location: Sector [%d, %d]\n\n", index, name, region, owner, x, y)
+				mapHUD += fmt.Sprintf("[%d] Outpost: %s %s\n    Commander: %s | Location: %s\n\n",
+					index, htmlEscape(name), htmlCode("("+region+" Quadrant)"), htmlEscape(owner), htmlCode(fmt.Sprintf("Sector [%d, %d]", x, y)))
 				index++
 			}
 		}
 	}
 
-	mapHUD += "━━━━━━━━━━━━━━━━━━━━━━"
+	mapHUD += divider
 
-	return c.Send(mapHUD, keyboards.CombatNavigation())
+	return c.Send(mapHUD, telebot.ModeHTML, keyboards.CombatNavigation())
 }
 
 // HandleSectorBroadcast modulates a high-power wireless signal across neighboring coordinates and log bulletins

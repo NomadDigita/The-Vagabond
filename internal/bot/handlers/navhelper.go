@@ -37,6 +37,19 @@ func sendPanelWithNav(c telebot.Context, navCaption string, nav *telebot.ReplyMa
 	return c.Send(text, selector)
 }
 
+// sendPanelWithNavHTML is identical to sendPanelWithNav but renders the
+// panel body with Telegram HTML parse mode. Only use this at a call
+// site where `text` has already been built with the htmlBold/htmlItalic/
+// htmlCode/htmlEscape helpers in render.go - any raw "<", ">", or "&"
+// left un-escaped in interpolated data (player names, descriptions,
+// etc.) will make Telegram reject the whole message.
+func sendPanelWithNavHTML(c telebot.Context, navCaption string, nav *telebot.ReplyMarkup, text string, selector *telebot.ReplyMarkup) error {
+	if _, err := c.Bot().Send(c.Recipient(), navCaption, nav); err != nil {
+		return err
+	}
+	return c.Send(text, telebot.ModeHTML, selector)
+}
+
 // weatherLine gives the Wasteland Radio feed's one-line-per-continent
 // description for a given active event type ("" or "nominal" for clear
 // conditions). See internal/engine/world/weather.go's eventHeadline for

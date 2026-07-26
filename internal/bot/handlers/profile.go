@@ -33,9 +33,11 @@ func (h *ProfileHandler) HandleDescription(c telebot.Context) error {
 		var current string
 		_ = h.DB.QueryRowContext(ctx, "SELECT description FROM users WHERE telegram_id = $1", sender.ID).Scan(&current)
 		if current == "" {
-			current = "(none set)"
+			current = "<i>(none set)</i>"
+		} else {
+			current = htmlQuote(htmlEscape(current))
 		}
-		return c.Send(fmt.Sprintf("📝 YOUR DESCRIPTION:\n\"%s\"\n\nUsage: /description [text] (max 200 characters)", current))
+		return c.Send(fmt.Sprintf("📝 %s\n%s\n\n%s", htmlBold("YOUR DESCRIPTION"), current, htmlItalic("Usage: /description [text] (max 200 characters)")), telebot.ModeHTML)
 	}
 
 	if len(desc) > 200 {
@@ -365,22 +367,27 @@ func (h *ProfileHandler) HandleStats(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(metal),0), COALESCE(SUM(crystal),0), COALESCE(SUM(scrap),0) FROM resources").Scan(&totalMetal, &totalCrystal, &totalScrap)
 
 	panelText := fmt.Sprintf(
-		"📊━━━━━━━━━━━━━━━━━━━━━━📊\n"+
-			"🌍 GLOBAL WASTELAND STATISTICS 🌍\n"+
-			"📊━━━━━━━━━━━━━━━━━━━━━━📊\n\n"+
-			"👥 Total Survivors: %d\n"+
-			"🏴 Total Clans: %d\n"+
-			"🌐 Total Federations: %d\n"+
-			"⚔️ Total Raids Launched: %d\n\n"+
-			"🌎 ECONOMY-WIDE TOTALS:\n"+
-			"🔩 Metal in circulation: %.0f\n"+
-			"🔮 Crystal in circulation: %.0f\n"+
-			"⚙️ Scrap in circulation: %.0f\n"+
-			"📊━━━━━━━━━━━━━━━━━━━━━━📊",
-		totalPlayers, totalClans, totalFederations, totalRaids, totalMetal, totalCrystal, totalScrap,
+		"🌍 %s 🌍\n"+divider+"\n\n"+
+			"👥 Total Survivors: %s\n"+
+			"🏴 Total Clans: %s\n"+
+			"🌐 Total Federations: %s\n"+
+			"⚔️ Total Raids Launched: %s\n\n"+
+			"%s\n"+
+			"🔩 Metal in circulation: %s\n"+
+			"🔮 Crystal in circulation: %s\n"+
+			"⚙️ Scrap in circulation: %s\n"+divider,
+		htmlBold("GLOBAL WASTELAND STATISTICS"),
+		htmlCode(fmt.Sprintf("%d", totalPlayers)),
+		htmlCode(fmt.Sprintf("%d", totalClans)),
+		htmlCode(fmt.Sprintf("%d", totalFederations)),
+		htmlCode(fmt.Sprintf("%d", totalRaids)),
+		htmlBold("🌎 ECONOMY-WIDE TOTALS"),
+		htmlCode(fmt.Sprintf("%.0f", totalMetal)),
+		htmlCode(fmt.Sprintf("%.0f", totalCrystal)),
+		htmlCode(fmt.Sprintf("%.0f", totalScrap)),
 	)
 
-	return c.Send(panelText)
+	return c.Send(panelText, telebot.ModeHTML)
 }
 
 // ── /missions ─────────────────────────────────────────────────────────
@@ -400,9 +407,7 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
-	panelText := "🚀━━━━━━━━━━━━━━━━━━━━━━🚀\n" +
-		"📋 YOUR ACTIVE MISSIONS 📋\n" +
-		"🚀━━━━━━━━━━━━━━━━━━━━━━🚀\n\n"
+	panelText := "🚀 " + htmlBold("YOUR ACTIVE MISSIONS") + " 🚀\n" + divider + "\n\n"
 
 	any := false
 
@@ -418,7 +423,7 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 			var resolveTime interface{}
 			if raidRows.Scan(&target, &state, &resolveTime) == nil {
 				any = true
-				panelText += fmt.Sprintf("⚔️ Raid ➜ %s [%s]\n", target, state)
+				panelText += fmt.Sprintf("⚔️ Raid ➜ %s %s\n", htmlEscape(target), htmlCode("["+state+"]"))
 			}
 		}
 		raidRows.Close()
@@ -434,7 +439,7 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 			var bossName, state string
 			if bossRows.Scan(&bossName, &state) == nil {
 				any = true
-				panelText += fmt.Sprintf("👹 Boss Strike ➜ %s [%s]\n", bossName, state)
+				panelText += fmt.Sprintf("👹 Boss Strike ➜ %s %s\n", htmlEscape(bossName), htmlCode("["+state+"]"))
 			}
 		}
 		bossRows.Close()
@@ -451,18 +456,18 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 			var readyAt interface{}
 			if miningRows.Scan(&resType, &miners, &readyAt) == nil {
 				any = true
-				panelText += fmt.Sprintf("⛏️ Mining %s (%d miners)\n", resType, miners)
+				panelText += fmt.Sprintf("⛏️ Mining %s %s\n", htmlEscape(resType), htmlCode(fmt.Sprintf("(%d miners)", miners)))
 			}
 		}
 		miningRows.Close()
 	}
 
 	if !any {
-		panelText += "No active missions. Launch a raid, attack a boss, or start mining!\n"
+		panelText += htmlItalic("No active missions. Launch a raid, attack a boss, or start mining!") + "\n"
 	}
 
-	panelText += "🚀━━━━━━━━━━━━━━━━━━━━━━🚀"
-	return c.Send(panelText)
+	panelText += divider
+	return c.Send(panelText, telebot.ModeHTML)
 }
 
 // ── /destinations ─────────────────────────────────────────────────────
