@@ -81,9 +81,12 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 
 	for _, a := range agents {
 		// Calculate fuel deductions incorporating Science Tech and Biological Mutations
+		// Base upkeep and floor tuned 2026-07-26 per Asiwaju's balance
+		// call: automation should cost real electricity even at max tech
+		// investment, not trail off to a token fee.
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
-		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.10) // Cap minimum electricity upkeep at 10%
-		upkeepEnergy := 2.0 * upkeepMultiplier
+		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.40) // Floor: even maxed tech still pays 40% of base upkeep
+		upkeepEnergy := 5.0 * upkeepMultiplier
 
 		if a.Electricity < upkeepEnergy {
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)

@@ -1281,18 +1281,48 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 				fmt.Sprintf("🔩❌ LOGISTICS DEPLETED: Vehicles and grid equipment in the force marching on [%s] are no longer fully operational.", ex.defenderName))
 		}
 
-		// If a force runs completely dry (rations AND ammo, or
-		// electricity AND logistics) it can't safely continue - rather
-		// than force an immediate retreat, it HALTS in place and awaits
-		// either a dedicated resupply convoy from home (see
-		// processSupplyConvoys / HandleDispatchConvoy) or a manual
-		// retreat order from its commander. This matches "the entire
-		// army should pause until reinforcement resources arrive... once
-		// reinforcement reaches them, the journey can continue."
-		if ex.state == "marching" && (newRations <= 0 && newAmmo <= 0 || newElectricity <= 0 && newLogistics <= 0) {
+		// Phase 5 milestone 4: the two failure modes are NOT the same.
+		// Rations/ammo depletion means the column has nothing to fight or
+		// march with - it halts outright, same as before. Electricity/
+		// logistics depletion is softer: "high tech" (mech bonuses,
+		// capital-unit tech multipliers - see roadcombat.Power's
+		// HighTechOffline handling and the matching check in
+		// resolveRaidCombats below) goes offline immediately, but the
+		// column keeps moving on muscle and diesel alone. Only if power
+		// stays out for a sustained period (grace window) does it
+		// escalate to a full halt, matching "disables high-tech
+		// contributions before it can force a pause."
+		const powerOutageGraceTicks = 5
+
+		foodAmmoOut := newRations <= 0 && newAmmo <= 0
+		powerOut := newElectricity <= 0 && newLogistics <= 0
+
+		if ex.state == "marching" && foodAmmoOut {
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'awaiting_reinforcement', paused_at = CURRENT_TIMESTAMP WHERE id = $1", ex.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🛑 COLUMN HALTED: Your force marching on [%s] has run out of critical food/ammunition or power/logistics supplies and cannot continue. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
+				fmt.Sprintf("🛑 COLUMN HALTED: Your force marching on [%s] has run out of food and ammunition and cannot continue. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
+		} else if ex.state == "marching" && powerOut {
+			var wasOffline bool
+			var outageTicks int
+			_ = tx.QueryRowContext(ctx, "SELECT high_tech_offline, power_outage_ticks FROM raids WHERE id = $1", ex.id).Scan(&wasOffline, &outageTicks)
+			outageTicks++
+
+			if outageTicks > powerOutageGraceTicks {
+				_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'awaiting_reinforcement', paused_at = CURRENT_TIMESTAMP, power_outage_ticks = $1 WHERE id = $2", outageTicks, ex.id)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🛑 COLUMN HALTED: Sustained power/logistics failure in the force marching on [%s] has finally forced a full halt. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
+			} else {
+				_, _ = tx.ExecContext(ctx, "UPDATE raids SET high_tech_offline = TRUE, power_outage_ticks = $1 WHERE id = $2", outageTicks, ex.id)
+				if !wasOffline {
+					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+						fmt.Sprintf("⚠️ HIGH TECH OFFLINE: Power/logistics failure in the force marching on [%s] has disabled Mech and capital-unit tech bonuses. The column presses on, but a full halt follows if power isn't restored soon.", ex.defenderName))
+				}
+			}
+		} else if ex.state == "marching" {
+			// Power recovered (e.g. after a convoy delivery ticked
+			// electricity/logistics back above zero) - clear the grace
+			// counter and restore high-tech capability.
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET high_tech_offline = FALSE, power_outage_ticks = 0 WHERE id = $1 AND (high_tech_offline = TRUE OR power_outage_ticks > 0)", ex.id)
 		}
 	}
 	return nil
@@ -1910,7 +1940,13 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 	}
 	rows.Close()
 
-	incidentTypes := []string{"flood", "storm", "heatwave"}
+	// All six local incident types the request asked for. flood/storm/
+	// heatwave existed from the first Phase 5 pass; sandstorm/emp/
+	// radiation are the direct-mapped counterparts of the matching
+	// continent-wide world_events, each with its own onset effect below
+	// (routeIncidentOnsetEffect) rather than just a different label on the
+	// same generic pause.
+	incidentTypes := []string{"flood", "storm", "heatwave", "sandstorm", "emp", "radiation"}
 
 	for _, c := range candidates {
 		progress := roadcombat.RouteProgress(c.legStartedAt.UTC(), c.legTotalMinutes, time.Now().UTC())
@@ -1929,11 +1965,29 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 		incidentType := incidentTypes[rand.Intn(len(incidentTypes))]
 		rollChance := roadcombat.IncidentBaseRollChance
 		if activeEventType != "" {
-			for _, candidateType := range incidentTypes {
-				if roadcombat.IncidentMatchesActiveWeather(activeEventType, candidateType) {
-					incidentType = candidateType
-					rollChance = roadcombat.IncidentElevatedRollChance
-					break
+			// directLocalName covers the continent-wide events whose
+			// local incident counterpart isn't just the same string
+			// (radiation_storm -> "radiation"); everything else that has
+			// a direct local incident of the same name (sandstorm, emp)
+			// is handled by the identity check below.
+			directLocalName := ""
+			switch activeEventType {
+			case "radiation_storm":
+				directLocalName = "radiation"
+			case "sandstorm", "emp":
+				directLocalName = activeEventType
+			}
+
+			if directLocalName != "" && roadcombat.IncidentMatchesActiveWeather(activeEventType, directLocalName) {
+				incidentType = directLocalName
+				rollChance = roadcombat.IncidentElevatedRollChance
+			} else {
+				for _, candidateType := range incidentTypes {
+					if roadcombat.IncidentMatchesActiveWeather(activeEventType, candidateType) {
+						incidentType = candidateType
+						rollChance = roadcombat.IncidentElevatedRollChance
+						break
+					}
 				}
 			}
 		}
@@ -1964,13 +2018,110 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 			UPDATE raids SET movement_state = 'camped', active_incident_id = $1, paused_at = CURRENT_TIMESTAMP
 			WHERE id = $2`, incidentID, c.raidID)
 
+		effectNote := e.applyRouteIncidentOnsetEffect(ctx, tx, c.raidID, incidentType)
+
 		icon, label := routeIncidentPresentation(incidentType)
 		hours := int(roadcombat.IncidentDuration(severity).Hours())
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID,
-			fmt.Sprintf("%s %s: Your column has been forced to make temporary camp by conditions on the road. Expected clear time: ~%dh. The journey will resume automatically once conditions improve.", icon, label, hours))
+		msg := fmt.Sprintf("%s %s: Your column has been forced to make temporary camp by conditions on the road. Expected clear time: ~%dh. The journey will resume automatically once conditions improve.", icon, label, hours)
+		if effectNote != "" {
+			msg += "\n" + effectNote
+		}
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID, msg)
 	}
 
 	return e.clearRouteWeatherIncidents(ctx, tx)
+}
+
+// applyRouteIncidentOnsetEffect gives each of the six local incident types
+// real mechanical teeth instead of an identical pause with a different
+// label, and directly implements the original request's "units may die,
+// starvation may occur" for weather (as opposed to combat). Effects fire
+// once, at the moment the incident begins camping the column.
+func (e *Engine) applyRouteIncidentOnsetEffect(ctx context.Context, tx *sql.Tx, raidID, incidentType string) string {
+	clampFloor := func(v, delta float64) float64 {
+		v -= delta
+		if v < 0 {
+			return 0
+		}
+		return v
+	}
+
+	switch incidentType {
+	case "flood":
+		// Standing water spoils dry stores.
+		var rations float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_rations,0) FROM raids WHERE id = $1", raidID).Scan(&rations)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1 WHERE id = $2", clampFloor(rations, 10), raidID)
+		return "🍞 Rising water spoiled some dry rations (-10 supply)."
+
+	case "storm":
+		// Lightning/downed lines damage the column's field generators.
+		var electricity float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_electricity,0) FROM raids WHERE id = $1", raidID).Scan(&electricity)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_electricity = $1 WHERE id = $2", clampFloor(electricity, 10), raidID)
+		return "⚡ Storm damage knocked out field generators (-10 electricity)."
+
+	case "heatwave":
+		// Heat and dehydration burn through rations faster than planned.
+		var rations float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_rations,0) FROM raids WHERE id = $1", raidID).Scan(&rations)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1 WHERE id = $2", clampFloor(rations, 15), raidID)
+		return "🥵 Heat and dehydration burned through extra rations (-15 supply)."
+
+	case "sandstorm":
+		// Fine particulates foul engines and logistics equipment.
+		var logistics float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_logistics,0) FROM raids WHERE id = $1", raidID).Scan(&logistics)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_logistics = $1 WHERE id = $2", clampFloor(logistics, 10), raidID)
+		return "🏜️ Fine sand fouled logistics equipment (-10 logistics)."
+
+	case "emp":
+		// A surge knocks out a large share of remaining electrical/
+		// logistics capacity outright - the signature EMP effect.
+		var electricity, logistics float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_electricity,0), COALESCE(attacker_logistics,0) FROM raids WHERE id = $1", raidID).Scan(&electricity, &logistics)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_electricity = $1, attacker_logistics = $2 WHERE id = $3", electricity*0.4, logistics*0.4, raidID)
+		return "💥 An electromagnetic surge knocked out 60% of remaining electrical/logistics capacity."
+
+	case "radiation":
+		// Exposure causes real casualties - "units may die" from weather,
+		// not just combat. Reuses the same roadcombat casualty machinery
+		// as a road battle, at a much lower fraction.
+		force, err := e.loadRoadFieldForceForIncident(ctx, tx, raidID)
+		if err != nil {
+			return ""
+		}
+		lost := roadcombat.CasualtiesFor(force, 0.05)
+		survivors := roadcombat.Survivors(force, lost)
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2, destroyers_mobilized = $3,
+			    bombers_mobilized = $4, battlecruisers_mobilized = $5, deathstars_mobilized = $6,
+			    liberators_mobilized = $7, wraiths_mobilized = $8
+			WHERE raid_id = $9`,
+			survivors.Soldiers, survivors.Mechs, survivors.Destroyers, survivors.Bombers,
+			survivors.Battlecruisers, survivors.Deathstars, survivors.Liberators, survivors.Wraiths, raidID)
+		if lost.Soldiers > 0 || lost.Mechs > 0 {
+			return fmt.Sprintf("☢️ Radiation exposure claimed %d Soldiers and %d Mechs before the column could take shelter.", lost.Soldiers, lost.Mechs)
+		}
+		return "☢️ Radiation exposure was survived without casualties this time."
+	}
+	return ""
+}
+
+// loadRoadFieldForceForIncident is the tick-engine-side twin of
+// internal/bot/handlers/combat.go's loadRoadFieldForce - duplicated at
+// this small size because the two live in different packages with
+// different transaction/handler contexts, exactly like
+// resolveEncounterAsContinue/resolveRoadEncounterContinue above.
+func (e *Engine) loadRoadFieldForceForIncident(ctx context.Context, tx *sql.Tx, raidID string) (roadcombat.FieldForce, error) {
+	var f roadcombat.FieldForce
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(soldiers_mobilized,0), COALESCE(mechs_mobilized,0), COALESCE(destroyers_mobilized,0),
+		       COALESCE(bombers_mobilized,0), COALESCE(battlecruisers_mobilized,0), COALESCE(deathstars_mobilized,0),
+		       COALESCE(liberators_mobilized,0), COALESCE(wraiths_mobilized,0)
+		FROM raid_forces WHERE raid_id = $1`, raidID).Scan(
+		&f.Soldiers, &f.Mechs, &f.Destroyers, &f.Bombers, &f.Battlecruisers, &f.Deathstars, &f.Liberators, &f.Wraiths)
+	return f, err
 }
 
 // routeIncidentPresentation gives each local incident type a matching
@@ -1985,6 +2136,12 @@ func routeIncidentPresentation(incidentType string) (string, string) {
 		return "⛈️", "SEVERE STORM"
 	case "heatwave":
 		return "🔥", "HEATWAVE"
+	case "sandstorm":
+		return "🏜️", "SANDSTORM"
+	case "emp":
+		return "💥", "EMP SURGE"
+	case "radiation":
+		return "☢️", "RADIATION ZONE"
 	default:
 		return "🌍", "WEATHER DELAY"
 	}
@@ -2049,15 +2206,23 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 	type convoy struct {
 		id, homeID, targetRaidID              string
 		rations, ammo, electricity, logistics float64
+		haulersCommitted, tankersCommitted    int
 	}
 	var convoys []convoy
 	for rows.Next() {
 		var c convoy
 		if err := rows.Scan(&c.id, &c.homeID, &c.targetRaidID, &c.rations, &c.ammo, &c.electricity, &c.logistics); err == nil {
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers_committed,1), COALESCE(tankers_committed,1) FROM supply_convoys WHERE id = $1", c.id).Scan(&c.haulersCommitted, &c.tankersCommitted)
 			convoys = append(convoys, c)
 		}
 	}
 	rows.Close()
+
+	// convoyAmbushChance: a convoy "has its own route and exposure" per
+	// the plan - it isn't a guaranteed delivery. With no escort mechanic
+	// yet (documented as a follow-up), every unescorted convoy carries a
+	// flat real risk of being lost outright on the road.
+	const convoyAmbushChance = 0.08
 
 	for _, c := range convoys {
 		var movementState, state string
@@ -2070,12 +2235,31 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 
 		delivered := err == nil && movementState == "awaiting_reinforcement" && (state == "marching" || state == "returning")
 		if !delivered {
+			// Target moved on before the convoy arrived - the cargo and
+			// crews still make it back home safely, only the delivery
+			// itself failed.
 			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'failed' WHERE id = $1", c.id)
+			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + $1, tankers = tankers + $2 WHERE encampment_id = $3", c.haulersCommitted, c.tankersCommitted, c.homeID)
 			var userID int64
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&userID)
 			if userID != 0 {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-					"📦❌ CONVOY MISSED CONTACT: Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies and transport crews are lost.")
+					"📦❌ CONVOY MISSED CONTACT: Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies were lost, but the Hauler and Tanker crews made it back home.")
+			}
+			continue
+		}
+
+		if rand.Float64() < convoyAmbushChance {
+			// The convoy itself was ambushed en route - its own
+			// unmodeled "exposure." Unlike a missed-contact failure,
+			// this is a real loss: cargo AND the committed Hauler/Tanker
+			// crews are gone, and the stranded column is still stranded.
+			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'ambushed' WHERE id = $1", c.id)
+			var homeUserID int64
+			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&homeUserID)
+			if homeUserID != 0 {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", homeUserID,
+					"📦💥 CONVOY AMBUSHED: Your resupply convoy was ambushed en route and lost, along with its Hauler and Tanker crews. The stranded column is still waiting for supplies.")
 			}
 			continue
 		}
@@ -2102,6 +2286,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 			WHERE id = $5`, newRations, newAmmo, newElectricity, newLogistics, c.targetRaidID)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'delivered' WHERE id = $1", c.id)
+		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + $1, tankers = tankers + $2 WHERE encampment_id = $3", c.haulersCommitted, c.tankersCommitted, c.homeID)
 
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", c.targetRaidID).Scan(&userID)
@@ -2595,6 +2780,17 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
+
+		// Phase 5 milestone 4: sustained electricity/logistics failure
+		// disables high-tech contributions (mech multiplier, in this
+		// formula) without applying the full rations/ammo-depletion
+		// offense penalty above - matches roadcombat.Power's identical
+		// treatment for road battles.
+		var attackerHighTechOffline bool
+		_ = tx.QueryRowContext(ctx, "SELECT high_tech_offline FROM raids WHERE id = $1", r.id).Scan(&attackerHighTechOffline)
+		if attackerHighTechOffline {
+			mechOffenseMultiplier = 1.0
+		}
 
 		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
 

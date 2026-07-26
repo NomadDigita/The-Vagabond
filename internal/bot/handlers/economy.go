@@ -72,6 +72,7 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 			"Choose where to trade:\n"+
 			"🏦 [Financial Vault] — Deposit, borrow, repay, and convert Scrap/Metal/Crystal into Cash\n"+
 			"🛒 [Market Exchange] — Buy and sell directly with other survivors\n"+
+			"🔮 [Crystal Exchange] — Convert rare Crystal into large quantities of any other resource\n"+
 			"🏪━━━━━━━━━━━━━━━━━━━━━━🏪",
 		scrap, metal, crystal, dollars,
 		bankBalance, bankBalanceCash, loanAmount, loanCash,
@@ -81,8 +82,9 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	btnVault := selector.Data("🏦 Financial Vault", "trade_hub_nav", "vault")
 	btnMarket := selector.Data("🛒 Market Exchange", "trade_hub_nav", "market")
+	btnCrystal := selector.Data("🔮 Crystal Exchange", "trade_hub_nav", "crystal")
 
-	selector.Inline(selector.Row(btnVault, btnMarket))
+	selector.Inline(selector.Row(btnVault, btnMarket), selector.Row(btnCrystal))
 
 	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
@@ -93,6 +95,9 @@ func (h *EconomyHandler) HandleTradeHubNavCallback(c telebot.Context) error {
 	dest := c.Args()[0]
 	if dest == "vault" {
 		return h.HandleFinancialVault(c)
+	}
+	if dest == "crystal" {
+		return h.HandleCrystalExchangePanel(c)
 	}
 	return h.exchangeHandler.HandleExchangePanel(c)
 }

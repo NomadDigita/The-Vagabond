@@ -1,14 +1,12 @@
 # MMO Warfare, Exploration, and Logistics Plan
 
-Status: Phases 1-4 complete (weather camps + reinforcement convoys are
-partial - see MMO_WORLD_EVOLUTION_PLAN.md's Phase 5 completed-detail
-section for the exact scope); persistent AI civilizations remain pending
-(2026-07-25). Note: this document's phase numbers do not match
-`MMO_WORLD_EVOLUTION_PLAN.md`'s - this file's "Phase 3 (Road Encounters)"
-is that plan's "Phase 4"; this file's "Phase 4 (Weather/Camps)" is that
-plan's "Phase 5". Treat `MMO_WORLD_EVOLUTION_PLAN.md` as the authoritative
-phase numbering going forward; this file is kept for its detailed
-milestone/edge-case breakdown.
+Status: Phases 1-4 complete; persistent AI civilizations (Phase 5 in this
+doc's numbering) in progress (2026-07-26). Note: this document's phase
+numbers do not match `MMO_WORLD_EVOLUTION_PLAN.md`'s - this file's "Phase
+3 (Road Encounters)" is that plan's "Phase 4"; this file's "Phase 4
+(Weather/Camps)" is that plan's "Phase 5". Treat
+`MMO_WORLD_EVOLUTION_PLAN.md` as the authoritative phase numbering going
+forward; this file is kept for its detailed milestone/edge-case breakdown.
 
 ## Current Architecture Baseline
 
@@ -132,14 +130,16 @@ Milestones:
   home outpost) are still discovery-only, per Phase 2 - see
   `MMO_WORLD_EVOLUTION_PLAN.md`'s Phase 4 completion note for the exact
   scope boundary and why it was deferred rather than half-built.
-- Phase 4 (Weather/Camps, partial) complete: local route weather incidents
-  (flood/storm/heatwave) fed by the existing continent-wide world_events
-  table, temporary camps pausing a column 12-36 real hours, and reinforcement
-  convoys (real Hauler+Tanker requirement, distance-priced) that resolve a
-  column halted by supply depletion - which no longer forces an instant
-  retreat, matching "the entire army should pause until reinforcement
-  resources arrive." Not yet done: sandstorm/EMP/radiation as their own
-  local incident types, a priced pay-to-clear-early option for camps, and
-  distinct electricity/logistics-failure behavior separate from rations/
-  ammo depletion. See `MMO_WORLD_EVOLUTION_PLAN.md`'s Phase 5 completed-
-  detail section for the full breakdown.
+- Phase 4 (Weather/Camps) complete: local route weather incidents
+  (flood/storm/heatwave/sandstorm/emp/radiation - all six, each with a
+  distinct onset effect) fed by the existing continent-wide world_events
+  table, temporary camps pausing a column 12-36 real hours (with a
+  Crystal-priced early-clear option), and reinforcement convoys (real
+  Hauler+Tanker requirement, distance-priced, real ambush/exposure risk)
+  that resolve a column halted by supply depletion - which no longer
+  forces an instant retreat, matching "the entire army should pause until
+  reinforcement resources arrive." Rations/ammo depletion halts a column
+  outright; electricity/logistics depletion instead disables high-tech
+  contributions with a grace period before escalating to a full halt.
+  See `MMO_WORLD_EVOLUTION_PLAN.md`'s Phase 5 completed-detail section
+  for the full breakdown.

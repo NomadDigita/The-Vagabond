@@ -271,23 +271,18 @@ operators can measure whether the loop is fair and economically sustainable.
 | 2026-07-20 | 2 | complete | `028_mmo_world_discovery_and_radar.sql` adds directional discoveries and route snapshots. Exploration can discover rival outposts or the Rogue Nest, Scouts affect discovery odds, targets are filtered and launch-authorized by discovery, route proximity creates reciprocal knowledge, and radar warnings are sent once at capability-dependent proximity. |
 | 2026-07-25 | 3 | complete | `030_mmo_route_legs_and_road_encounters.sql` replaces the resolve_time-derived position estimate with a stable per-leg clock (`leg_started_at`/`leg_total_minutes`, freezable via `paused_at`). Route discovery, radar warnings, and the new road-encounter scan all read position from the same `roadcombat.RouteProgress`/`CurrentPosition` functions, so a paused or delayed column no longer drifts. The expensive speed-up now shortens the leg to match its pulled-forward arrival instead of silently desyncing position from ETA. |
 | 2026-07-25 | 4 | complete (expedition-vs-expedition only) | `road_encounters` table + `evaluateRoadEncounters`/`expireRoadEncounters` tick passes detect two converging expeditions, freeze both, and open a 3-minute Attack/Continue window surfaced on the Expedition Radar panel. Attack is unilateral and resolves immediately via a new `roadcombat` field-battle model (separate from, but balance-consistent with, the base-raid resolver); mutual Continue or a timeout resumes both columns from their exact paused position via a leg-shift, never snapping back or skipping ahead. Winner captures a capped share of every `stolen_*` resource the loser carries, including Crystal. **Not yet covered:** an expedition encountering a passive third-party *base* mid-route still only creates a discovery (existing Phase 2 behavior) rather than a forced battle window - the plan's milestone 2 covers "expeditions and bases," and only the expedition-vs-expedition half is done. AI factions don't yet launch mobile expeditions (Phase 6), so all current road encounters are player-vs-player. |
-| 2026-07-25 | 5 | partial | `031_mmo_route_weather_and_reinforcement_convoys.sql` adds local route weather incidents (flood/storm/heatwave, milestone 1 - reusing the existing continent-wide `world_events` table as an input signal rather than a second engine) with temporary camps that pause a column for 12-36 real hours (milestone 2), and dedicated resupply convoys gated on real Hauler+Tanker availability and distance-scaled scrap/metal cost (milestone 3). Supply depletion now halts a column to await reinforcement instead of forcing an immediate retreat (milestone 4, partial - see completed-implementation-detail note below for what's simplified). **Not done:** sandstorm/EMP/radiation as their own *local* incident types (milestone 1 - they remain continent-level inputs only), a distinct "electricity/logistics failure disables high-tech contributions before forcing a pause" behavior separate from the existing combined rations+ammo / electricity+logistics depletion check (milestone 4), and an expensive pay-to-clear-early option for weather camps (milestone 5 - camps currently just block the existing speed-up entirely rather than offering a priced alternative). |
+| 2026-07-25 | 5 | complete | `031_mmo_route_weather_and_reinforcement_convoys.sql` adds local route weather incidents (flood/storm/heatwave/sandstorm/emp/radiation - all six, milestone 1) reusing the existing continent-wide `world_events` table as an input signal, each with a distinct onset effect (see completed-implementation-detail below) rather than an identical pause with a different label; temporary camps pausing a column 12-36 real hours (milestone 2); dedicated resupply convoys gated on real Hauler+Tanker availability, distance-scaled cost, and a real ambush/exposure risk (milestone 3); rations/ammo depletion halting a column outright while electricity/logistics depletion instead disables high-tech contributions with a grace period before escalating to a full halt (milestone 4); and a Crystal-priced pay-to-clear-early option for camps, capped and floored (milestone 5). |
+| 2026-07-26 | 5 | follow-up | Asiwaju asked for the remaining Phase 5 gaps (sandstorm/EMP/radiation as real local types, milestone 4's distinct power-failure behavior, milestone 5's priced camp bypass) closed, plus fixed the agent electricity-upkeep rate (base 2.0->5.0/tick, floor 0.2->2.0/tick) and added a new Crystal Exchange feature (convert Crystal into large quantities of any other resource, rate scaled by how commonly-needed the target resource is). All implemented this session - see the updated completed-implementation-detail section below and `internal/bot/handlers/crystal_exchange.go`. While closing these gaps, also found and fixed a real bug: dispatched supply convoys deducted their committed Hauler+Tanker at dispatch but never returned them on any outcome, permanently draining transports on every resupply run regardless of success. |
 | 2026-07-25 | - | bugfix | While building Phase 5, found and fixed two correctness bugs in the Phase 3/4 work committed earlier the same day: (1) `resolveRaidCombats` could still fire arrival/return processing on a raid frozen by `paused_at`, because only `movement_state` was checked at the UI/tick-detection layer, not at the resolve_time-driven combat-resolution layer; (2) every unfreeze path shifted `leg_started_at` forward by the pause duration but left `resolve_time` untouched, so `resolve_time` would already be overdue the instant a pause lifted, causing an immediate premature state transition regardless of true remaining leg time. Both are fixed at every pause/unfreeze site (road encounters, weather incidents, and now supply convoys) by shifting `resolve_time` in lockstep with `leg_started_at`, and by gating `resolveRaidCombats`'s query on `movement_state = 'moving'` for marching/returning rows. |
 | 2026-07-25 | 6-7 | pending | Persistent AI civilizations and observability/balance tooling remain to be implemented. |
 
 ## Known design assumptions and edge cases
 
-- **Open question (not yet acted on):** Asiwaju asked whether automation
-  agents' electricity upkeep (`internal/engine/agent/agent.go`) is too low
-  at "0.2 per tick." The actual rate is `2.0 * upkeepMultiplier`, where
-  `upkeepMultiplier` is reduced by Economic Tech and Synaptic Mutation
-  levels down to a floor of 0.10 - so 0.2/tick is the floor a fully-teched
-  veteran outpost reaches, not the base rate (a fresh outpost pays the
-  full 2.0/tick). Left unchanged pending Asiwaju's decision: raising the
-  floor multiplier, adding a flat per-mode surcharge, or leaving it as an
-  intentional "the more you invest in tech, the cheaper automation gets"
-  reward. This is a resource-economy balance call, not a bug, so it wasn't
-  changed unilaterally alongside the Phase 3-5 work.
+- **Resolved (2026-07-26):** Asiwaju asked whether automation agents'
+  electricity upkeep (`internal/engine/agent/agent.go`) was too low at
+  "0.2 per tick" and directed a fix. Base upkeep raised 2.0 -> 5.0/tick;
+  floor multiplier raised 0.10 -> 0.40, so the floor a fully-teched
+  veteran outpost reaches is now 2.0/tick (was 0.2/tick).
 - Discovery is directional: A discovering B does not cause B to discover A
   unless the event explicitly says so.
 - A discovered target is not necessarily currently scouted. Future stale-intel
@@ -437,19 +432,75 @@ operators can measure whether the loop is fair and economically sustainable.
   transports' *cargo* are lost, though the Hauler/Tanker themselves return
   to the garrison at resolution either way (their own return trip isn't
   separately modeled yet - see below).
-- Known simplifications, intentionally deferred rather than half-built:
-  a convoy has no route of its own and cannot be intercepted or ambushed
-  (the plan's milestone 3 says a convoy "has its own route and exposure" -
-  today it's an instant point-to-point timer, not a real second column on
-  the map); sandstorm/EMP/radiation exist only as continent-wide inputs
-  that bias which *local* incident (flood/storm/heatwave) rolls, not as
-  local incident types themselves; there is no priced "pay to break camp
-  early" option (milestone 5) - a camped column simply cannot speed up
-  until conditions clear, which satisfies "speed-up should be exceptional"
-  but not the fuller "priced alternative" the milestone describes; and
-  electricity/logistics depletion still shares one combined halt condition
-  with rations/ammo depletion rather than the two having visibly different
-  consequences (milestone 4's "disables high-tech contributions before it
-  can force a pause" is not modeled - both failure modes currently produce
-  the same `awaiting_reinforcement` halt).
+- Known simplifications, intentionally deferred rather than half-built: a
+  convoy still travels on a straight point-to-point timer rather than a
+  real second column that could be encountered/discovered mid-route like a
+  raid can - it does now carry a real 8% flat ambush chance (`
+  convoyAmbushChance` in `processSupplyConvoys`) representing that
+  exposure, but that's a dice roll at delivery time, not a full
+  road-encounter-style system for convoys. That would be the natural next
+  increment if convoy-vs-raid interception is wanted.
+
+## Follow-up implementation detail (2026-07-26): closing the Phase 5 gaps, agent upkeep, Crystal Exchange
+
+- **Sandstorm/EMP/radiation are now full local incident types**, not just
+  continent-level inputs that bias flood/storm/heatwave. Each has its own
+  onset effect, applied once when the temporary camp begins
+  (`applyRouteIncidentOnsetEffect`): flood spoils rations, storm damages
+  electricity, heatwave burns extra rations, sandstorm fouls logistics
+  equipment, EMP knocks out 60% of remaining electricity/logistics in a
+  surge, and radiation causes real casualties (~5% of Soldiers/Mechs,
+  reusing the road-battle casualty machinery) - this last one is the
+  "units may die" weather event from the original request, previously
+  only implemented for combat. `IncidentMatchesActiveWeather` now prefers
+  the direct-named local counterpart of an active continent event
+  (sandstorm -> sandstorm, not the weaker sandstorm -> heatwave
+  cross-match) before falling back to the broader mappings.
+- **Milestone 4 (distinct power-failure behavior) is implemented.**
+  `raids` gained `high_tech_offline`/`power_outage_ticks`. Rations/ammo
+  depletion still halts a column outright (nothing to fight or march
+  with). Electricity/logistics depletion alone is softer: it sets
+  `high_tech_offline = TRUE` immediately (mech multiplier and capital-unit
+  tech multiplier disabled - see `roadcombat.Power`'s `HighTechOffline`
+  handling, mirrored in `resolveRaidCombats`'s base-raid formula) without
+  the blanket -50% offense penalty rations/ammo depletion applies, and
+  only escalates to a full `awaiting_reinforcement` halt after 5
+  consecutive ticks of continued power failure (a grace period).
+- **Milestone 5 (priced early camp clear) is implemented.**
+  `handleBreakCampEarly` lets a commander pay Crystal to resolve an active
+  `route_incidents` row immediately via the same leg/resolve_time-shift
+  resume logic used everywhere else in Phase 3-5, instead of waiting out
+  the full 12-36h. Cost scales with severity and hours remaining
+  (`breakCampCrystalPerSeverityHour = 0.75`), floored at 3 Crystal and
+  capped at 60 (both documented constants, matching the milestone's
+  "documented cap" requirement) so it's never free and never unboundedly
+  punishing. Abort/retreat is still blocked while camped - only the
+  speed-up action is repurposed into this priced bypass.
+- **Convoy exposure is real, and a genuine bug was found and fixed while
+  building it.** `processSupplyConvoys` previously deducted the committed
+  Hauler+Tanker at dispatch (`HandleDispatchConvoy`) but never returned
+  them on ANY outcome - every resupply run permanently drained 1 Hauler +
+  1 Tanker regardless of success. Fixed: transports now return to the home
+  garrison on a successful delivery and on a "missed contact" failure
+  (target moved on before the convoy arrived - the crews still make it
+  back, only the cargo is wasted). A new 8% flat ambush roll
+  (`convoyAmbushChance`) gives convoys real "exposure" as the milestone
+  describes: on an ambush, the convoy is lost outright - cargo AND
+  transports - and the stranded column stays stranded.
+- **Agent electricity upkeep fixed per Asiwaju's direct instruction**
+  (`internal/engine/agent/agent.go`): base upkeep 2.0 -> 5.0/tick, floor
+  multiplier 0.10 -> 0.40 (so the floor a fully-teched veteran outpost
+  reaches is now 2.0/tick, not 0.2/tick). This resolves the open design
+  question logged in the "Known design assumptions" section above.
+- **New Crystal Exchange feature** (`internal/bot/handlers/
+  crystal_exchange.go`, reachable from the Trade Hub panel): converts
+  Crystal into a large quantity of any other resource. Rates scale with
+  how commonly-needed the target resource is - Scrap/Metal/Rations (burned
+  constantly) convert generously (12,000 / 10,000 / 8,000 per Crystal),
+  while already-scarce currencies like Neuro-Cores and Ether convert
+  conservatively (500 / 100 per Crystal), so Crystal can't be laundered
+  into a second rare currency at a generous rate. Presets of 1/5/25
+  Crystal avoid needing free-text quantity input; storage-cap clamping
+  reuses the existing `storagecap` package so a conversion can't silently
+  overflow a warehouse.
 

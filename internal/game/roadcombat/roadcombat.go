@@ -113,6 +113,7 @@ type FieldForce struct {
 
 	MilitaryTechLvl int  // attacker-side mech multiplier input, floor 1
 	SuppliesOut     bool // rations/ammo both depleted -> offense penalty, mirrors base-raid rule
+	HighTechOffline bool // electricity/logistics depleted -> mech/capital tech multiplier disabled (Phase 5 milestone 4), distinct from SuppliesOut's blanket penalty
 }
 
 // TotalUnits returns the combined headcount of every combat-relevant unit
@@ -159,15 +160,25 @@ func Power(f FieldForce, offenseMod float64) float64 {
 		techLvl = 1
 	}
 	mechMultiplier := 1.50 * (1.0 + float64(techLvl-1)*0.25)
+	capitalTechMultiplier := 1.0
+	if f.HighTechOffline {
+		// High-tech contributions offline: mechs fight as unenhanced
+		// infantry (no multiplier) and capital units lose their tech
+		// edge, but nobody gets a blanket offense penalty the way
+		// SuppliesOut applies - this is "disables high-tech
+		// contributions," not "the whole column can't fight."
+		mechMultiplier = 1.0
+		capitalTechMultiplier = 0.70
+	}
 
 	rating := float64(f.Soldiers) * baseUnitRating * offenseMod
 	rating += float64(f.Mechs) * baseUnitRating * offenseMod * mechMultiplier
-	rating += float64(f.Destroyers) * destroyerRating * offenseMod
-	rating += float64(f.Bombers) * bomberRating * offenseMod
-	rating += float64(f.Liberators) * liberatorRating * offenseMod
-	rating += float64(f.Wraiths) * wraithRating * offenseMod
-	rating += float64(f.Battlecruisers) * battlecruiserRating * offenseMod
-	rating += float64(f.Deathstars) * deathstarRating * offenseMod
+	rating += float64(f.Destroyers) * destroyerRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Bombers) * bomberRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Liberators) * liberatorRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Wraiths) * wraithRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Battlecruisers) * battlecruiserRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Deathstars) * deathstarRating * offenseMod * capitalTechMultiplier
 	return rating
 }
 
@@ -271,6 +282,7 @@ func Survivors(f, lost FieldForce) FieldForce {
 		Battlecruisers:  clampSub(f.Battlecruisers, lost.Battlecruisers),
 		Deathstars:      clampSub(f.Deathstars, lost.Deathstars),
 		MilitaryTechLvl: f.MilitaryTechLvl,
+		HighTechOffline: f.HighTechOffline,
 	}
 }
 
@@ -319,10 +331,12 @@ func IncidentMatchesActiveWeather(activeEventType, incidentType string) bool {
 	switch activeEventType {
 	case "acid_rain":
 		return incidentType == "flood"
-	case "radiation_storm", "emp":
-		return incidentType == "storm"
+	case "radiation_storm":
+		return incidentType == "radiation" || incidentType == "storm"
+	case "emp":
+		return incidentType == "emp" || incidentType == "storm"
 	case "sandstorm":
-		return incidentType == "heatwave"
+		return incidentType == "sandstorm" || incidentType == "heatwave"
 	default:
 		return false
 	}

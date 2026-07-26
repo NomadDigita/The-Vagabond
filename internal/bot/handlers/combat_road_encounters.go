@@ -31,12 +31,13 @@ func (h *CombatHandler) loadRoadFieldForce(ctx context.Context, tx *sql.Tx, raid
 	}
 
 	var attackerID string
-	var rations, ammo, electricity, logistics float64
+	var rations, ammo float64
+	var highTechOffline bool
 	if err := tx.QueryRowContext(ctx, `
-		SELECT attacker_id, COALESCE(attacker_rations,100), COALESCE(attacker_ammo,100),
-		       COALESCE(attacker_electricity,100), COALESCE(attacker_logistics,100)
-		FROM raids WHERE id = $1`, raidID).Scan(&attackerID, &rations, &ammo, &electricity, &logistics); err == nil {
-		f.SuppliesOut = (rations <= 0 && ammo <= 0) || (electricity <= 0 && logistics <= 0)
+		SELECT attacker_id, COALESCE(attacker_rations,100), COALESCE(attacker_ammo,100), high_tech_offline
+		FROM raids WHERE id = $1`, raidID).Scan(&attackerID, &rations, &ammo, &highTechOffline); err == nil {
+		f.SuppliesOut = rations <= 0 && ammo <= 0
+		f.HighTechOffline = highTechOffline
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", attackerID).Scan(&f.MilitaryTechLvl)
 	}
 	if f.MilitaryTechLvl < 1 {
@@ -446,4 +447,72 @@ func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 		"🚚 RESUPPLY CONVOY DISPATCHED\n\n1 Hauler + 1 Tanker committed, carrying %.0f%% rations/ammo/electricity/logistics.\nCost: %.0f Scrap, %.0f Metal.\nETA: ~%d minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
 		convoySupplyPackage, scrapCost, convoyMetalCost, etaMinutes,
 	), keyboards.MainNavigation())
+}
+
+// breakCampCrystalPerSeverityHour / breakCampMinCrystalCost /
+// breakCampMaxCrystalCost price Phase 5 milestone 5's "pay to clear a
+// weather camp early" option: cost scales with severity and how much time
+// is actually left (clearing a camp that's about to expire anyway should
+// be cheap; clearing a severe camp with a day and a half left should be
+// genuinely expensive), with a documented floor and ceiling so it's never
+// free and never unboundedly punishing.
+const breakCampCrystalPerSeverityHour = 0.75
+const breakCampMinCrystalCost = 3.0
+const breakCampMaxCrystalCost = 60.0
+
+// handleBreakCampEarly implements the priced early-clear: paying Crystal
+// (deliberately - Crystal is the rarest resource, so this is an
+// "exceptional, expensive" bypass, matching the plan's milestone 5
+// requirement) resolves the active route_incidents row immediately via the
+// same leg/resolve_time-shift resume logic used everywhere else in Phase
+// 3-5, rather than a separate, disconnected "instant done" shortcut.
+func (h *CombatHandler) handleBreakCampEarly(ctx context.Context, tx *sql.Tx, c telebot.Context, raidID string) error {
+	var incidentID string
+	var severity int
+	var clearedAt time.Time
+	err := tx.QueryRowContext(ctx, `
+		SELECT ri.id, ri.severity, ri.cleared_at
+		FROM route_incidents ri
+		JOIN raids r ON r.active_incident_id = ri.id
+		WHERE r.id = $1 AND ri.resolved = FALSE FOR UPDATE OF ri`, raidID).Scan(&incidentID, &severity, &clearedAt)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ No active weather incident found for this column."})
+	}
+
+	remainingHours := time.Until(clearedAt.UTC()).Hours()
+	if remainingHours < 0 {
+		remainingHours = 0
+	}
+	crystalCost := breakCampCrystalPerSeverityHour * float64(severity) * remainingHours
+	if crystalCost < breakCampMinCrystalCost {
+		crystalCost = breakCampMinCrystalCost
+	}
+	if crystalCost > breakCampMaxCrystalCost {
+		crystalCost = breakCampMaxCrystalCost
+	}
+
+	var attackerID string
+	var crystal float64
+	_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID)
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&crystal)
+	if crystal < crystalCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Crystal: breaking camp early here costs 🔮 %.1f, you have %.1f.", crystalCost, crystal)})
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", crystalCost, attackerID)
+	_, _ = tx.ExecContext(ctx, "UPDATE route_incidents SET resolved = TRUE WHERE id = $1", incidentID)
+	_, _ = tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', active_incident_id = NULL,
+		    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+		    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+		    paused_at = NULL
+		WHERE id = $1`, raidID)
+
+	if err := tx.Commit(); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to break camp."})
+	}
+
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🔮 Camp broken early!"})
+	return c.Send(fmt.Sprintf("🔮 CAMP BROKEN EARLY\n\nSpent 🔮 %.1f Crystal to break camp ahead of schedule. Your column resumes its journey immediately.", crystalCost), keyboards.MainNavigation())
 }

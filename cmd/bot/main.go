@@ -818,6 +818,8 @@ func executeStartupMigrations(db *sql.DB) {
 		`CREATE INDEX IF NOT EXISTS idx_supply_convoys_pending ON supply_convoys(resolve_time) WHERE state = 'marching';`,
 		`CREATE INDEX IF NOT EXISTS idx_supply_convoys_target ON supply_convoys(target_raid_id) WHERE state = 'marching';`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uq_supply_convoys_active_target ON supply_convoys(target_raid_id) WHERE state = 'marching';`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS high_tech_offline BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS power_outage_ticks INT NOT NULL DEFAULT 0;`,
 	}
 
 	for _, stmt := range migrations {
@@ -1250,6 +1252,7 @@ func main() {
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)
 	bot.Handle("\ftrade_hub_nav", econ.HandleTradeHubNavCallback)
+	bot.Handle("\fcrystal_exchange", econ.HandleCrystalExchangeCallback)
 	bot.Handle("\frecon_ai", combat.HandleReconAICallback)
 	bot.Handle("\fsettings_toggle", profile.HandleSettingsToggleCallback)
 	bot.Handle("\fether_convert", ether.HandleEtherConvertCallback)

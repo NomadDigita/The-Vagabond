@@ -71,6 +71,15 @@ func TestPowerScalesWithForceAndSupplyPenalty(t *testing.T) {
 	if Power(starved, 1.0) >= Power(strong, 1.0) {
 		t.Fatalf("expected supply-depleted force to have a lower power rating")
 	}
+
+	offline := strong
+	offline.HighTechOffline = true
+	if Power(offline, 1.0) >= Power(strong, 1.0) {
+		t.Fatalf("expected high-tech-offline force to have a lower power rating than fully powered")
+	}
+	if Power(offline, 1.0) <= Power(starved, 1.0) {
+		t.Fatalf("expected high-tech-offline penalty to be milder than the full supplies-out penalty")
+	}
 }
 
 func TestResolveBattleWinnerAndDraw(t *testing.T) {
@@ -141,8 +150,11 @@ func TestIncidentMatchesActiveWeather(t *testing.T) {
 		{"acid_rain", "flood", true},
 		{"acid_rain", "storm", false},
 		{"radiation_storm", "storm", true},
+		{"radiation_storm", "radiation", true},
 		{"emp", "storm", true},
+		{"emp", "emp", true},
 		{"sandstorm", "heatwave", true},
+		{"sandstorm", "sandstorm", true},
 		{"solar_flare", "flood", false},
 		{"", "flood", false},
 	}

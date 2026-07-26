@@ -1763,11 +1763,15 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	if movementState == "encounter_pending" && (action == "speed" || action == "abort") {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Road Contact Active: Resolve the pending Attack/Continue decision on your Expedition Radar before ordering a speed-up or retreat."})
 	}
-	if movementState == "camped" {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Temporary Camp: Your column is sheltering from weather and cannot speed up or retreat until conditions clear."})
+	if movementState == "camped" && action == "abort" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Temporary Camp: Your column is sheltering from weather and cannot retreat until conditions clear or you pay to break camp early."})
 	}
 	if movementState == "awaiting_reinforcement" && action == "speed" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Out of Supplies: A stranded column has nothing left to spend on a speed-up. Dispatch a resupply convoy, or order a retreat instead."})
+	}
+
+	if movementState == "camped" && action == "speed" {
+		return h.handleBreakCampEarly(ctx, tx, c, raidID)
 	}
 
 	switch action {

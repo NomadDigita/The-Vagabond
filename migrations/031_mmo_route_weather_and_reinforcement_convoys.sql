@@ -33,6 +33,14 @@ CREATE INDEX IF NOT EXISTS idx_route_incidents_pending_clear ON route_incidents(
 CREATE UNIQUE INDEX IF NOT EXISTS uq_route_incidents_active_raid ON route_incidents(raid_id) WHERE resolved = FALSE;
 
 ALTER TABLE raids ADD COLUMN IF NOT EXISTS active_incident_id UUID;
+
+-- Phase 5 milestone 4: rations/ammo depletion halts a column outright
+-- (nothing to fight or march with), but electricity/logistics depletion
+-- alone is softer - "high tech" (mech bonuses, capital-unit tech
+-- multipliers) goes offline first, and only escalates to a full halt if
+-- power stays out past a short grace period.
+ALTER TABLE raids ADD COLUMN IF NOT EXISTS high_tech_offline BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE raids ADD COLUMN IF NOT EXISTS power_outage_ticks INT NOT NULL DEFAULT 0;
 DO $$
 BEGIN
 	IF NOT EXISTS (
