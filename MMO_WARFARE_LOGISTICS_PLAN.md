@@ -2,6 +2,13 @@
 
 Status: Phases 1-3 complete; camps/convoys and AI civilizations remain
 pending (2026-07-20).
+Status: Phases 1-3 complete (road encounters, expedition-vs-expedition only);
+camps/convoys and AI civilizations remain pending (2026-07-25). Note: this
+document's phase numbers do not match `MMO_WORLD_EVOLUTION_PLAN.md`'s -
+this file's "Phase 3 (Road Encounters)" is that plan's "Phase 4"; this
+file's "Phase 4 (Weather/Camps)" is that plan's "Phase 5". Treat
+`MMO_WORLD_EVOLUTION_PLAN.md` as the authoritative phase numbering going
+forward; this file is kept for its detailed milestone/edge-case breakdown.
 
 ## Current Architecture Baseline
 
@@ -118,3 +125,16 @@ Milestones:
   battle resolved by the established battle-report renderer; casualties update
   the moving force, only carried raid cargo is stealable, and an annihilated
   column turns home. A mutual Continue or timeout resumes both journeys.
+- Phase 3 (Road Encounters) complete for expedition-vs-expedition contact:
+  `road_encounters` table, per-leg route-progress tracking that survives
+  pauses/speed-ups without drifting, a tick pass that rolls encounters for
+  converging marching/returning columns, a live Attack/Continue window on
+  the Expedition Radar panel, a symmetric field-battle resolver
+  (`internal/game/roadcombat`, unit-tested) independent from but
+  balance-consistent with the base-raid resolver, multi-resource cargo
+  capture (including Crystal) from the loser, and safe encounter closure
+  (a wiped column is marked `completed`, not left `encounter_pending`).
+  Expedition-vs-*base* road encounters (a column passing a third party's
+  home outpost) are still discovery-only, per Phase 2 - see
+  `MMO_WORLD_EVOLUTION_PLAN.md`'s Phase 4 completion note for the exact
+  scope boundary and why it was deferred rather than half-built.

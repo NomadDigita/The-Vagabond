@@ -275,11 +275,15 @@ operators can measure whether the loop is fair and economically sustainable.
 | Date | Phase | State | Evidence / notes |
 |---|---|---|---|
 | 2026-07-20 | 0 | in progress | Repository cloned; architecture, existing Phase-1 plan/diff, active gameplay log, and the continuation's touched non-asset surfaces reviewed. The exhaustive audit remains active alongside implementation. |
+| 2026-07-25 | - | handoff note | A prior Codex session's transcript described Phase 3 (road encounters, weather/camps) as implemented, but `git log`/`git ls-remote` on `origin` showed only Phases 0-2 were ever merged (`0219c25`, PR #27) - that session's later work existed only in its own sandbox and was lost when its usage quota ran out before it could push. Claude picked up from the actual merged state (Phase 2 complete) rather than the transcript's claimed state. **Lesson for future sessions/developers: verify the real `git log` on `origin/main` before trusting a prior session's self-report of what's "done."** |
 | 2026-07-20 | 1 | complete and hardened | Existing `027_mmo_warfare_logistics_phase1.sql` supplies the foundation. `029_mmo_transport_staging_and_force_recovery.sql` closes the false home-inventory transport check and returns all tracked support units after a campaign. |
 | 2026-07-20 | 2 | complete | `028_mmo_world_discovery_and_radar.sql` adds directional discoveries and route snapshots. Exploration can discover rival outposts or the Rogue Nest, Scouts affect discovery odds, targets are filtered and launch-authorized by discovery, route proximity creates reciprocal knowledge, and radar warnings are sent once at capability-dependent proximity. |
 | 2026-07-20 | 3 | complete | Route snapshots, movement state, ETA-derived progress, actual staged support units, radar-proximity warnings, and route/status information in Expedition Radar are live. |
 | 2026-07-20 | 4 | complete | Active raid columns meeting within one coordinate create a 10-minute response window. `/encounters` offers Attack/Continue; either attack resolves a renderer-backed field battle, applies force casualties, delays the route, and transfers only carried raid cargo. |
 | 2026-07-20 | 5-7 | pending | Temporary camps and convoy reinforcement, persistent AI civilizations, and observability/balance tooling remain to be implemented. |
+| 2026-07-25 | 3 | complete | `030_mmo_route_legs_and_road_encounters.sql` replaces the resolve_time-derived position estimate with a stable per-leg clock (`leg_started_at`/`leg_total_minutes`, freezable via `paused_at`). Route discovery, radar warnings, and the new road-encounter scan all read position from the same `roadcombat.RouteProgress`/`CurrentPosition` functions, so a paused or delayed column no longer drifts. The expensive speed-up now shortens the leg to match its pulled-forward arrival instead of silently desyncing position from ETA. |
+| 2026-07-25 | 4 | complete (expedition-vs-expedition only) | `road_encounters` table + `evaluateRoadEncounters`/`expireRoadEncounters` tick passes detect two converging expeditions, freeze both, and open a 3-minute Attack/Continue window surfaced on the Expedition Radar panel. Attack is unilateral and resolves immediately via a new `roadcombat` field-battle model (separate from, but balance-consistent with, the base-raid resolver); mutual Continue or a timeout resumes both columns from their exact paused position via a leg-shift, never snapping back or skipping ahead. Winner captures a capped share of every `stolen_*` resource the loser carries, including Crystal. **Not yet covered:** an expedition encountering a passive third-party *base* mid-route still only creates a discovery (existing Phase 2 behavior) rather than a forced battle window - the plan's milestone 2 covers "expeditions and bases," and only the expedition-vs-expedition half is done. AI factions don't yet launch mobile expeditions (Phase 6), so all current road encounters are player-vs-player. |
+| 2026-07-25 | 5-7 | pending | Temporary camps and convoy reinforcement, persistent AI civilizations, and observability/balance tooling remain to be implemented. |
 
 ## Known design assumptions and edge cases
 
@@ -293,8 +297,15 @@ operators can measure whether the loop is fair and economically sustainable.
 - One unit/cargo allocation cannot be staged in more than one raid or convoy.
 - Route encounters must use stable locks and a canonical party ordering to
   avoid duplicate encounters when two tick workers observe the same pair.
+  Implemented in Phase 4: `road_encounters` enforces `raid_a_id::text <
+  raid_b_id::text` via a CHECK constraint, `evaluateRoadEncounters` always
+  reorders a detected pair into that order before insert, and a partial
+  unique index on `(raid_a_id, raid_b_id) WHERE status = 'pending'` makes a
+  duplicate insert from a second tick worker a no-op (`ON CONFLICT DO
+  NOTHING`) rather than a second encounter.
 - Loot comes from carried cargo in a field battle, never directly from a
-  remote home base.
+  remote home base. Implemented in Phase 4's road battles via
+  `captureCargo`, which only moves the loser's own `stolen_*` columns.
 - Flood speed-up is an expensive risk-management choice, not a mandatory
   premium gate: waiting remains a valid path.
 - AI faction simulation requires bounded scheduling and idempotent seeds so it
@@ -343,3 +354,62 @@ operators can measure whether the loop is fair and economically sustainable.
 - Field battles never access home-base reserves. They can take half of the
   losing expedition's already-carried raid payload, including rare Crystal,
   then update both moving payloads atomically.
+## Completed implementation detail: route legs and road encounters (Phase 3/4)
+
+- New package `internal/game/roadcombat` (zero DB/Telegram dependencies,
+  fully unit-tested) owns the pure policy: `RouteProgress` turns a leg's
+  start time + planned duration into a stable 0..1 fraction; `CurrentPosition`
+  interpolates origin->destination while `marching` and destination->origin
+  while `returning`; `Power`/`ResolveBattle`/`CasualtiesFor`/`Survivors`/
+  `CargoShare` implement a symmetric mobile-vs-mobile field battle.
+- `raids` gained `leg_started_at`, `leg_total_minutes`, `movement_state`,
+  `paused_at`, and `active_encounter_id`. Every place that used to write
+  `resolve_time` for a marching/returning transition (launch, forced
+  supply-depletion retreat, manual abort, and all three raid-combat-outcome
+  return transitions) now also resets the leg clock, so a route position
+  read is always accurate for the *current* leg regardless of how many
+  times `resolve_time` itself has been rewritten by pauses or speed-ups.
+- `discoverRouteContacts` (Phase 2) was refactored to read position from the
+  same leg-based helpers instead of its old ad-hoc `resolve_time` estimate,
+  fixing a latent drift bug: that estimate assumed `base_march_minutes`
+  never changed after launch, which stopped being true the moment any pause
+  or delay touched `resolve_time` without a matching change to the assumed
+  total trip length.
+- Road encounters: `evaluateRoadEncounters` (new tick pass, runs right after
+  `route_discovery`) scans all `moving` marching/returning raids, computes
+  each one's current position, and rolls a 35% chance for any pair within 3
+  coordinate units (skipping pairs that resolved an encounter in the last 4
+  minutes, so a "Continue" choice isn't immediately re-asked). A hit creates
+  a `road_encounters` row, freezes both raids (`movement_state =
+  'encounter_pending'`, `paused_at = now()`), and establishes reciprocal
+  discovery between the two commanders regardless of what they choose next.
+- Because the `notifications` table only ever delivers plain text (see
+  `internal/engine/notifications`), the queued alert tells each commander to
+  open their Expedition Radar rather than embedding a button - the actual
+  Attack/Continue buttons render live in `HandleExpeditionRadar`, which now
+  queries `road_encounters` for the caller's pending pairs.
+- `HandleRoadEncounterCallback` (new file
+  `internal/bot/handlers/combat_road_encounters.go`) implements the
+  decision: Attack is unilateral and resolves the field battle immediately
+  using each side's actual `raid_forces` composition, supply status (same
+  rations/ammo/electricity/logistics depletion rule as the forced-retreat
+  check), and `research_states.military_tech_lvl`. Continue only resolves
+  once both sides have chosen it, or the tick engine's `expireRoadEncounters`
+  times it out after 3 minutes; either path calls the same "shift
+  `leg_started_at` forward by the pause duration" logic so a resumed march
+  neither snaps back nor silently skips ahead.
+- A road-battle loser can be reduced to zero combat units; that raid is
+  immediately marked `completed` (wiped in the field, no survivors return)
+  rather than being left to limp home or getting stuck in a state the
+  existing raid-resolution tick passes don't expect.
+- Both `HandleExpeditionActions` (speed/abort) now refuse to act on a raid
+  whose `movement_state = 'encounter_pending'`, so a commander can't
+  side-step an active road decision by speeding up or retreating out from
+  under it.
+- Deliberately deferred to a later pass rather than left half-implemented:
+  expedition-vs-base road encounters (only expedition-vs-expedition exists
+  today - a friendly-fire-adjacent base a column passes is still only
+  discovered, per Phase 2, never forced into combat), and any AI-controlled
+  mobile expedition (AI factions are still static Rogue Nests until Phase 6,
+  so they cannot yet be met on the road).
+
