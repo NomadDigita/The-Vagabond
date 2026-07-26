@@ -356,7 +356,7 @@ func (h *ProfileHandler) HandleStats(c telebot.Context) error {
 
 	var totalPlayers, totalClans, totalFederations int
 	var totalRaids int
-	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalPlayers)
+	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE state != 'ai_faction'").Scan(&totalPlayers)
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM clans").Scan(&totalClans)
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM federations").Scan(&totalFederations)
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM raids").Scan(&totalRaids)

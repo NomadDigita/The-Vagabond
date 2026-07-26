@@ -151,7 +151,7 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 
 	case "server_metrics":
 		var totalUsers, totalCamps int
-		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
+		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE state != 'ai_faction'").Scan(&totalUsers)
 		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
@@ -689,7 +689,7 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 // shared by /admin_broadcast and the consolidated /admin panel's
 // guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doBroadcast(ctx context.Context, broadcastMsg string) (string, error) {
-	rows, err := h.DB.QueryContext(ctx, "SELECT telegram_id FROM users")
+	rows, err := h.DB.QueryContext(ctx, "SELECT telegram_id FROM users WHERE state != 'ai_faction'")
 	if err != nil {
 		log.Printf("Admin broadcast query failed: %v", err)
 		return "⚠️ Broadcast Failed: Error reading user databases.", err
@@ -739,7 +739,7 @@ func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 
 	var totalUsers, totalCamps int
 	ctx := context.Background()
-	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&totalUsers)
+	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE state != 'ai_faction'").Scan(&totalUsers)
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
 
 	var memStats runtime.MemStats

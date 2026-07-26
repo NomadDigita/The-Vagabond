@@ -534,3 +534,59 @@ operators can measure whether the loop is fair and economically sustainable.
   reuses the existing `storagecap` package so a conversion can't silently
   overflow a warehouse.
 
+## Completed implementation detail: persistent AI civilizations (Phase 6, foundational tier)
+
+- **Design choice: an AI faction is a REAL `encampments` row, not a new
+  entity type.** A synthetic `users` row (negative `telegram_id`, e.g.
+  `-900001`, `state = 'ai_faction'`) satisfies the existing `NOT NULL
+  UNIQUE` FK on `encampments.user_id` without altering that constraint or
+  auditing every join that assumes a real player. The payoff: discovery
+  (`resolveExplorationDiscovery` already queries "any encampment in this
+  continent, undiscovered by me" with no filter that would exclude one),
+  the raid target board, `resolveRaidCombats`, loot, and battle reports
+  all work on an AI faction identically to a real player's base, with
+  **zero code changes** in any of that pipeline. This is the single most
+  important integration decision in this pass, and the reason milestones
+  1-2 and most of the exit criteria were achievable in one session instead
+  of requiring a parallel AI-specific combat/discovery system.
+- **Seeded factions:** 8 total, 2 per continent (a stronger level-6 and a
+  weaker level-3 per region), each with a distinct name/flavor, a real
+  coordinate placed within that continent's existing quadrant convention
+  (same ranges `relocateZeroCoordinates` uses), starting resources scaled
+  to level, and a starting garrison (`workshop_inventory.soldiers`/
+  `mechs`) so it's a real raid target from the moment it's discovered, not
+  an empty shell. Seeding is idempotent via `ai_faction_key` and runs once
+  at startup (`seedAICivilizations`, called right after
+  `relocateZeroCoordinates`) - never re-seeds existing factions.
+- **`growAICivilizations`** (new tick pass): each AI faction gains a small
+  per-tick trickle of Scrap/Metal/Rations/Electricity (storage-cap
+  clamped, same as a player) and a much smaller Crystal trickle, plus a 5%
+  per-tick chance to add one Soldier, then one Mech once Soldiers hit
+  `level * 25`, then level up (raising both ceilings) once Mechs hit
+  `level * 4` - capped at level 15 so an ignored faction becomes a
+  meaningfully tougher target over time without becoming unraidable. A
+  faction that gets raided regularly stays suppressed; one left alone
+  grows - this is the intended emergent difficulty curve, not a bug.
+- **Safety audit, not skipped:** seeding synthetic `users` rows risks
+  leaking them into "total player count" stats or an admin broadcast.
+  Audited and fixed: `admin.go` (two player-count queries + the broadcast
+  target list), `profile.go`, and `world.go`'s survivor counts now all
+  exclude `state = 'ai_faction'`; `ranking.go`'s two global leaderboards
+  now filter `is_ai_faction = FALSE`. `profile.go`'s referral-count query
+  was checked and left as-is (a real player's `referred_by` can never
+  point to an AI faction, so no filter was needed there).
+- **Deliberately NOT done - the larger remaining half of Phase 6:** an AI
+  faction today gathers, builds, and expands, but never *decides* to do
+  anything - there is no AI tick-intent loop that picks research, launches
+  scouting, dispatches a raid, or reinforces. Building real AI-initiated
+  raids (an AI faction assessing its own force, picking a target through
+  the same discovery gate a player uses, and launching a genuine `raids`
+  row with itself as `attacker_id`) is what would let AI factions actually
+  appear on the road via the already-built Phase 3/4 road-encounter
+  system - that's the natural, concrete next increment, and it's
+  substantially larger than this pass (it needs its own decision logic,
+  not just more tick-pass math). Rogue Drone Nest was left completely
+  untouched throughout, per milestone 5's explicit "no destructive
+  conversion" instruction - it remains the fallback for a continent with
+  no other outpost.
+
