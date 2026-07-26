@@ -132,3 +132,45 @@ func TestCargoShareCapsAtCaptureFractionAndCapacity(t *testing.T) {
 		t.Fatalf("expected zero cargo share when loser carries nothing")
 	}
 }
+
+func TestIncidentMatchesActiveWeather(t *testing.T) {
+	cases := []struct {
+		active, incident string
+		want             bool
+	}{
+		{"acid_rain", "flood", true},
+		{"acid_rain", "storm", false},
+		{"radiation_storm", "storm", true},
+		{"emp", "storm", true},
+		{"sandstorm", "heatwave", true},
+		{"solar_flare", "flood", false},
+		{"", "flood", false},
+	}
+	for _, tc := range cases {
+		if got := IncidentMatchesActiveWeather(tc.active, tc.incident); got != tc.want {
+			t.Fatalf("IncidentMatchesActiveWeather(%q, %q) = %v, want %v", tc.active, tc.incident, got, tc.want)
+		}
+	}
+}
+
+func TestIncidentDurationScalesWithSeverity(t *testing.T) {
+	if IncidentDuration(1) != 12*time.Hour {
+		t.Fatalf("expected severity 1 to be 12h, got %v", IncidentDuration(1))
+	}
+	if IncidentDuration(2) != 24*time.Hour {
+		t.Fatalf("expected severity 2 to be 24h, got %v", IncidentDuration(2))
+	}
+	if IncidentDuration(3) != 36*time.Hour {
+		t.Fatalf("expected severity 3 to be 36h, got %v", IncidentDuration(3))
+	}
+}
+
+func TestConvoyTravelMinutesFloorsAtMinimum(t *testing.T) {
+	if ConvoyTravelMinutes(1) != MinConvoyTravelMinutes {
+		t.Fatalf("expected short distance to floor at %v minutes, got %v", MinConvoyTravelMinutes, ConvoyTravelMinutes(1))
+	}
+	long := ConvoyTravelMinutes(100)
+	if long <= MinConvoyTravelMinutes {
+		t.Fatalf("expected long distance to exceed the floor, got %v", long)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -242,6 +243,7 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE raids SET movement_state = 'moving', active_encounter_id = NULL,
 			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
 			    paused_at = NULL
 			WHERE id = $1`, side.raidID)
 	}
@@ -310,6 +312,7 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 			UPDATE raids
 			SET movement_state = 'moving', active_encounter_id = NULL,
 			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
 			    paused_at = NULL
 			WHERE id = $1 AND active_encounter_id = $2`, raidID, encounterID)
 
@@ -324,4 +327,123 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 		}
 	}
 	return nil
+}
+
+// convoySupplyPackage is the fixed resupply amount a standard convoy
+// carries per field-supply gauge (rations/ammo/electricity/logistics are
+// all 0-100 scales, see attacker_* columns on raids). A real logistics
+// operation restocks a meaningful chunk, not a full instant refill - the
+// stranded column still has to make the most of it and may need a second
+// convoy on a very long remaining leg.
+const convoySupplyPackage = 50.0
+
+// convoyScrapCostBase / convoyScrapCostPerUnit price a convoy by distance:
+// a nearby resupply is cheap, reinforcing a column halfway across the
+// world costs real materiel, matching "using [logistics] mechanics should
+// be very expensive" in spirit (this is the Phase 5 equivalent of Phase
+// 4's expensive march speed-up).
+const convoyScrapCostBase = 300.0
+const convoyScrapCostPerDistanceUnit = 4.0
+const convoyMetalCost = 150.0
+
+// HandleDispatchConvoy implements the "reinforcement resources... transported
+// by dedicated resource units" requirement: a commander with a column
+// halted at movement_state = 'awaiting_reinforcement' can send a convoy
+// from home carrying rations/ammo/electricity/logistics, gated on actually
+// having a hauler and a tanker to commit (matching the existing raid-launch
+// rule that transports must be real, staged units) and a scrap/metal cost
+// that scales with the real distance to the stranded column's current,
+// frozen position.
+func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid convoy order."})
+	}
+	targetRaidID := c.Args()[0]
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+	}
+	defer tx.Rollback()
+
+	var attackerID, movementState, state string
+	var originX, originY, destX, destY int
+	var legStartedAt time.Time
+	var legTotalMinutes float64
+	err = tx.QueryRowContext(ctx, `
+		SELECT attacker_id, COALESCE(movement_state,'moving'), state,
+		       COALESCE(origin_x,0), COALESCE(origin_y,0), COALESCE(destination_x,0), COALESCE(destination_y,0),
+		       COALESCE(leg_started_at, created_at, CURRENT_TIMESTAMP), COALESCE(leg_total_minutes, base_march_minutes, 15.0)
+		FROM raids WHERE id = $1 FOR UPDATE`, targetRaidID).Scan(
+		&attackerID, &movementState, &state, &originX, &originY, &destX, &destY, &legStartedAt, &legTotalMinutes)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That expedition no longer exists."})
+	}
+
+	var callerCampID string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&callerCampID); err != nil || callerCampID != attackerID {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can dispatch a convoy for this column."})
+	}
+	if movementState != "awaiting_reinforcement" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That column is not currently awaiting reinforcement."})
+	}
+
+	var existing int
+	_ = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM supply_convoys WHERE target_raid_id = $1 AND state = 'marching'", targetRaidID).Scan(&existing)
+	if existing > 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ A resupply convoy is already en route to this column."})
+	}
+
+	// Since the column is frozen (movement_state != 'moving'), paused_at
+	// anchors its true current position - it isn't advancing while it
+	// waits, so this is exactly where the convoy needs to travel to.
+	var pausedAt sql.NullTime
+	_ = tx.QueryRowContext(ctx, "SELECT paused_at FROM raids WHERE id = $1", targetRaidID).Scan(&pausedAt)
+	effectiveNow := time.Now().UTC()
+	if pausedAt.Valid {
+		effectiveNow = pausedAt.Time.UTC()
+	}
+	progress := roadcombat.RouteProgress(legStartedAt.UTC(), legTotalMinutes, effectiveNow)
+	targetPos := roadcombat.CurrentPosition(state, originX, originY, destX, destY, progress)
+
+	var homeX, homeY int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(c.x,0), COALESCE(c.y,0) FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", attackerID).Scan(&homeX, &homeY)
+	distance := roadcombat.Distance(roadcombat.Position{X: float64(homeX), Y: float64(homeY)}, targetPos)
+	travelMinutes := roadcombat.ConvoyTravelMinutes(distance)
+	scrapCost := convoyScrapCostBase + distance*convoyScrapCostPerDistanceUnit
+
+	var haulers, tankers int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers,0), COALESCE(tankers,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&haulers, &tankers)
+	if haulers < 1 || tankers < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Convoy Requires Transports: You need at least 1 available Hauler and 1 available Tanker at home to dispatch a resupply convoy."})
+	}
+
+	var homeScrap, homeMetal float64
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(scrap,0), COALESCE(metal,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&homeScrap, &homeMetal)
+	if homeScrap < scrapCost || homeMetal < convoyMetalCost {
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materiel: Dispatching this convoy costs %.0f Scrap and %.0f Metal.", scrapCost, convoyMetalCost)})
+	}
+
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2 WHERE encampment_id = $3", scrapCost, convoyMetalCost, attackerID)
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers - 1, tankers = tankers - 1 WHERE encampment_id = $1", attackerID)
+
+	resolveTime := time.Now().UTC().Add(time.Duration(travelMinutes) * time.Minute)
+	_, _ = tx.ExecContext(ctx, `
+		INSERT INTO supply_convoys (home_encampment_id, target_raid_id, rations_carried, ammo_carried, electricity_carried, logistics_carried,
+		    haulers_committed, tankers_committed, origin_x, origin_y, destination_x, destination_y, resolve_time)
+		VALUES ($1, $2, $3, $3, $3, $3, 1, 1, $4, $5, $6, $7, $8)`,
+		attackerID, targetRaidID, convoySupplyPackage, homeX, homeY, int(math.Round(targetPos.X)), int(math.Round(targetPos.Y)), resolveTime)
+
+	if err := tx.Commit(); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to dispatch convoy."})
+	}
+
+	etaMinutes := int(travelMinutes)
+	_ = c.Respond(&telebot.CallbackResponse{Text: "🚚 Convoy dispatched!"})
+	return c.Send(fmt.Sprintf(
+		"🚚 RESUPPLY CONVOY DISPATCHED\n\n1 Hauler + 1 Tanker committed, carrying %.0f%% rations/ammo/electricity/logistics.\nCost: %.0f Scrap, %.0f Metal.\nETA: ~%d minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
+		convoySupplyPackage, scrapCost, convoyMetalCost, etaMinutes,
+	), keyboards.MainNavigation())
 }

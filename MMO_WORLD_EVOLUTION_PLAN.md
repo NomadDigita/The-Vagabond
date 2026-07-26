@@ -271,10 +271,23 @@ operators can measure whether the loop is fair and economically sustainable.
 | 2026-07-20 | 2 | complete | `028_mmo_world_discovery_and_radar.sql` adds directional discoveries and route snapshots. Exploration can discover rival outposts or the Rogue Nest, Scouts affect discovery odds, targets are filtered and launch-authorized by discovery, route proximity creates reciprocal knowledge, and radar warnings are sent once at capability-dependent proximity. |
 | 2026-07-25 | 3 | complete | `030_mmo_route_legs_and_road_encounters.sql` replaces the resolve_time-derived position estimate with a stable per-leg clock (`leg_started_at`/`leg_total_minutes`, freezable via `paused_at`). Route discovery, radar warnings, and the new road-encounter scan all read position from the same `roadcombat.RouteProgress`/`CurrentPosition` functions, so a paused or delayed column no longer drifts. The expensive speed-up now shortens the leg to match its pulled-forward arrival instead of silently desyncing position from ETA. |
 | 2026-07-25 | 4 | complete (expedition-vs-expedition only) | `road_encounters` table + `evaluateRoadEncounters`/`expireRoadEncounters` tick passes detect two converging expeditions, freeze both, and open a 3-minute Attack/Continue window surfaced on the Expedition Radar panel. Attack is unilateral and resolves immediately via a new `roadcombat` field-battle model (separate from, but balance-consistent with, the base-raid resolver); mutual Continue or a timeout resumes both columns from their exact paused position via a leg-shift, never snapping back or skipping ahead. Winner captures a capped share of every `stolen_*` resource the loser carries, including Crystal. **Not yet covered:** an expedition encountering a passive third-party *base* mid-route still only creates a discovery (existing Phase 2 behavior) rather than a forced battle window - the plan's milestone 2 covers "expeditions and bases," and only the expedition-vs-expedition half is done. AI factions don't yet launch mobile expeditions (Phase 6), so all current road encounters are player-vs-player. |
-| 2026-07-25 | 5-7 | pending | Temporary camps and convoy reinforcement, persistent AI civilizations, and observability/balance tooling remain to be implemented. |
+| 2026-07-25 | 5 | partial | `031_mmo_route_weather_and_reinforcement_convoys.sql` adds local route weather incidents (flood/storm/heatwave, milestone 1 - reusing the existing continent-wide `world_events` table as an input signal rather than a second engine) with temporary camps that pause a column for 12-36 real hours (milestone 2), and dedicated resupply convoys gated on real Hauler+Tanker availability and distance-scaled scrap/metal cost (milestone 3). Supply depletion now halts a column to await reinforcement instead of forcing an immediate retreat (milestone 4, partial - see completed-implementation-detail note below for what's simplified). **Not done:** sandstorm/EMP/radiation as their own *local* incident types (milestone 1 - they remain continent-level inputs only), a distinct "electricity/logistics failure disables high-tech contributions before forcing a pause" behavior separate from the existing combined rations+ammo / electricity+logistics depletion check (milestone 4), and an expensive pay-to-clear-early option for weather camps (milestone 5 - camps currently just block the existing speed-up entirely rather than offering a priced alternative). |
+| 2026-07-25 | - | bugfix | While building Phase 5, found and fixed two correctness bugs in the Phase 3/4 work committed earlier the same day: (1) `resolveRaidCombats` could still fire arrival/return processing on a raid frozen by `paused_at`, because only `movement_state` was checked at the UI/tick-detection layer, not at the resolve_time-driven combat-resolution layer; (2) every unfreeze path shifted `leg_started_at` forward by the pause duration but left `resolve_time` untouched, so `resolve_time` would already be overdue the instant a pause lifted, causing an immediate premature state transition regardless of true remaining leg time. Both are fixed at every pause/unfreeze site (road encounters, weather incidents, and now supply convoys) by shifting `resolve_time` in lockstep with `leg_started_at`, and by gating `resolveRaidCombats`'s query on `movement_state = 'moving'` for marching/returning rows. |
+| 2026-07-25 | 6-7 | pending | Persistent AI civilizations and observability/balance tooling remain to be implemented. |
 
 ## Known design assumptions and edge cases
 
+- **Open question (not yet acted on):** Asiwaju asked whether automation
+  agents' electricity upkeep (`internal/engine/agent/agent.go`) is too low
+  at "0.2 per tick." The actual rate is `2.0 * upkeepMultiplier`, where
+  `upkeepMultiplier` is reduced by Economic Tech and Synaptic Mutation
+  levels down to a floor of 0.10 - so 0.2/tick is the floor a fully-teched
+  veteran outpost reaches, not the base rate (a fresh outpost pays the
+  full 2.0/tick). Left unchanged pending Asiwaju's decision: raising the
+  floor multiplier, adding a flat per-mode surcharge, or leaving it as an
+  intentional "the more you invest in tech, the cheaper automation gets"
+  reward. This is a resource-economy balance call, not a bug, so it wasn't
+  changed unilaterally alongside the Phase 3-5 work.
 - Discovery is directional: A discovering B does not cause B to discover A
   unless the event explicitly says so.
 - A discovered target is not necessarily currently scouted. Future stale-intel
@@ -383,4 +396,60 @@ operators can measure whether the loop is fair and economically sustainable.
   discovered, per Phase 2, never forced into combat), and any AI-controlled
   mobile expedition (AI factions are still static Rogue Nests until Phase 6,
   so they cannot yet be met on the road).
+
+## Completed implementation detail: weather route incidents and reinforcement convoys (Phase 5, partial)
+
+- `route_incidents` reuses the Phase 3/4 `paused_at`/`leg_started_at` pause
+  mechanism rather than inventing a second one: a temporary camp and an
+  encounter freeze are both "something external is blocking this column,"
+  they just differ in cause (local weather vs. another player) and in what
+  ends them (a timer vs. a decision). `evaluateRouteWeatherIncidents` reads
+  the *existing* continent-wide `world_events` table
+  (`internal/engine/world`) as an input signal - an active `acid_rain`
+  event over the continent a column is currently crossing raises the odds
+  of a local `flood` there specifically - rather than rolling a second,
+  disconnected weather system, per the plan's explicit instruction.
+- Severity (1-3, rolled uniformly) maps to a 12h/24h/36h real-world clear
+  time via `roadcombat.IncidentDuration`, directly matching "which might
+  take a day or even longer."
+- Supply depletion (`internal/engine/tick/engine.go`'s per-tick march
+  consumption loop) no longer forces an immediate retreat. It now sets
+  `movement_state = 'awaiting_reinforcement'` and stops - the column stays
+  exactly where it ran dry until the commander either dispatches a convoy
+  (`HandleDispatchConvoy`) or manually orders a retreat from the Expedition
+  Radar panel (the existing abort action, now explicitly permitted in this
+  movement state). A column already paused for any reason (encounter,
+  camp, or reinforcement) skips this consumption check entirely rather
+  than re-triggering it or continuing to drain supplies while halted.
+- `HandleDispatchConvoy` prices a convoy by real distance from home to the
+  stranded column's *actual current position* (computed via the same
+  `roadcombat.CurrentPosition` used everywhere else, anchored to
+  `paused_at` since the column isn't advancing while frozen) and requires
+  at least 1 available Hauler and 1 available Tanker, mirroring the
+  existing raid-launch rule that transport requirements must be real,
+  staged units rather than a resource-only cost. `processSupplyConvoys`
+  (new tick pass) delivers a fixed 50-point top-up to all four field-supply
+  gauges (capped at the existing 0-100 scale) and resumes the column via
+  the same leg/resolve_time shift used everywhere else in Phase 3-5. A
+  convoy whose target has already moved on (aborted, resolved, or - not
+  yet possible, since paused columns don't self-resume - any other exit)
+  before it arrives fails outright: the resources and the committed
+  transports' *cargo* are lost, though the Hauler/Tanker themselves return
+  to the garrison at resolution either way (their own return trip isn't
+  separately modeled yet - see below).
+- Known simplifications, intentionally deferred rather than half-built:
+  a convoy has no route of its own and cannot be intercepted or ambushed
+  (the plan's milestone 3 says a convoy "has its own route and exposure" -
+  today it's an instant point-to-point timer, not a real second column on
+  the map); sandstorm/EMP/radiation exist only as continent-wide inputs
+  that bias which *local* incident (flood/storm/heatwave) rolls, not as
+  local incident types themselves; there is no priced "pay to break camp
+  early" option (milestone 5) - a camped column simply cannot speed up
+  until conditions clear, which satisfies "speed-up should be exceptional"
+  but not the fuller "priced alternative" the milestone describes; and
+  electricity/logistics depletion still shares one combined halt condition
+  with rations/ammo depletion rather than the two having visibly different
+  consequences (milestone 4's "disables high-tech contributions before it
+  can force a pause" is not modeled - both failure modes currently produce
+  the same `awaiting_reinforcement` halt).
 

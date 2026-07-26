@@ -795,6 +795,8 @@ func (e *Engine) ProcessTick() {
 		{"logistics_consumption", e.applyActiveLogisticsConsumption},
 		{"route_discovery", e.discoverRouteContacts},
 		{"road_encounters", e.evaluateRoadEncounters},
+		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
+		{"supply_convoys", e.processSupplyConvoys},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},
@@ -1164,7 +1166,8 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		SELECT r.id, r.attacker_id, r.state, r.resolve_time, ea.user_id,
 		       COALESCE(r.attacker_rations, 100.0), COALESCE(r.attacker_ammo, 100.0),
 		       COALESCE(r.attacker_electricity, 100.0), COALESCE(r.attacker_logistics, 100.0),
-		       COALESCE(r.base_march_minutes, 15.0), COALESCE(ed.name, 'Rogue Drone Nest')
+		       COALESCE(r.base_march_minutes, 15.0), COALESCE(ed.name, 'Rogue Drone Nest'),
+		       COALESCE(r.movement_state, 'moving')
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
@@ -1188,18 +1191,27 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		logistics        float64
 		baseMarchMinutes float64
 		defenderName     string
+		movementState    string
 	}
 
 	var exps []activeExp
 	for rows.Next() {
 		var ex activeExp
 		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime, &ex.userID,
-			&ex.rations, &ex.ammo, &ex.electricity, &ex.logistics, &ex.baseMarchMinutes, &ex.defenderName); err == nil {
+			&ex.rations, &ex.ammo, &ex.electricity, &ex.logistics, &ex.baseMarchMinutes, &ex.defenderName, &ex.movementState); err == nil {
 			exps = append(exps, ex)
 		}
 	}
 
 	for _, ex := range exps {
+		if ex.movementState != "moving" {
+			// Frozen by a road encounter, a weather camp, or already
+			// awaiting reinforcement - the column has halted, so it isn't
+			// burning marching supplies (or re-triggering this same
+			// depletion check) until it resumes.
+			continue
+		}
+
 		var homeRations, metalFuel float64
 		_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1 FOR UPDATE", ex.attackerID).Scan(&homeRations, &metalFuel)
 
@@ -1269,15 +1281,18 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 				fmt.Sprintf("🔩❌ LOGISTICS DEPLETED: Vehicles and grid equipment in the force marching on [%s] are no longer fully operational.", ex.defenderName))
 		}
 
-		// If a force runs completely dry (rations AND ammo) before it has
-		// even reached the target, it can't fight - order a forced
-		// retreat rather than let it arrive and immediately eat a -50%
-		// offense penalty in a battle it was never supplied to win.
+		// If a force runs completely dry (rations AND ammo, or
+		// electricity AND logistics) it can't safely continue - rather
+		// than force an immediate retreat, it HALTS in place and awaits
+		// either a dedicated resupply convoy from home (see
+		// processSupplyConvoys / HandleDispatchConvoy) or a manual
+		// retreat order from its commander. This matches "the entire
+		// army should pause until reinforcement resources arrive... once
+		// reinforcement reaches them, the journey can continue."
 		if ex.state == "marching" && (newRations <= 0 && newAmmo <= 0 || newElectricity <= 0 && newLogistics <= 0) {
-			returnResolve := time.Now().UTC().Add(time.Duration(ex.baseMarchMinutes) * time.Minute)
-			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1, leg_started_at = CURRENT_TIMESTAMP, leg_total_minutes = $3, movement_state = 'moving' WHERE id = $2", returnResolve, ex.id, ex.baseMarchMinutes)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'awaiting_reinforcement', paused_at = CURRENT_TIMESTAMP WHERE id = $1", ex.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("↩️ FORCED RETREAT: Your force marching on [%s] lost critical food/ammunition or power/logistics supplies before arrival and has turned back.", ex.defenderName))
+				fmt.Sprintf("🛑 COLUMN HALTED: Your force marching on [%s] has run out of critical food/ammunition or power/logistics supplies and cannot continue. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
 		}
 	}
 	return nil
@@ -1829,6 +1844,7 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 			SET movement_state = 'moving',
 			    active_encounter_id = NULL,
 			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
 			    paused_at = NULL
 			WHERE id = $1 AND active_encounter_id = $2`, raidID, encounterID)
 
@@ -1843,6 +1859,255 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 				}
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID, note)
 			}
+		}
+	}
+	return nil
+}
+
+// evaluateRouteWeatherIncidents implements MMO_WORLD_EVOLUTION_PLAN.md
+// Phase 5's local weather layer: a marching/returning column can be forced
+// into a temporary camp by a flood, storm, or heatwave. This deliberately
+// reads the EXISTING continent-wide world_events table (internal/engine/
+// world.WeatherEngine) as an input signal rather than rolling a second,
+// disconnected weather system - an active acid_rain/radiation_storm/emp/
+// sandstorm event over the continent a column is currently crossing raises
+// the odds of a matching local incident there.
+func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id, ea.user_id, r.state,
+		       COALESCE(r.leg_started_at, r.created_at, CURRENT_TIMESTAMP),
+		       COALESCE(r.leg_total_minutes, r.base_march_minutes, 15.0),
+		       r.origin_x, r.origin_y, r.destination_x, r.destination_y,
+		       r.origin_region, r.destination_region
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		WHERE r.state IN ('marching', 'returning')
+		  AND r.movement_state = 'moving'
+		  AND r.active_incident_id IS NULL
+		  AND r.origin_x IS NOT NULL AND r.destination_x IS NOT NULL
+		  AND r.origin_region IS NOT NULL AND r.destination_region IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("querying route weather candidates: %w", err)
+	}
+
+	type candidate struct {
+		raidID                          string
+		userID                          int64
+		state                           string
+		legStartedAt                    time.Time
+		legTotalMinutes                 float64
+		originX, originY                int
+		destinationX, destinationY      int
+		originRegion, destinationRegion string
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.raidID, &c.userID, &c.state, &c.legStartedAt, &c.legTotalMinutes,
+			&c.originX, &c.originY, &c.destinationX, &c.destinationY, &c.originRegion, &c.destinationRegion); err == nil {
+			candidates = append(candidates, c)
+		}
+	}
+	rows.Close()
+
+	incidentTypes := []string{"flood", "storm", "heatwave"}
+
+	for _, c := range candidates {
+		progress := roadcombat.RouteProgress(c.legStartedAt.UTC(), c.legTotalMinutes, time.Now().UTC())
+		pos := roadcombat.CurrentPosition(c.state, c.originX, c.originY, c.destinationX, c.destinationY, progress)
+		currentRegion := c.originRegion
+		if progress >= 0.5 {
+			currentRegion = c.destinationRegion
+		}
+
+		var activeEventType string
+		_ = tx.QueryRowContext(ctx, `
+			SELECT event_type FROM world_events
+			WHERE continent = $1 AND expires_at > CURRENT_TIMESTAMP
+			ORDER BY expires_at DESC LIMIT 1`, currentRegion).Scan(&activeEventType)
+
+		incidentType := incidentTypes[rand.Intn(len(incidentTypes))]
+		rollChance := roadcombat.IncidentBaseRollChance
+		if activeEventType != "" {
+			for _, candidateType := range incidentTypes {
+				if roadcombat.IncidentMatchesActiveWeather(activeEventType, candidateType) {
+					incidentType = candidateType
+					rollChance = roadcombat.IncidentElevatedRollChance
+					break
+				}
+			}
+		}
+
+		if rand.Float64() >= rollChance {
+			continue
+		}
+
+		severity := 1 + rand.Intn(3)
+		clearedAt := time.Now().UTC().Add(roadcombat.IncidentDuration(severity))
+		locX := int(math.Round(pos.X))
+		locY := int(math.Round(pos.Y))
+
+		var incidentID string
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO route_incidents (raid_id, incident_type, severity, location_x, location_y, cleared_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT DO NOTHING
+			RETURNING id`, c.raidID, incidentType, severity, locX, locY, clearedAt).Scan(&incidentID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue // already has an active incident (race with another tick worker)
+			}
+			return fmt.Errorf("creating route incident: %w", err)
+		}
+
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raids SET movement_state = 'camped', active_incident_id = $1, paused_at = CURRENT_TIMESTAMP
+			WHERE id = $2`, incidentID, c.raidID)
+
+		icon, label := routeIncidentPresentation(incidentType)
+		hours := int(roadcombat.IncidentDuration(severity).Hours())
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID,
+			fmt.Sprintf("%s %s: Your column has been forced to make temporary camp by conditions on the road. Expected clear time: ~%dh. The journey will resume automatically once conditions improve.", icon, label, hours))
+	}
+
+	return e.clearRouteWeatherIncidents(ctx, tx)
+}
+
+// routeIncidentPresentation gives each local incident type a matching
+// emoji/headline, distinct from the continent-wide event headlines in
+// internal/engine/world/weather.go (these are personal to one column, not
+// a regional news broadcast).
+func routeIncidentPresentation(incidentType string) (string, string) {
+	switch incidentType {
+	case "flood":
+		return "🌊", "FLASH FLOOD"
+	case "storm":
+		return "⛈️", "SEVERE STORM"
+	case "heatwave":
+		return "🔥", "HEATWAVE"
+	default:
+		return "🌍", "WEATHER DELAY"
+	}
+}
+
+// clearRouteWeatherIncidents resolves any route incident whose cleared_at
+// has passed, resuming the column from exactly where it paused - the same
+// leg_started_at/resolve_time shift used to resume from a road encounter,
+// since both are the same underlying "something external paused this
+// column" mechanism.
+func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, raid_id FROM route_incidents
+		WHERE resolved = FALSE AND cleared_at <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return fmt.Errorf("querying cleared route incidents: %w", err)
+	}
+	var cleared []struct{ id, raidID string }
+	for rows.Next() {
+		var row struct{ id, raidID string }
+		if err := rows.Scan(&row.id, &row.raidID); err == nil {
+			cleared = append(cleared, row)
+		}
+	}
+	rows.Close()
+
+	for _, row := range cleared {
+		_, _ = tx.ExecContext(ctx, "UPDATE route_incidents SET resolved = TRUE WHERE id = $1", row.id)
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raids
+			SET movement_state = 'moving', active_incident_id = NULL,
+			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    paused_at = NULL
+			WHERE id = $1 AND active_incident_id = $2`, row.raidID, row.id)
+
+		var userID int64
+		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", row.raidID).Scan(&userID)
+		if userID != 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
+				"☀️ CONDITIONS CLEARED: Your column has broken camp and resumed its journey.")
+		}
+	}
+	return nil
+}
+
+// processSupplyConvoys resolves any dispatched resupply convoy whose
+// travel time has elapsed: if its target column is still marching and
+// still awaiting reinforcement, the carried supplies are delivered (capped
+// at the 0-100 field-supply scale) and the column resumes; otherwise the
+// convoy's delivery fails outright (the resources and transports it
+// carried are NOT refunded - a real logistics run that missed its column
+// is a real loss, not an instant undo).
+func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, home_encampment_id, target_raid_id, rations_carried, ammo_carried, electricity_carried, logistics_carried
+		FROM supply_convoys
+		WHERE state = 'marching' AND resolve_time <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return fmt.Errorf("querying due supply convoys: %w", err)
+	}
+	type convoy struct {
+		id, homeID, targetRaidID              string
+		rations, ammo, electricity, logistics float64
+	}
+	var convoys []convoy
+	for rows.Next() {
+		var c convoy
+		if err := rows.Scan(&c.id, &c.homeID, &c.targetRaidID, &c.rations, &c.ammo, &c.electricity, &c.logistics); err == nil {
+			convoys = append(convoys, c)
+		}
+	}
+	rows.Close()
+
+	for _, c := range convoys {
+		var movementState, state string
+		var curRations, curAmmo, curElectricity, curLogistics float64
+		err := tx.QueryRowContext(ctx, `
+			SELECT COALESCE(movement_state,'moving'), state,
+			       COALESCE(attacker_rations,0), COALESCE(attacker_ammo,0),
+			       COALESCE(attacker_electricity,0), COALESCE(attacker_logistics,0)
+			FROM raids WHERE id = $1 FOR UPDATE`, c.targetRaidID).Scan(&movementState, &state, &curRations, &curAmmo, &curElectricity, &curLogistics)
+
+		delivered := err == nil && movementState == "awaiting_reinforcement" && (state == "marching" || state == "returning")
+		if !delivered {
+			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'failed' WHERE id = $1", c.id)
+			var userID int64
+			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&userID)
+			if userID != 0 {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
+					"📦❌ CONVOY MISSED CONTACT: Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies and transport crews are lost.")
+			}
+			continue
+		}
+
+		clamp100 := func(v, add float64) float64 {
+			total := v + add
+			if total > 100 {
+				return 100
+			}
+			return total
+		}
+		newRations := clamp100(curRations, c.rations)
+		newAmmo := clamp100(curAmmo, c.ammo)
+		newElectricity := clamp100(curElectricity, c.electricity)
+		newLogistics := clamp100(curLogistics, c.logistics)
+
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raids
+			SET attacker_rations = $1, attacker_ammo = $2, attacker_electricity = $3, attacker_logistics = $4,
+			    movement_state = 'moving',
+			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    paused_at = NULL
+			WHERE id = $5`, newRations, newAmmo, newElectricity, newLogistics, c.targetRaidID)
+
+		_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'delivered' WHERE id = $1", c.id)
+
+		var userID int64
+		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", c.targetRaidID).Scan(&userID)
+		if userID != 0 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
+				"📦✅ CONVOY ARRIVED: Reinforcement supplies have reached your stranded column. The journey resumes.")
 		}
 	}
 	return nil
@@ -1954,7 +2219,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning'`
+		WHERE ((r.state = 'marching' OR r.state = 'returning') AND COALESCE(r.movement_state, 'moving') = 'moving')
+		   OR r.state = 'engaged'`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
