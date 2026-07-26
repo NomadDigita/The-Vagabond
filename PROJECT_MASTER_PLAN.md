@@ -1520,6 +1520,36 @@ migration) and every callback registration against the full
 `bot.Handle` call list in `main.go`, specifically checking for
 duplicates. Branched as `feature/onboarding-overhaul`.
 
+**Hotfix, same day, direct to `main`:** both branches merged, then
+Render's build immediately failed — `startingScrap`/`startingEnergy`
+were declared with `:=` inside the `isNewCamp` block that creates the
+encampment/resources, but the welcome-message `isNewCamp` block added
+by this ADR referenced the same names expecting them still in scope.
+Real Go scoping error, invisible to `gofmt`/manual review, only
+catchable by an actual compiler. Fixed by declaring both as function-
+scoped `var` before the first block and assigning with `=` inside it.
+**This time actually verified for real**: found a working sandbox-only
+`go.mod` replace-directive workaround (mapping `gopkg.in/telebot.v3`
+and its `gopkg.in`/`golang.org/x` transitive deps to their GitHub
+mirrors, reverted before commit) that got both `go build ./...` and
+`go test ./...` running clean across the whole repo — not just
+`gofmt`. The exact commands, for reuse:
+```
+export GOPROXY=direct GOSUMDB=off GOFLAGS=-mod=mod
+go mod edit -replace gopkg.in/telebot.v3=github.com/go-telebot/telebot/v3@v3.3.8
+go mod edit -replace golang.org/x/xerrors=github.com/golang/xerrors@v0.0.0-20200804184101-5ec99f83aff1
+go mod edit -replace gopkg.in/ini.v1=github.com/go-ini/ini@v1.67.0
+go mod edit -replace gopkg.in/yaml.v2=github.com/go-yaml/yaml@v2.4.0+incompatible
+go mod edit -replace gopkg.in/yaml.v3=github.com/go-yaml/yaml/v3@v3.0.1
+go build -o bot cmd/bot/main.go   # or: go build ./...
+go test ./...
+git checkout -- go.mod go.sum     # revert before committing
+```
+Worth running this up front in future sessions instead of defaulting
+to syntax-only verification — a prior session (§1.9/§2 ADR-016 area)
+apparently found the same trick but didn't record the actual commands,
+which cost real time re-deriving them twice.
+
 ---
 
 ## 4. Known Issues / Technical Debt
@@ -1978,6 +2008,14 @@ duplicates. Branched as `feature/onboarding-overhaul`.
   handler. Same build-verification gap as the referral-fix session —
   no full `go build`/`go test` run, `gofmt` + manual review only.
   Documented as ADR-022. Branched as `feature/onboarding-overhaul`.
+- **Same-day hotfix, direct to `main`:** both branches above merged,
+  then Render's build failed immediately (`startingScrap`/
+  `startingEnergy` undefined — a real variable-scoping bug across two
+  `isNewCamp` blocks, invisible to `gofmt`). Fixed by hoisting both to
+  function-scoped `var` declarations. This time verified with an
+  actual `go build ./... && go test ./...` pass, via a sandbox-only
+  `go.mod` replace-directive workaround (commands recorded in ADR-022)
+  instead of `gofmt`-only checking.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
@@ -2018,12 +2056,13 @@ duplicates. Branched as `feature/onboarding-overhaul`.
    network access — confirm Phase A still compiles end-to-end (this
    session could only verify the `internal/ai` subtree in isolation;
    see §1 and §4).
-   - **Immediate priority:** neither `fix/referral-system-overhaul`
-     nor `feature/onboarding-overhaul` (stacked on top of it) have
-     ever had a real `go build`/`go test` run against them — only
-     `gofmt` syntax checks and manual signature review (§2's ADR-021 /
-     ADR-022, §6's two most recent Change Log entries). Run the real
-     suite on both branches before either is merged or deployed.
+   - Both `fix/referral-system-overhaul` and `feature/onboarding-
+     overhaul` are merged to `main` as of this session, and a Render
+     build failure they caused (variable scoping bug, see §2 ADR-022's
+     hotfix addendum and §6) has been fixed and verified with a real
+     `go build ./... && go test ./...` pass. If picking up fresh work,
+     use the recorded replace-directive workaround (ADR-022) up front
+     rather than re-deriving it or falling back to `gofmt`-only checks.
 3. Pick up the "Recommended next task" in §3 unless the project owner
    has redirected you.
 4. Before writing code for any phase: inspect the relevant existing
