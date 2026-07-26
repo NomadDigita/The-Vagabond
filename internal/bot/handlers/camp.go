@@ -204,7 +204,7 @@ var infrastructureModules = []defenseModule{
 	{"large_shield", "🛡️🛡️", "Large Planetary Shield", "Major reduction of loot taken when raided."},
 	{"engineering_bay", "⚙️", "Engineering Bay", "Reduces unit crafting material costs."},
 	{"metal_mine", "🔩", "Metal Mine", "Passive Metal generation every tick."},
-	{"crystal_mine", "💎", "Crystal Mine", "Passive Crystal generation every tick."},
+	{"crystal_mine", "🔮", "Crystal Mine", "Passive Crystal generation every tick."},
 }
 
 // HandleInfrastructureGridPanel renders the economy/utility building panel.
@@ -315,7 +315,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 			"%s"+
 			"EXTRACTION QUEUE BLUEPRINTS (5m Duration):\n"+
 			"🔩 [Forge Metal] — Costs: 10.0 Electricity (+20.0 Metal / miner)\n"+
-			"💎 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
+			"🔮 [Mine Crystal] — Costs: 20.0 Electricity (+5.0 Crystal / miner)\n"+
 			"🎈 [Pump Hydrogen] — Costs: 15.0 Electricity (+10.0 Hydrogen / miner)\n\n"+
 			"🛒 MINER SHOP DECK:\n"+
 			"👥 Recruit Miner -> Cost: %d Scrap",
@@ -324,7 +324,7 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 	btnMetal := selector.Data("🔩 Metal", "mine_action", "metal")
-	btnCrystal := selector.Data("💎 Crystal", "mine_action", "crystal")
+	btnCrystal := selector.Data("🔮 Crystal", "mine_action", "crystal")
 	btnHydrogen := selector.Data("🎈 Hydrogen", "mine_action", "hydrogen")
 
 	btnBuyMiner := selector.Data(fmt.Sprintf("Recruit Miner (%d Scrap)", minerCost), "mine_action", "buy_miner")

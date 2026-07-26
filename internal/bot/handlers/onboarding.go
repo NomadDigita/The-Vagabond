@@ -26,6 +26,27 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
+// generateReferralCode derives a referral code directly from a player's
+// Telegram ID. Because Telegram IDs are themselves unique, base36-encoding
+// the ID guarantees a collision-free code with no DB round-trip or retry
+// loop needed (unlike the old `telegramID % 1_000_000` scheme, which could
+// map two different players to the same code).
+func generateReferralCode(telegramID int64) string {
+	return "REF" + strings.ToUpper(strconv.FormatInt(telegramID, 36))
+}
+
+// referralMilestones defines one-time bonus payouts unlocked once a
+// referrer's total referral count reaches the given threshold, on top of
+// the standard per-referral reward.
+var referralMilestones = []struct {
+	Count                 int
+	Metal, Crystal, Neuro float64
+}{
+	{5, 25000, 250, 25000},
+	{10, 75000, 750, 75000},
+	{25, 250000, 2500, 250000},
+}
+
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -277,12 +298,18 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
+	// Every player gets a referral code the moment their account is
+	// created (or upgraded from 'onboarding' to 'active'), instead of
+	// waiting for them to first run /refer. COALESCE on conflict means
+	// an existing code (e.g. set by an earlier session) is never
+	// clobbered.
+	newReferralCode := generateReferralCode(telegramID)
 	insertUser := `
-		INSERT INTO users (telegram_id, username, first_name, state, faction) 
-		VALUES ($1, $2, $3, 'active', $4)
+		INSERT INTO users (telegram_id, username, first_name, state, faction, referral_code) 
+		VALUES ($1, $2, $3, 'active', $4, $5)
 		ON CONFLICT (telegram_id) 
-		DO UPDATE SET faction = $4, state = 'active'`
-	_, err = tx.ExecContext(ctx, insertUser, telegramID, sender.Username, sender.FirstName, faction)
+		DO UPDATE SET faction = $4, state = 'active', referral_code = COALESCE(users.referral_code, $5)`
+	_, err = tx.ExecContext(ctx, insertUser, telegramID, sender.Username, sender.FirstName, faction, newReferralCode)
 	if err != nil {
 		log.Printf("Failed registering faction user: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Database writing registration error."})
@@ -341,7 +368,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var campID string
 	queryCampExists := `SELECT id FROM encampments WHERE user_id = $1`
 	err = tx.QueryRowContext(ctx, queryCampExists, telegramID).Scan(&campID)
-	if errors.Is(err, sql.ErrNoRows) {
+	isNewCamp := errors.Is(err, sql.ErrNoRows)
+	if isNewCamp {
 		campName := fmt.Sprintf("Outpost-%d", telegramID%1000)
 		insertCamp := `
 			INSERT INTO encampments (user_id, name, coordinate_id, level) 
@@ -378,12 +406,15 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 
 	// Referral reward: if this new survivor arrived via a referral code,
-	// grant both them and their referrer a resource bonus now that their
-	// outpost actually exists.
+	// grant both them and their referrer a resource bonus. Gated on
+	// isNewCamp so this can only ever fire once per player — previously
+	// this ran on every HandleFactionCallback invocation, letting anyone
+	// replay the still-live "join faction" button to farm free resources
+	// indefinitely.
 	var referrerID sql.NullInt64
 	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
-	if referrerID.Valid {
-		const refMetal, refCrystal, refNeuro = 500.0, 200.0, 100.0
+	if isNewCamp && referrerID.Valid {
+		const refMetal, refCrystal, refNeuro = 50000.0, 500.0, 50000.0
 
 		var curMetal, curCrystal, curNeuro float64
 		_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal, &curNeuro)
@@ -403,7 +434,28 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			refNewNeuro, _ := storagecap.Clamp(refCurNeuro, refNeuro, referrerCap)
 			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", refNewMetal, refNewCrystal, refNewNeuro, referrerCampID)
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
-				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 500 Metal, 200 Crystal, 100 Neuro Cores.", sender.FirstName))
+				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 50,000 Metal, 500 🔮 Crystal, 50,000 Neuro Cores.", sender.FirstName))
+
+			// Milestone tiers: grant a one-time bonus the first time the
+			// referrer's total referral count crosses a threshold.
+			var referralCount, tierClaimed int
+			_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE referred_by = $1", referrerID.Int64).Scan(&referralCount)
+			_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_tier_claimed, 0) FROM users WHERE telegram_id = $1", referrerID.Int64).Scan(&tierClaimed)
+
+			for _, m := range referralMilestones {
+				if referralCount >= m.Count && tierClaimed < m.Count {
+					var mCurMetal, mCurCrystal, mCurNeuro float64
+					_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", referrerCampID).Scan(&mCurMetal, &mCurCrystal, &mCurNeuro)
+					mNewMetal, _ := storagecap.Clamp(mCurMetal, m.Metal, referrerCap)
+					mNewCrystal, _ := storagecap.Clamp(mCurCrystal, m.Crystal, referrerCap)
+					mNewNeuro, _ := storagecap.Clamp(mCurNeuro, m.Neuro, referrerCap)
+					_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", mNewMetal, mNewCrystal, mNewNeuro, referrerCampID)
+					_, _ = h.DB.ExecContext(ctx, "UPDATE users SET referral_tier_claimed = $1 WHERE telegram_id = $2", m.Count, referrerID.Int64)
+					_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
+						fmt.Sprintf("🏆 REFERRAL MILESTONE: %d friends recruited! Bonus: %.0f Metal, %.0f 🔮 Crystal, %.0f Neuro Cores.", m.Count, m.Metal, m.Crystal, m.Neuro))
+					tierClaimed = m.Count
+				}
+			}
 		}
 	}
 

@@ -30,7 +30,7 @@ type etherDeal struct {
 
 var etherDeals = []etherDeal{
 	{"ether_metal", "🔩", "Metal", 10.0, "metal", 500.0},
-	{"ether_crystal", "💎", "Crystal", 20.0, "crystal", 200.0},
+	{"ether_crystal", "🔮", "Crystal", 20.0, "crystal", 200.0},
 	{"ether_scrap", "⚙️", "Scrap", 8.0, "scrap", 400.0},
 	{"ether_neuro", "🧠", "Neuro Cores", 15.0, "neuro_cores", 100.0},
 	{"ether_dollars", "💵", "Cash", 12.0, "dollars", 300.0},

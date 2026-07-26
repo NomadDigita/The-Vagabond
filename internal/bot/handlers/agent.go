@@ -79,9 +79,9 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 
 	licenseText := "⚠️ NO LICENSE (LOCKED)"
 	if isPremium {
-		licenseText = "💎 PREMIUM GRANTED"
+		licenseText = "🔮 PREMIUM GRANTED"
 		if premiumUntil.Valid {
-			licenseText = fmt.Sprintf("💎 PREMIUM (Expires: %s)", premiumUntil.Time.UTC().Format("2006-01-02"))
+			licenseText = fmt.Sprintf("🔮 PREMIUM (Expires: %s)", premiumUntil.Time.UTC().Format("2006-01-02"))
 		}
 	}
 
@@ -101,7 +101,7 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 			"BEHAVIOR MODES:\n"+
 			"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\n"+
 			"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Metal, +5.0 Hydrogen.\n"+
-			"💎 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\n"+
+			"🔮 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\n"+
 			"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\n"+
 			"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━",
@@ -119,7 +119,7 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 	btnToggle := selector.Data(toggleLabel, "toggle_agent", senderIDStr)
 	btnModeCollector := selector.Data("🛠️ Collector", "set_agent_mode", "collector", senderIDStr)
 	btnModeCollectorOmega := selector.Data("💱 Collector Ω", "set_agent_mode", "collector_omega", senderIDStr)
-	btnModeCollectorPrecious := selector.Data("💎 Precious", "set_agent_mode", "collector_precious", senderIDStr)
+	btnModeCollectorPrecious := selector.Data("🔮 Precious", "set_agent_mode", "collector_precious", senderIDStr)
 	btnModeBuilder := selector.Data("🏗️ Builder", "set_agent_mode", "builder", senderIDStr)
 	btnModeMilitary := selector.Data("🪖 Military", "set_agent_mode", "military", senderIDStr)
 

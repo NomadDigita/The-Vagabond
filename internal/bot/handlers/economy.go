@@ -63,7 +63,7 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 			"🏪━━━━━━━━━━━━━━━━━━━━━━🏪\n\n"+
 			"💰 YOUR WALLET:\n"+
 			"⚙️ Scrap: %.1f  |  🔩 Metal: %.1f\n"+
-			"💎 Crystal: %.1f  |  💵 Cash: $%.1f\n\n"+
+			"🔮 Crystal: %.1f  |  💵 Cash: $%.1f\n\n"+
 			"🏦 BANK VAULT SNAPSHOT:\n"+
 			"💰 Savings: %.1f Scrap | $%.1f Cash\n"+
 			"💳 Debt: %.1f Scrap | $%.1f Cash\n\n"+
@@ -123,9 +123,9 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 			"💱 CONVERSION RATES:\n"+
 			"⚙️ 100 Scrap ➜ $50\n"+
 			"🔩 100 Metal ➜ $80\n"+
-			"💎 50 Crystal ➜ $120\n"+
+			"🔮 50 Crystal ➜ $120\n"+
 			"$100 ➜ 🔩 50 Metal\n"+
-			"$200 ➜ 💎 20 Crystal\n"+
+			"$200 ➜ 🔮 20 Crystal\n"+
 			"$150 ➜ 🎈 40 Hydrogen\n"+
 			"🏦━━━━━━━━━━━━━━━━━━━━━━🏦",
 		dollars, scrap, bankBalance, bankBalanceCash, loanAmount, loanCash,
@@ -143,7 +143,7 @@ func (h *EconomyHandler) HandleFinancialVault(c telebot.Context) error {
 	btnSellMetal := selector.Data("💵 Sell 100 Metal", "market_buy", "sell_metal")
 	btnSellCrystal := selector.Data("💵 Sell 50 Crystal", "market_buy", "sell_crystal")
 	btnBuyMetal := selector.Data("🔩 Buy 50 Metal ($100)", "market_buy", "buy_metal")
-	btnBuyCrystal := selector.Data("💎 Buy 20 Crystal ($200)", "market_buy", "buy_crystal")
+	btnBuyCrystal := selector.Data("🔮 Buy 20 Crystal ($200)", "market_buy", "buy_crystal")
 	btnBuyHydrogen := selector.Data("🎈 Buy 40 Hydrogen ($150)", "market_buy", "buy_hydrogen")
 
 	selector.Inline(
@@ -187,7 +187,7 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 			"⚡ Electricity: %.1f cells\n\n"+
 			"🏗️ CORE SPACEHUNT RESOURCES:\n"+
 			"🔩 Metal: %.1f tons\n"+
-			"💎 Crystal: %.1f kg\n"+
+			"🔮 Crystal: %.1f kg\n"+
 			"🎈 Hydrogen: %.1f L\n"+
 			"📦━━━━━━━━━━━━━━━━━━━━━━📦",
 		dollars, scrap, rations, electricity, metal, crystal, hydrogen,
@@ -395,7 +395,7 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 		_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1", campID).Scan(&crystal)
 		newCrystal, _ := storagecap.Clamp(crystal, 20.0, storageCap)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1, crystal = $2 WHERE encampment_id = $3", cost, newCrystal, campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💎 Purchased 20 kg of Crystal!"})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🔮 Purchased 20 kg of Crystal!"})
 
 	case "buy_hydrogen":
 		cost := 150.0 * buyMultiplier

@@ -120,27 +120,71 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
+	// Codes are normally set the moment a player picks a faction, but
+	// fall back to generating one here (e.g. a player runs /refer before
+	// ever finishing onboarding). Same deterministic, collision-free
+	// generator either way, so the value is identical regardless of
+	// which path sets it first.
 	var code string
-	err := h.DB.QueryRowContext(ctx, "SELECT referral_code FROM users WHERE telegram_id = $1", sender.ID).Scan(&code)
+	err := h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_code, '') FROM users WHERE telegram_id = $1", sender.ID).Scan(&code)
 	if err != nil || code == "" {
-		code = fmt.Sprintf("REF%d", sender.ID%1000000)
+		code = generateReferralCode(sender.ID)
 		_, _ = h.DB.ExecContext(ctx, "UPDATE users SET referral_code = $1 WHERE telegram_id = $2", code, sender.ID)
 	}
 
-	var referralCount int
+	var referralCount, tierClaimed int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE referred_by = $1", sender.ID).Scan(&referralCount)
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_tier_claimed, 0) FROM users WHERE telegram_id = $1", sender.ID).Scan(&tierClaimed)
+
+	botUsername := ""
+	if c.Bot() != nil && c.Bot().Me != nil {
+		botUsername = c.Bot().Me.Username
+	}
+	referralLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, code)
 
 	panelText := fmt.Sprintf(
 		"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n"+
 			"👥 REFER YOUR FRIENDS 👥\n"+
 			"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n\n"+
-			"Share your code with friends. When they start with /start %s, you both earn rewards!\n\n"+
-			"🔑 Your Referral Code: %s\n"+
+			"Send your link below — anyone who taps it and starts the bot is automatically marked as referred by you. No code to type!\n\n"+
+			"🔗 Your Referral Link:\n%s\n\n"+
+			"🔑 Your Code: %s\n"+
 			"👥 Friends Referred: %d\n"+
-			"🎁 Reward per referral: 500 Metal + 200 Crystal + 100 Neuro Cores\n"+
-			"🎁━━━━━━━━━━━━━━━━━━━━━━🎁",
-		code, code, referralCount,
+			"🎁 Reward per referral: 50,000 Metal + 500 🔮 Crystal + 50,000 Neuro Cores\n\n",
+		referralLink, code, referralCount,
 	)
+
+	panelText += "🏆 MILESTONE BONUSES:\n"
+	for _, m := range referralMilestones {
+		status := fmt.Sprintf("%d/%d", referralCount, m.Count)
+		if tierClaimed >= m.Count {
+			status = "✅ Claimed"
+		}
+		panelText += fmt.Sprintf("%d referrals → +%.0f Metal / +%.0f 🔮 Crystal / +%.0f Neuro (%s)\n", m.Count, m.Metal, m.Crystal, m.Neuro, status)
+	}
+
+	panelText += "\n🏅 TOP REFERRERS:\n"
+	rows, lbErr := h.DB.QueryContext(ctx, `
+		SELECT COALESCE(ref.first_name, 'Commander'), COUNT(*) AS cnt
+		FROM users child
+		JOIN users ref ON ref.telegram_id = child.referred_by
+		GROUP BY ref.telegram_id, ref.first_name
+		ORDER BY cnt DESC
+		LIMIT 5`)
+	if lbErr == nil {
+		rank := 1
+		for rows.Next() {
+			var name string
+			var cnt int
+			if scanErr := rows.Scan(&name, &cnt); scanErr == nil {
+				panelText += fmt.Sprintf("%s %d. %s — %d referred\n", medalFor(rank), rank, name, cnt)
+				rank++
+			}
+		}
+		rows.Close()
+	}
+
+	panelText += "🎁━━━━━━━━━━━━━━━━━━━━━━🎁"
 
 	return c.Send(panelText)
 }
@@ -330,7 +374,7 @@ func (h *ProfileHandler) HandleStats(c telebot.Context) error {
 			"⚔️ Total Raids Launched: %d\n\n"+
 			"🌎 ECONOMY-WIDE TOTALS:\n"+
 			"🔩 Metal in circulation: %.0f\n"+
-			"💎 Crystal in circulation: %.0f\n"+
+			"🔮 Crystal in circulation: %.0f\n"+
 			"⚙️ Scrap in circulation: %.0f\n"+
 			"📊━━━━━━━━━━━━━━━━━━━━━━📊",
 		totalPlayers, totalClans, totalFederations, totalRaids, totalMetal, totalCrystal, totalScrap,

@@ -81,7 +81,7 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	btnTick := selector.Data("⚡ Force Tick", "admin_action", "tick")
 	btnInject := selector.Data("🪙 Inject 5000 (Self)", "admin_action", "inject")
-	btnGiftPremium := selector.Data("💎 Gift Premium", "admin_action", "gift_premium")
+	btnGiftPremium := selector.Data("🔮 Gift Premium", "admin_action", "gift_premium")
 	btnGiftResources := selector.Data("🎁 Gift Resources", "admin_action", "gift_resources")
 	btnTaxRate := selector.Data("💰 Set Tax Rate", "admin_action", "tax_rate")
 	btnFaction := selector.Data("🎭 Change My Faction", "admin_action", "faction")
@@ -474,7 +474,7 @@ func (h *AdminHandler) doGiftPremium(ctx context.Context, targetUser string, day
 	}
 
 	alertMsg := fmt.Sprintf(
-		"💎 PREMIUM STATUS GRANTED!\n\n"+
+		"🔮 PREMIUM STATUS GRANTED!\n\n"+
 			"An Administrator has gifted you a Premium License for %d days.\n"+
 			"Your Automation Agent and advanced HUD structures are now fully unlocked!",
 		days,

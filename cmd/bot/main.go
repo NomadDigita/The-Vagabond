@@ -171,6 +171,18 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS ether DOUBLE PRECISION DEFAULT 0.00;`,
 		`ALTER TABLE resources ADD COLUMN IF NOT EXISTS neuro_cores DOUBLE PRECISION DEFAULT 0.00;`,
 
+		// Referral system fix (2026-07-26): referral_code was never
+		// enforced unique, and the old `telegramID % 1_000_000` scheme
+		// could collide, silently misattributing referrals. Codes are
+		// now derived deterministically from the player's Telegram ID
+		// (base36), which is unique by construction, so this index just
+		// protects against any stale/legacy duplicate codes.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code) WHERE referral_code IS NOT NULL;`,
+		// Tracks the highest referral-count milestone tier (5/10/25) a
+		// player has already claimed, so milestone bonuses are granted
+		// exactly once.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_tier_claimed INT DEFAULT 0;`,
+
 		`CREATE TABLE IF NOT EXISTS modules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,

@@ -2785,7 +2785,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			report.Outcome = battlereport.OutcomeAttackerWon
 			report.LootLines = []string{
 				fmt.Sprintf("🔩 %.0f Metal", primaryMetalShare),
-				fmt.Sprintf("💎 %.0f Crystal", primaryCrystalShare),
+				fmt.Sprintf("🔮 %.0f Crystal", primaryCrystalShare),
 				fmt.Sprintf("♻️ %.0f Scrap", primaryShare),
 				fmt.Sprintf("🍖 %.0f Rations", primaryRationsShare),
 				fmt.Sprintf("⚡ %.0f Electricity", primaryElectricityShare),
@@ -2905,7 +2905,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			etaAlert := fmt.Sprintf(
 				"🚚 SALVAGE COMPLETE, RETURN MARCH ENGAGED\n\n"+
-					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 💎 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
+					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 🔮 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
 					"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).",
 				primaryShare, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare, returnMinutes, r.baseMarchMinutes,
 			)
