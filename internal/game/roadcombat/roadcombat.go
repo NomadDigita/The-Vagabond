@@ -113,6 +113,7 @@ type FieldForce struct {
 
 	MilitaryTechLvl int  // attacker-side mech multiplier input, floor 1
 	SuppliesOut     bool // rations/ammo both depleted -> offense penalty, mirrors base-raid rule
+	HighTechOffline bool // electricity/logistics depleted -> mech/capital tech multiplier disabled (Phase 5 milestone 4), distinct from SuppliesOut's blanket penalty
 }
 
 // TotalUnits returns the combined headcount of every combat-relevant unit
@@ -159,15 +160,25 @@ func Power(f FieldForce, offenseMod float64) float64 {
 		techLvl = 1
 	}
 	mechMultiplier := 1.50 * (1.0 + float64(techLvl-1)*0.25)
+	capitalTechMultiplier := 1.0
+	if f.HighTechOffline {
+		// High-tech contributions offline: mechs fight as unenhanced
+		// infantry (no multiplier) and capital units lose their tech
+		// edge, but nobody gets a blanket offense penalty the way
+		// SuppliesOut applies - this is "disables high-tech
+		// contributions," not "the whole column can't fight."
+		mechMultiplier = 1.0
+		capitalTechMultiplier = 0.70
+	}
 
 	rating := float64(f.Soldiers) * baseUnitRating * offenseMod
 	rating += float64(f.Mechs) * baseUnitRating * offenseMod * mechMultiplier
-	rating += float64(f.Destroyers) * destroyerRating * offenseMod
-	rating += float64(f.Bombers) * bomberRating * offenseMod
-	rating += float64(f.Liberators) * liberatorRating * offenseMod
-	rating += float64(f.Wraiths) * wraithRating * offenseMod
-	rating += float64(f.Battlecruisers) * battlecruiserRating * offenseMod
-	rating += float64(f.Deathstars) * deathstarRating * offenseMod
+	rating += float64(f.Destroyers) * destroyerRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Bombers) * bomberRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Liberators) * liberatorRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Wraiths) * wraithRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Battlecruisers) * battlecruiserRating * offenseMod * capitalTechMultiplier
+	rating += float64(f.Deathstars) * deathstarRating * offenseMod * capitalTechMultiplier
 	return rating
 }
 
@@ -271,6 +282,7 @@ func Survivors(f, lost FieldForce) FieldForce {
 		Battlecruisers:  clampSub(f.Battlecruisers, lost.Battlecruisers),
 		Deathstars:      clampSub(f.Deathstars, lost.Deathstars),
 		MilitaryTechLvl: f.MilitaryTechLvl,
+		HighTechOffline: f.HighTechOffline,
 	}
 }
 
@@ -291,4 +303,77 @@ func CargoShare(loserCarried, capacityLimit float64) float64 {
 		share = capacityLimit
 	}
 	return share
+}
+
+// --- Phase 5: route weather incidents and reinforcement convoys ---
+//
+// These live in the same package as the route/field-battle policy above
+// because they are governed by the same physical model (a column at a
+// point on the route, blocked by something external, resumed via the
+// paused_at/leg_started_at shift) rather than because they are
+// thematically identical to combat.
+
+// IncidentBaseRollChance is the per-tick chance of a local weather
+// incident on a column travelling through a continent with no matching
+// active regional event - freak weather can still happen on a clear day.
+const IncidentBaseRollChance = 0.02
+
+// IncidentElevatedRollChance is the per-tick chance once the column's
+// current continent has a matching active world_events entry (e.g. an
+// acid_rain event raising flood odds).
+const IncidentElevatedRollChance = 0.12
+
+// IncidentMatchesActiveWeather reports whether an active continent-wide
+// world event (from internal/engine/world) makes a given local route
+// incident type more likely, so Phase 5 reads the existing weather engine
+// as an input signal instead of rolling a second, disconnected one.
+func IncidentMatchesActiveWeather(activeEventType, incidentType string) bool {
+	switch activeEventType {
+	case "acid_rain":
+		return incidentType == "flood"
+	case "radiation_storm":
+		return incidentType == "radiation" || incidentType == "storm"
+	case "emp":
+		return incidentType == "emp" || incidentType == "storm"
+	case "sandstorm":
+		return incidentType == "sandstorm" || incidentType == "heatwave"
+	default:
+		return false
+	}
+}
+
+// IncidentDuration maps a rolled severity (1..3) to how long the temporary
+// camp must hold before conditions clear, matching "which might take a day
+// or even longer" - a minor incident clears in about half a day, a severe
+// one can run a day and a half.
+func IncidentDuration(severity int) time.Duration {
+	switch severity {
+	case 3:
+		return 36 * time.Hour
+	case 2:
+		return 24 * time.Hour
+	default:
+		return 12 * time.Hour
+	}
+}
+
+// ConvoySpeedCoordinateUnitsPerMinute is how fast a dedicated resupply
+// convoy covers ground - deliberately slower than a combat column's
+// implicit speed (a marching column's minutes are balance-tuned per raid,
+// not distance-derived) so a convoy is a real logistics commitment, not a
+// courier that outruns the very expedition it's chasing.
+const ConvoySpeedCoordinateUnitsPerMinute = 0.5
+
+// MinConvoyTravelMinutes floors convoy travel time so a resupply run to an
+// adjacent tile still takes a meaningful, non-instant amount of time.
+const MinConvoyTravelMinutes = 10.0
+
+// ConvoyTravelMinutes converts a straight-line distance into travel time
+// for a dedicated supply convoy.
+func ConvoyTravelMinutes(distance float64) float64 {
+	minutes := distance / ConvoySpeedCoordinateUnitsPerMinute
+	if minutes < MinConvoyTravelMinutes {
+		return MinConvoyTravelMinutes
+	}
+	return minutes
 }

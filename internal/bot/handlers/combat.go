@@ -237,12 +237,12 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		defer rowsOut.Close()
 		index := 1
 		for rowsOut.Next() {
-			var rID, dName, rState, originRegion, destinationRegion, movementState, pauseReason string
+			var rID, dName, rState, originRegion, destinationRegion, rMovementState, pauseReason string
 			var rRound int
 			var rRations, rAmmo float64
 			var originX, originY, destinationX, destinationY int
 			var resTime time.Time
-			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &movementState, &pauseReason); err == nil {
+			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &rMovementState, &pauseReason); err == nil {
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
@@ -250,7 +250,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				}
 				routeLine := ""
 				if originRegion != "" && destinationRegion != "" {
-					routeLine = fmt.Sprintf("   Route: [%s %d,%d] → [%s %d,%d] | Movement: %s\n", originRegion, originX, originY, destinationRegion, destinationX, destinationY, movementState)
+					routeLine = fmt.Sprintf("   Route: [%s %d,%d] → [%s %d,%d] | Movement: %s\n", originRegion, originX, originY, destinationRegion, destinationX, destinationY, rMovementState)
 					if pauseReason != "" {
 						routeLine += fmt.Sprintf("   Status: %s\n", pauseReason)
 					}
@@ -264,6 +264,16 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n%s   Base Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
 				default:
 					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%ds remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), timeLeft, rRations, rAmmo)
+				}
+				switch rMovementState {
+				case "camped":
+					outboundText += "   🏕️ HALTED: Temporary camp - waiting for weather conditions to clear.\n\n"
+				case "awaiting_reinforcement":
+					outboundText += "   🛑 HALTED: Out of supplies - awaiting a resupply convoy or retreat order.\n\n"
+					btnConvoy := selector.Data(fmt.Sprintf("🚚 Dispatch Convoy [%d]", index), "dispatch_convoy", rID)
+					buttons = append(buttons, selector.Row(btnConvoy))
+				case "encounter_pending":
+					outboundText += "   🚧 HALTED: Road contact - decide below.\n\n"
 				}
 				btnSpeed := selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID)
 				btnAbort := selector.Data(fmt.Sprintf("↩️ Abort [%d]", index), "exp_action", "abort", rID)
@@ -1818,6 +1828,16 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 	if movementState == "encounter_pending" && (action == "speed" || action == "abort") {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Road Contact Active: Resolve the pending Attack/Continue decision on your Expedition Radar before ordering a speed-up or retreat."})
 	}
+	if movementState == "camped" && action == "abort" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Temporary Camp: Your column is sheltering from weather and cannot retreat until conditions clear or you pay to break camp early."})
+	}
+	if movementState == "awaiting_reinforcement" && action == "speed" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Out of Supplies: A stranded column has nothing left to spend on a speed-up. Dispatch a resupply convoy, or order a retreat instead."})
+	}
+
+	if movementState == "camped" && action == "speed" {
+		return h.handleBreakCampEarly(ctx, tx, c, raidID)
+	}
 
 	switch action {
 	case "speed":
@@ -1954,7 +1974,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		returnResolveTime := time.Now().UTC().Add(elapsed)
 		returnLegMinutes := elapsed.Minutes()
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1, leg_started_at = CURRENT_TIMESTAMP, leg_total_minutes = $3, movement_state = 'moving' WHERE id = $2", returnResolveTime, raidID, returnLegMinutes)
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', resolve_time = $1, leg_started_at = CURRENT_TIMESTAMP, leg_total_minutes = $3, movement_state = 'moving', paused_at = NULL, active_incident_id = NULL WHERE id = $2", returnResolveTime, raidID, returnLegMinutes)
 
 		var attackerName string
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
