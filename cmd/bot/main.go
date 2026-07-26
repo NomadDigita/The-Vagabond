@@ -567,9 +567,70 @@ func executeStartupMigrations(db *sql.DB) {
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS origin_region VARCHAR(50);`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS destination_region VARCHAR(50);`,
 		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS radar_alert_sent_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS movement_state VARCHAR(30) NOT NULL DEFAULT 'moving';`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS pause_reason TEXT;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS next_route_event_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_progress DOUBLE PRECISION;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_progress_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS route_leg_minutes DOUBLE PRECISION;`,
+		`UPDATE raids SET route_progress = CASE WHEN state = 'returning' THEN 1.0 ELSE 0.0 END WHERE route_progress IS NULL;`,
+		`ALTER TABLE raids ALTER COLUMN route_progress SET DEFAULT 0.0;`,
+		`ALTER TABLE raids ALTER COLUMN route_progress SET NOT NULL;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid
+					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused'));
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_route_progress_range') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_route_progress_range
+					CHECK (route_progress >= 0.0 AND route_progress <= 1.0);
+			END IF;
+		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending
 			ON raids(resolve_time)
 			WHERE state = 'marching' AND defender_id IS NOT NULL AND radar_alert_sent_at IS NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_raids_active_movement
+			ON raids(state, movement_state, resolve_time)
+			WHERE state IN ('marching', 'returning');`,
+
+		// MMO living-world Phase 3: a durable response window for two
+		// expeditions meeting on the same road. Pair ordering is canonical
+		// in tick code before insert, which makes the unique constraint an
+		// idempotency guard under concurrent tick workers.
+		`CREATE TABLE IF NOT EXISTS road_encounters (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			primary_raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+			secondary_raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+			region VARCHAR(50) NOT NULL,
+			x INT NOT NULL,
+			y INT NOT NULL,
+			primary_route_state VARCHAR(20) NOT NULL DEFAULT 'marching',
+			secondary_route_state VARCHAR(20) NOT NULL DEFAULT 'marching',
+			primary_decision VARCHAR(20) NOT NULL DEFAULT 'pending',
+			secondary_decision VARCHAR(20) NOT NULL DEFAULT 'pending',
+			state VARCHAR(20) NOT NULL DEFAULT 'pending',
+			decision_deadline TIMESTAMP WITH TIME ZONE NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			resolved_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT road_encounters_distinct_raids CHECK (primary_raid_id <> secondary_raid_id),
+			CONSTRAINT road_encounters_primary_decision CHECK (primary_decision IN ('pending', 'continue', 'attack')),
+			CONSTRAINT road_encounters_secondary_decision CHECK (secondary_decision IN ('pending', 'continue', 'attack')),
+			CONSTRAINT road_encounters_primary_route_state CHECK (primary_route_state IN ('marching', 'returning')),
+			CONSTRAINT road_encounters_secondary_route_state CHECK (secondary_route_state IN ('marching', 'returning')),
+			CONSTRAINT road_encounters_state CHECK (state IN ('pending', 'resolving', 'continued', 'resolved', 'expired'))
+		);`,
+		`ALTER TABLE road_encounters DROP CONSTRAINT IF EXISTS road_encounters_unique_pair;`,
+		`ALTER TABLE road_encounters ADD COLUMN IF NOT EXISTS primary_route_state VARCHAR(20) NOT NULL DEFAULT 'marching';`,
+		`ALTER TABLE road_encounters ADD COLUMN IF NOT EXISTS secondary_route_state VARCHAR(20) NOT NULL DEFAULT 'marching';`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_road_encounters_active_pair
+			ON road_encounters(primary_raid_id, secondary_raid_id)
+			WHERE state IN ('pending', 'resolving');`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_road_encounters_route_legs
+			ON road_encounters(primary_raid_id, secondary_raid_id, primary_route_state, secondary_route_state);`,
+		`CREATE INDEX IF NOT EXISTS idx_road_encounters_actionable
+			ON road_encounters(decision_deadline)
+			WHERE state IN ('pending', 'resolving');`,
 
 		// Phase 7 (item 11): Diplomacy. Mirrors clan_wars's clan_a/clan_b
 		// shape, but for peaceful pacts instead of conflicts. A pact only
@@ -966,6 +1027,7 @@ func main() {
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
 	bot.Handle("/camp", camp.HandleCamp)
 	bot.Handle("/raid", combat.HandleRaidBoard)
+	bot.Handle("/encounters", combat.HandleRoadEncounters)
 	bot.Handle("/agent", agentH.HandleAgent)
 	bot.Handle("/hero", hero.HandleHeroPanel)
 	bot.Handle("/world", world.HandleWorldFeed)
@@ -1149,6 +1211,7 @@ func main() {
 	bot.Handle("\fleave_clan", clan.HandleLeaveClanCallback)
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
+	bot.Handle("\froad_encounter", combat.HandleRoadEncounterDecision)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)

@@ -62,6 +62,10 @@ exists" has grown a lot past the original engine. As of this writing:
   contact. Scout Walkers improve discovery odds; target selection and launch
   checks enforce the same rule server-side. Incoming-raid warnings are issued
   once at a defender's radar-derived proximity threshold, not at launch.
+- **Road encounters and field battles**: expeditions that meet on a route
+  pause for a response window. Both commanders can Attack or Continue through
+  `/encounters`; an attack resolves as a full field battle and can seize only
+  cargo already carried by the defeated expedition, never remote home reserves.
 - **Bulk unit selection**: a cycling `x1 → x10 → x100 → MAX` step
   control on the raid draft board, plus `/add`, `/remove`, and bulk
   `/deconstruct` text commands, so building a 500-Soldier army doesn't
@@ -234,7 +238,7 @@ by area:
 | Area | Commands |
 |---|---|
 | Core | `/start`, `/camp`, `/help`, `/inventory`, `/name` |
-| Combat | `/raid`, `/scout`, `/autoscan`, `/add`, `/remove`, `/deconstruct` |
+| Combat | `/raid`, `/encounters`, `/scout`, `/autoscan`, `/add`, `/remove`, `/deconstruct` |
 | Economy | `/econ`, `/factory`, `/mine`, `/research`, `/mutations` |
 | Military/Defense | `/defense`, `/infrastructure`, `/silo`, `/hero` |
 | Social | `/clan`, `/clans`, `/federation`, `/federations`, `/rebellion`, `/board`, `/refer`, `/msg` |

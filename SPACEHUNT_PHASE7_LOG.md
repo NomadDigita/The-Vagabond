@@ -942,5 +942,24 @@ Completed in the first continuation increment:
 Verification for this increment: `gofmt`, `go test -run=^$` for the changed
 tick and handler packages, and `go test ./internal/game/worldintel` all pass.
 
-Verified via the same full `go build ./...` / `go vet ./...` pass used
-throughout this log.
+### Road-encounter continuation (2026-07-20)
+
+The next completed MMO phase extends the persistent route snapshots into live
+contact between two active expedition columns. `road_encounters` records the
+canonical pair, coordinates, response deadline, both decisions, and terminal
+state. A ten-minute response window pauses both routes and queues a notice to
+open `/encounters`; either commander may attack, while mutual Continue or a
+timeout allows a peaceful pass.
+
+An attack resolves once in the tick transaction with the existing
+`battlereport` renderer, proportionate per-unit losses, a route delay, and a
+return order for a force that loses all combat capability. The winner may take
+half of the losing expedition's *already carried* cargo, including Crystal;
+the implementation never reads or steals a remote home base's resources.
+Expedition Radar now also displays immutable origin/destination snapshots and
+the current movement-state/reason, so an ETA delay from a route encounter is
+visible rather than opaque.
+
+Verification for this fast continuation increment: `gofmt`, `git diff
+--check`, and the focused road-encounter tick tests. Broader build/vet passes
+remain part of the release gate before a production deployment.

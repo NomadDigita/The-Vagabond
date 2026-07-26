@@ -372,11 +372,9 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 	return "", nil
 }
 
-// autoScanSweep implements SpaceHunt's "Automatic Scan" job: for every
-// encampment with auto_scan_enabled, pick one random rival outpost and
-// send a lightweight scan report - automating what /scout does manually.
-// Runs on its own ~30-minute cadence via the caller, same pattern as the
-// idle miner sweep.
+// autoScanSweep refreshes intelligence on one already-discovered rival.
+// Automatic scanning must never reveal an undiscovered player: exploration
+// and route sightings remain the only ways to create first contact.
 func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.user_id
@@ -410,7 +408,9 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 			JOIN users u ON u.telegram_id = e.user_id
 			JOIN coordinates c ON c.id = e.coordinate_id
 			JOIN resources r ON r.encampment_id = e.id
-			WHERE e.id != $1
+			JOIN encampment_discoveries d ON d.target_encampment_id = e.id
+			WHERE d.observer_encampment_id = $1
+			  AND e.id != $1
 			ORDER BY RANDOM()
 			LIMIT 1`, s.campID).Scan(&targetName, &targetOwnerName, &targetX, &targetY, &targetScrap)
 		if err != nil {
@@ -792,7 +792,10 @@ func (e *Engine) ProcessTick() {
 		{"resources", func(ctx context.Context, tx *sql.Tx) error { return e.resourceProcessor.RunResourcePass(ctx, tx) }},
 		{"agents", func(ctx context.Context, tx *sql.Tx) error { return e.agentProcessor.RunAgentPass(ctx, tx) }},
 		{"logistics_consumption", e.applyActiveLogisticsConsumption},
+		{"route_recovery", e.resumeRouteRecoveries},
 		{"route_discovery", e.discoverRouteContacts},
+		{"road_encounter_detection", e.createRoadEncounters},
+		{"road_encounter_resolution", e.resolveRoadEncounters},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},
@@ -1523,18 +1526,90 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 	return nil
 }
 
+func clampRouteProgress(progress float64) float64 {
+	return math.Min(1, math.Max(0, progress))
+}
+
+// routeProgressAt uses a frozen progress snapshot plus elapsed active travel
+// time.  Pauses never alter the snapshot, so adding time for an encounter,
+// weather, or recovery cannot move a column backwards on the map.
+func routeProgressAt(state string, progress float64, progressAt sql.NullTime, legMinutes float64, resolveTime, now time.Time) float64 {
+	if legMinutes <= 0 {
+		return clampRouteProgress(progress)
+	}
+	if progressAt.Valid {
+		elapsed := math.Max(0, now.UTC().Sub(progressAt.Time.UTC()).Minutes())
+		delta := elapsed / legMinutes
+		if state == "returning" {
+			return clampRouteProgress(progress - delta)
+		}
+		return clampRouteProgress(progress + delta)
+	}
+
+	// Pre-migration campaigns have no snapshot. Preserve their previous ETA
+	// interpretation until their next route transition writes one.
+	remaining := math.Min(1, math.Max(0, now.UTC().Sub(resolveTime.UTC()).Minutes()/-legMinutes))
+	if state == "returning" {
+		return remaining
+	}
+	return 1 - remaining
+}
+
+func (e *Engine) resumeRouteRecoveries(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL,
+			route_progress_at = CURRENT_TIMESTAMP,
+			resolve_time = CURRENT_TIMESTAMP + (
+				CASE WHEN state = 'returning'
+					THEN COALESCE(route_progress, 1.0)
+					ELSE 1.0 - COALESCE(route_progress, 0.0)
+				END * COALESCE(route_leg_minutes, base_march_minutes, 15.0) * INTERVAL '1 minute'
+			)
+		WHERE movement_state = 'battle_recovery'
+		  AND next_route_event_at IS NOT NULL
+		  AND next_route_event_at <= CURRENT_TIMESTAMP
+		  AND state IN ('marching', 'returning')`)
+	if err != nil {
+		return fmt.Errorf("resuming route recovery columns: %w", err)
+	}
+	return nil
+}
+
+// resumeRoadRaids recalculates ETA from the route snapshot on a mutually
+// continued or expired encounter. It is deliberately conditional so a stale
+// resolver cannot resume a force claimed by another active encounter.
+func resumeRoadRaids(ctx context.Context, tx *sql.Tx, primaryRaidID, secondaryRaidID string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL,
+			route_progress_at = CURRENT_TIMESTAMP,
+			resolve_time = CURRENT_TIMESTAMP + (
+				CASE WHEN state = 'returning'
+					THEN COALESCE(route_progress, 1.0)
+					ELSE 1.0 - COALESCE(route_progress, 0.0)
+				END * COALESCE(route_leg_minutes, base_march_minutes, 15.0) * INTERVAL '1 minute'
+			)
+		WHERE (id = $1 OR id = $2)
+		  AND movement_state IN ('encounter_pending', 'encounter_battle')
+		  AND state IN ('marching', 'returning')`, primaryRaidID, secondaryRaidID)
+	return err
+}
+
 // discoverRouteContacts reveals nearby outposts as an expedition passes them.
-// This phase establishes knowledge only; Phase 4 will layer response-window
-// road encounters and field combat on the same route snapshots.
+// This phase establishes knowledge only; Phase 4 layers response-window road
+// encounters and field combat on the same frozen route snapshots.
 func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.attacker_id, ea.user_id, COALESCE(r.defender_id::text, ''), r.state,
-		       r.resolve_time, COALESCE(r.base_march_minutes, 15.0),
+		       r.resolve_time, COALESCE(r.base_march_minutes, 15.0), COALESCE(r.route_progress, CASE WHEN r.state = 'returning' THEN 1.0 ELSE 0.0 END),
+		       r.route_progress_at, COALESCE(r.route_leg_minutes, r.base_march_minutes, 15.0),
 		       r.origin_x, r.origin_y, r.destination_x, r.destination_y,
 		       r.origin_region, r.destination_region
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		WHERE r.state IN ('marching', 'returning')
+		  AND r.movement_state = 'moving'
 		  AND r.origin_x IS NOT NULL AND r.origin_y IS NOT NULL
 		  AND r.destination_x IS NOT NULL AND r.destination_y IS NOT NULL
 		  AND r.origin_region IS NOT NULL AND r.destination_region IS NOT NULL
@@ -1551,6 +1626,9 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		state             string
 		resolveTime       time.Time
 		baseMinutes       float64
+		routeProgress     float64
+		routeProgressAt   sql.NullTime
+		routeLegMinutes   float64
 		originX, originY  int
 		destinationX      int
 		destinationY      int
@@ -1561,7 +1639,7 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var raid movingRaid
 		if err := rows.Scan(&raid.attackerID, &raid.attackerUserID, &raid.defenderID, &raid.state,
-			&raid.resolveTime, &raid.baseMinutes, &raid.originX, &raid.originY,
+			&raid.resolveTime, &raid.baseMinutes, &raid.routeProgress, &raid.routeProgressAt, &raid.routeLegMinutes, &raid.originX, &raid.originY,
 			&raid.destinationX, &raid.destinationY, &raid.originRegion, &raid.destinationRegion); err != nil {
 			return fmt.Errorf("scanning route discovery candidate: %w", err)
 		}
@@ -1572,14 +1650,10 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	for _, raid := range raids {
-		if raid.baseMinutes <= 0 {
+		if raid.routeLegMinutes <= 0 {
 			continue
 		}
-		remainingFraction := math.Min(1, math.Max(0, time.Until(raid.resolveTime.UTC()).Minutes()/raid.baseMinutes))
-		progress := 1 - remainingFraction
-		if raid.state == "returning" {
-			progress = remainingFraction
-		}
+		progress := routeProgressAt(raid.state, raid.routeProgress, raid.routeProgressAt, raid.routeLegMinutes, raid.resolveTime, time.Now().UTC())
 		currentX := int(math.Round(float64(raid.originX) + float64(raid.destinationX-raid.originX)*progress))
 		currentY := int(math.Round(float64(raid.originY) + float64(raid.destinationY-raid.originY)*progress))
 		currentRegion := raid.originRegion
@@ -1634,6 +1708,376 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", contactUserID,
 				"📡 ROUTE CONTACT: Your sensors detected a foreign expedition moving near your outpost. Its commander has now discovered your location.")
 		}
+	}
+	return nil
+}
+
+// createRoadEncounters finds pairs of active expedition columns occupying the
+// same region and adjacent route coordinates. Pair IDs are sorted before the
+// insert so the database uniqueness constraint safely suppresses duplicate
+// encounters across repeated or concurrent tick passes.
+func (e *Engine) createRoadEncounters(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id, r.attacker_id, ea.user_id, r.state, r.resolve_time,
+		       COALESCE(r.base_march_minutes, 15.0), COALESCE(r.route_progress, CASE WHEN r.state = 'returning' THEN 1.0 ELSE 0.0 END),
+		       r.route_progress_at, COALESCE(r.route_leg_minutes, r.base_march_minutes, 15.0), r.origin_x, r.origin_y,
+		       r.destination_x, r.destination_y, r.origin_region, r.destination_region
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		WHERE r.state IN ('marching', 'returning')
+		  AND r.movement_state = 'moving'
+		  AND r.resolve_time > CURRENT_TIMESTAMP
+		  AND r.origin_x IS NOT NULL AND r.origin_y IS NOT NULL
+		  AND r.destination_x IS NOT NULL AND r.destination_y IS NOT NULL
+		  AND r.origin_region IS NOT NULL AND r.destination_region IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("querying moving expeditions for road encounters: %w", err)
+	}
+	defer rows.Close()
+
+	type movingColumn struct {
+		raidID, campID   string
+		userID           int64
+		state            string
+		resolveTime      time.Time
+		baseMinutes      float64
+		routeProgress    float64
+		routeProgressAt  sql.NullTime
+		routeLegMinutes  float64
+		originX, originY int
+		destX, destY     int
+		originRegion     string
+		destRegion       string
+		currentX         int
+		currentY         int
+		currentRegion    string
+	}
+	var columns []movingColumn
+	for rows.Next() {
+		var column movingColumn
+		if err := rows.Scan(&column.raidID, &column.campID, &column.userID, &column.state,
+			&column.resolveTime, &column.baseMinutes, &column.routeProgress, &column.routeProgressAt, &column.routeLegMinutes, &column.originX, &column.originY,
+			&column.destX, &column.destY, &column.originRegion, &column.destRegion); err != nil {
+			return fmt.Errorf("scanning moving expedition for road encounter: %w", err)
+		}
+		if column.routeLegMinutes <= 0 {
+			continue
+		}
+		progress := routeProgressAt(column.state, column.routeProgress, column.routeProgressAt, column.routeLegMinutes, column.resolveTime, time.Now().UTC())
+		column.routeProgress = progress
+		column.currentX = int(math.Round(float64(column.originX) + float64(column.destX-column.originX)*progress))
+		column.currentY = int(math.Round(float64(column.originY) + float64(column.destY-column.originY)*progress))
+		column.currentRegion = column.originRegion
+		if progress >= 0.5 {
+			column.currentRegion = column.destRegion
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating moving expeditions for road encounters: %w", err)
+	}
+
+	claimed := make(map[string]bool)
+	for i := 0; i < len(columns); i++ {
+		for j := i + 1; j < len(columns); j++ {
+			a, b := columns[i], columns[j]
+			if claimed[a.raidID] || claimed[b.raidID] {
+				continue
+			}
+			if a.campID == b.campID || a.currentRegion != b.currentRegion || math.Abs(float64(a.currentX-b.currentX))+math.Abs(float64(a.currentY-b.currentY)) > 1 {
+				continue
+			}
+			primary, secondary := a, b
+			if primary.raidID > secondary.raidID {
+				primary, secondary = secondary, primary
+			}
+			// Claim both columns before inserting the encounter. The predicate is
+			// re-evaluated by PostgreSQL after concurrent updates, so no tick
+			// worker can make one raid part of two active encounters.
+			claim, err := tx.ExecContext(ctx, `
+				UPDATE raids r
+				SET movement_state = 'encounter_pending', pause_reason = 'road encounter response window',
+					next_route_event_at = NULL,
+					route_progress = CASE WHEN r.id = $1 THEN $3 ELSE $4 END,
+					route_progress_at = CURRENT_TIMESTAMP
+				WHERE (r.id = $1 OR r.id = $2)
+				  AND r.state IN ('marching', 'returning')
+				  AND r.movement_state = 'moving'
+				  AND NOT EXISTS (
+					SELECT 1 FROM road_encounters re
+					WHERE re.state IN ('pending', 'resolving')
+					  AND (re.primary_raid_id = r.id OR re.secondary_raid_id = r.id)
+				  )`, primary.raidID, secondary.raidID, primary.routeProgress, secondary.routeProgress)
+			if err != nil {
+				return fmt.Errorf("claiming expeditions for road encounter: %w", err)
+			}
+			if affected, _ := claim.RowsAffected(); affected != 2 {
+				// A concurrent worker may have claimed one of the pair. Release
+				// only an orphaned claim; never touch a raid with an active record.
+				_, _ = tx.ExecContext(ctx, `UPDATE raids r SET movement_state = 'moving', pause_reason = NULL
+					WHERE (r.id = $1 OR r.id = $2) AND r.movement_state = 'encounter_pending'
+					  AND NOT EXISTS (SELECT 1 FROM road_encounters re WHERE re.state IN ('pending', 'resolving') AND (re.primary_raid_id = r.id OR re.secondary_raid_id = r.id))`, primary.raidID, secondary.raidID)
+				continue
+			}
+			var encounterID string
+			err = tx.QueryRowContext(ctx, `
+				INSERT INTO road_encounters (primary_raid_id, secondary_raid_id, region, x, y, primary_route_state, secondary_route_state, decision_deadline)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP + INTERVAL '10 minutes')
+				ON CONFLICT DO NOTHING
+				RETURNING id`, primary.raidID, secondary.raidID, primary.currentRegion, primary.currentX, primary.currentY, primary.state, secondary.state).Scan(&encounterID)
+			if err == sql.ErrNoRows {
+				_ = resumeRoadRaids(ctx, tx, primary.raidID, secondary.raidID)
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("creating road encounter: %w", err)
+			}
+			claimed[primary.raidID], claimed[secondary.raidID] = true, true
+			for _, column := range []movingColumn{primary, secondary} {
+				message := fmt.Sprintf("🛣️ ROAD ENCOUNTER: Your expedition met another player's column near [%s: %d,%d]. Open /encounters within 10 minutes to Attack or Continue. If either commander attacks, a field battle begins.", primary.currentRegion, primary.currentX, primary.currentY)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", column.userID, message)
+			}
+		}
+	}
+	return nil
+}
+
+type roadForce struct {
+	raidID, campID, name string
+	userID               int64
+	state                string
+	baseMinutes          float64
+	soldiers, mechs      int
+	destroyers, bombers  int
+	battlecruisers       int
+	deathstars           int
+	liberators, wraiths  int
+	stolenScrap          float64
+	stolenMetal          float64
+	stolenCrystal        float64
+	stolenRations        float64
+	stolenElectricity    float64
+	stolenHydrogen       float64
+	stolenNeuroCores     float64
+	stolenDollars        float64
+}
+
+func (f roadForce) power() float64 {
+	return float64(f.soldiers) + float64(f.mechs)*5 + float64(f.destroyers)*3 + float64(f.bombers)*4 + float64(f.battlecruisers)*15 + float64(f.deathstars)*100 + float64(f.liberators)*8 + float64(f.wraiths)*6
+}
+
+func (f roadForce) composition() []battlereport.UnitTally {
+	return []battlereport.UnitTally{
+		{Emoji: "🪖", Label: "Soldiers", Count: f.soldiers},
+		{Emoji: "🤖", Label: "Mechs", Count: f.mechs},
+		{Emoji: "💥", Label: "Destroyers", Count: f.destroyers},
+		{Emoji: "🛩️", Label: "Bombers", Count: f.bombers},
+		{Emoji: "🦅", Label: "Liberators", Count: f.liberators},
+		{Emoji: "👻", Label: "Wraiths", Count: f.wraiths},
+		{Emoji: "🚢👑", Label: "Battlecruisers", Count: f.battlecruisers},
+		{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: f.deathstars},
+	}
+}
+
+func roadLosses(f roadForce, rate float64) ([]battlereport.UnitTally, roadForce) {
+	loss := func(count int) int { return int(math.Floor(float64(count) * rate)) }
+	return []battlereport.UnitTally{
+		{Emoji: "🪖", Label: "Soldiers", Count: loss(f.soldiers)},
+		{Emoji: "🤖", Label: "Mechs", Count: loss(f.mechs)},
+		{Emoji: "💥", Label: "Destroyers", Count: loss(f.destroyers)},
+		{Emoji: "🛩️", Label: "Bombers", Count: loss(f.bombers)},
+		{Emoji: "🦅", Label: "Liberators", Count: loss(f.liberators)},
+		{Emoji: "👻", Label: "Wraiths", Count: loss(f.wraiths)},
+		{Emoji: "🚢👑", Label: "Battlecruisers", Count: loss(f.battlecruisers)},
+		{Emoji: "🌑💀", Label: "Doomsday Rigs", Count: loss(f.deathstars)},
+	}, roadForce{soldiers: f.soldiers - loss(f.soldiers), mechs: f.mechs - loss(f.mechs), destroyers: f.destroyers - loss(f.destroyers), bombers: f.bombers - loss(f.bombers), battlecruisers: f.battlecruisers - loss(f.battlecruisers), deathstars: f.deathstars - loss(f.deathstars), liberators: f.liberators - loss(f.liberators), wraiths: f.wraiths - loss(f.wraiths)}
+}
+
+func loadRoadForce(ctx context.Context, tx *sql.Tx, raidID string) (roadForce, error) {
+	var force roadForce
+	err := tx.QueryRowContext(ctx, `
+		SELECT r.id, r.attacker_id, e.name, e.user_id, r.state, COALESCE(r.base_march_minutes, 15.0),
+		       COALESCE(rf.soldiers_mobilized, 0), COALESCE(rf.mechs_mobilized, 0),
+		       COALESCE(rf.destroyers_mobilized, 0), COALESCE(rf.bombers_mobilized, 0),
+		       COALESCE(rf.battlecruisers_mobilized, 0), COALESCE(rf.deathstars_mobilized, 0),
+		       COALESCE(rf.liberators_mobilized, 0), COALESCE(rf.wraiths_mobilized, 0),
+		       COALESCE(r.stolen_scrap, 0), COALESCE(r.stolen_metal, 0), COALESCE(r.stolen_crystal, 0),
+		       COALESCE(r.stolen_rations, 0), COALESCE(r.stolen_electricity, 0), COALESCE(r.stolen_hydrogen, 0),
+		       COALESCE(r.stolen_neuro_cores, 0), COALESCE(r.stolen_dollars, 0)
+		FROM raids r
+		JOIN encampments e ON e.id = r.attacker_id
+		JOIN raid_forces rf ON rf.raid_id = r.id
+		WHERE r.id = $1 FOR UPDATE`, raidID).Scan(
+		&force.raidID, &force.campID, &force.name, &force.userID, &force.state, &force.baseMinutes,
+		&force.soldiers, &force.mechs, &force.destroyers, &force.bombers, &force.battlecruisers, &force.deathstars, &force.liberators, &force.wraiths,
+		&force.stolenScrap, &force.stolenMetal, &force.stolenCrystal, &force.stolenRations, &force.stolenElectricity, &force.stolenHydrogen, &force.stolenNeuroCores, &force.stolenDollars,
+	)
+	return force, err
+}
+
+func updateRoadForceSurvivors(ctx context.Context, tx *sql.Tx, raidID string, survivor roadForce) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE raid_forces SET soldiers_mobilized = $1, mechs_mobilized = $2,
+			destroyers_mobilized = $3, bombers_mobilized = $4,
+			battlecruisers_mobilized = $5, deathstars_mobilized = $6,
+			liberators_mobilized = $7, wraiths_mobilized = $8
+		WHERE raid_id = $9`, survivor.soldiers, survivor.mechs, survivor.destroyers, survivor.bombers, survivor.battlecruisers, survivor.deathstars, survivor.liberators, survivor.wraiths, raidID)
+	return err
+}
+
+// resolveRoadEncounters resolves timeouts peacefully and turns an attack
+// decision into a single, capacity-aware field battle. Loot is transferred
+// between the two moving raid payloads rather than touching either home base.
+func (e *Engine) resolveRoadEncounters(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, primary_raid_id, secondary_raid_id, state, decision_deadline
+		FROM road_encounters
+		WHERE state IN ('pending', 'resolving')
+		FOR UPDATE SKIP LOCKED`)
+	if err != nil {
+		return fmt.Errorf("querying active road encounters: %w", err)
+	}
+	defer rows.Close()
+
+	type encounter struct {
+		id, primaryRaidID, secondaryRaidID, state string
+		deadline                                  time.Time
+	}
+	var encounters []encounter
+	for rows.Next() {
+		var item encounter
+		if err := rows.Scan(&item.id, &item.primaryRaidID, &item.secondaryRaidID, &item.state, &item.deadline); err != nil {
+			return fmt.Errorf("scanning active road encounter: %w", err)
+		}
+		encounters = append(encounters, item)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating active road encounters: %w", err)
+	}
+
+	for _, item := range encounters {
+		primary, primaryErr := loadRoadForce(ctx, tx, item.primaryRaidID)
+		secondary, secondaryErr := loadRoadForce(ctx, tx, item.secondaryRaidID)
+		if primaryErr != nil || secondaryErr != nil {
+			_, _ = tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'expired', resolved_at = CURRENT_TIMESTAMP WHERE id = $1", item.id)
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'moving', pause_reason = NULL WHERE id = $1 OR id = $2", item.primaryRaidID, item.secondaryRaidID)
+			continue
+		}
+		if item.state == "pending" {
+			if item.deadline.UTC().After(time.Now().UTC()) {
+				continue
+			}
+			_, _ = tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'expired', resolved_at = CURRENT_TIMESTAMP WHERE id = $1", item.id)
+			if err := resumeRoadRaids(ctx, tx, item.primaryRaidID, item.secondaryRaidID); err != nil {
+				return fmt.Errorf("resuming expired road encounter: %w", err)
+			}
+			for _, force := range []roadForce{primary, secondary} {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", force.userID,
+					"🛣️ ROAD ENCOUNTER EXPIRED: No attack order was issued. Both expeditions continued their journeys.")
+			}
+			continue
+		}
+		if (primary.state != "marching" && primary.state != "returning") || (secondary.state != "marching" && secondary.state != "returning") {
+			_, _ = tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'expired', resolved_at = CURRENT_TIMESTAMP WHERE id = $1", item.id)
+			continue
+		}
+
+		primaryPower, secondaryPower := primary.power(), secondary.power()
+		winner, loser := primary, secondary
+		outcome := battlereport.OutcomeAttackerWon
+		if primaryPower == 0 && secondaryPower == 0 {
+			outcome = battlereport.OutcomeDraw
+		} else if primaryPower == 0 {
+			winner, loser, outcome = secondary, primary, battlereport.OutcomeDefenderWon
+		} else if secondaryPower == 0 {
+			outcome = battlereport.OutcomeAttackerWon
+		} else if rand.Float64() > primaryPower/(primaryPower+secondaryPower) {
+			winner, loser, outcome = secondary, primary, battlereport.OutcomeDefenderWon
+		}
+
+		primaryLossRate, secondaryLossRate := 0.15, 0.40
+		if outcome == battlereport.OutcomeDefenderWon {
+			primaryLossRate, secondaryLossRate = 0.40, 0.15
+		} else if outcome == battlereport.OutcomeDraw {
+			primaryLossRate, secondaryLossRate = 0.25, 0.25
+		}
+		primaryLosses, primarySurvivors := roadLosses(primary, primaryLossRate)
+		secondaryLosses, secondarySurvivors := roadLosses(secondary, secondaryLossRate)
+		if err := updateRoadForceSurvivors(ctx, tx, primary.raidID, primarySurvivors); err != nil {
+			return fmt.Errorf("updating primary road-battle survivors: %w", err)
+		}
+		if err := updateRoadForceSurvivors(ctx, tx, secondary.raidID, secondarySurvivors); err != nil {
+			return fmt.Errorf("updating secondary road-battle survivors: %w", err)
+		}
+
+		lootLines := []string(nil)
+		if outcome != battlereport.OutcomeDraw {
+			lootFactor := 0.50
+			lootScrap := loser.stolenScrap * lootFactor
+			lootMetal := loser.stolenMetal * lootFactor
+			lootCrystal := loser.stolenCrystal * lootFactor
+			lootRations := loser.stolenRations * lootFactor
+			lootElectricity := loser.stolenElectricity * lootFactor
+			lootHydrogen := loser.stolenHydrogen * lootFactor
+			lootNeuro := loser.stolenNeuroCores * lootFactor
+			lootDollars := loser.stolenDollars * lootFactor
+			_, err := tx.ExecContext(ctx, `
+				UPDATE raids SET stolen_scrap = GREATEST(stolen_scrap - $1, 0), stolen_metal = GREATEST(stolen_metal - $2, 0), stolen_crystal = GREATEST(stolen_crystal - $3, 0),
+					stolen_rations = GREATEST(stolen_rations - $4, 0), stolen_electricity = GREATEST(stolen_electricity - $5, 0), stolen_hydrogen = GREATEST(stolen_hydrogen - $6, 0),
+					stolen_neuro_cores = GREATEST(stolen_neuro_cores - $7, 0), stolen_dollars = GREATEST(stolen_dollars - $8, 0)
+				WHERE id = $9`, lootScrap, lootMetal, lootCrystal, lootRations, lootElectricity, lootHydrogen, lootNeuro, lootDollars, loser.raidID)
+			if err != nil {
+				return fmt.Errorf("removing stolen road cargo: %w", err)
+			}
+			_, err = tx.ExecContext(ctx, `
+				UPDATE raids SET stolen_scrap = stolen_scrap + $1, stolen_metal = stolen_metal + $2, stolen_crystal = stolen_crystal + $3,
+					stolen_rations = stolen_rations + $4, stolen_electricity = stolen_electricity + $5, stolen_hydrogen = stolen_hydrogen + $6,
+					stolen_neuro_cores = stolen_neuro_cores + $7, stolen_dollars = stolen_dollars + $8
+				WHERE id = $9`, lootScrap, lootMetal, lootCrystal, lootRations, lootElectricity, lootHydrogen, lootNeuro, lootDollars, winner.raidID)
+			if err != nil {
+				return fmt.Errorf("crediting captured road cargo: %w", err)
+			}
+			if lootScrap+lootMetal+lootCrystal+lootRations+lootElectricity+lootHydrogen+lootNeuro+lootDollars > 0 {
+				lootLines = []string{fmt.Sprintf("⚙️ %.0f Scrap", lootScrap), fmt.Sprintf("🔩 %.0f Metal", lootMetal), fmt.Sprintf("💎 %.0f Crystal", lootCrystal), fmt.Sprintf("🍖 %.0f Rations", lootRations), fmt.Sprintf("⚡ %.0f Electricity", lootElectricity)}
+			}
+		}
+
+		// A field battle freezes the column for a deliberate recovery window.
+		// Its position remains the snapshot taken when the encounter opened;
+		// the route_recovery phase resumes it from that exact point.
+		_, _ = tx.ExecContext(ctx, `UPDATE raids
+			SET movement_state = 'battle_recovery', pause_reason = 'field battle recovery',
+				next_route_event_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes'
+			WHERE id = $1 OR id = $2`, item.primaryRaidID, item.secondaryRaidID)
+
+		// A completely wiped combat column turns home. It starts a fresh
+		// return leg rather than being teleported to the original destination.
+		if primarySurvivors.power() <= 0 {
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL, route_progress = 1.0, route_progress_at = CURRENT_TIMESTAMP, route_leg_minutes = $1, resolve_time = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 minute') WHERE id = $2", primary.baseMinutes, primary.raidID)
+		}
+		if secondarySurvivors.power() <= 0 {
+			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', movement_state = 'moving', pause_reason = NULL, next_route_event_at = NULL, route_progress = 1.0, route_progress_at = CURRENT_TIMESTAMP, route_leg_minutes = $1, resolve_time = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 minute') WHERE id = $2", secondary.baseMinutes, secondary.raidID)
+		}
+
+		report := battlereport.Round{
+			Number:              1,
+			AttackerName:        primary.name,
+			DefenderName:        secondary.name,
+			AttackerComposition: primary.composition(),
+			DefenderComposition: secondary.composition(),
+			AttackerLosses:      primaryLosses,
+			DefenderLosses:      secondaryLosses,
+			Outcome:             outcome,
+			LootLines:           lootLines,
+			LootCollector:       winner.name,
+			AttackerNotes:       []string{"🛣️ Field battle: both forces were intercepted on an active expedition route."},
+			DefenderNotes:       []string{"🚚 Only cargo already carried by the expedition can be captured; no remote home reserves are touched."},
+		}
+		reportText := battlereport.Render(report)
+		for _, force := range []roadForce{primary, secondary} {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", force.userID, reportText)
+		}
+		_, _ = tx.ExecContext(ctx, "UPDATE road_encounters SET state = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = $1", item.id)
 	}
 	return nil
 }
@@ -1744,7 +2188,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
-		WHERE r.state = 'marching' OR r.state = 'engaged' OR r.state = 'returning'`
+		WHERE r.state = 'engaged'
+		   OR (r.state IN ('marching', 'returning') AND r.movement_state = 'moving')`
 
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {

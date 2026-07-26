@@ -1,7 +1,7 @@
 # MMO Warfare, Exploration, and Logistics Plan
 
-Status: Phases 1-2 complete; road encounters, camps/convoys, and AI
-civilizations remain pending (2026-07-20).
+Status: Phases 1-3 complete; camps/convoys and AI civilizations remain
+pending (2026-07-20).
 
 ## Current Architecture Baseline
 
@@ -112,3 +112,9 @@ Milestones:
 - Incoming raid warnings are now capability- and proximity-based. They queue
   once after a force crosses the defender's radar threshold instead of
   revealing a raid at departure or sending a duplicate alert every tick.
+- Phase 3 road encounters complete: active outbound/returning columns that
+  meet on a route pause for a ten-minute response window. `/encounters` gives
+  both commanders Attack/Continue controls. Either attack starts a field
+  battle resolved by the established battle-report renderer; casualties update
+  the moving force, only carried raid cargo is stealable, and an annihilated
+  column turns home. A mutual Continue or timeout resumes both journeys.
