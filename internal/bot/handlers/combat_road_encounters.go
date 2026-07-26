@@ -292,6 +292,209 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	return c.Send(resultText, keyboards.MainNavigation())
 }
 
+// loadBaseGarrisonForce loads a passive base's standing home-defense
+// reserve (workshop_inventory.garrisoned_soldiers/garrisoned_mechs - units
+// the owner explicitly withheld from every draft, see hero.go's Manual
+// Defense Garrison) as a roadcombat.FieldForce. This is deliberately a
+// lighter force than the base's full raid-defense computation (no defense
+// grid, turrets, or drafted-but-not-yet-launched units): a road ambush is a
+// field skirmish against whoever the base kept at home, not a full siege.
+// A commander who wants to actually raid the base's economy for loot still
+// needs to launch a real raid through the normal /raid flow, with all of
+// that system's existing protections (shields, pacts, etc.) intact.
+func (h *CombatHandler) loadBaseGarrisonForce(ctx context.Context, tx *sql.Tx, encampmentID string) (roadcombat.FieldForce, error) {
+	var f roadcombat.FieldForce
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0)
+		FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`, encampmentID).
+		Scan(&f.Soldiers, &f.Mechs)
+	if err != nil {
+		return f, err
+	}
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", encampmentID).Scan(&f.MilitaryTechLvl)
+	if f.MilitaryTechLvl < 1 {
+		f.MilitaryTechLvl = 1
+	}
+	return f, nil
+}
+
+// applyBaseGarrisonSurvivors writes back the post-battle survivor counts
+// for a base's home-defense reserve.
+func (h *CombatHandler) applyBaseGarrisonSurvivors(ctx context.Context, tx *sql.Tx, encampmentID string, s roadcombat.FieldForce) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE workshop_inventory SET garrisoned_soldiers = $1, garrisoned_mechs = $2
+		WHERE encampment_id = $3`, s.Soldiers, s.Mechs, encampmentID)
+	return err
+}
+
+// HandleRoadBaseEncounterCallback resolves the Attack/Continue decision for
+// a road-vs-base encounter (MMO_WORLD_EVOLUTION_PLAN.md Phase 4 milestone
+// 2). Only the expedition's commander gets a choice here - the base didn't
+// choose to be in the road's path, so there is no symmetric "both sides
+// must agree to continue" step like the expedition-vs-expedition version;
+// Attack resolves immediately, and doing nothing before the deadline is a
+// peaceful pass (handled by the tick engine's expireRoadBaseEncounters).
+func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 2 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid road encounter action."})
+	}
+	action := c.Args()[0]
+	encounterID := c.Args()[1]
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+	}
+	defer tx.Rollback()
+
+	var raidID, encampmentID, status string
+	err = tx.QueryRowContext(ctx, `
+		SELECT raid_id, encampment_id, status
+		FROM road_base_encounters WHERE id = $1 FOR UPDATE`, encounterID).Scan(&raidID, &encampmentID, &status)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ This road encounter no longer exists."})
+	}
+	if status != "pending" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ This road encounter has already been resolved."})
+	}
+
+	var callerCampID string
+	var attackerID string
+	_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID)
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&callerCampID); err != nil || callerCampID != attackerID {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can issue this order."})
+	}
+
+	if action == "continue" {
+		if err := h.resolveRoadBaseEncounterContinue(ctx, tx, encounterID, raidID, "voluntary"); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to resolve encounter."})
+		}
+		_ = tx.Commit()
+		return c.Send("➡️ Your column bypasses the outpost and continues on its way.", keyboards.MainNavigation())
+	}
+
+	if action != "attack" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Unknown road encounter order."})
+	}
+
+	myForce, err := h.loadRoadFieldForce(ctx, tx, raidID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not load your force composition."})
+	}
+	garrison, err := h.loadBaseGarrisonForce(ctx, tx, encampmentID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not load the outpost's home garrison."})
+	}
+
+	myPower := roadcombat.Power(myForce, 1.0)
+	garrisonPower := roadcombat.Power(garrison, 1.0)
+	result := roadcombat.ResolveBattle(myPower, garrisonPower)
+
+	myLost := roadcombat.CasualtiesFor(myForce, result.ACasualtyFraction)
+	garrisonLost := roadcombat.CasualtiesFor(garrison, result.BCasualtyFraction)
+	mySurvivors := roadcombat.Survivors(myForce, myLost)
+	garrisonSurvivors := roadcombat.Survivors(garrison, garrisonLost)
+
+	if err := h.applyRoadSurvivors(ctx, tx, raidID, mySurvivors); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to apply casualties."})
+	}
+	if err := h.applyBaseGarrisonSurvivors(ctx, tx, encampmentID, garrisonSurvivors); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to apply casualties."})
+	}
+
+	outcome := "battle"
+	attackerWon := result.AWon
+	if result.Draw {
+		outcome = "draw"
+	}
+
+	_, _ = tx.ExecContext(ctx, `
+		UPDATE road_base_encounters SET status = 'resolved', outcome = $1, resolved_at = CURRENT_TIMESTAMP
+		WHERE id = $2`, outcome, encounterID)
+
+	// The expedition continues its journey from exactly where it paused,
+	// unless it has nothing left to march with. No resource looting here
+	// (see loadBaseGarrisonForce) - a skirmish costs lives, not the base's
+	// economy, which stays behind the normal /raid protections.
+	if mySurvivors.TotalUnits() <= 0 {
+		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed', movement_state = 'moving', active_base_encounter_id = NULL WHERE id = $1", raidID)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID,
+			"💀 COLUMN DESTROYED: Your expedition was wiped out attacking the outpost. No survivors returned.")
+	} else {
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raids SET movement_state = 'moving', active_base_encounter_id = NULL,
+			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+			    paused_at = NULL
+			WHERE id = $1`, raidID)
+	}
+
+	var attackerHeadline string
+	switch {
+	case result.Draw:
+		attackerHeadline = "⚔️ ROAD SKIRMISH - INCONCLUSIVE: Your column and the outpost's garrison traded fire and disengaged."
+	case attackerWon:
+		attackerHeadline = "🏆 ROAD SKIRMISH WON: Your column overpowered the outpost's home garrison."
+	default:
+		attackerHeadline = "💥 ROAD SKIRMISH LOST: The outpost's garrison repelled your column."
+	}
+	attackerReport := fmt.Sprintf(
+		"%s\n\nYour Power Rating: %.0f | Garrison Power Rating: %.0f\nYour Casualties: %d Soldiers, %d Mechs\nGarrison Casualties: %d Soldiers, %d Mechs\n",
+		attackerHeadline, myPower, garrisonPower, myLost.Soldiers, myLost.Mechs, garrisonLost.Soldiers, garrisonLost.Mechs,
+	)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID, attackerReport)
+
+	var defenderUserID int64
+	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", encampmentID).Scan(&defenderUserID)
+	if defenderUserID != 0 {
+		var attackerName string
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
+		var defenderHeadline string
+		switch {
+		case result.Draw:
+			defenderHeadline = "⚔️ ROAD SKIRMISH - INCONCLUSIVE: Your garrison traded fire with a passing column and both disengaged."
+		case !attackerWon:
+			defenderHeadline = fmt.Sprintf("🏆 GARRISON HELD: Your home defense repelled an attack from [%s].", attackerName)
+		default:
+			defenderHeadline = fmt.Sprintf("💥 GARRISON OVERRUN: A passing column from [%s] defeated your home garrison in a road skirmish. Your base itself was not raided.", attackerName)
+		}
+		defenderReport := fmt.Sprintf(
+			"%s\n\nYour Garrison Power: %.0f | Enemy Power: %.0f\nGarrison Casualties: %d Soldiers, %d Mechs\n",
+			defenderHeadline, garrisonPower, myPower, garrisonLost.Soldiers, garrisonLost.Mechs,
+		)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderReport)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to commit road skirmish resolution."})
+	}
+
+	resultText := "⚔️ Skirmish joined! Check your notifications for the full battle report."
+	_ = c.Respond(&telebot.CallbackResponse{Text: resultText})
+	return c.Send(resultText, keyboards.MainNavigation())
+}
+
+// resolveRoadBaseEncounterContinue is the explicit-Continue / timeout
+// counterpart for a road-vs-base encounter - same shape as
+// resolveRoadEncounterContinue, but only one raid to unfreeze since the
+// base side was never paused (it was never moving to begin with).
+func (h *CombatHandler) resolveRoadBaseEncounterContinue(ctx context.Context, tx *sql.Tx, encounterID, raidID, outcome string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE road_base_encounters SET status = 'resolved', outcome = $1, resolved_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND status = 'pending'`, outcome, encounterID)
+	if err != nil {
+		return err
+	}
+	_, _ = tx.ExecContext(ctx, `
+		UPDATE raids
+		SET movement_state = 'moving', active_base_encounter_id = NULL,
+		    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - COALESCE(paused_at, CURRENT_TIMESTAMP)),
+		    paused_at = NULL
+		WHERE id = $1 AND active_base_encounter_id = $2`, raidID, encounterID)
+	return nil
+}
+
 // resolveRoadEncounterContinue is the mutual-Continue counterpart to the
 // tick engine's timeout resolution (internal/engine/tick/engine.go
 // resolveEncounterAsContinue) - duplicated at this small size rather than

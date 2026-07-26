@@ -320,6 +320,30 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
+	// Road-vs-base encounters: same idea as the road_encounters block
+	// above, but the other side is a passive base rather than a second
+	// expedition, so only this commander gets an Attack/Continue choice.
+	queryRoadBase := `
+		SELECT rbe.id, r.id, e.name
+		FROM road_base_encounters rbe
+		JOIN raids r ON r.id = rbe.raid_id
+		JOIN encampments e ON e.id = rbe.encampment_id
+		WHERE rbe.status = 'pending' AND r.attacker_id = $1
+		ORDER BY rbe.response_deadline ASC`
+	rowsRoadBase, errRoadBase := h.DB.QueryContext(ctx, queryRoadBase, campID)
+	if errRoadBase == nil {
+		defer rowsRoadBase.Close()
+		for rowsRoadBase.Next() {
+			var encID, myRaidID, baseName string
+			if err := rowsRoadBase.Scan(&encID, &myRaidID, &baseName); err == nil {
+				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Outpost [%s]\n   Attack its home garrison, or continue past it.\n\n", baseName)
+				btnAttack := selector.Data(fmt.Sprintf("⚔️ Attack [%s]", baseName), "road_base_encounter", "attack", encID)
+				btnContinue := selector.Data(fmt.Sprintf("➡️ Continue [%s]", baseName), "road_base_encounter", "continue", encID)
+				buttons = append(buttons, selector.Row(btnAttack, btnContinue))
+			}
+		}
+	}
+
 	queryInbound := `
 		SELECT ea.name, r.resolve_time, r.state 
 		FROM raids r

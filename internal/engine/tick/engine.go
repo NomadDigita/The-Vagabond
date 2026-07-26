@@ -796,6 +796,7 @@ func (e *Engine) ProcessTick() {
 		{"route_recovery", e.resumeRouteRecoveries},
 		{"route_discovery", e.discoverRouteContacts},
 		{"road_encounters", e.evaluateRoadEncounters},
+		{"road_base_encounters", e.evaluateRoadBaseEncounters},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},
@@ -1723,6 +1724,7 @@ type roadMover struct {
 	attackerName   string
 	state          string
 	pos            roadcombat.Position
+	region         string // current region (origin before the leg's midpoint, destination after)
 }
 
 // evaluateRoadEncounters implements MMO_WORLD_EVOLUTION_PLAN.md Phase 4:
@@ -1743,6 +1745,7 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 		WHERE r.state IN ('marching', 'returning')
 		  AND r.movement_state = 'moving'
 		  AND r.active_encounter_id IS NULL
+		  AND r.active_base_encounter_id IS NULL
 		  AND r.origin_x IS NOT NULL AND r.destination_x IS NOT NULL
 		ORDER BY r.id`)
 	if err != nil {

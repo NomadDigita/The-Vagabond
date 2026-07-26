@@ -803,6 +803,38 @@ func executeStartupMigrations(db *sql.DB) {
 			END IF;
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_moving_route_scan ON raids(state) WHERE state IN ('marching', 'returning') AND movement_state = 'moving';`,
+
+		// See migrations/032_mmo_road_base_encounters.sql for the annotated
+		// version. Completes Phase 4 milestone 2 (expedition-vs-base road
+		// encounters), the "expeditions and bases" half that road_encounters
+		// above (expedition-vs-expedition only) didn't cover.
+		`CREATE TABLE IF NOT EXISTS road_base_encounters (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			raid_id UUID NOT NULL REFERENCES raids(id) ON DELETE CASCADE,
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			location_x INT NOT NULL,
+			location_y INT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			outcome VARCHAR(20),
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			response_deadline TIMESTAMP WITH TIME ZONE NOT NULL,
+			resolved_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT road_base_encounters_status CHECK (status IN ('pending', 'resolved'))
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_road_base_encounters_pending_pair ON road_base_encounters(raid_id, encampment_id) WHERE status = 'pending';`,
+		`CREATE INDEX IF NOT EXISTS idx_road_base_encounters_pending_deadline ON road_base_encounters(response_deadline) WHERE status = 'pending';`,
+		`CREATE INDEX IF NOT EXISTS idx_road_base_encounters_raid_recent ON road_base_encounters(raid_id, created_at DESC);`,
+		`ALTER TABLE raids ADD COLUMN IF NOT EXISTS active_base_encounter_id UUID;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint WHERE conname = 'raids_active_base_encounter_id_fkey'
+			) THEN
+				ALTER TABLE raids
+					ADD CONSTRAINT raids_active_base_encounter_id_fkey
+					FOREIGN KEY (active_base_encounter_id) REFERENCES road_base_encounters(id) ON DELETE SET NULL;
+			END IF;
+		END $$;`,
 	}
 
 	for _, stmt := range migrations {
@@ -1244,6 +1276,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\froad_encounter", combat.HandleRoadEncounterCallback)
+	bot.Handle("\froad_base_encounter", combat.HandleRoadBaseEncounterCallback)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
