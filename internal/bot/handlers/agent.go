@@ -85,28 +85,23 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		}
 	}
 
-	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🧠 COGNITIVE AGENT MODULE [PRO]\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Your tactical agent handles offline outpost automation.\n\n"+
-			"SYSTEM STATE:\n"+
-			"🤖 Agent Status: %s\n"+
-			"🏷️ License: %s\n"+
-			"⚙️ Operational Mode: %s\n"+
-			"⚡ Fuel Reserve: %.1f Electricity Cells\n\n"+
-			"UPKEEP REQUIREMENTS:\n"+
-			"⚡ Consumes 0.2 Electricity Cells per tick.\n"+
-			"⚠️ Agent auto-shuts down if reserves hit 0.\n\n"+
-			"BEHAVIOR MODES:\n"+
-			"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\n"+
-			"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Metal, +5.0 Hydrogen.\n"+
-			"🔮 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\n"+
-			"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\n"+
-			"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		statusLabel, licenseText, mode, electricity,
-	)
+	panelText := "🧠 " + htmlBold("COGNITIVE AGENT MODULE [PRO]") + "\n" + divider + "\n" +
+		htmlItalic("Your tactical agent handles offline outpost automation.") + "\n\n" +
+		htmlBold("SYSTEM STATE") + "\n" +
+		fmt.Sprintf("🤖 Agent Status: %s\n", htmlCode(statusLabel)) +
+		fmt.Sprintf("🏷️ License: %s\n", htmlCode(licenseText)) +
+		fmt.Sprintf("⚙️ Operational Mode: %s\n", htmlCode(mode)) +
+		fmt.Sprintf("⚡ Fuel Reserve: %s\n\n", htmlCode(fmt.Sprintf("%.1f Electricity Cells", electricity))) +
+		htmlBold("UPKEEP REQUIREMENTS") + "\n" +
+		"⚡ Consumes 0.2 Electricity Cells per tick.\n" +
+		"⚠️ Agent auto-shuts down if reserves hit 0.\n\n" +
+		htmlBold("BEHAVIOR MODES") + "\n" +
+		"🛠️ [Collector]: Auto-scavenges +5.0 Scrap, +2.0 Rations per tick.\n" +
+		"💱 [Collector Ω]: Auto-refines metals/fuels +15.0 Iron, +8.0 Oil, +10.0 Metal, +5.0 Hydrogen.\n" +
+		"🔮 [Collector Precious]: Auto-mines rare assets +5.0 Silver, +2.0 Gold, +1.0 Crystal, +0.1 Diamonds, +1.0 Neuro.\n" +
+		"🏗️ [Builder]: Auto-upgrades lowest modules if Scrap permits.\n" +
+		"🪖 [Military]: Auto-recruits Soldiers if Rations permit.\n" +
+		divider
 
 	selector := &telebot.ReplyMarkup{}
 	senderIDStr := strconv.FormatInt(sender.ID, 10)
@@ -130,7 +125,7 @@ func (h *AgentHandler) HandleAgent(c telebot.Context) error {
 		selector.Row(btnModeBuilder, btnModeMilitary),
 	)
 
-	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *AgentHandler) HandleToggleAgentCallback(c telebot.Context) error {

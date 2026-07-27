@@ -24,6 +24,22 @@ func NewClanHandler(db *sql.DB) *ClanHandler {
 
 const clanRenameCost = 800.0 // Crystal
 
+// canManageClan reports whether a role grants alliance-management
+// permissions (reviewing applications, kicking Soldiers, setting the
+// icon/description). Introduced to fix BUGS_AND_INCONSISTENCIES.md
+// bug #4: HandlePromoteMemberCallback set role = "Co-Leader" but
+// nothing ever checked for it, making Promote a purely cosmetic
+// no-op. Co-Leader now grants real, but deliberately narrower than
+// Leader, authority - see the callers of this helper for exactly
+// which actions it unlocks. Declaring war, renaming the clan, and
+// promoting/demoting/kicking a Leader or another Co-Leader remain
+// Leader-only: those are either costly/structural (rename costs
+// Crystal, war commits the whole clan for 48h) or would let a
+// Co-Leader remove the person who promoted them.
+func canManageClan(role string) bool {
+	return role == "Leader" || role == "Co-Leader"
+}
+
 // HandleClanPanel renders the player's own clan HUD, or the "unaligned" screen.
 func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
@@ -86,7 +102,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_clans WHERE clan_id = $1", clanID.String).Scan(&members)
 
 	var pendingApps int
-	if role.String == "Leader" {
+	if canManageClan(role.String) {
 		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM clan_applications WHERE clan_id = $1 AND status = 'pending'", clanID.String).Scan(&pendingApps)
 	}
 
@@ -128,14 +144,13 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	btnStats := selector.Data("📊 Alliance Stats", "clan_stats", clanID.String)
 	buttons = append(buttons, selector.Row(btnManage, btnStats))
 
-	if role.String == "Leader" {
+	if canManageClan(role.String) {
 		btnApps := selector.Data(fmt.Sprintf("📬 Applications (%d)", pendingApps), "clan_apps", clanID.String)
 		buttons = append(buttons, selector.Row(btnApps))
-
-		if !inWar {
-			btnDeclare := selector.Data("⚔️ Declare War", "declare_clan_war", clanID.String)
-			buttons = append(buttons, selector.Row(btnDeclare))
-		}
+	}
+	if role.String == "Leader" && !inWar {
+		btnDeclare := selector.Data("⚔️ Declare War", "declare_clan_war", clanID.String)
+		buttons = append(buttons, selector.Row(btnDeclare))
 	}
 	btnLeave := selector.Data("🚪 Leave Clan", "leave_clan", clanID.String)
 	buttons = append(buttons, selector.Row(btnLeave))
@@ -236,8 +251,8 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 
 	var role string
 	_ = h.DB.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1 AND clan_id = $2", sender.ID, clanID).Scan(&role)
-	if role != "Leader" {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
+	if !canManageClan(role) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders and Co-Leaders only."})
 	}
 
 	rows, err := h.DB.QueryContext(ctx, `
@@ -289,8 +304,8 @@ func (h *ClanHandler) HandleApplicationDecisionCallback(c telebot.Context, accep
 
 	var role string
 	_ = h.DB.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1 AND clan_id = $2", sender.ID, clanID).Scan(&role)
-	if role != "Leader" {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
+	if !canManageClan(role) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders and Co-Leaders only."})
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
@@ -368,6 +383,12 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
 				btnPromote := selector.Data(fmt.Sprintf("🛡️ Promote [%d]", index), "clan_promote", strconv.FormatInt(memberID, 10))
 				buttons = append(buttons, selector.Row(btnPromote, btnKick))
+			} else if senderRole == "Co-Leader" && memberID != sender.ID && role == "Soldier" {
+				// Co-Leaders can manage rank-and-file Soldiers but not
+				// the Leader or fellow Co-Leaders, and can't promote -
+				// only the Leader hands out the Co-Leader rank.
+				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
+				buttons = append(buttons, selector.Row(btnKick))
 			}
 			index++
 		}
@@ -391,11 +412,19 @@ func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	var leaderRole string
+	var actingRole string
 	var myClanID string
-	_ = tx.QueryRowContext(ctx, "SELECT role, clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&leaderRole, &myClanID)
-	if leaderRole != "Leader" {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
+	_ = tx.QueryRowContext(ctx, "SELECT role, clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&actingRole, &myClanID)
+	if !canManageClan(actingRole) {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders and Co-Leaders only."})
+	}
+
+	if actingRole == "Co-Leader" {
+		var targetRole string
+		_ = tx.QueryRowContext(ctx, "SELECT role FROM user_clans WHERE user_id = $1 AND clan_id = $2", targetID, myClanID).Scan(&targetRole)
+		if targetRole != "Soldier" {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Co-Leaders may only remove Soldiers."})
+		}
 	}
 
 	// BUGFIX: this used to DELETE by targetID alone, with no check that
@@ -599,8 +628,8 @@ func (h *ClanHandler) HandleGuildIcon(c telebot.Context) error {
 	if err != nil {
 		return c.Send("⚠️ You're not in a Clan.")
 	}
-	if role != "Leader" {
-		return c.Send("❌ Access Denied: Only the Clan Leader can change the icon.")
+	if !canManageClan(role) {
+		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can change the icon.")
 	}
 
 	newIcon := randomAnimalIcons[int(sender.ID+time.Now().Unix())%len(randomAnimalIcons)]
@@ -634,8 +663,8 @@ func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
 	if err != nil {
 		return c.Send("⚠️ You're not in a Clan.")
 	}
-	if role != "Leader" {
-		return c.Send("❌ Access Denied: Only the Clan Leader can set the description.")
+	if !canManageClan(role) {
+		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can set the description.")
 	}
 
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET description = $1 WHERE id = $2", desc, clanID)

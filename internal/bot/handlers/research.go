@@ -103,15 +103,10 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	var neuro float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&neuro)
 
-	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🧪 COGNITIVE RESEARCH WORKSTATION\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Unlock lost technology blueprints by analyzing valuable Neuro Cores.\n\n"+
-			"🧠 Neuro Cores Stock: %.0f cores\n\n"+
-			"TECHNOLOGY UPGRADE TREES:\n",
-		neuro,
-	)
+	panelText := "🧪 " + htmlBold("COGNITIVE RESEARCH WORKSTATION") + "\n" + divider + "\n\n" +
+		htmlItalic("Unlock lost technology blueprints by analyzing valuable Neuro Cores.") + "\n\n" +
+		fmt.Sprintf("🧠 Neuro Cores Stock: %s\n\n", htmlCode(fmt.Sprintf("%.0f", neuro))) +
+		htmlBold("TECHNOLOGY UPGRADE TREES") + "\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var rows []telebot.Row
@@ -119,19 +114,19 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	for _, node := range researchTree {
 		lvl := levels[node.key]
 		if lvl >= MaxResearchLevel {
-			panelText += fmt.Sprintf("%s [%s Lvl %d/%d] MAX\n   %s\n\n", node.emoji, node.title, lvl, MaxResearchLevel, node.desc)
+			panelText += fmt.Sprintf("%s %s\n   %s\n\n", node.emoji, htmlBold(fmt.Sprintf("[%s Lvl %d/%d] MAX", node.title, lvl, MaxResearchLevel)), htmlItalic(node.desc))
 			continue
 		}
 		cost := researchCost(lvl)
-		panelText += fmt.Sprintf("%s [%s Lvl %d/%d] (Cost: %d Neuro Cores)\n   %s\n\n", node.emoji, node.title, lvl, MaxResearchLevel, cost, node.desc)
+		panelText += fmt.Sprintf("%s %s %s\n   %s\n\n", node.emoji, htmlBold(fmt.Sprintf("[%s Lvl %d/%d]", node.title, lvl, MaxResearchLevel)), htmlCode(fmt.Sprintf("(Cost: %d Neuro Cores)", cost)), htmlItalic(node.desc))
 		btn := selector.Data(fmt.Sprintf("%s %s (Lvl %d)", node.emoji, node.title, lvl+1), "upgrade_tech", node.key)
 		rows = append(rows, selector.Row(btn))
 	}
 
-	panelText += "━━━━━━━━━━━━━━━━━━━━━━"
+	panelText += divider
 	selector.Inline(rows...)
 
-	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 // HandleUpgradeTechCallback manages spending neuro cores to level up research nodes

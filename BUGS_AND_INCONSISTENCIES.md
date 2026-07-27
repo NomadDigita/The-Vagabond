@@ -29,17 +29,21 @@ next, grouped by how serious they are.
    of it, fails to compile in a way that's easy to misdiagnose.
 
 4. **Promoting a clan member sets a role that nothing else recognizes.**
-   `clan.go`, `HandlePromoteMemberCallback` sets `role = 'Co-Leader'`,
+   ~~`clan.go`, `HandlePromoteMemberCallback` sets `role = 'Co-Leader'`,
    but every permission check in the file (`HandleGuildIcon`,
    `HandleGuildDescription`, `HandleDeclareClanWarCallback`,
-   `HandleKickMemberCallback`, etc.) checks `role == "Leader"` exactly.
-   A promoted member gets a congratulatory message and a "Rank:
-   Co-Leader" label on the roster, but literally zero additional
-   permissions — and they've lost whatever "Soldier" gave them, if
-   anything ever keys off that string specifically. This is a silent
-   no-op dressed up as a reward. Either add real Co-Leader permission
-   checks alongside the Leader ones, or remove the Promote button until
-   that's built.
+   `HandleKickMemberCallback`, etc.) checks `role == "Leader"` exactly.~~
+   **Fixed in UI Polish Wave 6.** Added a `canManageClan(role)` helper
+   (`role == "Leader" || role == "Co-Leader"`) and wired it into the
+   Applications Inbox, Accept/Reject, Manage Members roster access,
+   Kick, Guild Icon, and Guild Description checks. Co-Leader is
+   deliberately narrower than Leader, not identical: a Co-Leader can
+   only Kick a `Soldier` (not the Leader or another Co-Leader, checked
+   server-side in `HandleKickMemberCallback`, not just hidden in the
+   UI), cannot Promote anyone, and cannot Declare War or rename the
+   clan (those stay Leader-only - one is a 48h commitment for the
+   whole clan, the other spends Crystal). Promoting someone is a real
+   power grant now, not a cosmetic label.
 
 ## Confirmed still-open items from prior sessions (re-verified today)
 
@@ -74,12 +78,23 @@ Piercing Missile flow, exchange.go, deconstruct.go, and the highest-
 traffic tick-engine notifications (return-march loot, campaign
 engagement, boss loot, clan war, arena, espionage).
 
-Still plain text / not yet audited: admin.go, clan.go (guild-panel
-UI, not just its notification calls), jobs.go, research.go,
-diplomacy.go, federation.go, rebellion.go, crystal_exchange.go,
-ether.go, combat_road_encounters.go, agent.go, starvation.go, the
-remaining ~15 tick-engine notifications (tax collection, exploration
-discovery, ETA/proximity alerts), and all AI-advisor
-`FormatForTelegram` outputs (Governor, Fleet Commander, Economy/
-Research/Battle/Guild/Galaxy/NPC advisors, Dev Console). Recommend
-these as the next batch.
+Wave 4 covered: all 9 AI-advisor `FormatForTelegram` outputs (Governor,
+Fleet Commander, Economy/Research/Battle/Guild/Galaxy/NPC advisors, Dev
+Console).
+
+Wave 5 covered: clan.go's full guild-panel UI (not just its
+notification calls) - and surfaced bug #4 above, since fixed in wave 6.
+
+Wave 6 covered: research.go, ether.go, crystal_exchange.go,
+rebellion.go, jobs.go, agent.go - plus the bug #4 Co-Leader permission
+fix itself (see above). `jobs.go`'s two cooldown messages
+(`HandleTeleport`, `HandleGatherSunlight`) were deliberately left plain
+- low-value one-liners, not worth the churn.
+
+Still plain text / not yet audited: admin.go, diplomacy.go,
+federation.go, combat_road_encounters.go, starvation.go (the tick
+notifications in `internal/engine/starvation`, not a handler file),
+the remaining ~15 tick-engine notifications (tax collection,
+exploration discovery, ETA/proximity alerts). Recommend admin.go and
+combat_road_encounters.go (the two largest remaining files) as the
+next batch - wave 7.

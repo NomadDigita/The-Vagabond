@@ -57,22 +57,17 @@ func (h *EconomyHandler) HandleCrystalExchangePanel(c telebot.Context) error {
 	var crystal float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", campID).Scan(&crystal)
 
-	text := fmt.Sprintf(
-		"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\n"+
-			"CRYSTAL EXCHANGE\n"+
-			"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\n\n"+
-			"💎 Your Crystal: %.2f\n\n"+
-			"Crystal is the rarest resource in the world. Convert it into a "+
+	text := "🔮 " + htmlBold("CRYSTAL EXCHANGE") + "\n" + divider + "\n\n" +
+		fmt.Sprintf("💎 Your Crystal: %s\n\n", htmlCode(fmt.Sprintf("%.2f", crystal))) +
+		htmlItalic("Crystal is the rarest resource in the world. Convert it into a "+
 			"large stockpile of any other resource - the rate depends on how "+
 			"commonly that resource is needed; everyday materiel converts "+
-			"generously, other rare currencies conservatively.\n\n"+
-			"Rates (per 1 💎 Crystal):\n",
-		crystal,
-	)
+			"generously, other rare currencies conservatively.") + "\n\n" +
+		htmlBold("Rates (per 1 💎 Crystal)") + "\n"
 	for _, conv := range crystalConversionTable {
-		text += fmt.Sprintf("%s %s: %.0f\n", conv.emoji, conv.label, conv.rate)
+		text += fmt.Sprintf("%s %s: %s\n", conv.emoji, conv.label, htmlCode(fmt.Sprintf("%.0f", conv.rate)))
 	}
-	text += "\n🔮━━━━━━━━━━━━━━━━━━━━━━🔮"
+	text += "\n" + divider
 
 	selector := &telebot.ReplyMarkup{}
 	var rows []telebot.Row
@@ -84,7 +79,7 @@ func (h *EconomyHandler) HandleCrystalExchangePanel(c telebot.Context) error {
 	}
 	selector.Inline(rows...)
 
-	return c.Send(text, selector)
+	return c.Send(text, telebot.ModeHTML, selector)
 }
 
 // HandleCrystalExchangeCallback performs the conversion: resourceKey|amount.
@@ -153,10 +148,10 @@ func (h *EconomyHandler) HandleCrystalExchangeCallback(c telebot.Context) error 
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Exchange failed to commit."})
 	}
 
-	respText := fmt.Sprintf("🔮 Converted %.2f Crystal into %s %.0f %s!", crystalAmount, conv.emoji, actualGain, conv.label)
+	respText := fmt.Sprintf("🔮 Converted %s Crystal into %s %s!", htmlCode(fmt.Sprintf("%.2f", crystalAmount)), conv.emoji, htmlBold(fmt.Sprintf("%.0f %s", actualGain, conv.label)))
 	if wasClamped {
-		respText += "\n⚠️ Warehouse capacity capped the gain - some value was lost. Upgrade storage before converting large batches."
+		respText += "\n⚠️ " + htmlItalic("Warehouse capacity capped the gain - some value was lost. Upgrade storage before converting large batches.")
 	}
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔮 Exchange complete!"})
-	return c.Send(respText, keyboards.MainNavigation())
+	return c.Send(respText, telebot.ModeHTML, keyboards.MainNavigation())
 }

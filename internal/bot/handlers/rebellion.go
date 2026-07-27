@@ -62,18 +62,13 @@ func (h *RebellionHandler) HandleRebellionPanel(c telebot.Context) error {
 
 	rankEmoji, rankTitle := renownRank(totalContributed)
 
-	panelText := fmt.Sprintf(
-		"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\n"+
-			"✊ CONTACT THE REBELLION ✊\n"+
-			"🚩━━━━━━━━━━━━━━━━━━━━━━🚩\n\n"+
-			"\"The Old World fell, but we endure. Support the Rebellion's cause with Scrap, and we'll share what intel and salvaged tech we can spare.\"\n\n"+
-			"%s YOUR STANDING: %s\n"+
-			"📊 Lifetime Contribution: %.0f Scrap\n"+
-			"♻️ Your Scrap Reserves: %.0f\n\n"+
-			"💰 Donate %.0f Scrap ➜ Receive 🧠 %.0f Neuro Cores + Renown\n\n"+
-			"🏆 TOP REBELLION SUPPORTERS:\n",
-		rankEmoji, rankTitle, totalContributed, scrap, donationAmount, donationAmount*0.10,
-	)
+	panelText := "✊ " + htmlBold("CONTACT THE REBELLION") + " 🚩\n" + divider + "\n\n" +
+		htmlQuote("The Old World fell, but we endure. Support the Rebellion's cause with Scrap, and we'll share what intel and salvaged tech we can spare.") + "\n\n" +
+		fmt.Sprintf("%s YOUR STANDING: %s\n", rankEmoji, htmlBold(rankTitle)) +
+		fmt.Sprintf("📊 Lifetime Contribution: %s\n", htmlCode(fmt.Sprintf("%.0f Scrap", totalContributed))) +
+		fmt.Sprintf("♻️ Your Scrap Reserves: %s\n\n", htmlCode(fmt.Sprintf("%.0f", scrap))) +
+		fmt.Sprintf("💰 Donate %s ➜ Receive 🧠 %s + Renown\n\n", htmlCode(fmt.Sprintf("%.0f Scrap", donationAmount)), htmlCode(fmt.Sprintf("%.0f Neuro Cores", donationAmount*0.10))) +
+		htmlBold("🏆 TOP REBELLION SUPPORTERS") + "\n"
 
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT e.name, rs.total_contributed
@@ -89,20 +84,20 @@ func (h *RebellionHandler) HandleRebellionPanel(c telebot.Context) error {
 			if scanErr := rows.Scan(&name, &contrib); scanErr == nil {
 				medal := medalFor(rank)
 				emoji, title := renownRank(contrib)
-				panelText += fmt.Sprintf("%s %d. %s — %s %s (%.0f)\n", medal, rank, name, emoji, title, contrib)
+				panelText += fmt.Sprintf("%s %d. %s — %s %s %s\n", medal, rank, htmlEscape(name), emoji, title, htmlCode(fmt.Sprintf("(%.0f)", contrib)))
 				rank++
 			}
 		}
 		rows.Close()
 	}
 
-	panelText += "\n🚩━━━━━━━━━━━━━━━━━━━━━━🚩"
+	panelText += "\n" + divider
 
 	selector := &telebot.ReplyMarkup{}
 	btnDonate := selector.Data(fmt.Sprintf("💰 Donate %.0f Scrap", donationAmount), "rebellion_donate")
 	selector.Inline(selector.Row(btnDonate))
 
-	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
 func (h *RebellionHandler) HandleRebellionDonateCallback(c telebot.Context) error {
