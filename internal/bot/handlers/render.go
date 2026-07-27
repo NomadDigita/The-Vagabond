@@ -58,3 +58,29 @@ func htmlSpoiler(s string) string { return "<span class=\"tg-spoiler\">" + s + "
 // divider is a soft section separator used between blocks in longer
 // panel messages so they don't read as one dense wall of text.
 const divider = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈"
+
+// resourceEmoji gives a consistent icon per resource/item type across
+// every panel that lists tradeable stock (Exchange, Vault, Silo,
+// Deconstruct, etc.) instead of each screen picking its own.
+func resourceEmoji(itemType string) string {
+	switch strings.ToLower(itemType) {
+	case "metal":
+		return "🔩"
+	case "crystal":
+		return "🔮"
+	case "scrap":
+		return "⚙️"
+	case "dollars", "cash":
+		return "💵"
+	case "hydrogen":
+		return "🎈"
+	case "rations":
+		return "🍖"
+	case "soldiers", "soldier":
+		return "🪖"
+	case "mechs", "mech":
+		return "🤖"
+	default:
+		return "📦"
+	}
+}

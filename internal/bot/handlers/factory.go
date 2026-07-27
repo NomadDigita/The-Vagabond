@@ -30,6 +30,17 @@ func renderOrEdit(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error
 	return c.Send(text, markup)
 }
 
+// renderOrEditHTML is identical to renderOrEdit but renders with
+// Telegram HTML parse mode - only use at a call site where `text` has
+// already been built with the htmlBold/htmlItalic/htmlCode/htmlEscape
+// helpers in render.go.
+func renderOrEditHTML(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error {
+	if c.Callback() != nil {
+		return c.Edit(text, gopkg.ModeHTML, markup)
+	}
+	return c.Send(text, gopkg.ModeHTML, markup)
+}
+
 func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 	_ = c.Notify(gopkg.Typing)
 

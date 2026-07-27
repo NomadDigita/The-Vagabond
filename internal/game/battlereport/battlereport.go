@@ -12,6 +12,17 @@ import (
 	"strings"
 )
 
+// htmlEscape makes a string safe to place inside a Telegram HTML-mode
+// message. Duplicated locally (rather than imported from bot/handlers)
+// so this package stays dependency-free, per the repo's package-per-
+// feature convention. AttackerName/DefenderName ultimately come from
+// player-set encampment names, so this MUST run on them before they're
+// interpolated into the report.
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
+}
+
 // UnitTally is one line item in a composition or loss listing.
 type UnitTally struct {
 	Emoji string
@@ -113,49 +124,57 @@ type Round struct {
 	DefenderNotes []string
 }
 
-// Render produces the full SpaceHunt-style report text for one round.
+// Render produces the full SpaceHunt-style report text for one round,
+// using Telegram HTML formatting: bold for names/headers, monospace for
+// unit tallies so columns line up, and an expandable blockquote for the
+// final loot line so a long battle report doesn't crowd out the verdict.
 func Render(r Round) string {
-	roundLabel := fmt.Sprintf("🔮 ROUND %d:", r.Number)
+	attacker := htmlEscape(r.AttackerName)
+	defender := htmlEscape(r.DefenderName)
+
+	roundLabel := fmt.Sprintf("🔮 <b>ROUND %d</b>", r.Number)
 	if r.Outcome != OutcomeOngoing {
-		roundLabel = "🔮 END:"
+		roundLabel = "🔮 <b>FINAL CLASH</b>"
 	}
 
 	msg := fmt.Sprintf(
-		"⚔️ %s  VS  🛡️ %s\n%s\n\n"+
-			"⚔️ %s: %s\n"+
-			"🛡️ %s: %s\n\n"+
-			"💥 Losses:\n"+
-			"⚔️ %s: %s\n"+
-			"🛡️ %s: %s",
-		r.AttackerName, r.DefenderName, roundLabel,
-		r.AttackerName, renderComposition(r.AttackerComposition),
-		r.DefenderName, renderComposition(r.DefenderComposition),
-		r.AttackerName, renderLossEmojis(r.AttackerLosses),
-		r.DefenderName, renderLossEmojis(r.DefenderLosses),
+		"⚔️ <b>%s</b>  🆚  🛡️ <b>%s</b>\n%s\n\n"+
+			"⚔️ %s: <code>%s</code>\n"+
+			"🛡️ %s: <code>%s</code>\n\n"+
+			"💥 <b>Losses:</b>\n"+
+			"⚔️ %s: <code>%s</code>\n"+
+			"🛡️ %s: <code>%s</code>",
+		attacker, defender, roundLabel,
+		attacker, renderComposition(r.AttackerComposition),
+		defender, renderComposition(r.DefenderComposition),
+		attacker, renderLossEmojis(r.AttackerLosses),
+		defender, renderLossEmojis(r.DefenderLosses),
 	)
 
 	if len(r.AttackerNotes) > 0 {
-		msg += "\n" + strings.Join(r.AttackerNotes, "\n")
+		msg += "\n" + htmlEscape(strings.Join(r.AttackerNotes, "\n"))
 	}
 	if len(r.DefenderNotes) > 0 {
-		msg += "\n" + strings.Join(r.DefenderNotes, "\n")
+		msg += "\n" + htmlEscape(strings.Join(r.DefenderNotes, "\n"))
 	}
 
 	switch r.Outcome {
 	case OutcomeOngoing:
-		msg += "\n\n⏳ Next skirmish round resolves on the next clock tick."
+		msg += "\n\n⏳ <i>Next skirmish round resolves on the next clock tick.</i>"
 	case OutcomeAttackerWon:
-		msg += fmt.Sprintf("\n\n🏆 %s WON!", r.AttackerName)
+		msg += fmt.Sprintf("\n\n🏆 <b>%s WON!</b> 🎉", attacker)
 		if len(r.LootLines) > 0 {
-			msg += fmt.Sprintf("\n\n📦 Battle Debris: %s\n%s collected the debris.", strings.Join(r.LootLines, " "), r.LootCollector)
+			msg += fmt.Sprintf("\n\n📦 <b>Battle Debris:</b>\n<blockquote expandable>%s</blockquote>\n🏅 %s collected the debris.",
+				htmlEscape(strings.Join(r.LootLines, "\n")), htmlEscape(r.LootCollector))
 		}
 	case OutcomeDefenderWon:
-		msg += fmt.Sprintf("\n\n🏆 %s WON!", r.DefenderName)
+		msg += fmt.Sprintf("\n\n🏆 <b>%s WON!</b> 🎉", defender)
 		if len(r.LootLines) > 0 {
-			msg += fmt.Sprintf("\n\n📦 Battle Debris: %s\n%s collected the debris.", strings.Join(r.LootLines, " "), r.LootCollector)
+			msg += fmt.Sprintf("\n\n📦 <b>Battle Debris:</b>\n<blockquote expandable>%s</blockquote>\n🏅 %s collected the debris.",
+				htmlEscape(strings.Join(r.LootLines, "\n")), htmlEscape(r.LootCollector))
 		}
 	case OutcomeDraw:
-		msg += "\n\n🤝 DRAW! Neither side could break the other. Forces disengage and retreat."
+		msg += "\n\n🤝 <b>DRAW!</b> Neither side could break the other. Forces disengage and retreat."
 	}
 
 	return msg

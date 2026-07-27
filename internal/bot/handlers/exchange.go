@@ -50,7 +50,7 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 
 	if err != nil {
 		log.Printf("Failed scanning exchange listings: %v", err)
-		listingsText = "📡 Static: Connection interrupted."
+		listingsText = "📡 " + htmlItalic("Static: Connection interrupted.")
 	} else {
 		defer rows.Close()
 		index := 1
@@ -59,28 +59,30 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 			var qty int
 			var price float64
 			if err := rows.Scan(&listID, &sellerName, &itemType, &qty, &price); err == nil {
-				listingsText += fmt.Sprintf("[%d] Outpost: %s\n    Item: %d %s | Price: $%0.f\n\n", index, sellerName, qty, itemType, price)
+				listingsText += fmt.Sprintf("🏷️ [%d] Outpost: %s\n    %s %s | 💵 Price: %s\n\n",
+					index, htmlBold(htmlEscape(sellerName)), resourceEmoji(itemType), htmlCode(fmt.Sprintf("%d %s", qty, itemType)), htmlCode(fmt.Sprintf("$%.0f", price)))
 				btnBuy := selector.Data(fmt.Sprintf("🛍️ Buy [%d]", index), "buy_listing", listID)
 				buttons = append(buttons, selector.Row(btnBuy))
 				index++
 			}
 		}
 		if listingsText == "" {
-			listingsText = "📋 Board Clean: No active player listings currently on exchange.\n\n"
+			listingsText = "📋 " + htmlItalic("Board Clean: No active player listings currently on exchange.") + "\n\n"
 		}
 	}
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"💱 PLAYER AUCTION MARKET EXCHANGE\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Buy raw tactical stockpiles listed by other active outposts:\n\n"+
+		"💱 %s\n"+divider+"\n"+
+			"%s\n\n"+
 			"%s"+
-			"POST NEW LISTING:\n"+
-			"🔩 [Sell 50 Metal] — List on exchange for $150 Cash\n"+
-			"☢️ [Sell 20 Crystal] — List on exchange for $300 Cash\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
+			"%s\n"+
+			"🔩 Sell 50 Metal — List on exchange for $150 Cash\n"+
+			"☢️ Sell 20 Crystal — List on exchange for $300 Cash\n"+
+			divider,
+		htmlBold("PLAYER AUCTION MARKET EXCHANGE"),
+		htmlItalic("Buy raw tactical stockpiles listed by other active outposts:"),
 		listingsText,
+		htmlBold("📮 POST NEW LISTING"),
 	)
 
 	btnPostSteel := selector.Data("🔩 List 50 Metal ($150)", "post_listing", "metal")
@@ -89,7 +91,7 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
 
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {

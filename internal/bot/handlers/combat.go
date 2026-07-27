@@ -116,10 +116,8 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	}
 	rows.Close()
 
-	dashboard := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"⚔️ TACTICAL TARGET MATRIX\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Select an action button to initiate an offensive sweep. Co-Op calls allow teammates to coordinate power.\n\n"
+	dashboard := "⚔️ " + htmlBold("TACTICAL TARGET MATRIX") + "\n" + divider + "\n" +
+		htmlItalic("Select an action button to initiate an offensive sweep. Co-Op calls allow teammates to coordinate power.") + "\n\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
@@ -141,7 +139,9 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 				marchTimeStr = fmt.Sprintf("%.1fh", marchingMinutes/60.0)
 			}
 
-			dashboard += fmt.Sprintf("[%d] Outpost: %s (%s Territory)\n    Commander: %s\n    Travel Steps: %.0f | March Time: %s\n    Estimated Loot: %.1f Scrap\n\n", i+1, t.name, t.region, t.owner, steps, marchTimeStr, t.lootable)
+			dashboard += fmt.Sprintf("🎯 [%d] Outpost: %s %s\n    👤 Commander: %s\n    🚶 Travel: %s | ⏱️ March Time: %s\n    💰 Estimated Loot: %s\n\n",
+				i+1, htmlBold(htmlEscape(t.name)), htmlCode("("+t.region+" Territory)"), htmlEscape(t.owner),
+				htmlCode(fmt.Sprintf("%.0f steps", steps)), htmlCode(marchTimeStr), htmlCode(fmt.Sprintf("%.1f Scrap", t.lootable)))
 			btnRaid := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", t.id)
 			btnSpy := selector.Data(fmt.Sprintf("🛰️ Spy [%d]", i+1), "spy_action", t.id)
 			btnCoop := selector.Data(fmt.Sprintf("🤝 Co-Op [%d]", i+1), "stage_coop", t.id)
@@ -165,14 +165,14 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 			var resTime time.Time
 			if err := rowsCoop.Scan(&rID, &aName, &dName, &resTime); err == nil {
 				if !hasCoops {
-					dashboard += "🤝 ACTIVE CO-OP RECRUITMENT LOBBIES:\n"
+					dashboard += "🤝 " + htmlBold("ACTIVE CO-OP RECRUITMENT LOBBIES") + "\n"
 					hasCoops = true
 				}
 				timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
-				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  Departure window expires in: %ds\n\n", aName, dName, timeLeft)
+				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  ⏳ Departure window expires in: %s\n\n", htmlEscape(aName), htmlEscape(dName), htmlCode(fmt.Sprintf("%ds", timeLeft)))
 				btnJoin := selector.Data(fmt.Sprintf("🤝 Join %s", aName), "join_coop", rID)
 				buttons = append(buttons, selector.Row(btnJoin))
 			}
@@ -186,23 +186,23 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 			WHERE observer_encampment_id = $1 AND target_key = $2
 		)`, myCampID, worldintel.RogueDroneNestKey).Scan(&knowsRogueNest)
 	if knowsRogueNest {
-		dashboard += "🤖 DISCOVERED AI CONTACT:\n" +
-			"[AI] Rogue Drone Nest (Sector 1,1)\n" +
-			"    Loot Yield: Metal/Crystal/Scrap | Journey Time: Dynamic\n" +
-			"    🔍 Recon first to see exactly what you're facing!\n\n"
+		dashboard += "🤖 " + htmlBold("DISCOVERED AI CONTACT") + "\n" +
+			"👹 [AI] Rogue Drone Nest " + htmlCode("(Sector 1,1)") + "\n" +
+			"    💰 Loot Yield: Metal/Crystal/Scrap | ⏱️ Journey Time: Dynamic\n" +
+			"    🔍 " + htmlItalic("Recon first to see exactly what you're facing!") + "\n\n"
 
 		btnReconAI := selector.Data("🔍 Recon Rogue Drone Nest", "recon_ai", worldintel.RogueDroneNestKey)
 		btnAI := selector.Data("🤖 Skirmish Rogue Drones", "launch_raid", worldintel.RogueDroneNestKey)
 		buttons = append(buttons, selector.Row(btnReconAI), selector.Row(btnAI))
 	} else {
-		dashboard += "🧭 UNKNOWN WORLD CONTACTS:\n" +
-			"No AI or rival outposts are targetable yet. Complete /explore expeditions to establish first contact.\n\n"
+		dashboard += "🧭 " + htmlBold("UNKNOWN WORLD CONTACTS") + "\n" +
+			htmlItalic("No AI or rival outposts are targetable yet. Complete /explore expeditions to establish first contact.") + "\n\n"
 	}
 
-	dashboard += "━━━━━━━━━━━━━━━━━━━━━━"
+	dashboard += divider
 
 	selector.Inline(buttons...)
-	return c.Send(dashboard, selector)
+	return c.Send(dashboard, telebot.ModeHTML, selector)
 }
 
 func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
@@ -2001,16 +2001,17 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 	}
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"🛰️ EXPEDITION COMMAND PANEL\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Attacker: %s\n"+
-			"Estimated Arrival: %s (%ds remaining)\n\n"+
-			"Use the action buttons to speed up or abort the current expedition.\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		attackerName,
-		resolveTime.UTC().Format("15:04:05"),
-		timeLeft,
+		"🛰️ %s\n"+divider+"\n"+
+			"⚔️ Attacker: %s\n"+
+			"🕐 Estimated Arrival: %s\n"+
+			"⏳ Time Remaining: %s\n\n"+
+			"%s\n"+
+			divider,
+		htmlBold("EXPEDITION COMMAND PANEL"),
+		htmlEscape(attackerName),
+		htmlCode(resolveTime.UTC().Format("15:04:05")),
+		htmlCode(fmt.Sprintf("%ds", timeLeft)),
+		htmlItalic("Use the action buttons to speed up or abort the current expedition."),
 	)
 
 	selector := &telebot.ReplyMarkup{}
@@ -2018,5 +2019,5 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 	btnAbort := selector.Data("↩️ Abort", "exp_action", "abort", raidID)
 	selector.Inline(selector.Row(btnSpeed, btnAbort))
 
-	return c.Send(panelText, selector)
+	return c.Send(panelText, telebot.ModeHTML, selector)
 }

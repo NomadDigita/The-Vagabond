@@ -167,10 +167,8 @@ func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {
 		return c.Send("⚠️ System connection error reading hangar inventory.")
 	}
 
-	panelText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"♻️ DECONSTRUCTION BAY\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"Scrap unwanted units to recover 40% of their build materials and free up Hangar capacity.\n\n"
+	panelText := "♻️ " + htmlBold("DECONSTRUCTION BAY") + "\n" + divider + "\n" +
+		htmlItalic("Scrap unwanted units to recover 40% of their build materials and free up Hangar capacity.") + "\n\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var rows []telebot.Row
@@ -182,19 +180,19 @@ func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {
 			continue
 		}
 		anyUnits = true
-		panelText += fmt.Sprintf("%s [%s] — In Hangar: %d\n", d.emoji, d.title, count)
+		panelText += fmt.Sprintf("%s %s — In Hangar: %s\n", d.emoji, htmlBold(d.title), htmlCode(fmt.Sprintf("%d", count)))
 		btn := selector.Data(fmt.Sprintf("%s Scrap 1 %s", d.emoji, d.title), "deconstruct_item", d.key)
 		rows = append(rows, selector.Row(btn))
 	}
 
 	if !anyUnits {
-		panelText += "Your Hangar is empty — nothing to deconstruct yet."
+		panelText += htmlItalic("Your Hangar is empty — nothing to deconstruct yet.")
 	}
 
-	panelText += "\n━━━━━━━━━━━━━━━━━━━━━━"
+	panelText += "\n" + divider
 	selector.Inline(rows...)
 
-	return renderOrEdit(c, panelText, selector)
+	return renderOrEditHTML(c, panelText, selector)
 }
 
 func (h *DeconstructHandler) fetchInventory(ctx context.Context, campID string) (map[string]int, error) {

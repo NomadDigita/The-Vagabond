@@ -62,14 +62,14 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 
 	if err != nil {
 		log.Printf("Silo target scanning failed: %v", err)
-		targetsText = "📡 Static: Target matrix scanning offline."
+		targetsText = "📡 " + htmlItalic("Static: Target matrix scanning offline.")
 	} else {
 		defer rows.Close()
 		index := 1
 		for rows.Next() {
 			var tID, tName, tOwner string
 			if err := rows.Scan(&tID, &tName, &tOwner); err == nil {
-				targetsText += fmt.Sprintf("[%d] Outpost: %s | Commander: %s\n", index, tName, tOwner)
+				targetsText += fmt.Sprintf("🎯 [%d] Outpost: %s | 👤 Commander: %s\n", index, htmlBold(htmlEscape(tName)), htmlEscape(tOwner))
 				btnLaunch := selector.Data(fmt.Sprintf("🚀 Detonate [%d]", index), "launch_icbm", tID)
 				btnPierce := selector.Data(fmt.Sprintf("🎯 Pierce [%d]", index), "launch_piercing", tID)
 				buttons = append(buttons, selector.Row(btnLaunch, btnPierce))
@@ -77,26 +77,30 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 			}
 		}
 		if targetsText == "" {
-			targetsText = "⚠️ Radar Clean: No rival outposts detected in strike range.\n"
+			targetsText = "⚠️ " + htmlItalic("Radar Clean: No rival outposts detected in strike range.") + "\n"
 		}
 	}
 
 	panelText := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"☢️ STRATEGIC SILO STRIKE DECK\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"Deploy crafted inter-continental nuclear devices to vaporize rival targets.\n\n"+
-			"SILO STORAGE INVENTORY:\n"+
-			"🚀 Active ICBM Warheads: %d warheads\n"+
-			"🎯☢️ Piercing Missiles: %d warheads\n\n"+
-			"TARGET ACQUISITION RADAR:\n"+
+		"☢️ %s\n"+divider+"\n"+
+			"%s\n\n"+
+			"%s\n"+
+			"🚀 Active ICBM Warheads: %s\n"+
+			"🎯☢️ Piercing Missiles: %s\n\n"+
+			"%s\n"+
 			"%s"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		nukes, piercingMissiles, targetsText,
+			divider,
+		htmlBold("STRATEGIC SILO STRIKE DECK"),
+		htmlItalic("Deploy crafted inter-continental nuclear devices to vaporize rival targets."),
+		htmlBold("🏭 SILO STORAGE INVENTORY"),
+		htmlCode(fmt.Sprintf("%d warheads", nukes)),
+		htmlCode(fmt.Sprintf("%d warheads", piercingMissiles)),
+		htmlBold("📡 TARGET ACQUISITION RADAR"),
+		targetsText,
 	)
 
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
@@ -162,10 +166,11 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 
 			if defenderUserID != 0 {
 				defenderAlert := fmt.Sprintf(
-					"🛡️ DEFENSE ALERT: ANTI-MISSILE BATTERY INTERCEPT!\n\n"+
-						"Our Anti-Missile Battery successfully shot down an incoming tactical ICBM strike from Outpost [%s]!\n"+
-						"💀 Casualties: 0 | Structural Damage: None.",
-					attackerName,
+					"🛡️ %s\n\n"+
+						"Our Anti-Missile Battery successfully shot down an incoming tactical ICBM strike from Outpost %s! 🎉\n\n"+
+						"💀 Casualties: %s | Structural Damage: %s",
+					htmlBold("DEFENSE ALERT: ANTI-MISSILE BATTERY INTERCEPT!"),
+					htmlBold(htmlEscape(attackerName)), htmlCode("0"), htmlItalic("None"),
 				)
 				_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
 			}
@@ -185,10 +190,12 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 
 		if defenderUserID != 0 {
 			defenderAlert := fmt.Sprintf(
-				"🛡️ DEFENSE ALERT: ICBM SHIELD INTERCEPT!\n\n"+
-					"Our Nuclear Shielding installations have successfully intercepted and destroyed an incoming tactical ICBM strike from Outpost [%s]!\n"+
-					"💀 Casualties: 0 | Structural Damage: None. 1 Shielding charge depleted.",
-				attackerName,
+				"🛡️ %s\n\n"+
+					"Our Nuclear Shielding installations have successfully intercepted and destroyed an incoming tactical ICBM strike from Outpost %s! 🎉\n\n"+
+					"💀 Casualties: %s | Structural Damage: %s\n"+
+					"🔋 1 Shielding charge depleted.",
+				htmlBold("DEFENSE ALERT: ICBM SHIELD INTERCEPT!"),
+				htmlBold(htmlEscape(attackerName)), htmlCode("0"), htmlItalic("None"),
 			)
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
 		}
@@ -217,12 +224,16 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 
 	if defenderUserID != 0 {
 		defenderAlert := fmt.Sprintf(
-			"💥 CATASTROPHIC NUCLEAR ALERT: DIRECT IMPACT!\n\n"+
-				"An ICBM warhead launched by Outpost [%s] has detonated directly on your base!\n\n"+
-				"💀 Casualties: 50%% of all barracks troops vaporized.\n"+
-				"🛠️ Structural Damage: Your [%s] level dropped by 1.\n"+
-				"⚙️ Resource Looted: -%.1f Scrap stolen from warehouses.",
-			attackerName, randomModule, stolenScrap,
+			"💥 %s\n\n"+
+				"An ICBM warhead launched by Outpost %s has detonated directly on your base! ☢️\n\n"+
+				"💀 Casualties: %s\n"+
+				"🛠️ Structural Damage: your %s dropped by %s.\n"+
+				"⚙️ Resource Looted: %s stolen from warehouses.",
+			htmlBold("CATASTROPHIC NUCLEAR ALERT: DIRECT IMPACT!"),
+			htmlBold(htmlEscape(attackerName)),
+			htmlCode("50% of all barracks troops vaporized"),
+			htmlCode(randomModule), htmlCode("1 level"),
+			htmlCode(fmt.Sprintf("-%.1f Scrap", stolenScrap)),
 		)
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
 	}
@@ -300,10 +311,11 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 
 			if defenderUserID != 0 {
 				defenderAlert := fmt.Sprintf(
-					"🛡️ DEFENSE ALERT: ANTI-MISSILE BATTERY INTERCEPT!\n\n"+
-						"Our Anti-Missile Battery successfully shot down an incoming Piercing Missile strike from Outpost [%s]!\n"+
-						"💀 Casualties: 0 | Structural Damage: None.",
-					attackerName,
+					"🛡️ %s\n\n"+
+						"Our Anti-Missile Battery successfully shot down an incoming Piercing Missile strike from Outpost %s! 🎉\n\n"+
+						"💀 Casualties: %s | Structural Damage: %s",
+					htmlBold("DEFENSE ALERT: ANTI-MISSILE BATTERY INTERCEPT!"),
+					htmlBold(htmlEscape(attackerName)), htmlCode("0"), htmlItalic("None"),
 				)
 				_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
 			}
@@ -335,11 +347,14 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 
 	if defenderUserID != 0 {
 		defenderAlert := fmt.Sprintf(
-			"🎯☢️ CATASTROPHIC ALERT: PIERCING MISSILE IMPACT!\n\n"+
-				"A Piercing Missile launched by Outpost [%s] has slipped past your Nuclear Shields entirely and detonated directly on your Defense Grid!\n\n"+
-				"🛠️ Structural Damage: Every turret type (Light/Heavy Laser, Gauss Cannon, Ion Cannon, Plasma Turret) dropped 1 level.\n"+
-				"⚙️ Resource Looted: -%.1f Scrap stolen from warehouses.",
-			attackerName, stolenScrap,
+			"🎯☢️ %s\n\n"+
+				"A Piercing Missile launched by Outpost %s has slipped past your Nuclear Shields entirely and detonated directly on your Defense Grid! 💥\n\n"+
+				"🛠️ Structural Damage: %s\n"+
+				"⚙️ Resource Looted: %s stolen from warehouses.",
+			htmlBold("CATASTROPHIC ALERT: PIERCING MISSILE IMPACT!"),
+			htmlBold(htmlEscape(attackerName)),
+			htmlCode("Every turret type (Light/Heavy Laser, Gauss Cannon, Ion Cannon, Plasma Turret) −1 level"),
+			htmlCode(fmt.Sprintf("-%.1f Scrap", stolenScrap)),
 		)
 		_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderAlert)
 	}
