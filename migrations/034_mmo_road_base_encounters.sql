@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- THE VAGABOND - MMO LIVING WORLD: ROAD-VS-BASE ENCOUNTERS
--- (032_mmo_road_base_encounters.sql)
+-- (034_mmo_road_base_encounters.sql)
 -- DB Engine: PostgreSQL (Supabase)
 --
 -- Completes MMO_WORLD_EVOLUTION_PLAN.md Phase 4 milestone 2, which shipped

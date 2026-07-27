@@ -804,7 +804,7 @@ func executeStartupMigrations(db *sql.DB) {
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_moving_route_scan ON raids(state) WHERE state IN ('marching', 'returning') AND movement_state = 'moving';`,
 
-		// See migrations/032_mmo_road_base_encounters.sql for the annotated
+		// See migrations/034_mmo_road_base_encounters.sql for the annotated
 		// version. Completes Phase 4 milestone 2 (expedition-vs-base road
 		// encounters), the "expeditions and bases" half that road_encounters
 		// above (expedition-vs-expedition only) didn't cover.
