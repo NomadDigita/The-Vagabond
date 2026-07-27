@@ -82,7 +82,7 @@ func (h *GuildAssistantHandler) HandleGuildAssistant(c telebot.Context) error {
 		return c.Send(errorMessageForGuildAssistant(err))
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: guild_assistant_refresh ────────────────────────────────
@@ -103,5 +103,5 @@ func (h *GuildAssistantHandler) HandleGuildAssistantRefreshCallback(c telebot.Co
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

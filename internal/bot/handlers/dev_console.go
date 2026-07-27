@@ -90,7 +90,7 @@ func (h *DevConsoleHandler) HandleWeeklyReport(c telebot.Context) error {
 		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: dev_console_refresh ────────────────────────────────────
@@ -120,7 +120,7 @@ func (h *DevConsoleHandler) HandleDevConsoleRefreshCallback(c telebot.Context) e
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Report refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── /admin_ask <question> ────────────────────────────────────────────

@@ -178,45 +178,46 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message
-// suitable for a Telegram reply.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🖥️ AI DEVELOPER CONSOLE — GAME ACTIVITY REPORT\n\n")
+	b.WriteString("🖥️ " + ai.HTMLBold("AI DEVELOPER CONSOLE — GAME ACTIVITY REPORT") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 
 	if len(rec.Highlights) > 0 {
-		b.WriteString("HIGHLIGHTS:\n")
+		b.WriteString("✨ " + ai.HTMLBold("HIGHLIGHTS") + "\n")
 		for _, h := range rec.Highlights {
-			fmt.Fprintf(&b, "  • %s\n", h)
+			fmt.Fprintf(&b, "  • %s\n", ai.HTMLEscape(h))
 		}
 		b.WriteString("\n")
 	}
 
 	if rec.NewPlayerNarrative != "" {
-		fmt.Fprintf(&b, "🆕 New players: %s\n\n", rec.NewPlayerNarrative)
+		fmt.Fprintf(&b, "🆕 New players: %s\n\n", ai.HTMLEscape(rec.NewPlayerNarrative))
 	}
 	if rec.TopPerformerNarrative != "" {
-		fmt.Fprintf(&b, "👑 Top performers: %s\n\n", rec.TopPerformerNarrative)
+		fmt.Fprintf(&b, "👑 Top performers: %s\n\n", ai.HTMLEscape(rec.TopPerformerNarrative))
 	}
 	if rec.RecommendationsForAdmins != "" {
-		fmt.Fprintf(&b, "🛠️ For admins: %s\n\n", rec.RecommendationsForAdmins)
+		fmt.Fprintf(&b, "🛠️ For admins: %s\n\n", ai.HTMLEscape(rec.RecommendationsForAdmins))
 	}
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\nThis is a read-only summary — no player, setting, or game data has been changed automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a read-only summary — no player, setting, or game data has been changed automatically."))
 	return b.String()
 }

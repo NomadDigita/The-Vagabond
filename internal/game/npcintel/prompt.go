@@ -191,30 +191,31 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message
-// suitable for a Telegram reply.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🤖 AI NPC INTELLIGENCE\n\n")
+	b.WriteString("🤖 " + ai.HTMLBold("AI NPC INTELLIGENCE") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 
 	if rec.NestReading != "" {
-		fmt.Fprintf(&b, "🛰️ Nest reading: %s\n\n", rec.NestReading)
+		fmt.Fprintf(&b, "🛰️ Nest reading: %s\n\n", ai.HTMLEscape(rec.NestReading))
 	}
 
 	if len(rec.FleetCompositionAdvice) > 0 {
-		b.WriteString("FLEET COMPOSITION ADVICE:\n")
+		b.WriteString("🪖 " + ai.HTMLBold("FLEET COMPOSITION ADVICE") + "\n")
 		for _, v := range rec.FleetCompositionAdvice {
 			icon := "❔"
 			switch v.Verdict {
@@ -225,18 +226,18 @@ func FormatForTelegram(rec *Recommendation) string {
 			case "fine":
 				icon = "✅"
 			}
-			fmt.Fprintf(&b, "%s %s — %s\n   💭 %s\n", icon, v.Unit, v.Verdict, v.Reason)
+			fmt.Fprintf(&b, "%s %s — %s\n   💭 %s\n", icon, ai.HTMLEscape(v.Unit), ai.HTMLEscape(v.Verdict), ai.HTMLEscape(v.Reason))
 		}
 		b.WriteString("\n")
 	}
 
 	if rec.KeyRisk != "" {
-		fmt.Fprintf(&b, "⚠️ Key risk: %s\n", rec.KeyRisk)
+		fmt.Fprintf(&b, "⚠️ Key risk: %s\n", ai.HTMLEscape(rec.KeyRisk))
 	}
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\nThis is a tactical read only — no raid has been launched and no units have been moved automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a tactical read only — no raid has been launched and no units have been moved automatically."))
 	return b.String()
 }

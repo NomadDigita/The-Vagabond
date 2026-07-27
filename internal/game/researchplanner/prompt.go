@@ -266,40 +266,42 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🧪 AI RESEARCH PLANNER\n\n")
+	b.WriteString("🧪 " + ai.HTMLBold("AI RESEARCH PLANNER") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
 	if rec.GoalUsed != "" {
-		fmt.Fprintf(&b, "🎯 Goal: %s\n\n", rec.GoalUsed)
+		fmt.Fprintf(&b, "🎯 Goal: %s\n\n", ai.HTMLEscape(rec.GoalUsed))
 	}
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 
 	if len(rec.RecommendedOrder) > 0 {
-		b.WriteString("RECOMMENDED RESEARCH ORDER:\n")
+		b.WriteString("🔬 " + ai.HTMLBold("RECOMMENDED RESEARCH ORDER") + "\n")
 		for i, n := range rec.RecommendedOrder {
-			fmt.Fprintf(&b, "%d. %s → Lvl %d (%d cores)\n   → %s (%s)\n",
-				i+1, n.Node, n.TargetLevel, n.CoreCost, n.Reason, n.ExpectedGain)
+			fmt.Fprintf(&b, "%d. %s ➜ %s\n   %s (%s)\n",
+				i+1, ai.HTMLBold(ai.HTMLEscape(n.Node)), ai.HTMLCode(fmt.Sprintf("Lvl %d — %d cores", n.TargetLevel, n.CoreCost)), ai.HTMLEscape(n.Reason), ai.HTMLEscape(n.ExpectedGain))
 		}
 		b.WriteString("\n")
 	}
 
-	fmt.Fprintf(&b, "🧠 Cores needed: %d | Available: %d\n", rec.CoresNeeded, rec.CoresAvailable)
+	fmt.Fprintf(&b, "🧠 Cores needed: %s | Available: %s\n", ai.HTMLCode(fmt.Sprintf("%d", rec.CoresNeeded)), ai.HTMLCode(fmt.Sprintf("%d", rec.CoresAvailable)))
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\nThis is a recommendation only — nothing has been researched automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a recommendation only — nothing has been researched automatically."))
 	return b.String()
 }

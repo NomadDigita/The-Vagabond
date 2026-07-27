@@ -170,39 +170,40 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message
-// suitable for a Telegram reply.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("📊 AI BATTLE ANALYST\n\n")
+	b.WriteString("📊 " + ai.HTMLBold("AI BATTLE ANALYST") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 
 	if len(rec.KeyPatterns) > 0 {
-		b.WriteString("KEY PATTERNS:\n")
+		b.WriteString("🔎 " + ai.HTMLBold("KEY PATTERNS") + "\n")
 		for i, p := range rec.KeyPatterns {
-			fmt.Fprintf(&b, "%d. %s\n   📎 %s\n   💡 %s\n", i+1, p.Observation, p.Evidence, p.Suggestion)
+			fmt.Fprintf(&b, "%d. %s\n   📎 %s\n   💡 %s\n", i+1, ai.HTMLBold(ai.HTMLEscape(p.Observation)), ai.HTMLEscape(p.Evidence), ai.HTMLEscape(p.Suggestion))
 		}
 		b.WriteString("\n")
 	}
 
 	if rec.RecommendedFocus != "" {
-		fmt.Fprintf(&b, "🎯 Recommended focus: %s\n", rec.RecommendedFocus)
+		fmt.Fprintf(&b, "🎯 Recommended focus: %s\n", ai.HTMLEscape(rec.RecommendedFocus))
 	}
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\nThis is an analysis of past battles only — nothing has been changed automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is an analysis of past battles only — nothing has been changed automatically."))
 	return b.String()
 }

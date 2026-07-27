@@ -63,7 +63,7 @@ func (h *BattleAnalystHandler) HandleBattleAnalyst(c telebot.Context) error {
 		return c.Send("⚠️ The AI Battle Analyst is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: battle_analyst_refresh ─────────────────────────────────
@@ -87,5 +87,5 @@ func (h *BattleAnalystHandler) HandleBattleAnalystRefreshCallback(c telebot.Cont
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

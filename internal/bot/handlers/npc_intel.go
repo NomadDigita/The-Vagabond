@@ -66,7 +66,7 @@ func (h *NPCIntelHandler) HandleNPCIntel(c telebot.Context) error {
 		return c.Send("⚠️ The AI NPC Intelligence advisor is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: npc_intel_refresh ──────────────────────────────────────
@@ -90,5 +90,5 @@ func (h *NPCIntelHandler) HandleNPCIntelRefreshCallback(c telebot.Context) error
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Intel refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

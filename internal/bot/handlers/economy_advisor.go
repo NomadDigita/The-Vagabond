@@ -56,7 +56,7 @@ func (h *EconomyAdvisorHandler) HandleEconomyAdvisor(c telebot.Context) error {
 		return c.Send("⚠️ The AI Economy Advisor is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: econ_refresh ────────────────────────────────────────────
@@ -79,5 +79,5 @@ func (h *EconomyAdvisorHandler) HandleEconomyAdvisorRefreshCallback(c telebot.Co
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

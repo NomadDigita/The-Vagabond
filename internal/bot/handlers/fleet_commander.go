@@ -59,7 +59,7 @@ func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 		return c.Send("⚠️ The AI Fleet Commander is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: fleet_refresh ──────────────────────────────────────────
@@ -82,5 +82,5 @@ func (h *FleetCommanderHandler) HandleFleetCommanderRefreshCallback(c telebot.Co
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

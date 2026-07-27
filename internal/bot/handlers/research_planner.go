@@ -85,7 +85,7 @@ func (h *ResearchPlannerHandler) HandleResearchPlanner(c telebot.Context) error 
 		return c.Send("⚠️ The AI Research Planner is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: research_refresh ──────────────────────────────────────
@@ -109,7 +109,7 @@ func (h *ResearchPlannerHandler) HandleResearchPlannerRefreshCallback(c telebot.
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: research_goal <goal> ──────────────────────────────────
@@ -138,5 +138,5 @@ func (h *ResearchPlannerHandler) HandleResearchPlannerGoalCallback(c telebot.Con
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🎯 Goal set: " + goal})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

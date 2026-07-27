@@ -74,7 +74,7 @@ func (h *GovernorHandler) HandleGovernor(c telebot.Context) error {
 		return c.Send("⚠️ The AI Planet Governor is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: gov_refresh ────────────────────────────────────────────
@@ -99,7 +99,7 @@ func (h *GovernorHandler) HandleGovernorRefreshCallback(c telebot.Context) error
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Analysis refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: gov_toggle_autopilot ──────────────────────────────────

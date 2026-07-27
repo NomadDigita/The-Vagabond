@@ -64,7 +64,7 @@ func (h *GalaxyAdvisorHandler) HandleGalaxyAdvisor(c telebot.Context) error {
 		return c.Send("⚠️ The AI Dynamic Galaxy advisor is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
 // ── callback: galaxy_advisor_refresh ─────────────────────────────────
@@ -88,5 +88,5 @@ func (h *GalaxyAdvisorHandler) HandleGalaxyAdvisorRefreshCallback(c telebot.Cont
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Briefing refreshed."})
-	return c.Send(text, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard)
 }

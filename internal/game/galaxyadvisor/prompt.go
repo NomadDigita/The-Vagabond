@@ -172,43 +172,44 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message
-// suitable for a Telegram reply.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🌌 AI DYNAMIC GALAXY ADVISOR\n\n")
+	b.WriteString("🌌 " + ai.HTMLBold("AI DYNAMIC GALAXY ADVISOR") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 
 	if rec.HomeContinentAdvice != "" {
-		fmt.Fprintf(&b, "🏠 Home continent: %s\n\n", rec.HomeContinentAdvice)
+		fmt.Fprintf(&b, "🏠 Home continent: %s\n\n", ai.HTMLEscape(rec.HomeContinentAdvice))
 	}
 	if rec.GalaxyOutlook != "" {
-		fmt.Fprintf(&b, "🌍 Galaxy outlook: %s\n\n", rec.GalaxyOutlook)
+		fmt.Fprintf(&b, "🌍 Galaxy outlook: %s\n\n", ai.HTMLEscape(rec.GalaxyOutlook))
 	}
 
 	if len(rec.RecommendedActions) > 0 {
-		b.WriteString("RECOMMENDED ACTIONS:\n")
+		b.WriteString("🛰️ " + ai.HTMLBold("RECOMMENDED ACTIONS") + "\n")
 		for i, a := range rec.RecommendedActions {
-			fmt.Fprintf(&b, "%d. %s\n   💡 %s\n", i+1, a.Action, a.Reason)
+			fmt.Fprintf(&b, "%d. %s\n   💡 %s\n", i+1, ai.HTMLBold(ai.HTMLEscape(a.Action)), ai.HTMLEscape(a.Reason))
 		}
 		b.WriteString("\n")
 	}
 
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\nThis is a briefing only — nothing has been moved, built, or changed automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a briefing only — nothing has been moved, built, or changed automatically."))
 	return b.String()
 }

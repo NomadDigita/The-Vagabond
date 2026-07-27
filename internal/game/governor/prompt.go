@@ -156,36 +156,37 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message
-// suitable for a Telegram reply.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. Every field is LLM-generated text, so it's escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🧠 AI PLANET GOVERNOR\n\n")
+	b.WriteString("🧠 " + ai.HTMLBold("AI PLANET GOVERNOR") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 	if len(rec.PriorityActions) > 0 {
-		b.WriteString("PRIORITY ACTIONS:\n")
+		b.WriteString("🎯 " + ai.HTMLBold("PRIORITY ACTIONS") + "\n")
 		for i, a := range rec.PriorityActions {
-			fmt.Fprintf(&b, "%d. %s — %s\n   → %s\n", i+1, a.Action, a.Target, a.Reason)
+			fmt.Fprintf(&b, "%d. %s — %s\n   ➜ %s\n", i+1, ai.HTMLBold(ai.HTMLEscape(a.Action)), ai.HTMLEscape(a.Target), ai.HTMLEscape(a.Reason))
 		}
 		b.WriteString("\n")
 	}
 	if rec.StorageWarning != "" {
-		fmt.Fprintf(&b, "⚠️ Storage: %s\n", rec.StorageWarning)
+		fmt.Fprintf(&b, "⚠️ Storage: %s\n", ai.HTMLEscape(rec.StorageWarning))
 	}
 	if rec.ExpectedImpact != "" {
-		fmt.Fprintf(&b, "📈 Expected impact: %s\n", rec.ExpectedImpact)
+		fmt.Fprintf(&b, "📈 Expected impact: %s\n", ai.HTMLEscape(rec.ExpectedImpact))
 	}
-	b.WriteString("\nThis is a recommendation only — nothing has been built, upgraded, or queued automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a recommendation only — nothing has been built, upgraded, or queued automatically."))
 	return b.String()
 }

@@ -186,38 +186,40 @@ func ParseRecommendation(text string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("💹 AI ECONOMY ADVISOR\n\n")
+	b.WriteString("💹 " + ai.HTMLBold("AI ECONOMY ADVISOR") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
 	if len(rec.TopROIActions) > 0 {
-		b.WriteString("TOP ROI ACTIONS:\n")
+		b.WriteString("💰 " + ai.HTMLBold("TOP ROI ACTIONS") + "\n")
 		for i, a := range rec.TopROIActions {
-			fmt.Fprintf(&b, "%d. %s — %s (%s)\n   → %s\n", i+1, a.Action, a.Target, a.ExpectedGain, a.Reason)
+			fmt.Fprintf(&b, "%d. %s — %s (%s)\n   ➜ %s\n", i+1, ai.HTMLBold(ai.HTMLEscape(a.Action)), ai.HTMLEscape(a.Target), ai.HTMLCode(ai.HTMLEscape(a.ExpectedGain)), ai.HTMLEscape(a.Reason))
 		}
 		b.WriteString("\n")
 	}
 	if rec.Bottlenecks != "" {
-		fmt.Fprintf(&b, "🚧 Bottlenecks: %s\n", rec.Bottlenecks)
+		fmt.Fprintf(&b, "🚧 Bottlenecks: %s\n", ai.HTMLEscape(rec.Bottlenecks))
 	}
 	if rec.MarketTiming != "" {
-		fmt.Fprintf(&b, "📈 Market timing: %s\n", rec.MarketTiming)
+		fmt.Fprintf(&b, "📈 Market timing: %s\n", ai.HTMLEscape(rec.MarketTiming))
 	}
 	if rec.TradingAdvice != "" {
-		fmt.Fprintf(&b, "🤝 Trading advice: %s\n", rec.TradingAdvice)
+		fmt.Fprintf(&b, "🤝 Trading advice: %s\n", ai.HTMLEscape(rec.TradingAdvice))
 	}
-	b.WriteString("\nThis is a recommendation only — nothing has been bought, sold, or built automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a recommendation only — nothing has been bought, sold, or built automatically."))
 	return b.String()
 }

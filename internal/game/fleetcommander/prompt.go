@@ -216,18 +216,20 @@ var actionEmoji = map[string]string{
 	string(ActionSplit):     "🔀",
 }
 
-// FormatForTelegram renders a Recommendation as a plain-text message.
+// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
+// message. All fields are LLM-generated text and are escaped via
+// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
-	b.WriteString("🎖️ AI FLEET COMMANDER\n\n")
+	b.WriteString("🎖️ " + ai.HTMLBold("AI FLEET COMMANDER") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Reasoning)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Reasoning)))
 		return b.String()
 	}
 
@@ -235,14 +237,14 @@ func FormatForTelegram(rec *Recommendation) string {
 	if emoji == "" {
 		emoji = "🎯"
 	}
-	fmt.Fprintf(&b, "%s RECOMMENDATION: %s (confidence: %s)\n\n", emoji, strings.ToUpper(rec.Recommendation), rec.Confidence)
-	fmt.Fprintf(&b, "💭 Reasoning: %s\n", rec.Reasoning)
+	fmt.Fprintf(&b, "%s %s: %s (confidence: %s)\n\n", emoji, ai.HTMLBold("RECOMMENDATION"), ai.HTMLBold(ai.HTMLEscape(strings.ToUpper(rec.Recommendation))), ai.HTMLCode(rec.Confidence))
+	fmt.Fprintf(&b, "💭 Reasoning: %s\n", ai.HTMLEscape(rec.Reasoning))
 	if rec.RiskAssessment != "" {
-		fmt.Fprintf(&b, "⚠️ Risk: %s\n", rec.RiskAssessment)
+		fmt.Fprintf(&b, "⚠️ Risk: %s\n", ai.HTMLEscape(rec.RiskAssessment))
 	}
 	if strings.EqualFold(rec.Recommendation, string(ActionSplit)) && rec.SuggestedSplit != "" {
-		fmt.Fprintf(&b, "🔀 Suggested split: %s\n", rec.SuggestedSplit)
+		fmt.Fprintf(&b, "🔀 Suggested split: %s\n", ai.HTMLEscape(rec.SuggestedSplit))
 	}
-	b.WriteString("\nThis is a recommendation only — no fleet has been launched automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("This is a recommendation only — no fleet has been launched automatically."))
 	return b.String()
 }
