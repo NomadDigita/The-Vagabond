@@ -189,71 +189,6 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-// explorationSiteTemplate is one entry in the pool spawnExplorationSites
-// rolls from - a flavor name/type paired with a reward currency and
-// amount range.
-type explorationSiteTemplate struct {
-	siteType   string
-	namePrefix string
-	rewardType string
-	minAmount  float64
-	maxAmount  float64
-}
-
-var explorationTemplates = []explorationSiteTemplate{
-	{"Ruins", "Ancient Ruins", "ether", 15, 40},
-	{"Cache", "Supply Cache", "metal", 200, 500},
-	{"Cache", "Supply Cache", "crystal", 80, 200},
-	{"Artifact", "Tech Artifact", "ether", 30, 70},
-	{"Beacon", "Signal Beacon", "dollars", 500, 1500},
-}
-
-const explorationSiteRollChance = 0.15
-const explorationSiteDuration = 3 * time.Hour
-
-// spawnExplorationSites is Phase 7 item 10's world-exploration engine.
-// Same shape as the weather engine's per-continent roll: each continent
-// gets a 15% chance per tick to spawn a new undiscovered site, but only
-// if it doesn't already have one waiting to be claimed (keeps the map
-// from flooding with sites nobody has time to reach).
-func (e *Engine) spawnExplorationSites(ctx context.Context, tx *sql.Tx) error {
-	for _, continent := range world.Continents {
-		var hasOpenSite bool
-		err := tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM exploration_sites WHERE continent = $1 AND claimed_by IS NULL AND expires_at > CURRENT_TIMESTAMP)",
-			continent).Scan(&hasOpenSite)
-		if err != nil {
-			continue
-		}
-		if hasOpenSite {
-			continue
-		}
-		if rand.Float64() >= explorationSiteRollChance {
-			continue
-		}
-
-		tmpl := explorationTemplates[rand.Intn(len(explorationTemplates))]
-		sector := rand.Intn(99) + 1
-		siteName := fmt.Sprintf("%s (Sector %d)", tmpl.namePrefix, sector)
-		rewardAmount := tmpl.minAmount + rand.Float64()*(tmpl.maxAmount-tmpl.minAmount)
-		expiresAt := time.Now().UTC().Add(explorationSiteDuration)
-
-		_, err = tx.ExecContext(ctx,
-			"INSERT INTO exploration_sites (continent, site_name, site_type, reward_type, reward_amount, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
-			continent, siteName, tmpl.siteType, tmpl.rewardType, rewardAmount, expiresAt)
-		if err != nil {
-			log.Printf("Failed inserting exploration site for %s: %v", continent, err)
-			continue
-		}
-
-		headline := fmt.Sprintf("🧭 UNCHARTED SIGNAL: A %s has been detected over %s. First outpost to dispatch an expedition claims it - check /explore.", siteName, continent)
-		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
-			log.Printf("Failed writing exploration-site news headline: %v", err)
-		}
-	}
-	return nil
-}
-
 // resolveExplorationDispatches credits the reward and marks the site
 // claimed for every expedition whose resolve_time has passed.
 func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) error {
@@ -814,7 +749,6 @@ func (e *Engine) ProcessTick() {
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
-		{"exploration_spawn", e.spawnExplorationSites},
 		{"exploration_resolve", e.resolveExplorationDispatches},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
@@ -2923,6 +2857,13 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenseRatingModifier *= 1.30
 		}
 
+		// mechOffenseCount is the mech count used ONLY for the attack
+		// rating below; it defaults to the true totMechs and is reduced
+		// only by acid_rain, so totMechs itself always stays accurate
+		// for casualties, reports, and split ratios (see the bug-fix
+		// comment on the acid_rain case below).
+		mechOffenseCount := totMechs
+
 		// Dynamic weather combat rating calculations
 		var weatherNotice string = ""
 		switch activeWeather {
@@ -2934,7 +2875,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			offenseRatingModifier *= 0.75
 			weatherNotice = "\n⚠️ RADIATION STORM ACTIVE: Fallout morale penalty applied! Base offense rating reduced by 25%."
 		case "acid_rain":
-			totMechs = totMechs / 2
+			// BUG FIX (2026-07-26): this used to mutate the shared
+			// totMechs variable directly ("totMechs = totMechs / 2"),
+			// which silently corrupted every downstream use of totMechs
+			// for the rest of this raid's resolution - casualty-pool
+			// distribution (soldierMechShare), the reported attacker
+			// casualty count, the Mechs count shown in the battle
+			// report, and the co-op raid split ratio all read totMechs
+			// AFTER this line ran, so an acid-rain battle would show
+			// half as many mechs as were actually committed and would
+			// misallocate casualties between the soldier/mech pool and
+			// the specialist pool. The corrosion penalty is now applied
+			// only to a dedicated mechOffenseCount used solely in the
+			// attack-rating formula below; totMechs itself (and every
+			// report/ratio that depends on it) stays accurate.
+			mechOffenseCount = totMechs / 2
 			weatherNotice = "\n⚠️ ACID RAIN ACTIVE: Corrosive rain detected! Armored Mech defensive structures degraded by 50%."
 		case "emp":
 			// EMP hits electronics-dependent systems hard - a flat, non-random offense penalty.
@@ -2963,7 +2918,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			mechOffenseMultiplier = 1.0
 		}
 
-		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(totMechs) * mechOffenseMultiplier))
+		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(mechOffenseCount) * mechOffenseMultiplier))
 
 		// Destroyer: anti-drone/anti-air specialist. Rating scales up the
 		// more drones/jets the defender is fielding - a hard counter unit.

@@ -203,9 +203,18 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	cargoSummary := ""
 	if result.Draw {
 		outcome = "draw"
-	} else if result.AWon == (myRaidID == raidAID) {
-		// "AWon" is expressed in terms of raid_a/raid_b; translate to
-		// winner/loser in terms of the two actual raid IDs.
+	} else if result.AWon {
+		// BUG FIX (2026-07-26): result.AWon already means "my side won" -
+		// ResolveBattle(myPower, otherPower) was called with my side as
+		// its "A" argument, independent of which raid happens to be
+		// road_encounters.raid_a vs raid_b (an unrelated canonical
+		// ordering used only for the pending-pair unique index). The
+		// previous code compared result.AWon against (myRaidID ==
+		// raidAID), which silently flipped the winner backwards - and
+		// therefore the cargo-capture direction, the winner_raid_id
+		// column, and the "WON"/"LOST" battle-report headline for BOTH
+		// sides - every time the attacker happened to be raid_b in that
+		// ordering. Fixed: just use result.AWon directly.
 		winnerRaidID, loserRaidID = myRaidID, otherRaidID
 	} else {
 		winnerRaidID, loserRaidID = otherRaidID, myRaidID
