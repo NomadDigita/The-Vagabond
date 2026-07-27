@@ -64,24 +64,22 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		var pendingCount int
 		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM clan_applications WHERE user_id = $1 AND status = 'pending'", sender.ID).Scan(&pendingCount)
 
-		panelText := "🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️\n" +
-			"🏴 SECTOR ALLIANCE NETWORK 🏴\n" +
-			"🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️\n\n" +
-			"Clans unite up to 15 commanders under joint defense grids and war decks.\n\n" +
-			"You are currently unaligned.\n"
+		panelText := "🛡️ " + htmlBold("SECTOR ALLIANCE NETWORK") + " 🏴\n" + divider + "\n\n" +
+			htmlItalic("Clans unite up to 15 commanders under joint defense grids and war decks.") + "\n\n" +
+			"You are currently " + htmlItalic("unaligned") + ".\n"
 
 		if pendingCount > 0 {
-			panelText += fmt.Sprintf("\n⏳ You have %d pending application(s) awaiting Leader approval.\n", pendingCount)
+			panelText += fmt.Sprintf("\n⏳ You have %s pending application(s) awaiting Leader approval.\n", htmlCode(fmt.Sprintf("%d", pendingCount)))
 		}
 
 		panelText += "\n🔍 Browse existing clans with /clans, or found your own:\n" +
 			"⚒️ /clan_create [name]\n" +
-			"🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️"
+			divider
 
 		btnBrowse := selector.Data("🔍 Browse Clans", "browse_clans", "0")
 		selector.Inline(selector.Row(btnBrowse))
 
-		return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+		return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 	}
 
 	var members int
@@ -110,21 +108,19 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	}
 
 	panelText := fmt.Sprintf(
-		"🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️\n"+
-			"🏴 CLAN HUD: %s 🏴\n"+
-			"🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️\n"+
-			"👥 Commanders Enlisted: %d / 15\n"+
+		"🛡️ %s\n"+divider+"\n"+
+			"👥 Commanders Enlisted: %s\n"+
 			"🎖️ Your Rank: %s\n",
-		clanName.String, members, role.String,
+		htmlBold(fmt.Sprintf("CLAN HUD: %s", htmlEscape(clanName.String))), htmlCode(fmt.Sprintf("%d / 15", members)), htmlEscape(role.String),
 	)
 
 	if inWar {
-		panelText += fmt.Sprintf("\n⚔️ AT WAR with %s!\n📊 Score: %.0f - %.0f\n", activeWarOpponent, warScoreMine, warScoreTheirs)
+		panelText += fmt.Sprintf("\n⚔️ %s %s!\n📊 Score: %s\n", htmlBold("AT WAR with"), htmlBold(htmlEscape(activeWarOpponent)), htmlCode(fmt.Sprintf("%.0f - %.0f", warScoreMine, warScoreTheirs)))
 	}
 	if pendingApps > 0 {
-		panelText += fmt.Sprintf("\n📬 %d pending application(s) - review them below!\n", pendingApps)
+		panelText += fmt.Sprintf("\n📬 %s pending application(s) - review them below!\n", htmlCode(fmt.Sprintf("%d", pendingApps)))
 	}
-	panelText += "🛡️━━━━━━━━━━━━━━━━━━━━━━🛡️"
+	panelText += divider
 
 	var buttons []telebot.Row
 
@@ -145,7 +141,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnLeave))
 
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 // HandleBrowseClansCallback / HandleBrowseClansCommand lists all clans,
@@ -154,9 +150,7 @@ func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
 
-	panelText := "🔍━━━━━━━━━━━━━━━━━━━━━━🔍\n" +
-		"🏴 BROWSE CLANS 🏴\n" +
-		"🔍━━━━━━━━━━━━━━━━━━━━━━🔍\n\n"
+	panelText := "🔍 " + htmlBold("BROWSE CLANS") + " 🏴\n" + divider + "\n\n"
 
 	query := fmt.Sprintf(`
 		SELECT c.id, c.name, COUNT(uc.user_id) as members, COALESCE(SUM(%s), 0) as total_score
@@ -180,7 +174,7 @@ func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 			var score float64
 			if scanErr := rows.Scan(&clanID, &name, &members, &score); scanErr == nil {
 				any = true
-				panelText += fmt.Sprintf("%s %d. 🏴 %s (%d/15) — 🏅 %.0f pts\n", medalFor(rank), rank, name, members, score)
+				panelText += fmt.Sprintf("%s %d. 🏴 %s %s — 🏅 %s pts\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("(%d/15)", members)), htmlCode(fmt.Sprintf("%.0f", score)))
 				if members < 15 {
 					btn := selector.Data(fmt.Sprintf("📨 Apply to %s", name), "clan_apply", clanID)
 					buttons = append(buttons, selector.Row(btn))
@@ -190,13 +184,13 @@ func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 		}
 		rows.Close()
 		if !any {
-			panelText += "No Clans exist yet. Found the first one with /clan_create [name]!\n"
+			panelText += htmlItalic("No Clans exist yet. Found the first one with /clan_create [name]!") + "\n"
 		}
 	}
 
-	panelText += "\n🔍━━━━━━━━━━━━━━━━━━━━━━🔍"
+	panelText += "\n" + divider
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 // HandleApplyToClanCallback sends a join application, notifying the Leader.
@@ -256,9 +250,7 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	}
 	defer rows.Close()
 
-	panelText := "📬━━━━━━━━━━━━━━━━━━━━━━📬\n" +
-		"PENDING CLAN APPLICATIONS\n" +
-		"📬━━━━━━━━━━━━━━━━━━━━━━📬\n\n"
+	panelText := "📬 " + htmlBold("PENDING CLAN APPLICATIONS") + "\n" + divider + "\n\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
@@ -269,7 +261,7 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 		var fName, username string
 		if scanErr := rows.Scan(&userID, &fName, &username); scanErr == nil {
 			any = true
-			panelText += fmt.Sprintf("👤 %s (@%s)\n", fName, username)
+			panelText += fmt.Sprintf("👤 %s (@%s)\n", htmlEscape(fName), htmlEscape(username))
 			btnAccept := selector.Data("✅ Accept", "clan_app_accept", strconv.FormatInt(userID, 10), clanID)
 			btnReject := selector.Data("❌ Reject", "clan_app_reject", strconv.FormatInt(userID, 10), clanID)
 			buttons = append(buttons, selector.Row(btnAccept, btnReject))
@@ -277,11 +269,11 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	}
 
 	if !any {
-		panelText += "No pending applications.\n"
+		panelText += htmlItalic("No pending applications.") + "\n"
 	}
-	panelText += "📬━━━━━━━━━━━━━━━━━━━━━━📬"
+	panelText += divider
 	selector.Inline(buttons...)
-	return c.Send(panelText, selector)
+	return c.Send(panelText, telebot.ModeHTML, selector)
 }
 
 // HandleApplicationDecisionCallback processes Accept/Reject on an application.
@@ -324,11 +316,11 @@ func (h *ClanHandler) HandleApplicationDecisionCallback(c telebot.Context, accep
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Soldier')", targetID, clanID)
 		_, _ = tx.ExecContext(ctx, "DELETE FROM clan_applications WHERE clan_id = $1 AND user_id = $2", clanID, targetID)
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, "✅ APPLICATION ACCEPTED: Welcome to your new Clan!")
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, "✅ <b>APPLICATION ACCEPTED</b>: Welcome to your new Clan! 🎉")
 		_ = c.Respond(&telebot.CallbackResponse{Text: "✅ Applicant accepted!"})
 	} else {
 		_, _ = tx.ExecContext(ctx, "UPDATE clan_applications SET status = 'rejected' WHERE clan_id = $1 AND user_id = $2", clanID, targetID)
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, "❌ Your Clan application was declined.")
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, "❌ Your Clan application was <b>declined</b>.")
 		_ = c.Respond(&telebot.CallbackResponse{Text: "❌ Applicant rejected."})
 	}
 
@@ -359,10 +351,8 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 	}
 	defer rows.Close()
 
-	rosterText := "👥━━━━━━━━━━━━━━━━━━━━━━👥\n" +
-		"ALLIANCE ROSTER LISTING\n" +
-		"👥━━━━━━━━━━━━━━━━━━━━━━👥\n" +
-		"Manage your allied commanders below:\n\n"
+	rosterText := "👥 " + htmlBold("ALLIANCE ROSTER LISTING") + "\n" + divider + "\n" +
+		htmlItalic("Manage your allied commanders below:") + "\n\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
@@ -372,7 +362,7 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 		var memberID int64
 		var fName, username, role string
 		if err := rows.Scan(&memberID, &fName, &username, &role); err == nil {
-			rosterText += fmt.Sprintf("[%d] %s (@%s)\n    Rank: %s\n\n", index, fName, username, role)
+			rosterText += fmt.Sprintf("🎖️ [%d] %s (@%s)\n    Rank: %s\n\n", index, htmlBold(htmlEscape(fName)), htmlEscape(username), htmlCode(role))
 
 			if senderRole == "Leader" && memberID != sender.ID {
 				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
@@ -383,9 +373,9 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 		}
 	}
 
-	rosterText += "👥━━━━━━━━━━━━━━━━━━━━━━👥"
+	rosterText += divider
 	selector.Inline(buttons...)
-	return c.Send(rosterText, selector)
+	return c.Send(rosterText, telebot.ModeHTML, selector)
 }
 
 // HandleKickMemberCallback processes kicking members from the alliance
@@ -419,7 +409,7 @@ func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
 	}
 
-	alertMsg := "🚪 ALLIANCE NOTICE: You have been removed from the alliance roster by the Clan Leader."
+	alertMsg := "🚪 <b>ALLIANCE NOTICE</b>: You have been removed from the alliance roster by the Clan Leader."
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 
 	_ = tx.Commit()
@@ -455,7 +445,7 @@ func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
 	}
 
-	alertMsg := "🛡️ CONGRATULATIONS: You have been promoted to Co-Leader within your alliance!"
+	alertMsg := "🛡️ <b>CONGRATULATIONS</b>: You have been promoted to Co-Leader within your alliance! 🎉"
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 
 	_ = tx.Commit()
@@ -487,19 +477,20 @@ func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 	alliancePower := (totalSoldiers * 10) + (totalMechs * 150)
 
 	report := fmt.Sprintf(
-		"📊━━━━━━━━━━━━━━━━━━━━━━📊\n"+
-			"ALLIANCE STRENGTH SUMMARY\n"+
-			"📊━━━━━━━━━━━━━━━━━━━━━━📊\n\n"+
-			"🏆 Collective Outpost Level: Level %d\n"+
-			"⚔️ Accumulated Military Power: %d Power Rating\n\n"+
-			"MILITARY ASSET STOCKPILES:\n"+
-			"🪖 Combined Infantry: %d Soldiers\n"+
-			"🤖 Combined Armored Core: %d Mechs\n"+
-			"📊━━━━━━━━━━━━━━━━━━━━━━📊",
-		totalLevel, alliancePower, totalSoldiers, totalMechs,
+		"📊 %s\n"+divider+"\n\n"+
+			"🏆 Collective Outpost Level: %s\n"+
+			"⚔️ Accumulated Military Power: %s\n\n"+
+			"%s\n"+
+			"🪖 Combined Infantry: %s\n"+
+			"🤖 Combined Armored Core: %s\n"+
+			divider,
+		htmlBold("ALLIANCE STRENGTH SUMMARY"),
+		htmlCode(fmt.Sprintf("Level %d", totalLevel)), htmlCode(fmt.Sprintf("%d Power Rating", alliancePower)),
+		htmlBold("MILITARY ASSET STOCKPILES"),
+		htmlCode(fmt.Sprintf("%d Soldiers", totalSoldiers)), htmlCode(fmt.Sprintf("%d Mechs", totalMechs)),
 	)
 
-	return c.Send(report, keyboards.EconomyNavigation())
+	return c.Send(report, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 // randomAnimalIcons is the pool /guild_icon draws from, matching
@@ -522,10 +513,8 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 	}
 
 	panelText := fmt.Sprintf(
-		"📜━━━━━━━━━━━━━━━━━━━━━━📜\n"+
-			"🏴 %s: RAIDS & TRANSFERS 🏴\n"+
-			"📜━━━━━━━━━━━━━━━━━━━━━━📜\n\n",
-		clanName,
+		"📜 %s\n"+divider+"\n\n",
+		htmlBold(fmt.Sprintf("%s: RAIDS & TRANSFERS", htmlEscape(clanName))),
 	)
 
 	rows, err := h.DB.QueryContext(ctx, `
@@ -544,17 +533,18 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 			var stolenScrap, stolenMetal, stolenCrystal float64
 			if scanErr := rows.Scan(&attName, &defName, &state, &stolenScrap, &stolenMetal, &stolenCrystal); scanErr == nil {
 				any = true
-				panelText += fmt.Sprintf("⚔️ %s ➜ %s [%s]\n   Loot: ⚙️%.0f 🔩%.0f 🔮%.0f\n\n", attName, defName, state, stolenScrap, stolenMetal, stolenCrystal)
+				panelText += fmt.Sprintf("⚔️ %s ➜ %s %s\n   Loot: %s\n\n", htmlEscape(attName), htmlEscape(defName), htmlCode("["+state+"]"),
+					htmlCode(fmt.Sprintf("⚙️%.0f 🔩%.0f 🔮%.0f", stolenScrap, stolenMetal, stolenCrystal)))
 			}
 		}
 		rows.Close()
 		if !any {
-			panelText += "No recent Clan activity.\n"
+			panelText += htmlItalic("No recent Clan activity.") + "\n"
 		}
 	}
 
-	panelText += "📜━━━━━━━━━━━━━━━━━━━━━━📜"
-	return c.Send(panelText)
+	panelText += divider
+	return c.Send(panelText, telebot.ModeHTML)
 }
 
 // HandleGuildMsg (/guildmsg [message]) broadcasts to every clan member.
@@ -576,7 +566,7 @@ func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
 		return c.Send("⚠️ You're not in a Clan.")
 	}
 
-	broadcast := fmt.Sprintf("📢 %s [%s]:\n\n%s", clanName, sender.FirstName, msg)
+	broadcast := fmt.Sprintf("📢 %s\n\n%s", htmlBold(fmt.Sprintf("%s [%s]:", htmlEscape(clanName), htmlEscape(sender.FirstName))), htmlEscape(msg))
 
 	rows, err := h.DB.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1 AND user_id != $2", clanID, sender.ID)
 	if err != nil {
@@ -662,9 +652,7 @@ func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
 func (h *ClanHandler) HandleBoard(c telebot.Context) error {
 	ctx := context.Background()
 
-	panelText := "📋━━━━━━━━━━━━━━━━━━━━━━📋\n" +
-		"🏴 CLAN RECRUITMENT BOARD 🏴\n" +
-		"📋━━━━━━━━━━━━━━━━━━━━━━📋\n\n"
+	panelText := "📋 " + htmlBold("CLAN RECRUITMENT BOARD") + " 🏴\n" + divider + "\n\n"
 
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT c.id, c.name, c.icon, c.description, COUNT(uc.user_id) as members
@@ -689,20 +677,20 @@ func (h *ClanHandler) HandleBoard(c telebot.Context) error {
 				if desc == "" {
 					desc = "(no description set)"
 				}
-				panelText += fmt.Sprintf("%s %s (%d/15)\n📜 %s\n\n", icon, name, members, desc)
+				panelText += fmt.Sprintf("%s %s %s\n📜 %s\n\n", icon, htmlBold(htmlEscape(name)), htmlCode(fmt.Sprintf("(%d/15)", members)), htmlEscape(desc))
 				btn := selector.Data(fmt.Sprintf("📨 Apply to %s", name), "clan_apply", clanID)
 				buttons = append(buttons, selector.Row(btn))
 			}
 		}
 		rows.Close()
 		if !any {
-			panelText += "No Clans are actively recruiting right now. Check /clans for the full list.\n"
+			panelText += htmlItalic("No Clans are actively recruiting right now. Check /clans for the full list.") + "\n"
 		}
 	}
 
-	panelText += "\n📋━━━━━━━━━━━━━━━━━━━━━━📋"
+	panelText += "\n" + divider
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 // HandleCreateClanCommand establishes a clan with a REAL custom name
@@ -751,7 +739,7 @@ func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 		return c.Send("⚠️ Error establishing Clan.")
 	}
 
-	return c.Send(fmt.Sprintf("🛡️🎉 CLAN ESTABLISHED: \"%s\"! You are its Leader. Use /clans to see it listed, or /clan for your HUD.", name))
+	return c.Send(fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML)
 }
 
 // HandleRenameClanCommand lets a Leader rename their clan for a real cost.
@@ -804,7 +792,7 @@ func (h *ClanHandler) HandleRenameClanCommand(c telebot.Context) error {
 		return c.Send("⚠️ Error saving new name.")
 	}
 
-	return c.Send(fmt.Sprintf("✅ CLAN RENAMED: Now known as \"%s\"!", newName))
+	return c.Send(fmt.Sprintf("✅ <b>CLAN RENAMED</b>: Now known as \"%s\"! 🎉", htmlEscape(newName)), telebot.ModeHTML)
 }
 
 // HandleLeaveClanCallback removes the member (or dissolves if Leader)
@@ -872,11 +860,11 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	}
 
 	alert := fmt.Sprintf(
-		"🚨⚔️ CLAN WAR DECLARED! ⚔️🚨\n\n"+
-			"War has begun against [%s]! Duration: 48 hours.\n"+
+		"🚨⚔️ %s ⚔️🚨\n\n"+
+			"War has begun against %s! Duration: %s.\n"+
 			"📊 Every successful raid your Clan members win against enemy Clan members earns War Score.\n"+
 			"🏆 The Clan with the highest score when the war ends claims victory and a shared spoils reward!",
-		enemyName,
+		htmlBold("CLAN WAR DECLARED!"), htmlBold(htmlEscape(enemyName)), htmlCode("48 hours"),
 	)
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚔️ WAR DECLARED on %s! 48h battle begins now.", enemyName)})
 

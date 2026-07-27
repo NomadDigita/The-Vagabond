@@ -28,6 +28,19 @@ next, grouped by how serious they are.
    `telebot.X` reference into factory.go, or a `gopkg.X` reference out
    of it, fails to compile in a way that's easy to misdiagnose.
 
+4. **Promoting a clan member sets a role that nothing else recognizes.**
+   `clan.go`, `HandlePromoteMemberCallback` sets `role = 'Co-Leader'`,
+   but every permission check in the file (`HandleGuildIcon`,
+   `HandleGuildDescription`, `HandleDeclareClanWarCallback`,
+   `HandleKickMemberCallback`, etc.) checks `role == "Leader"` exactly.
+   A promoted member gets a congratulatory message and a "Rank:
+   Co-Leader" label on the roster, but literally zero additional
+   permissions — and they've lost whatever "Soldier" gave them, if
+   anything ever keys off that string specifically. This is a silent
+   no-op dressed up as a reward. Either add real Co-Leader permission
+   checks alongside the Leader ones, or remove the Promote button until
+   that's built.
+
 ## Confirmed still-open items from prior sessions (re-verified today)
 
 4. **`coordinates.danger_level` is stored but never read by any game
