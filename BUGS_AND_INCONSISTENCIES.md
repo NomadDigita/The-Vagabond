@@ -54,12 +54,19 @@ next, grouped by how serious they are.
 
 ## Not yet audited (flagging so nothing gets assumed "checked")
 
-Combat (`combat.go`, 2,022 lines — the largest handler), Clan/Guild,
-Jobs, Silo, Deconstruct, Research, Diplomacy, Federation, Rebellion,
-Exchange, Exploration, Crystal Exchange, Ether, Admin, Dev Console, and
-all AI-advisor `FormatForTelegram` outputs (Governor, Fleet Commander,
-Economy/Research/Battle/Guild/Galaxy/NPC advisors) still send plain
-text and haven't been checked for keyboard-rendering issues or dead
-game-logic references beyond the two re-confirmed above. Recommend
-these as the next batch, in roughly that order (combat.go first since
-it's the single biggest player-facing surface).
+Waves 2-3 covered: battlereport.go (shared raid + World Boss combat
+report renderer), the notifications dispatcher (auto-detects HTML now),
+combat.go's Target Matrix + Expedition Panel, silo.go's full ICBM/
+Piercing Missile flow, exchange.go, deconstruct.go, and the highest-
+traffic tick-engine notifications (return-march loot, campaign
+engagement, boss loot, clan war, arena, espionage).
+
+Still plain text / not yet audited: admin.go, clan.go (guild-panel
+UI, not just its notification calls), jobs.go, research.go,
+diplomacy.go, federation.go, rebellion.go, crystal_exchange.go,
+ether.go, combat_road_encounters.go, agent.go, starvation.go, the
+remaining ~15 tick-engine notifications (tax collection, exploration
+discovery, ETA/proximity alerts), and all AI-advisor
+`FormatForTelegram` outputs (Governor, Fleet Commander, Economy/
+Research/Battle/Guild/Galaxy/NPC advisors, Dev Console). Recommend
+these as the next batch.
