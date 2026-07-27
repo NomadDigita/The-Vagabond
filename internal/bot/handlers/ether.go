@@ -57,29 +57,24 @@ func (h *EtherHandler) HandleEtherShop(c telebot.Context) error {
 	var ether float64
 	_ = h.DB.QueryRowContext(ctx, "SELECT ether FROM resources WHERE encampment_id = $1", campID).Scan(&ether)
 
-	panelText := fmt.Sprintf(
-		"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\n"+
-			"✨ THE ETHER SHOP ✨\n"+
-			"🔮━━━━━━━━━━━━━━━━━━━━━━🔮\n\n"+
-			"🔮 Your Ether: %.2f\n"+
-			"💡 Ether trickles in slowly from Technology research over time.\n\n"+
-			"⚗️ CONVERSION DEALS:\n",
-		ether,
-	)
+	panelText := "🔮 " + htmlBold("THE ETHER SHOP") + " ✨\n" + divider + "\n\n" +
+		fmt.Sprintf("🔮 Your Ether: %s\n", htmlCode(fmt.Sprintf("%.2f", ether))) +
+		htmlItalic("Ether trickles in slowly from Technology research over time.") + "\n\n" +
+		htmlBold("CONVERSION DEALS") + "\n"
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
 
 	for _, d := range etherDeals {
-		panelText += fmt.Sprintf("%s %.0f Ether ➜ %.0f %s\n", d.emoji, d.cost, d.amount, d.title)
+		panelText += fmt.Sprintf("%s %s ➜ %s\n", d.emoji, htmlCode(fmt.Sprintf("%.0f Ether", d.cost)), htmlBold(fmt.Sprintf("%.0f %s", d.amount, d.title)))
 		btn := selector.Data(fmt.Sprintf("%s Convert for %s", d.emoji, d.title), "ether_convert", d.key)
 		buttons = append(buttons, selector.Row(btn))
 	}
 
-	panelText += "🔮━━━━━━━━━━━━━━━━━━━━━━🔮"
+	panelText += "\n" + divider
 	selector.Inline(buttons...)
 
-	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
 func (h *EtherHandler) HandleEtherConvertCallback(c telebot.Context) error {

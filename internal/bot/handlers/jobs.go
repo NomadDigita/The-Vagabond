@@ -51,7 +51,7 @@ func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 	var electricity float64
 	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Electricity! Need %.0f, you have %.0f.", cost, electricity))
+		return c.Send(fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost)), htmlCode(fmt.Sprintf("%.0f", electricity))), telebot.ModeHTML)
 	}
 
 	var raidID string
@@ -74,7 +74,7 @@ func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 		return c.Send("⚠️ Error activating HyperSpeed.")
 	}
 
-	return c.Send(fmt.Sprintf("🚀⚡ HYPERSPEED ENGAGED! Your nearest mission's remaining time was cut in half. New ETA: %s", newResolve.UTC().Format("15:04 MST")))
+	return c.Send(fmt.Sprintf("🚀⚡ %s Your nearest mission's remaining time was cut in half. New ETA: %s", htmlBold("HYPERSPEED ENGAGED!"), htmlCode(newResolve.UTC().Format("15:04 MST"))), telebot.ModeHTML)
 }
 
 // HandleExtendPlanet (/newjobextendplanet) permanently increases storage
@@ -106,7 +106,7 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 	var metal, crystal float64
 	_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&metal, &crystal)
 	if metal < metalCost || crystal < crystalCost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal for extension level %d.", metalCost, crystalCost, extensionLvl+1))
+		return c.Send(fmt.Sprintf("❌ %s Need %s for extension level %d.", htmlBold("Insufficient Materials!"), htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost, crystalCost)), extensionLvl+1), telebot.ModeHTML)
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", metalCost, crystalCost, campID)
@@ -116,7 +116,7 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 		return c.Send("⚠️ Error extending planet.")
 	}
 
-	return c.Send(fmt.Sprintf("🌍✅ PLANET EXTENDED! Storage capacity +1000 permanently (extension level %d). Next extension: %.0f Metal, %.0f Crystal.", extensionLvl+1, metalCost*2, crystalCost*2))
+	return c.Send(fmt.Sprintf("🌍✅ %s Storage capacity +1000 permanently (extension level %d). Next extension: %s.", htmlBold("PLANET EXTENDED!"), extensionLvl+1, htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost*2, crystalCost*2))), telebot.ModeHTML)
 }
 
 // HandleTeleport (/newjobteleport) relocates your outpost to a fresh
@@ -150,7 +150,7 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 	var electricity float64
 	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Electricity! Need %.0f.", cost))
+		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
 	}
 
 	newX := rand.Intn(10000)
@@ -177,7 +177,7 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 		return c.Send("⚠️ Error completing teleport.")
 	}
 
-	return c.Send(fmt.Sprintf("🌀✨ TELEPORT COMPLETE! Your outpost now stands at [%d, %d] in a %s biome.", newX, newY, biome))
+	return c.Send(fmt.Sprintf("🌀✨ %s Your outpost now stands at %s in a %s biome.", htmlBold("TELEPORT COMPLETE!"), htmlCode(fmt.Sprintf("[%d, %d]", newX, newY)), biome), telebot.ModeHTML)
 }
 
 // HandleOrbitalManeuver (/newjoborbitalmaneuver) grants a temporary
@@ -206,7 +206,7 @@ func (h *JobsHandler) HandleOrbitalManeuver(c telebot.Context) error {
 	var electricity float64
 	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Electricity! Need %.0f.", cost))
+		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
 	}
 
 	buffUntil := time.Now().UTC().Add(buffDuration)
@@ -217,7 +217,7 @@ func (h *JobsHandler) HandleOrbitalManeuver(c telebot.Context) error {
 		return c.Send("⚠️ Error activating maneuver.")
 	}
 
-	return c.Send(fmt.Sprintf("🛰️✅ ORBITAL MANEUVER ACTIVE! +30%% defense rating for the next %.0f minutes.", buffDuration.Minutes()))
+	return c.Send(fmt.Sprintf("🛰️✅ %s +30%% defense rating for the next %s.", htmlBold("ORBITAL MANEUVER ACTIVE!"), htmlCode(fmt.Sprintf("%.0f minutes", buffDuration.Minutes()))), telebot.ModeHTML)
 }
 
 // HandleRepairUnits (/newjobrepairunits) - field repairs bring back a
@@ -246,7 +246,7 @@ func (h *JobsHandler) HandleRepairUnits(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 	if scrap < cost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Scrap! Need %.0f.", cost))
+		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
@@ -256,7 +256,7 @@ func (h *JobsHandler) HandleRepairUnits(c telebot.Context) error {
 		return c.Send("⚠️ Error repairing units.")
 	}
 
-	return c.Send(fmt.Sprintf("🔧✅ FIELD REPAIRS COMPLETE! +%d Soldiers restored to fighting condition.", repaired))
+	return c.Send(fmt.Sprintf("🔧✅ %s +%d Soldiers restored to fighting condition.", htmlBold("FIELD REPAIRS COMPLETE!"), repaired), telebot.ModeHTML)
 }
 
 // HandleRepairBuildings (/newjobrepairbuildings) speeds up any in-progress
@@ -291,7 +291,7 @@ func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 	if scrap < cost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Scrap! Need %.0f.", cost))
+		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
 	}
 
 	remaining := time.Until(readyAt)
@@ -304,7 +304,7 @@ func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 		return c.Send("⚠️ Error rushing construction.")
 	}
 
-	return c.Send("🏗️✅ CONSTRUCTION CREW DEPLOYED! Remaining build time on your active upgrade cut in half.")
+	return c.Send("🏗️✅ "+htmlBold("CONSTRUCTION CREW DEPLOYED!")+" Remaining build time on your active upgrade cut in half.", telebot.ModeHTML)
 }
 
 // HandleGatherSunlight (/newjobgathersunlight) - instant manual burst of
@@ -336,7 +336,7 @@ func (h *JobsHandler) HandleGatherSunlight(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newElectricity, campID)
 	_, _ = h.DB.ExecContext(ctx, "UPDATE encampments SET last_sunlight_at = CURRENT_TIMESTAMP WHERE id = $1", campID)
 
-	return c.Send(fmt.Sprintf("☀️✅ SUNLIGHT GATHERED! +%.0f Electricity harvested manually.", gain))
+	return c.Send(fmt.Sprintf("☀️✅ %s +%s Electricity harvested manually.", htmlBold("SUNLIGHT GATHERED!"), htmlCode(fmt.Sprintf("%.0f", gain))), telebot.ModeHTML)
 }
 
 // ── Scan command aliases for full command-name parity ──────────────────
