@@ -85,16 +85,38 @@ Console).
 Wave 5 covered: clan.go's full guild-panel UI (not just its
 notification calls) - and surfaced bug #4 above, since fixed in wave 6.
 
-Wave 6 covered: research.go, ether.go, crystal_exchange.go,
-rebellion.go, jobs.go, agent.go - plus the bug #4 Co-Leader permission
-fix itself (see above). `jobs.go`'s two cooldown messages
-(`HandleTeleport`, `HandleGatherSunlight`) were deliberately left plain
-- low-value one-liners, not worth the churn.
+Wave 6 covered: research.go, ether.go, crystal_exchange.go, rebellion.go, jobs.go, agent.go - plus the bug #4 Co-Leader permission fix itself (see above). `jobs.go`'s two cooldown messages (`HandleTeleport`, `HandleGatherSunlight`) were deliberately left plain - low-value one-liners, not worth the churn.
 
-Still plain text / not yet audited: admin.go, diplomacy.go,
-federation.go, combat_road_encounters.go, starvation.go (the tick
-notifications in `internal/engine/starvation`, not a handler file),
-the remaining ~15 tick-engine notifications (tax collection,
-exploration discovery, ETA/proximity alerts). Recommend admin.go and
-combat_road_encounters.go (the two largest remaining files) as the
-next batch - wave 7.
+Wave 7 covered: admin.go (panel activation, guided-input prompts, both the
+inline-callback and standalone /admin_metrics variants of the server
+metrics panel, the two-tap db-reset confirmation flow, and every
+gift/tax/faction/broadcast confirmation + player-facing notification) and
+combat_road_encounters.go (road battle/skirmish reports for both
+commanders on both sides, convoy dispatch, break-camp-early, and every
+"resolved without engaging" / "column destroyed" notification). Escaped
+admin-supplied free text (broadcast body, gifted usernames) and
+user-authored encampment names (`ar.attackerName`/`ar.defenderName` in
+admin.go's DB-reset abort alerts, `attackerName` in the road-skirmish
+defender report) since these now carry HTML tags and pass through the
+notification dispatcher's auto-detect-HTML path (see wave 2-3 note above)
+- previously safe as plain text, these would now risk a "can't parse
+entities" 400 error on a raw `&`/`<`/`>` in a player's chosen name.
+
+Infra note: this sandbox can install a real Go toolchain
+(`apt-get install golang-1.22-go`) - a capability prior sessions didn't
+have. The default module proxy (proxy.golang.org) is still blocked by
+the network allowlist, but `GOPROXY=direct` plus a temporary
+`replace gopkg.in/telebot.v3 => github.com/go-telebot/telebot/v3 v3.3.8`
+directive in go.mod (github.com and codeload.github.com are allowlisted)
+lets `go build`/`go vet`/`go test` run for real. That replace line is
+build-verification-only and must never be committed - go.mod/go.sum are
+restored to their original state after every verification pass. All 203+
+tests plus a full `go build ./...` and `go vet ./...` passed clean against
+both wave 7 files using this method.
+
+Still plain text / not yet audited: diplomacy.go, federation.go,
+starvation.go (the tick notifications in `internal/engine/starvation`,
+not a handler file), the remaining ~15 tick-engine notifications (tax
+collection, exploration discovery, ETA/proximity alerts), and world.go.
+Recommend diplomacy.go and federation.go as wave 8 (the two largest
+remaining unaudited handler files at 294 and 267 lines).

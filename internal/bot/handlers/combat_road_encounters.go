@@ -93,7 +93,7 @@ func (h *CombatHandler) captureCargo(ctx context.Context, tx *sql.Tx, winnerRaid
 		}
 		_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE raids SET %s = %s - $1 WHERE id = $2", field.column, field.column), share, loserRaidID)
 		_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE raids SET %s = %s + $1 WHERE id = $2", field.column, field.column), share, winnerRaidID)
-		summary += fmt.Sprintf("   %s: %.1f captured\n", field.label, share)
+		summary += fmt.Sprintf("   %s: %s captured\n", field.label, htmlCode(fmt.Sprintf("%.1f", share)))
 	}
 	return summary
 }
@@ -162,7 +162,7 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 				return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to resolve encounter."})
 			}
 			_ = tx.Commit()
-			return c.Send("➡️ Both columns agreed to continue on their way. Your expedition resumes its journey.", keyboards.MainNavigation())
+			return c.Send("➡️ "+htmlBold("Both columns agreed to continue on their way.")+" Your expedition resumes its journey.", telebot.ModeHTML, keyboards.MainNavigation())
 		}
 
 		_ = tx.Commit()
@@ -247,7 +247,7 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 			_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", side.raidID).Scan(&wipedUserID)
 			if wipedUserID != 0 {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", wipedUserID,
-					"💀 COLUMN DESTROYED: Your expedition was wiped out in a road battle. No survivors returned.")
+					"💀 "+htmlBold("COLUMN DESTROYED")+": Your expedition was wiped out in a road battle. No survivors returned.")
 			}
 			continue
 		}
@@ -279,19 +279,20 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 		var headline string
 		switch {
 		case result.Draw:
-			headline = "⚔️ ROAD BATTLE - INCONCLUSIVE: Both columns traded fire and disengaged."
+			headline = "⚔️ " + htmlBold("ROAD BATTLE - INCONCLUSIVE") + ": Both columns traded fire and disengaged."
 		case side.won:
-			headline = "🏆 ROAD BATTLE WON: Your column overpowered the enemy expedition."
+			headline = "🏆 " + htmlBold("ROAD BATTLE WON") + ": Your column overpowered the enemy expedition."
 		default:
-			headline = "💥 ROAD BATTLE LOST: Your column was overpowered on the road."
+			headline = "💥 " + htmlBold("ROAD BATTLE LOST") + ": Your column was overpowered on the road."
 		}
 		report := fmt.Sprintf(
-			"%s\n\nYour Power Rating: %.0f | Enemy Power Rating: %.0f\nCasualties: %d Soldiers, %d Mechs, %d Capital Units\n",
-			headline, side.power, side.enemyPow, side.lost.Soldiers, side.lost.Mechs,
-			side.lost.Destroyers+side.lost.Bombers+side.lost.Battlecruisers+side.lost.Deathstars+side.lost.Liberators+side.lost.Wraiths,
+			"%s\n"+divider+"\nYour Power Rating: %s | Enemy Power Rating: %s\nCasualties: %s Soldiers, %s Mechs, %s Capital Units\n",
+			headline, htmlCode(fmt.Sprintf("%.0f", side.power)), htmlCode(fmt.Sprintf("%.0f", side.enemyPow)),
+			htmlCode(fmt.Sprintf("%d", side.lost.Soldiers)), htmlCode(fmt.Sprintf("%d", side.lost.Mechs)),
+			htmlCode(fmt.Sprintf("%d", side.lost.Destroyers+side.lost.Bombers+side.lost.Battlecruisers+side.lost.Deathstars+side.lost.Liberators+side.lost.Wraiths)),
 		)
 		if side.won && cargoSummary != "" {
-			report += fmt.Sprintf("\n🎒 CARGO CAPTURED:\n%s", cargoSummary)
+			report += fmt.Sprintf("\n🎒 %s\n%s", htmlBold("CARGO CAPTURED"), cargoSummary)
 		}
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID, report)
 	}
@@ -300,9 +301,9 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to commit road battle resolution."})
 	}
 
-	resultText := "⚔️ Road battle joined! Check your notifications for the full battle report."
+	resultText := "⚔️ " + htmlBold("Road battle joined!") + " Check your notifications for the full battle report."
 	_ = c.Respond(&telebot.CallbackResponse{Text: resultText})
-	return c.Send(resultText, keyboards.MainNavigation())
+	return c.Send(resultText, telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // loadBaseGarrisonForce loads a passive base's standing home-defense
@@ -385,7 +386,7 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to resolve encounter."})
 		}
 		_ = tx.Commit()
-		return c.Send("➡️ Your column bypasses the outpost and continues on its way.", keyboards.MainNavigation())
+		return c.Send("➡️ "+htmlBold("Your column bypasses the outpost")+" and continues on its way.", telebot.ModeHTML, keyboards.MainNavigation())
 	}
 
 	if action != "attack" {
@@ -434,7 +435,7 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 	if mySurvivors.TotalUnits() <= 0 {
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed', movement_state = 'moving', active_base_encounter_id = NULL WHERE id = $1", raidID)
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID,
-			"💀 COLUMN DESTROYED: Your expedition was wiped out attacking the outpost. No survivors returned.")
+			"💀 "+htmlBold("COLUMN DESTROYED")+": Your expedition was wiped out attacking the outpost. No survivors returned.")
 	} else {
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE raids SET movement_state = 'moving', active_base_encounter_id = NULL,
@@ -446,15 +447,17 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 	var attackerHeadline string
 	switch {
 	case result.Draw:
-		attackerHeadline = "⚔️ ROAD SKIRMISH - INCONCLUSIVE: Your column and the outpost's garrison traded fire and disengaged."
+		attackerHeadline = "⚔️ " + htmlBold("ROAD SKIRMISH - INCONCLUSIVE") + ": Your column and the outpost's garrison traded fire and disengaged."
 	case attackerWon:
-		attackerHeadline = "🏆 ROAD SKIRMISH WON: Your column overpowered the outpost's home garrison."
+		attackerHeadline = "🏆 " + htmlBold("ROAD SKIRMISH WON") + ": Your column overpowered the outpost's home garrison."
 	default:
-		attackerHeadline = "💥 ROAD SKIRMISH LOST: The outpost's garrison repelled your column."
+		attackerHeadline = "💥 " + htmlBold("ROAD SKIRMISH LOST") + ": The outpost's garrison repelled your column."
 	}
 	attackerReport := fmt.Sprintf(
-		"%s\n\nYour Power Rating: %.0f | Garrison Power Rating: %.0f\nYour Casualties: %d Soldiers, %d Mechs\nGarrison Casualties: %d Soldiers, %d Mechs\n",
-		attackerHeadline, myPower, garrisonPower, myLost.Soldiers, myLost.Mechs, garrisonLost.Soldiers, garrisonLost.Mechs,
+		"%s\n"+divider+"\nYour Power Rating: %s | Garrison Power Rating: %s\nYour Casualties: %s Soldiers, %s Mechs\nGarrison Casualties: %s Soldiers, %s Mechs\n",
+		attackerHeadline, htmlCode(fmt.Sprintf("%.0f", myPower)), htmlCode(fmt.Sprintf("%.0f", garrisonPower)),
+		htmlCode(fmt.Sprintf("%d", myLost.Soldiers)), htmlCode(fmt.Sprintf("%d", myLost.Mechs)),
+		htmlCode(fmt.Sprintf("%d", garrisonLost.Soldiers)), htmlCode(fmt.Sprintf("%d", garrisonLost.Mechs)),
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID, attackerReport)
 
@@ -466,15 +469,16 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 		var defenderHeadline string
 		switch {
 		case result.Draw:
-			defenderHeadline = "⚔️ ROAD SKIRMISH - INCONCLUSIVE: Your garrison traded fire with a passing column and both disengaged."
+			defenderHeadline = "⚔️ " + htmlBold("ROAD SKIRMISH - INCONCLUSIVE") + ": Your garrison traded fire with a passing column and both disengaged."
 		case !attackerWon:
-			defenderHeadline = fmt.Sprintf("🏆 GARRISON HELD: Your home defense repelled an attack from [%s].", attackerName)
+			defenderHeadline = fmt.Sprintf("🏆 %s: Your home defense repelled an attack from %s.", htmlBold("GARRISON HELD"), htmlCode(htmlEscape(attackerName)))
 		default:
-			defenderHeadline = fmt.Sprintf("💥 GARRISON OVERRUN: A passing column from [%s] defeated your home garrison in a road skirmish. Your base itself was not raided.", attackerName)
+			defenderHeadline = fmt.Sprintf("💥 %s: A passing column from %s defeated your home garrison in a road skirmish. Your base itself was not raided.", htmlBold("GARRISON OVERRUN"), htmlCode(htmlEscape(attackerName)))
 		}
 		defenderReport := fmt.Sprintf(
-			"%s\n\nYour Garrison Power: %.0f | Enemy Power: %.0f\nGarrison Casualties: %d Soldiers, %d Mechs\n",
-			defenderHeadline, garrisonPower, myPower, garrisonLost.Soldiers, garrisonLost.Mechs,
+			"%s\n"+divider+"\nYour Garrison Power: %s | Enemy Power: %s\nGarrison Casualties: %s Soldiers, %s Mechs\n",
+			defenderHeadline, htmlCode(fmt.Sprintf("%.0f", garrisonPower)), htmlCode(fmt.Sprintf("%.0f", myPower)),
+			htmlCode(fmt.Sprintf("%d", garrisonLost.Soldiers)), htmlCode(fmt.Sprintf("%d", garrisonLost.Mechs)),
 		)
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", defenderUserID, defenderReport)
 	}
@@ -483,9 +487,9 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to commit road skirmish resolution."})
 	}
 
-	resultText := "⚔️ Skirmish joined! Check your notifications for the full battle report."
+	resultText := "⚔️ " + htmlBold("Skirmish joined!") + " Check your notifications for the full battle report."
 	_ = c.Respond(&telebot.CallbackResponse{Text: resultText})
-	return c.Send(resultText, keyboards.MainNavigation())
+	return c.Send(resultText, telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // resolveRoadBaseEncounterContinue is the explicit-Continue / timeout
@@ -536,7 +540,7 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
 			if userID != 0 {
 				_ = notifications.Queue(ctx, tx, userID,
-					"🛣️ ROAD CONTACT RESOLVED: Both columns continued on their way without engaging.", "route_status")
+					"🛣️ "+htmlBold("ROAD CONTACT RESOLVED")+": Both columns continued on their way without engaging.", "route_status")
 			}
 		}
 	}
@@ -657,9 +661,11 @@ func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 	etaMinutes := int(travelMinutes)
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🚚 Convoy dispatched!"})
 	return c.Send(fmt.Sprintf(
-		"🚚 RESUPPLY CONVOY DISPATCHED\n\n1 Hauler + 1 Tanker committed, carrying %.0f%% rations/ammo/electricity/logistics.\nCost: %.0f Scrap, %.0f Metal.\nETA: ~%d minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
-		convoySupplyPackage, scrapCost, convoyMetalCost, etaMinutes,
-	), keyboards.MainNavigation())
+		"🚚 %s\n"+divider+"\n1 Hauler + 1 Tanker committed, carrying %s%% rations/ammo/electricity/logistics.\nCost: %s Scrap, %s Metal.\nETA: ~%s minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
+		htmlBold("RESUPPLY CONVOY DISPATCHED"),
+		htmlCode(fmt.Sprintf("%.0f", convoySupplyPackage)), htmlCode(fmt.Sprintf("%.0f", scrapCost)),
+		htmlCode(fmt.Sprintf("%.0f", convoyMetalCost)), htmlCode(fmt.Sprintf("%d", etaMinutes)),
+	), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // breakCampCrystalPerSeverityHour / breakCampMinCrystalCost /
@@ -728,5 +734,6 @@ func (h *CombatHandler) handleBreakCampEarly(ctx context.Context, tx *sql.Tx, c 
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔮 Camp broken early!"})
-	return c.Send(fmt.Sprintf("🔮 CAMP BROKEN EARLY\n\nSpent 🔮 %.1f Crystal to break camp ahead of schedule. Your column resumes its journey immediately.", crystalCost), keyboards.MainNavigation())
+	return c.Send(fmt.Sprintf("🔮 %s\n\nSpent 🔮 %s Crystal to break camp ahead of schedule. Your column resumes its journey immediately.",
+		htmlBold("CAMP BROKEN EARLY"), htmlCode(fmt.Sprintf("%.1f", crystalCost))), telebot.ModeHTML, keyboards.MainNavigation())
 }

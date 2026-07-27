@@ -97,7 +97,10 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		selector.Row(btnDBReset),
 	)
 
-	return c.Send("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED\n\nDeploy overrides using the secure inline controls or bottom submenu deck.\nActions marked ⚠️ are destructive and require a confirmation tap.", selector, keyboards.AdminNavigation())
+	panelText := htmlBold("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED") + "\n" + divider +
+		"\nDeploy overrides using the secure inline controls or bottom submenu deck." +
+		"\nActions marked ⚠️ are destructive and require a confirmation tap."
+	return c.Send(panelText, telebot.ModeHTML, selector, keyboards.AdminNavigation())
 }
 
 // adminPromptFor gives the guided-input prompt text for each action that
@@ -111,13 +114,15 @@ func (h *AdminHandler) adminPromptFor(senderID int64, action string) string {
 
 	switch action {
 	case "gift_premium":
-		return "✍️ Reply with: `username days`\nExample: `wanderer99 30`"
+		return "✍️ Reply with: " + htmlCode("username days") + "\nExample: " + htmlCode("wanderer99 30")
 	case "gift_resources":
-		return "✍️ Reply with: `username resource_type amount`\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores\nExample: `wanderer99 metal 500`"
+		return "✍️ Reply with: " + htmlCode("username resource_type amount") +
+			"\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores" +
+			"\nExample: " + htmlCode("wanderer99 metal 500")
 	case "tax_rate":
-		return "✍️ Reply with a whole number 0-10 (percent).\nExample: `5`"
+		return "✍️ Reply with a whole number 0-10 (percent).\nExample: " + htmlCode("5")
 	case "faction":
-		return "✍️ Reply with `steel_vanguard` or `rust_nomads`."
+		return "✍️ Reply with " + htmlCode("steel_vanguard") + " or " + htmlCode("rust_nomads") + "."
 	case "broadcast":
 		return "✍️ Reply with the message to broadcast to every survivor."
 	default:
@@ -147,7 +152,7 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 	case "gift_premium", "gift_resources", "tax_rate", "faction", "broadcast":
 		prompt := h.adminPromptFor(sender.ID, action)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "✍️ Check the chat for your input prompt."})
-		return c.Send(prompt)
+		return c.Send(prompt, telebot.ModeHTML)
 
 	case "server_metrics":
 		var totalUsers, totalCamps int
@@ -155,21 +160,16 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM encampments").Scan(&totalCamps)
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
-		metricsReport := fmt.Sprintf(
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"💻 ADMINISTRATIVE METRICS PANEL\n"+
-				"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"👥 Total Survivors: %d\n"+
-				"⛺ Total Encampments: %d\n\n"+
-				"⚙️ Active Goroutines: %d\n"+
-				"🧠 Allocated Memory: %.2f MB\n"+
-				"🧩 GC Cycles Executed: %d\n"+
-				"━━━━━━━━━━━━━━━━━━━━━━",
-			totalUsers, totalCamps, runtime.NumGoroutine(),
-			float64(memStats.Alloc)/1024.0/1024.0, memStats.NumGC,
-		)
+		metricsReport := htmlBold("💻 ADMINISTRATIVE METRICS PANEL") + "\n" + divider + "\n" +
+			fmt.Sprintf("👥 Total Survivors: %s\n⛺ Total Encampments: %s\n\n",
+				htmlCode(fmt.Sprintf("%d", totalUsers)), htmlCode(fmt.Sprintf("%d", totalCamps))) +
+			fmt.Sprintf("⚙️ Active Goroutines: %s\n🧠 Allocated Memory: %s MB\n🧩 GC Cycles Executed: %s\n",
+				htmlCode(fmt.Sprintf("%d", runtime.NumGoroutine())),
+				htmlCode(fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024.0/1024.0)),
+				htmlCode(fmt.Sprintf("%d", memStats.NumGC))) +
+			divider
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Memory telemetry fetched!"})
-		return c.Send(metricsReport, keyboards.AdminNavigation())
+		return c.Send(metricsReport, telebot.ModeHTML, keyboards.AdminNavigation())
 
 	case "db_reset":
 		// Destructive - require a second, explicit confirmation tap
@@ -182,12 +182,12 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		btnCancel := confirmSelector.Data("✅ Cancel", "admin_action", "db_reset_cancel")
 		confirmSelector.Inline(confirmSelector.Row(btnConfirm), confirmSelector.Row(btnCancel))
 		_ = c.Respond(&telebot.CallbackResponse{})
-		return c.Send("⚠️ Are you SURE? This clears active raids/world news/queues and redistributes every outpost's coordinates. This cannot be undone.", confirmSelector)
+		return c.Send(htmlBold("⚠️ Are you SURE?")+" This clears active raids/world news/queues and redistributes every outpost's coordinates. This cannot be undone.", telebot.ModeHTML, confirmSelector)
 
 	case "db_reset_confirm":
 		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Executing..."})
 		result, _ := h.doDBReset(ctx)
-		return c.Send(result)
+		return c.Send(result, telebot.ModeHTML)
 
 	case "db_reset_cancel":
 		return c.Respond(&telebot.CallbackResponse{Text: "✅ Cancelled - no changes made."})
@@ -224,25 +224,25 @@ func (h *AdminHandler) HandleAdminPendingInput(c telebot.Context) (handled bool,
 	switch action {
 	case "gift_premium":
 		if len(fields) < 2 {
-			return true, c.Send("⚠️ Expected `username days` - action cancelled, tap Gift Premium again to retry.")
+			return true, c.Send("⚠️ Expected "+htmlCode("username days")+" - action cancelled, tap Gift Premium again to retry.", telebot.ModeHTML)
 		}
 		days, convErr := strconv.Atoi(fields[1])
 		if convErr != nil {
 			return true, c.Send("⚠️ Days must be a whole number - action cancelled, tap Gift Premium again to retry.")
 		}
 		result, _ := h.doGiftPremium(ctx, fields[0], days)
-		return true, c.Send(result)
+		return true, c.Send(result, telebot.ModeHTML)
 
 	case "gift_resources":
 		if len(fields) < 3 {
-			return true, c.Send("⚠️ Expected `username resource_type amount` - action cancelled, tap Gift Resources again to retry.")
+			return true, c.Send("⚠️ Expected "+htmlCode("username resource_type amount")+" - action cancelled, tap Gift Resources again to retry.", telebot.ModeHTML)
 		}
 		amount, convErr := strconv.ParseFloat(fields[2], 64)
 		if convErr != nil {
 			return true, c.Send("⚠️ Amount must be a number - action cancelled, tap Gift Resources again to retry.")
 		}
 		result, _ := h.doGiftResources(ctx, fields[0], fields[1], amount)
-		return true, c.Send(result)
+		return true, c.Send(result, telebot.ModeHTML)
 
 	case "tax_rate":
 		if len(fields) < 1 {
@@ -253,21 +253,21 @@ func (h *AdminHandler) HandleAdminPendingInput(c telebot.Context) (handled bool,
 			return true, c.Send("⚠️ Rate must be a whole number - action cancelled, tap Set Tax Rate again to retry.")
 		}
 		result, _ := h.doSetTaxRate(ctx, rate)
-		return true, c.Send(result)
+		return true, c.Send(result, telebot.ModeHTML)
 
 	case "faction":
 		if len(fields) < 1 {
-			return true, c.Send("⚠️ Expected `steel_vanguard` or `rust_nomads` - action cancelled, tap Change My Faction again to retry.")
+			return true, c.Send("⚠️ Expected "+htmlCode("steel_vanguard")+" or "+htmlCode("rust_nomads")+" - action cancelled, tap Change My Faction again to retry.", telebot.ModeHTML)
 		}
 		result, _ := h.doFactionChange(ctx, sender.ID, fields[0])
-		return true, c.Send(result)
+		return true, c.Send(result, telebot.ModeHTML)
 
 	case "broadcast":
 		if c.Text() == "" {
 			return true, c.Send("⚠️ Broadcast message can't be empty - action cancelled, tap Broadcast again to retry.")
 		}
 		result, _ := h.doBroadcast(ctx, c.Text())
-		return true, c.Send(result)
+		return true, c.Send(result, telebot.ModeHTML)
 	}
 	return false, nil
 }
@@ -285,7 +285,7 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	h.TickEngine.ProcessTick()
 
-	return c.Send("⚡ ADMIN SYSTEM OVERRIDE: Master game tick successfully triggered.")
+	return c.Send("⚡ "+htmlBold("ADMIN SYSTEM OVERRIDE")+": Master game tick successfully triggered.", telebot.ModeHTML)
 }
 
 func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
@@ -299,7 +299,7 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 	}
 
 	result, _ := h.doDBReset(context.Background())
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doDBReset is the single source of truth for the destructive database
@@ -360,7 +360,7 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 
 						var hUserID int64
 						_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", hCampID).Scan(&hUserID)
-						coopAlert := "↩️ ALLIANCE NOTICE: Ongoing campaign has been aborted due to an administrative database reset. Your contributed forces have returned safely."
+						coopAlert := "↩️ " + htmlBold("ALLIANCE NOTICE") + ": Ongoing campaign has been aborted due to an administrative database reset. Your contributed forces have returned safely."
 						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hUserID, coopAlert)
 					}
 				}
@@ -368,11 +368,13 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 			}
 
 			// Send real-time notification alerts
-			attackerAlert := fmt.Sprintf("↩️ SYSTEM UPDATE: Your ongoing campaign against Outpost [%s] has been aborted due to an administrative database reset. Remaining forces have returned safely.", ar.defenderName)
+			attackerAlert := "↩️ " + htmlBold("SYSTEM UPDATE") + ": Your ongoing campaign against Outpost " +
+				htmlCode(htmlEscape(ar.defenderName)) + " has been aborted due to an administrative database reset. Remaining forces have returned safely."
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ar.attackerUserID, attackerAlert)
 
 			if ar.defenderUserID != 0 {
-				defenderAlert := fmt.Sprintf("🛡️ SYSTEM UPDATE: The hostile campaign marching towards your base from Outpost [%s] was aborted due to an administrative database reset.", ar.attackerName)
+				defenderAlert := "🛡️ " + htmlBold("SYSTEM UPDATE") + ": The hostile campaign marching towards your base from Outpost " +
+					htmlCode(htmlEscape(ar.attackerName)) + " was aborted due to an administrative database reset."
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ar.defenderUserID, defenderAlert)
 			}
 		}
@@ -426,7 +428,7 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 		}
 	}
 
-	return "⚡ ADMIN SYSTEM OVERRIDE: Database reset completed. Testing news cleared, queues flushed, active raids returned, and all coordinates redistributed securely.", nil
+	return "⚡ " + htmlBold("ADMIN SYSTEM OVERRIDE") + ": Database reset completed. Testing news cleared, queues flushed, active raids returned, and all coordinates redistributed securely.", nil
 }
 
 func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
@@ -451,7 +453,7 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	}
 
 	result, _ := h.doGiftPremium(context.Background(), args[0], days)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doGiftPremium is the single source of truth for granting Premium,
@@ -473,15 +475,13 @@ func (h *AdminHandler) doGiftPremium(ctx context.Context, targetUser string, day
 		return "⚠️ Database error.", err
 	}
 
-	alertMsg := fmt.Sprintf(
-		"🔮 PREMIUM STATUS GRANTED!\n\n"+
-			"An Administrator has gifted you a Premium License for %d days.\n"+
-			"Your Automation Agent and advanced HUD structures are now fully unlocked!",
-		days,
-	)
+	alertMsg := htmlBold("🔮 PREMIUM STATUS GRANTED!") + "\n\n" +
+		fmt.Sprintf("An Administrator has gifted you a Premium License for %s days.\n", htmlCode(fmt.Sprintf("%d", days))) +
+		"Your Automation Agent and advanced HUD structures are now fully unlocked!"
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 
-	return fmt.Sprintf("⚡ ADMIN OVERRIDE: Granted %d days of Premium License to @%s.", days, targetUser), nil
+	return "⚡ " + htmlBold("ADMIN OVERRIDE") + fmt.Sprintf(": Granted %s days of Premium License to @%s.",
+		htmlCode(fmt.Sprintf("%d", days)), htmlEscape(targetUser)), nil
 }
 
 func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
@@ -506,7 +506,7 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	}
 
 	result, _ := h.doGiftResources(context.Background(), args[0], args[1], amount)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doGiftResources is the single source of truth for gifting a resource
@@ -539,10 +539,13 @@ func (h *AdminHandler) doGiftResources(ctx context.Context, targetUser, resType 
 		return "⚠️ Database write error.", err
 	}
 
-	alertMsg := fmt.Sprintf("⚡ GIFT RECEIVED: An Administrator has permanently added +%.1f %s directly to your outpost warehouse.", amount, strings.Title(resType))
+	alertMsg := "⚡ " + htmlBold("GIFT RECEIVED") + ": An Administrator has permanently added +" +
+		htmlCode(fmt.Sprintf("%.1f", amount)) + " " + resourceEmoji(resType) + " " + htmlEscape(strings.Title(resType)) +
+		" directly to your outpost warehouse."
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 
-	return fmt.Sprintf("⚡ ADMIN OVERRIDE: Gifted %.1f %s permanently to @%s.", amount, strings.Title(resType), targetUser), nil
+	return "⚡ " + htmlBold("ADMIN OVERRIDE") + fmt.Sprintf(": Gifted %s %s permanently to @%s.",
+		htmlCode(fmt.Sprintf("%.1f", amount)), htmlEscape(strings.Title(resType)), htmlEscape(targetUser)), nil
 }
 
 func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
@@ -556,7 +559,7 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	}
 
 	result, _ := h.doInjectSelf(context.Background(), sender.ID)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doInjectSelf is the single source of truth for injecting 5,000 of
@@ -585,7 +588,7 @@ func (h *AdminHandler) doInjectSelf(ctx context.Context, senderID int64) (string
 		return "⚠️ Error executing resource injection.", err
 	}
 
-	return "⚡ ADMIN OVERRIDE: Injected 5,000 of ALL Resources into your camp.", nil
+	return "⚡ " + htmlBold("ADMIN OVERRIDE") + ": Injected " + htmlCode("5,000") + " of ALL Resources into your camp.", nil
 }
 
 func (h *AdminHandler) HandleAdminSetTaxRate(c telebot.Context) error {
@@ -609,7 +612,7 @@ func (h *AdminHandler) HandleAdminSetTaxRate(c telebot.Context) error {
 	}
 
 	result, _ := h.doSetTaxRate(context.Background(), rate)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doSetTaxRate is the single source of truth for the daily tax rate,
@@ -624,7 +627,7 @@ func (h *AdminHandler) doSetTaxRate(ctx context.Context, rate int) (string, erro
 		log.Printf("Failed updating tax rate: %v", err)
 		return "⚠️ Error updating tax law.", err
 	}
-	return fmt.Sprintf("💰 WASTELAND TAX LAW UPDATED: Daily rate is now %d%%.", rate), nil
+	return "💰 " + htmlBold("WASTELAND TAX LAW UPDATED") + ": Daily rate is now " + htmlCode(fmt.Sprintf("%d%%", rate)) + ".", nil
 }
 
 func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
@@ -642,7 +645,7 @@ func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 		return c.Send("⚠️ Syntax Error: Use `/admin_faction steel_vanguard` or `/admin_faction rust_nomads`")
 	}
 	result, _ := h.doFactionChange(context.Background(), sender.ID, targetFaction)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doFactionChange is the single source of truth for an admin's own
@@ -663,7 +666,8 @@ func (h *AdminHandler) doFactionChange(ctx context.Context, senderID int64, targ
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", senderID).Scan(&campID)
 	_, _ = h.DB.ExecContext(ctx, "DELETE FROM heroes WHERE encampment_id = $1", campID)
 
-	return fmt.Sprintf("⚡ ADMIN OVERRIDE: Faction realigned to [%s]. Existing commander retired; check /hero to view your new commander.", targetFaction), nil
+	return "⚡ " + htmlBold("ADMIN OVERRIDE") + ": Faction realigned to " + htmlCode(targetFaction) +
+		". Existing commander retired; check /hero to view your new commander.", nil
 }
 
 func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
@@ -682,7 +686,7 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 	}
 
 	result, _ := h.doBroadcast(context.Background(), broadcastMsg)
-	return c.Send(result)
+	return c.Send(result, telebot.ModeHTML)
 }
 
 // doBroadcast is the single source of truth for a system-wide broadcast,
@@ -704,10 +708,7 @@ func (h *AdminHandler) doBroadcast(ctx context.Context, broadcastMsg string) (st
 		}
 	}
 
-	formattedBroadcast := fmt.Sprintf(
-		"🛰️ SYSTEM BROADCAST (DEVELOPER MSG):\n\n%s",
-		broadcastMsg,
-	)
+	formattedBroadcast := "🛰️ " + htmlBold("SYSTEM BROADCAST (DEVELOPER MSG)") + ":\n\n" + htmlEscape(broadcastMsg)
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -724,7 +725,7 @@ func (h *AdminHandler) doBroadcast(ctx context.Context, broadcastMsg string) (st
 	}
 
 	_ = tx.Commit()
-	return fmt.Sprintf("📡 Broadcast successfully queued to %d users.", len(targets)), nil
+	return "📡 Broadcast successfully queued to " + htmlCode(fmt.Sprintf("%d", len(targets))) + " users.", nil
 }
 
 func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
@@ -745,21 +746,16 @@ func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	metricsReport := fmt.Sprintf(
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"💻 ADMINISTRATIVE METRICS PANEL\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-			"DATABASE TELEMETRY:\n"+
-			"👥 Total Survivors: %d\n"+
-			"⛺ Total Encampments: %d\n\n"+
-			"GO ENGINE VIRTUAL PROFILES:\n"+
-			"⚙️ Active Goroutines: %d\n"+
-			"🧠 Allocated Memory: %.2f MB\n"+
-			"🧩 Total GC Cycles Executed: %d\n"+
-			"━━━━━━━━━━━━━━━━━━━━━━",
-		totalUsers, totalCamps, runtime.NumGoroutine(),
-		float64(memStats.Alloc)/1024.0/1024.0, memStats.NumGC,
-	)
+	metricsReport := htmlBold("💻 ADMINISTRATIVE METRICS PANEL") + "\n" + divider + "\n" +
+		htmlBold("DATABASE TELEMETRY") + "\n" +
+		fmt.Sprintf("👥 Total Survivors: %s\n⛺ Total Encampments: %s\n\n",
+			htmlCode(fmt.Sprintf("%d", totalUsers)), htmlCode(fmt.Sprintf("%d", totalCamps))) +
+		htmlBold("GO ENGINE VIRTUAL PROFILES") + "\n" +
+		fmt.Sprintf("⚙️ Active Goroutines: %s\n🧠 Allocated Memory: %s MB\n🧩 Total GC Cycles Executed: %s\n",
+			htmlCode(fmt.Sprintf("%d", runtime.NumGoroutine())),
+			htmlCode(fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024.0/1024.0)),
+			htmlCode(fmt.Sprintf("%d", memStats.NumGC))) +
+		divider
 
-	return c.Send(metricsReport, keyboards.MainNavigation())
+	return c.Send(metricsReport, telebot.ModeHTML, keyboards.MainNavigation())
 }

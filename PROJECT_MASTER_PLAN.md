@@ -2017,7 +2017,49 @@ which cost real time re-deriving them twice.
   `go.mod` replace-directive workaround (commands recorded in ADR-022)
   instead of `gofmt`-only checking.
 
-## 7. Future Ideas (unscoped, not committed to any phase)
+- **Following session (core game, not AI Systems Roadmap): UI Polish
+  wave 7 — admin.go + combat_road_encounters.go, plus a real fix for
+  the recurring build-verification gap.** Rich-formatted the two
+  largest remaining plain-text handler files per the wave-6 recommendation
+  in `BUGS_AND_INCONSISTENCIES.md`: `admin.go` (panel activation,
+  guided-input prompts, both metrics-panel variants, the two-tap
+  db-reset confirm flow, gift/tax/faction/broadcast confirmations and
+  player-facing notifications) and `combat_road_encounters.go` (road
+  battle/skirmish reports for both sides, convoy dispatch, break-camp-
+  early, and the "resolved without engaging"/"column destroyed" alerts).
+  Escaped admin-supplied free text (broadcast body, gifted usernames)
+  and user-authored encampment names embedded in notifications that now
+  carry HTML tags, since the dispatcher auto-detects HTML per message
+  (see wave 2-3 note above) and an unescaped `&`/`<`/`>` in a player's
+  chosen name would 400 the send.
+
+  **Build-verification gap (flagged repeatedly since ADR-021/ADR-022 as
+  "could not run a full `go build`/`go test`") is resolved:** this
+  sandbox's `apt-get` can install a real Go toolchain
+  (`apt-get install -y golang-1.22-go`) — this was never tried in prior
+  sessions, which only ever attempted to fetch a pre-built `go` binary
+  or relied on whatever was already on `PATH`. `proxy.golang.org` is
+  still not allowlisted, but `GOPROXY=direct GOSUMDB=off GOFLAGS=-mod=mod`
+  plus a temporary `replace gopkg.in/telebot.v3 =>
+  github.com/go-telebot/telebot/v3 v3.3.8` line appended to `go.mod`
+  (both `github.com` and `codeload.github.com` are allowlisted, and this
+  version of telebot.v3 does not actually require the `spf13/viper` /
+  `cloud.google.com` transitive chain ADR-022 hit — that dependency
+  isn't pulled in by the code paths this repo imports) let `go build
+  ./...`, `go vet ./...`, and `go test ./...` all run for real and pass
+  clean, no `gofmt`-only fallback needed. The replace line is
+  build-verification-only: `go.mod`/`go.sum` were restored to their
+  committed state (via a backup/restore, not left modified) before
+  every commit this session, so nothing about the project's real
+  dependency resolution changed. **Future sessions: try this before
+  assuming the build gap still applies.**
+
+  Both files verified gofmt-clean and pass a full `go build ./... && go
+  vet ./... && go test ./...` (all 203+ existing tests, unchanged pass
+  count since this was formatting-only, zero gameplay logic touched).
+  Updated `BUGS_AND_INCONSISTENCIES.md`'s wave tracker; recommended
+  wave 8 targets are `diplomacy.go` and `federation.go` (294 and 267
+  lines, the two largest remaining unaudited handler files).
 
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)
   that periodically compacts old `ai_memory` rows via an LLM call, for
@@ -2052,17 +2094,17 @@ which cost real time re-deriving them twice.
 ## 9. How to Resume Work (for the next session, AI or human)
 
 1. Read this whole file first.
-2. Run `go build ./... && go test ./... && go vet ./...` with normal
-   network access — confirm Phase A still compiles end-to-end (this
-   session could only verify the `internal/ai` subtree in isolation;
-   see §1 and §4).
-   - Both `fix/referral-system-overhaul` and `feature/onboarding-
-     overhaul` are merged to `main` as of this session, and a Render
-     build failure they caused (variable scoping bug, see §2 ADR-022's
-     hotfix addendum and §6) has been fixed and verified with a real
-     `go build ./... && go test ./...` pass. If picking up fresh work,
-     use the recorded replace-directive workaround (ADR-022) up front
-     rather than re-deriving it or falling back to `gofmt`-only checks.
+2. Run `go build ./... && go test ./... && go vet ./...`. If `go` isn't
+   already on `PATH`, install it first (`apt-get install -y
+   golang-1.22-go`, then add `/usr/lib/go-1.22/bin` to `PATH`) rather
+   than assuming the build can't be verified. `proxy.golang.org` is not
+   allowlisted, so also use `GOPROXY=direct GOSUMDB=off
+   GOFLAGS=-mod=mod` and a temporary `replace gopkg.in/telebot.v3 =>
+   github.com/go-telebot/telebot/v3 v3.3.8` line appended to `go.mod`
+   (restore `go.mod`/`go.sum` to their committed state before
+   committing anything — this replace is build-verification-only, see
+   the UI Polish wave 7 changelog entry in §6 for why the earlier
+   ADR-021/ADR-022 "could not build" conclusion no longer holds).
 3. Pick up the "Recommended next task" in §3 unless the project owner
    has redirected you.
 4. Before writing code for any phase: inspect the relevant existing
