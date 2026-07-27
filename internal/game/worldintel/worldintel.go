@@ -16,7 +16,15 @@ func ExplorationDiscoveryChance(scouts int) float64 {
 	if scouts < 0 {
 		scouts = 0
 	}
-	return math.Min(0.35+float64(scouts)*0.05, 0.75)
+	// Raised from 0.35 base (2026-07-26): exploration itself used to be
+	// the real bottleneck (a single shared, contested site per continent -
+	// see explorationSiteTemplate's doc comment in
+	// internal/bot/handlers/exploration.go), so this roll rarely even got
+	// a chance to fire. Now that every dispatch is personal and always
+	// available, this base is tuned so a fresh outpost with zero Scout
+	// Walkers still has roughly a 92% chance of at least one first-contact
+	// within 5 expeditions (1-(1-0.45)^5), not just a "maybe, eventually."
+	return math.Min(0.45+float64(scouts)*0.05, 0.80)
 }
 
 // RadarWarningMinutes returns how much remaining travel time a defender gets

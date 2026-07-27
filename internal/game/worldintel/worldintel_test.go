@@ -7,14 +7,15 @@ func TestExplorationDiscoveryChance(t *testing.T) {
 		scouts int
 		want   float64
 	}{
-		{-4, 0.35},
-		{0, 0.35},
-		{3, 0.50},
-		{99, 0.75},
+		{-4, 0.45},
+		{0, 0.45},
+		{3, 0.60},
+		{99, 0.80},
 	}
 	for _, tt := range tests {
-		if got := ExplorationDiscoveryChance(tt.scouts); got != tt.want {
-			t.Fatalf("ExplorationDiscoveryChance(%d) = %.2f, want %.2f", tt.scouts, got, tt.want)
+		got := ExplorationDiscoveryChance(tt.scouts)
+		if diff := got - tt.want; diff > 0.0001 || diff < -0.0001 {
+			t.Fatalf("ExplorationDiscoveryChance(%d) = %.4f, want %.4f", tt.scouts, got, tt.want)
 		}
 	}
 }
