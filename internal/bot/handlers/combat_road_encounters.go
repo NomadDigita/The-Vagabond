@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 	"gopkg.in/telebot.v3"
 )
@@ -534,8 +535,8 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
 			if userID != 0 {
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-					"🛣️ ROAD CONTACT RESOLVED: Both columns continued on their way without engaging.")
+				_ = notifications.Queue(ctx, tx, userID,
+					"🛣️ ROAD CONTACT RESOLVED: Both columns continued on their way without engaging.", "route_status")
 			}
 		}
 	}
@@ -712,6 +713,7 @@ func (h *CombatHandler) handleBreakCampEarly(ctx context.Context, tx *sql.Tx, c 
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", crystalCost, attackerID)
+	_, _ = tx.ExecContext(ctx, "INSERT INTO speedup_usage_log (encampment_id, scrap_spent, dollars_spent, crystal_spent) VALUES ($1, 0, 0, $2)", attackerID, crystalCost)
 	_, _ = tx.ExecContext(ctx, "UPDATE route_incidents SET resolved = TRUE WHERE id = $1", incidentID)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE raids

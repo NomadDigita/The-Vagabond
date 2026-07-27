@@ -63,20 +63,26 @@ func (h *ProfileHandler) HandleSettings(c telebot.Context) error {
 	var notifyRaid, notifyStorage bool
 	_ = h.DB.QueryRowContext(ctx, "SELECT notify_on_raid, notify_on_storage_full FROM users WHERE telegram_id = $1", sender.ID).Scan(&notifyRaid, &notifyStorage)
 
+	var muteRouteStatus bool
+	_ = h.DB.QueryRowContext(ctx, "SELECT mute_route_status FROM notification_preferences WHERE user_id = $1", sender.ID).Scan(&muteRouteStatus)
+
 	panelText := fmt.Sprintf(
 		"⚙️━━━━━━━━━━━━━━━━━━━━━━⚙️\n"+
 			"🎛️ ADVANCED GAMEPLAY SETTINGS 🎛️\n"+
 			"⚙️━━━━━━━━━━━━━━━━━━━━━━⚙️\n\n"+
 			"🚨 Incoming Raid Alerts: %s\n"+
 			"📦 Storage Full Alerts: %s\n"+
+			"🛣️ Route Status Pings (peaceful road passes,\n"+
+			"   weather clears, convoy arrivals): %s\n"+
 			"⚙️━━━━━━━━━━━━━━━━━━━━━━⚙️",
-		onOff(notifyRaid), onOff(notifyStorage),
+		onOff(notifyRaid), onOff(notifyStorage), onOff(!muteRouteStatus),
 	)
 
 	selector := &telebot.ReplyMarkup{}
 	btnRaid := selector.Data("🚨 Toggle Raid Alerts", "settings_toggle", "raid")
 	btnStorage := selector.Data("📦 Toggle Storage Alerts", "settings_toggle", "storage")
-	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage))
+	btnRouteStatus := selector.Data("🛣️ Toggle Route Status Pings", "settings_toggle", "route_status")
+	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage), selector.Row(btnRouteStatus))
 
 	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
@@ -92,6 +98,25 @@ func (h *ProfileHandler) HandleSettingsToggleCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 	setting := c.Args()[0]
+
+	// route_status lives in notification_preferences, not users - see
+	// MMO_WORLD_EVOLUTION_PLAN.md Phase 7 milestone 2 / internal/engine/
+	// notifications/preferences.go's MutableCategories. This is
+	// deliberately the ONLY notification category a player can mute here;
+	// combat, discovery, and supply-loss alerts stay on users.notify_on_*
+	// or aren't gated at all, by design.
+	if setting == "route_status" {
+		_, err := h.DB.ExecContext(ctx, `
+			INSERT INTO notification_preferences (user_id, mute_route_status, updated_at)
+			VALUES ($1, TRUE, CURRENT_TIMESTAMP)
+			ON CONFLICT (user_id) DO UPDATE SET mute_route_status = NOT notification_preferences.mute_route_status, updated_at = CURRENT_TIMESTAMP`,
+			sender.ID)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error updating setting."})
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: "✅ Setting updated!"})
+		return h.HandleSettings(c)
+	}
 
 	var column string
 	switch setting {

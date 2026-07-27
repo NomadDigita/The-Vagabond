@@ -222,7 +222,9 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		SELECT r.id, COALESCE(ed.name, 'Rogue Drone Nest'), r.resolve_time, r.state, r.round_number, r.attacker_rations, r.attacker_ammo,
 		       COALESCE(r.origin_region, ''), COALESCE(r.origin_x, 0), COALESCE(r.origin_y, 0),
 		       COALESCE(r.destination_region, ''), COALESCE(r.destination_x, 0), COALESCE(r.destination_y, 0),
-		       COALESCE(r.movement_state, 'moving'), COALESCE(r.pause_reason, '')
+		       COALESCE(r.movement_state, 'moving'), COALESCE(r.pause_reason, ''),
+		       COALESCE(r.stolen_scrap,0)+COALESCE(r.stolen_metal,0)+COALESCE(r.stolen_crystal,0)+COALESCE(r.stolen_rations,0)+COALESCE(r.stolen_electricity,0)+COALESCE(r.stolen_hydrogen,0)+COALESCE(r.stolen_neuro_cores,0)+COALESCE(r.stolen_dollars,0),
+		       (r.radar_alert_sent_at IS NOT NULL)
 		FROM raids r
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.attacker_id = $1 AND (r.state = 'marching' OR r.state = 'engaged' OR r.state = 'staged' OR r.state = 'returning')
@@ -239,10 +241,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		for rowsOut.Next() {
 			var rID, dName, rState, originRegion, destinationRegion, rMovementState, pauseReason string
 			var rRound int
-			var rRations, rAmmo float64
+			var rRations, rAmmo, cargoCarried float64
 			var originX, originY, destinationX, destinationY int
 			var resTime time.Time
-			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &rMovementState, &pauseReason); err == nil {
+			var detected bool
+			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &rMovementState, &pauseReason, &cargoCarried, &detected); err == nil {
 				diff := resTime.UTC().Sub(time.Now().UTC())
 				timeLeft := int(diff.Seconds())
 				if timeLeft < 0 {
@@ -250,7 +253,14 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				}
 				routeLine := ""
 				if originRegion != "" && destinationRegion != "" {
-					routeLine = fmt.Sprintf("   Route: [%s %d,%d] → [%s %d,%d] | Movement: %s\n", originRegion, originX, originY, destinationRegion, destinationX, destinationY, rMovementState)
+					radarLine := "🟢 undetected"
+					if detected {
+						radarLine = "🔴 spotted by target"
+					}
+					routeLine = fmt.Sprintf("   Route: [%s %d,%d] → [%s %d,%d] | Movement: %s\n   Supplies: Rations %.0f%% | Ammo %.0f%% | Radar: %s\n", originRegion, originX, originY, destinationRegion, destinationX, destinationY, rMovementState, rRations, rAmmo, radarLine)
+					if cargoCarried > 0.01 {
+						routeLine += fmt.Sprintf("   Cargo carried: %.1f units\n", cargoCarried)
+					}
 					if pauseReason != "" {
 						routeLine += fmt.Sprintf("   Status: %s\n", pauseReason)
 					}
@@ -259,7 +269,9 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				case "marching":
 					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n%s   Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
 				case "staged":
-					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Departure Window: %s (%ds remaining)\n\n", index, dName, resTime.UTC().Format("15:04:05"), timeLeft)
+					var coopCount int
+					_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM raid_coop_members WHERE raid_id = $1", rID).Scan(&coopCount)
+					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Commanders joined: %d (auto-launches at the window below regardless of headcount)\n   Departure Window: %s (%ds remaining)\n\n", index, dName, coopCount, resTime.UTC().Format("15:04:05"), timeLeft)
 				case "returning":
 					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n%s   Base Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
 				default:
@@ -1859,6 +1871,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 2500.0, dollars = dollars - 750.0, crystal = crystal - 25.0 WHERE encampment_id = $1", attackerID)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO speedup_usage_log (encampment_id, scrap_spent, dollars_spent, crystal_spent) VALUES ($1, 2500.0, 750.0, 25.0)", attackerID)
 		newResolve := resolveTime.UTC().Add(-30 * time.Minute)
 		if time.Until(newResolve) < 0 {
 			newResolve = time.Now().UTC().Add(5 * time.Second)

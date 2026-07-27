@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 )
 
@@ -16,9 +17,14 @@ import (
 // decision - a column would just keep marching. This mirrors
 // evaluateRoadEncounters (expedition-vs-expedition) but against a
 // stationary, real-player-owned base instead of a second moving column.
-// AI/seeded settlements are deliberately excluded: they run their own
-// recon/skirmish flow (see resolveExplorationDiscovery / Phase 2) and
-// Phase 6 (persistent AI civilizations) has not been touched.
+// AI/seeded settlements are excluded via encampments.is_ai_faction = FALSE
+// (they run their own recon/skirmish flow; see resolveExplorationDiscovery
+// / Phase 2). Earlier versions of this query tried to exclude them by
+// requiring a JOIN on users, on the assumption AI-owned encampments had no
+// real users row - Phase 6 (persistent AI civilizations, built afterward)
+// actually gives each AI faction a genuine users row (required by
+// encampments.user_id's FK/UNIQUE constraint), which silently broke that
+// assumption. Caught by TestEvaluateRoadBaseEncountersExcludesAIFactionBases.
 //
 // Runs its own fresh query rather than reusing evaluateRoadEncounters'
 // in-memory movers slice, since that slice may already be stale within the
@@ -76,8 +82,8 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 			SELECT e.id, e.name, e.user_id, c.x, c.y
 			FROM encampments e
 			JOIN coordinates c ON c.id = e.coordinate_id
-			JOIN users u ON u.telegram_id = e.user_id
 			WHERE e.id <> $1
+			  AND e.is_ai_faction = FALSE
 			  AND c.region = $2
 			  AND ABS(c.x - $3) <= $4 AND ABS(c.y - $5) <= $4
 			ORDER BY ABS(c.x - $3) + ABS(c.y - $5)
@@ -191,8 +197,8 @@ func (e *Engine) expireRoadBaseEncounters(ctx context.Context, tx *sql.Tx) error
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", x.raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
 			if userID != 0 {
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-					"🛣️ ROAD CONTACT RESOLVED: Your column continued on its way without engaging the outpost.")
+				_ = notifications.Queue(ctx, tx, userID,
+					"🛣️ ROAD CONTACT RESOLVED: Your column continued on its way without engaging the outpost.", "route_status")
 			}
 		}
 	}

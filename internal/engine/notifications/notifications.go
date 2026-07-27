@@ -95,8 +95,33 @@ func (d *Dispatcher) drainQueue() {
 		}
 	}
 
+	// Deduplication (Phase 7 milestone 2): a burst of the same event -
+	// e.g. several near-simultaneous route-status pings - can queue the
+	// identical (user_id, message) pair more than once before a player
+	// has had a chance to read any of them. Rather than retrofitting
+	// every one of this codebase's many INSERT INTO notifications call
+	// sites to check for an existing duplicate before queuing, coalesce
+	// here: send the message once per (user, text) pair still pending in
+	// this batch, and mark every duplicate row sent alongside it. This
+	// only merges rows that are byte-identical, so it can never conflate
+	// two different alerts that happen to arrive close together.
+	type dedupKey struct {
+		userID  int64
+		message string
+	}
+	groups := make(map[dedupKey][]string) // -> notification ids
+	order := make([]dedupKey, 0, len(queue))
 	for _, p := range queue {
-		targetUser := &telebot.User{ID: p.userID}
+		k := dedupKey{p.userID, p.message}
+		if _, seen := groups[k]; !seen {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], p.id)
+	}
+
+	for _, k := range order {
+		ids := groups[k]
+		targetUser := &telebot.User{ID: k.userID}
 
 		// Auto-detect HTML-formatted messages rather than assuming every
 		// queued notification across the whole codebase is HTML-safe.
@@ -109,19 +134,21 @@ func (d *Dispatcher) drainQueue() {
 		// contain one of these tags; anything else is sent exactly as
 		// before (plain text, zero behavior change).
 		opts := []interface{}{}
-		if looksLikeHTML(p.message) {
+		if looksLikeHTML(k.message) {
 			opts = append(opts, telebot.ModeHTML)
 		}
-		_, err := d.Bot.Send(targetUser, p.message, opts...)
+		_, err := d.Bot.Send(targetUser, k.message, opts...)
 		if err != nil {
-			log.Printf("Dispatcher failed to deliver notification to %d: %v", p.userID, err)
+			log.Printf("Dispatcher failed to deliver notification to %d: %v", k.userID, err)
 			continue
 		}
 
-		// Mark as sent in database
-		_, err = d.DB.ExecContext(ctx, "UPDATE notifications SET is_sent = TRUE WHERE id = $1", p.id)
-		if err != nil {
-			log.Printf("Dispatcher failed updating persistence sentinel state for notification %s: %v", p.id, err)
+		// Mark every duplicate in this batch as sent together, not just
+		// the one that was actually delivered.
+		for _, id := range ids {
+			if _, err := d.DB.ExecContext(ctx, "UPDATE notifications SET is_sent = TRUE WHERE id = $1", id); err != nil {
+				log.Printf("Dispatcher failed updating persistence sentinel state for notification %s: %v", id, err)
+			}
 		}
 	}
 }

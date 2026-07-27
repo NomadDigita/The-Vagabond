@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/agent"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/resource"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
@@ -1899,7 +1900,7 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 				if outcome == "timeout" {
 					note = "🛣️ ROAD CONTACT RESOLVED: No attack order was given in time - your column continued on its way."
 				}
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID, note)
+				_ = notifications.Queue(ctx, tx, userID, note, "route_status")
 			}
 		}
 	}
@@ -2193,8 +2194,8 @@ func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) err
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", row.raidID).Scan(&userID)
 		if userID != 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-				"☀️ CONDITIONS CLEARED: Your column has broken camp and resumed its journey.")
+			_ = notifications.Queue(ctx, tx, userID,
+				"☀️ CONDITIONS CLEARED: Your column has broken camp and resumed its journey.", "route_status")
 		}
 	}
 	return nil
@@ -2303,8 +2304,8 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", c.targetRaidID).Scan(&userID)
 		if userID != 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-				"📦✅ CONVOY ARRIVED: Reinforcement supplies have reached your stranded column. The journey resumes.")
+			_ = notifications.Queue(ctx, tx, userID,
+				"📦✅ CONVOY ARRIVED: Reinforcement supplies have reached your stranded column. The journey resumes.", "route_status")
 		}
 	}
 	return nil
