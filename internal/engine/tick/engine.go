@@ -630,7 +630,7 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 			ctCap := storagecap.CapFor(ctx, tx, ct.campID)
 			newDollars, _ := storagecap.Clamp(curDollars, share, ctCap)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, ct.campID)
-			alertMsg := fmt.Sprintf("☠️🎉 BOSS SLAIN: %s\n\nYour cumulative %.0f damage earned you 💵 $%.2f from the loot pool.", bossName, ct.damage, share)
+			alertMsg := fmt.Sprintf("☠️🎉 <b>BOSS SLAIN: %s</b>\n\nYour cumulative <code>%.0f damage</code> earned you 💵 <code>$%.2f</code> from the loot pool.", htmlEscapeTick(bossName), ct.damage, share)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ct.userID, alertMsg)
 		}
 	}
@@ -724,7 +724,8 @@ func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", loserClanID).Scan(&loserName)
 
 		if isDraw {
-			drawMsg := fmt.Sprintf("🤝 CLAN WAR ENDED IN A DRAW!\n\n%s vs %s: %.0f - %.0f. Neither side prevailed.", winnerName, loserName, winnerScore, loserScore)
+			drawMsg := fmt.Sprintf("🤝 %s\n\n%s 🆚 %s: <code>%.0f - %.0f</code>. Neither side prevailed.",
+				htmlBoldTick("CLAN WAR ENDED IN A DRAW!"), htmlBoldTick(htmlEscapeTick(winnerName)), htmlBoldTick(htmlEscapeTick(loserName)), winnerScore, loserScore)
 			e.notifyClanMembers(ctx, tx, w.clanA, drawMsg)
 			e.notifyClanMembers(ctx, tx, w.clanB, drawMsg)
 			continue
@@ -755,13 +756,15 @@ func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, campID)
 			}
 
-			winMsg := fmt.Sprintf("🏆⚔️ CLAN WAR VICTORY!\n\nYour Clan defeated %s! Final score: %.0f - %.0f.\n💵 Your share of the spoils: $%.2f", loserName, winnerScore, loserScore, share)
+			winMsg := fmt.Sprintf("🏆⚔️ %s\n\nYour Clan defeated %s! Final score: <code>%.0f - %.0f</code>.\n💵 Your share of the spoils: <code>$%.2f</code>",
+				htmlBoldTick("CLAN WAR VICTORY!"), htmlBoldTick(htmlEscapeTick(loserName)), winnerScore, loserScore, share)
 			for _, uid := range winnerMembers {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, winMsg)
 			}
 		}
 
-		loseMsg := fmt.Sprintf("💀⚔️ CLAN WAR DEFEAT\n\nYour Clan lost to %s. Final score: %.0f - %.0f.", winnerName, winnerScore, loserScore)
+		loseMsg := fmt.Sprintf("💀⚔️ %s\n\nYour Clan lost to %s. Final score: <code>%.0f - %.0f</code>.",
+			htmlBoldTick("CLAN WAR DEFEAT"), htmlBoldTick(htmlEscapeTick(winnerName)), winnerScore, loserScore)
 		e.notifyClanMembers(ctx, tx, loserClanID, loseMsg)
 	}
 
@@ -1031,7 +1034,7 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 
 		_, _ = tx.ExecContext(ctx, "UPDATE active_mining_queues SET is_completed = TRUE WHERE id = $1", m.id)
 
-		alertMsg := fmt.Sprintf("⛏️ EXTRACTION COMPLETE: Your miners successfully returned with +%.1f %s!", gain, m.resType)
+		alertMsg := fmt.Sprintf("⛏️ <b>EXTRACTION COMPLETE</b>: Your miners successfully returned with <code>+%.1f %s</code>! %s", gain, m.resType, resourceEmojiTick(m.resType))
 		queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
 		_, _ = tx.ExecContext(ctx, queryNotif, m.userID, alertMsg)
 	}
@@ -1084,9 +1087,9 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE, resolve_time = $1 WHERE id = $2", returnResolveTime, s.id)
 
 		defenderAlert := fmt.Sprintf(
-			"🛰️ ESPIONAGE BREACH: Outpost [%s] has successfully scanned your warehouse telemetry!\n"+
-				"The spy satellite is now returning to orbit. You have %d seconds left to launch an Interceptor Drone and vaporize the intel before it lands.",
-			s.spyName, int(returnDuration.Seconds()),
+			"🛰️ %s Outpost %s has successfully scanned your warehouse telemetry!\n"+
+				"The spy satellite is now returning to orbit. You have <code>%d seconds</code> left to launch an Interceptor Drone and vaporize the intel before it lands. ⏳",
+			htmlBoldTick("ESPIONAGE BREACH:"), htmlBoldTick(htmlEscapeTick(s.spyName)), int(returnDuration.Seconds()),
 		)
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.targetUserID, defenderAlert)
 	}
@@ -1440,12 +1443,12 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 				newDollars, _ := storagecap.Clamp(curDollars, lootWon, wCap)
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, wCampID)
 
-				winAlert := fmt.Sprintf("🏟️ ARENA REPORT: TEAM VICTORY!\n\nYou won the %s team clash!\n🏆 Reward: +$%.0f Cash credited.", b, lootWon)
+				winAlert := fmt.Sprintf("🏟️ %s\n\nYou won the %s team clash! 🎉\n🏆 Reward: <code>+$%.0f Cash</code> credited.", htmlBoldTick("ARENA REPORT: TEAM VICTORY!"), b, lootWon)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, winAlert)
 			}
 
 			for _, l := range losers {
-				loseAlert := fmt.Sprintf("🏟️ ARENA REPORT: TEAM DEFEAT\n\nYou lost the %s team clash. Keep training commander!", b)
+				loseAlert := fmt.Sprintf("🏟️ %s\n\nYou lost the %s team clash. Keep training commander! 💪", htmlBoldTick("ARENA REPORT: TEAM DEFEAT"), b)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", l.userID, loseAlert)
 			}
 
@@ -2669,14 +2672,21 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 					var helperUserID int64
 					_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", s.campID).Scan(&helperUserID)
 					if helperUserID != 0 {
-						helperAlert := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your contributed forces survived the co-op campaign and have returned safely to your own base (+%d Soldiers, +%d Mechs).", s.soldiers, s.mechs)
+						helperAlert := fmt.Sprintf("🚀 <b>RETURN MARCH COMPLETED</b>: Your contributed forces survived the co-op campaign and have returned safely to your own base (<code>+%d Soldiers, +%d Mechs</code>). 🎖️", s.soldiers, s.mechs)
 						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", helperUserID, helperAlert)
 					}
 				}
 				_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", r.id)
 			}
 
-			alertMsg := fmt.Sprintf("🚀 RETURN MARCH COMPLETED: Your survivors returned to base carrying +%.1f Scrap, +%.1f Metal, +%.1f Crystal, +%.1f Rations, +%.1f Electricity, +%.1f Hydrogen, +%.1f Neuro Cores, +$%.1f!", r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.stolenRations, r.stolenElectricity, r.stolenHydrogen, r.stolenNeuroCores, r.stolenDollars)
+			alertMsg := fmt.Sprintf(
+				"🚀 <b>RETURN MARCH COMPLETED</b> 🎉\n\n"+
+					"Your survivors returned to base carrying:\n"+
+					"⚙️ <code>+%.1f Scrap</code>  🔩 <code>+%.1f Metal</code>  🔮 <code>+%.1f Crystal</code>\n"+
+					"🍖 <code>+%.1f Rations</code>  ⚡ <code>+%.1f Electricity</code>  🎈 <code>+%.1f Hydrogen</code>\n"+
+					"🧠 <code>+%.1f Neuro Cores</code>  💵 <code>+$%.1f</code>",
+				r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.stolenRations, r.stolenElectricity, r.stolenHydrogen, r.stolenNeuroCores, r.stolenDollars,
+			)
 			queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
 			_, _ = tx.ExecContext(ctx, queryNotif, r.attackerUserID, alertMsg)
 			continue
@@ -2691,20 +2701,24 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, updateMarch, nextRoundResolve, r.id)
 
 			arrivalAlert := fmt.Sprintf(
-				"⚔️ CAMPAIGN ENGAGEMENT ACTIVATED!\n\n"+
-					"Your forces have arrived at Outpost [%s].\n"+
+				"⚔️ %s\n\n"+
+					"Your forces have arrived at Outpost %s. 🎯\n"+
 					"Deployments are actively engaged in battlefield skirmishes.\n"+
-					"Decisive Resolution progress starting next tick cycle.",
-				r.defenderName,
+					"⏳ %s",
+				htmlBoldTick("CAMPAIGN ENGAGEMENT ACTIVATED!"),
+				htmlBoldTick(htmlEscapeTick(r.defenderName)),
+				htmlItalicTick("Decisive Resolution progress starting next tick cycle."),
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
 
 			if r.defenderID.Valid && r.defenderUserID != 0 {
 				defenderEngagedAlert := fmt.Sprintf(
-					"⚔️ UNDER ATTACK: ENGAGEMENT ACTIVATED!\n\n"+
-						"Hostile forces from Outpost [%s] have arrived and are actively engaging your defenses!\n"+
-						"Decisive Resolution progress starting next tick cycle.",
-					r.attackerName,
+					"⚔️ %s\n\n"+
+						"Hostile forces from Outpost %s have arrived and are actively engaging your defenses! 🚨\n"+
+						"⏳ %s",
+					htmlBoldTick("UNDER ATTACK: ENGAGEMENT ACTIVATED!"),
+					htmlBoldTick(htmlEscapeTick(r.attackerName)),
+					htmlItalicTick("Decisive Resolution progress starting next tick cycle."),
 				)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, defenderEngagedAlert)
 			}
@@ -3382,10 +3396,10 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				}
 
 				salvageAlert := fmt.Sprintf(
-					"💀 ASSAULT FORCE WIPED OUT - BUT NOT EMPTY-HANDED\n\n"+
+					"💀 <b>ASSAULT FORCE WIPED OUT - BUT NOT EMPTY-HANDED</b>\n\n"+
 						"Your combat units were destroyed, but %d surviving Buggy crew(s) grabbed what they could before retreating.\n"+
-						"⚙️ Salvaged: %.0f Scrap, %.0f Metal, %.0f Crystal.\n"+
-						"⏳ Return march engaged, arriving in %.0f minutes.",
+						"⚙️ Salvaged: <code>%.0f Scrap, %.0f Metal, %.0f Crystal</code>.\n"+
+						"⏳ Return march engaged, arriving in <code>%.0f minutes</code>.",
 					primaryBuggies, salvageScrap, salvageMetal, salvageCrystal, returnMinutes,
 				)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, salvageAlert)
