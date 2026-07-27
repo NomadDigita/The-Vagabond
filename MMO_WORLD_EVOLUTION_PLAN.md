@@ -9,6 +9,13 @@ the source-of-truth unit registry, the persistent raid lifecycle, or the
 separate provider-agnostic AI infrastructure workstream documented in
 `PROJECT_MASTER_PLAN.md`.
 
+**Resuming Phase 6 (persistent AI civilizations)?** The foundational tier
+(seeded, passive, raidable AI factions) is done - see the "Completed
+implementation detail" section below. The remaining half (AI factions that
+actually decide to scout/raid) has a full, ready-to-implement design at
+`AI_FACTION_DECISION_LOOP_PLAN.md` - read that file first, it's written
+specifically so this doesn't need to be re-derived.
+
 ## Operating rules
 
 - Do not modify `assets/`. Visual assets are a separate workstream.
@@ -590,5 +597,9 @@ operators can measure whether the loop is fair and economically sustainable.
   not just more tick-pass math). Rogue Drone Nest was left completely
   untouched throughout, per milestone 5's explicit "no destructive
   conversion" instruction - it remains the fallback for a continent with
-  no other outpost.
+  no other outpost. **Full design for this remaining half - data model,
+  decision algorithm, fairness guardrails, exact raid-launch field list to
+  copy from the human flow, testing strategy, and a suggested incremental
+  build order - is written up in `AI_FACTION_DECISION_LOOP_PLAN.md`, so a
+  future session can implement it without re-deriving any of this.**
 
