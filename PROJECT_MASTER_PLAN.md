@@ -2061,6 +2061,28 @@ which cost real time re-deriving them twice.
   wave 8 targets are `diplomacy.go` and `federation.go` (294 and 267
   lines, the two largest remaining unaudited handler files).
 
+- **Following session (core game, not AI Systems Roadmap): UI Polish
+  wave 8 — diplomacy.go + federation.go, plus a terminology fix.**
+  Rich-formatted the two remaining largest unaudited handler files.
+  Escaped user-authored Clan names (diplomacy.go) and Federation names
+  (federation.go - `name` is player-chosen at founding, `icon`/
+  `description` are DB defaults per migration 014 but `description` was
+  escaped defensively anyway). Also fixed a real terminology
+  inconsistency: both files called the Clan's top role "King"/"Clan
+  King" throughout (player text, comments, and the `isKing` variable),
+  while `clan.go` - the actual clan system - calls the identical role
+  (`clans.leader_id`) "Leader" everywhere. Renamed every occurrence to
+  "Leader"/`isLeader` in both files; the `leader_id == userID` check
+  itself was already correct and untouched. Verified with a full `go
+  build ./... && go vet ./... && go test ./...` pass (same
+  GOPROXY=direct + temporary telebot.v3 replace-directive method from
+  wave 7, restored before commit as always) - all green, zero gameplay
+  logic changed. No unaudited handler file remains above ~250 lines;
+  recommended wave 9 target is the tick-engine notification strings in
+  `internal/engine/` directly instead of another whole-file pass.
+
+## 7. Future Ideas (unscoped, not committed to any phase)
+
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)
   that periodically compacts old `ai_memory` rows via an LLM call, for
   Phases G/I which will want longer-lived context than raw

@@ -21,7 +21,7 @@ func NewDiplomacyHandler(db *sql.DB) *DiplomacyHandler {
 // getMyClanForDiplomacy mirrors federation.go's private getMyClan helper
 // (can't call that one directly - it's a method on *FederationHandler,
 // a different receiver type).
-func (h *DiplomacyHandler) getMyClanForDiplomacy(ctx context.Context, userID int64) (clanID string, clanName string, isKing bool, err error) {
+func (h *DiplomacyHandler) getMyClanForDiplomacy(ctx context.Context, userID int64) (clanID string, clanName string, isLeader bool, err error) {
 	var leaderID int64
 	err = h.DB.QueryRowContext(ctx, `
 		SELECT c.id, c.name, c.leader_id
@@ -50,14 +50,12 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
-	clanID, _, isKing, err := h.getMyClanForDiplomacy(ctx, sender.ID)
+	clanID, _, isLeader, err := h.getMyClanForDiplomacy(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
 
-	panelText := "🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\n" +
-		"🕊️ CLAN DIPLOMACY\n" +
-		"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️\n"
+	panelText := htmlBold("🕊️ CLAN DIPLOMACY") + "\n" + divider + "\n"
 
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT d.id, d.pact_type, d.status, d.clan_a_id, d.clan_b_id,
@@ -84,14 +82,15 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 		if err := rows.Scan(&id, &pactType, &status, &clanAID, &clanBID, &otherName, &proposedBy); err != nil {
 			continue
 		}
+		safeOtherName := htmlEscape(otherName)
 		if status == "active" {
 			hasActive = true
-			activeText += fmt.Sprintf("%s with %s\n", pactLabel(pactType), otherName)
+			activeText += fmt.Sprintf("%s with %s\n", pactLabel(pactType), safeOtherName)
 		} else {
-			// Pending: only the RECEIVING Clan King (not the proposer) gets accept/reject buttons.
+			// Pending: only the RECEIVING Clan Leader (not the proposer) gets accept/reject buttons.
 			isRecipient := (clanAID == clanID && proposedBy != sender.ID) || (clanBID == clanID && proposedBy != sender.ID)
-			pendingText += fmt.Sprintf("%s proposed by %s\n", pactLabel(pactType), otherName)
-			if isRecipient && isKing {
+			pendingText += fmt.Sprintf("%s proposed by %s\n", pactLabel(pactType), safeOtherName)
+			if isRecipient && isLeader {
 				btnAccept := selector.Data(fmt.Sprintf("✅ Accept %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "accept")
 				btnReject := selector.Data(fmt.Sprintf("❌ Reject %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "reject")
 				buttons = append(buttons, selector.Row(btnAccept), selector.Row(btnReject))
@@ -100,22 +99,22 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 	}
 
 	if hasActive {
-		panelText += "\n✅ ACTIVE PACTS:\n" + activeText
+		panelText += "\n✅ " + htmlBold("ACTIVE PACTS") + ":\n" + activeText
 	}
 	if pendingText != "" {
-		panelText += "\n⏳ PENDING PROPOSALS:\n" + pendingText
+		panelText += "\n⏳ " + htmlBold("PENDING PROPOSALS") + ":\n" + pendingText
 	}
 	if !hasActive && pendingText == "" {
 		panelText += "\nNo active pacts or pending proposals.\n"
 	}
 
-	panelText += "\n💡 A Clan King can propose an alliance with /ally [clan_name], or a\n" +
-		"non-aggression pact with /nap [clan_name]. An active pact of either\n" +
-		"kind blocks raids between the two Clans until broken with /break_pact [clan_name].\n" +
-		"🕊️━━━━━━━━━━━━━━━━━━━━━━🕊️"
+	panelText += "\n💡 A Clan Leader can propose an alliance with " + htmlCode("/ally [clan_name]") + ", or a\n" +
+		"non-aggression pact with " + htmlCode("/nap [clan_name]") + ". An active pact of either\n" +
+		"kind blocks raids between the two Clans until broken with " + htmlCode("/break_pact [clan_name]") + ".\n" +
+		divider
 
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
 // proposePact handles both /ally and /nap - they differ only in
@@ -135,12 +134,12 @@ func (h *DiplomacyHandler) proposePact(c telebot.Context, pactType string) error
 		return c.Send("⚠️ Usage: /nap [clan_name]")
 	}
 
-	myClanID, myClanName, isKing, err := h.getMyClanForDiplomacy(ctx, sender.ID)
+	myClanID, myClanName, isLeader, err := h.getMyClanForDiplomacy(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
-	if !isKing {
-		return c.Send("❌ Only your Clan's King can propose diplomatic pacts.")
+	if !isLeader {
+		return c.Send("❌ Only your Clan's Leader can propose diplomatic pacts.")
 	}
 
 	var targetClanID string
@@ -167,7 +166,8 @@ func (h *DiplomacyHandler) proposePact(c telebot.Context, pactType string) error
 		return c.Send("⚠️ Error proposing pact.")
 	}
 
-	return c.Send(fmt.Sprintf("%s: %s proposed to %s! Their Clan King can accept via /diplomacy.", myClanName, pactLabel(pactType), targetName))
+	return c.Send(fmt.Sprintf("%s: %s proposed to %s! Their Clan Leader can accept via %s.",
+		htmlEscape(myClanName), pactLabel(pactType), htmlEscape(targetName), htmlCode("/diplomacy")), telebot.ModeHTML)
 }
 
 // HandleProposeAlliance (/ally [clan_name])
@@ -180,7 +180,7 @@ func (h *DiplomacyHandler) HandleProposeNAP(c telebot.Context) error {
 	return h.proposePact(c, "nap")
 }
 
-// HandleDiplomacyRespondCallback fires when the receiving Clan King taps
+// HandleDiplomacyRespondCallback fires when the receiving Clan Leader taps
 // Accept/Reject on a pending proposal from /diplomacy.
 func (h *DiplomacyHandler) HandleDiplomacyRespondCallback(c telebot.Context) error {
 	ctx := context.Background()
@@ -192,9 +192,9 @@ func (h *DiplomacyHandler) HandleDiplomacyRespondCallback(c telebot.Context) err
 	args := c.Args()
 	pactID, decision := args[0], args[1]
 
-	myClanID, _, isKing, err := h.getMyClanForDiplomacy(ctx, sender.ID)
-	if err != nil || !isKing {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only your Clan's King can respond to diplomatic proposals."})
+	myClanID, _, isLeader, err := h.getMyClanForDiplomacy(ctx, sender.ID)
+	if err != nil || !isLeader {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only your Clan's Leader can respond to diplomatic proposals."})
 	}
 
 	var clanAID, clanBID, status string
@@ -227,7 +227,7 @@ func (h *DiplomacyHandler) HandleDiplomacyRespondCallback(c telebot.Context) err
 	return h.HandleDiplomacyPanel(c)
 }
 
-// HandleBreakPact (/break_pact [clan_name]) lets either Clan King end an
+// HandleBreakPact (/break_pact [clan_name]) lets either Clan Leader end an
 // active pact unilaterally - diplomacy shouldn't be a permanent trap.
 func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 	ctx := context.Background()
@@ -241,12 +241,12 @@ func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 		return c.Send("⚠️ Usage: /break_pact [clan_name]")
 	}
 
-	myClanID, _, isKing, err := h.getMyClanForDiplomacy(ctx, sender.ID)
+	myClanID, _, isLeader, err := h.getMyClanForDiplomacy(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
-	if !isKing {
-		return c.Send("❌ Only your Clan's King can break a diplomatic pact.")
+	if !isLeader {
+		return c.Send("❌ Only your Clan's Leader can break a diplomatic pact.")
 	}
 
 	var targetClanID string
@@ -266,7 +266,7 @@ func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 		return c.Send("❌ No active pact found with that Clan.")
 	}
 
-	return c.Send(fmt.Sprintf("🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.", targetName))
+	return c.Send(fmt.Sprintf("🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.", htmlEscape(targetName)), telebot.ModeHTML)
 }
 
 // pactQueryer is satisfied by both *sql.DB and *sql.Tx, so combat.go's

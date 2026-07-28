@@ -22,7 +22,7 @@ func NewFederationHandler(db *sql.DB) *FederationHandler {
 const federationFoundCost = 5000.0 // Crystal - founding a Federation is a major, deliberate milestone
 
 // getMyClan resolves the caller's clan membership and whether they're the
-// King (leader), returning (clanID, isKing, error).
+// Leader, returning (clanID, isLeader, error).
 func (h *FederationHandler) getMyClan(ctx context.Context, userID int64) (string, bool, error) {
 	var clanID string
 	var leaderID int64
@@ -43,9 +43,7 @@ func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
 
-	panelText := "🌐━━━━━━━━━━━━━━━━━━━━━━🌐\n" +
-		"🏛️ FEDERATIONS OF THE WASTELAND 🏛️\n" +
-		"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\n\n"
+	panelText := htmlBold("🏛️ FEDERATIONS OF THE WASTELAND") + "\n" + divider + "\n\n"
 
 	query := fmt.Sprintf(`
 		SELECT f.name, f.icon, COUNT(DISTINCT c.id) as clan_count, COUNT(DISTINCT uc.user_id) as member_count, COALESCE(SUM(%s), 0) as total_score
@@ -67,7 +65,9 @@ func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 			var score float64
 			if scanErr := rows.Scan(&name, &icon, &clanCount, &memberCount, &score); scanErr == nil {
 				any = true
-				panelText += fmt.Sprintf("%s %d. %s %s — 🏴 %d Clans, 👥 %d Members, 🏅 %.0f pts\n", medalFor(rank), rank, icon, name, clanCount, memberCount, score)
+				panelText += fmt.Sprintf("%s %d. %s %s — 🏴 %s Clans, 👥 %s Members, 🏅 %s pts\n",
+					medalFor(rank), rank, icon, htmlEscape(name),
+					htmlCode(fmt.Sprintf("%d", clanCount)), htmlCode(fmt.Sprintf("%d", memberCount)), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
@@ -77,10 +77,11 @@ func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 		}
 	}
 
-	panelText += "\n💡 A Clan King can found a Federation with /fed_found [name], join one with /fed_join [name], or leave with /fed_leave.\n" +
-		"🌐━━━━━━━━━━━━━━━━━━━━━━🌐"
+	panelText += "\n💡 A Clan Leader can found a Federation with " + htmlCode("/fed_found [name]") +
+		", join one with " + htmlCode("/fed_join [name]") + ", or leave with " + htmlCode("/fed_leave") + ".\n" +
+		divider
 
-	return c.Send(panelText, keyboards.EconomyNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 // HandleMyFederationPanel (/federation) shows detailed info on the
@@ -102,16 +103,12 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 	var fedID, fedName, fedIcon, fedDesc string
 	err = h.DB.QueryRowContext(ctx, "SELECT f.id, f.name, f.icon, f.description FROM federations f JOIN clans c ON c.federation_id = f.id WHERE c.id = $1", clanID).Scan(&fedID, &fedName, &fedIcon, &fedDesc)
 	if err != nil {
-		return c.Send("⚠️ Your Clan isn't part of a Federation yet. A King can found one with /fed_found [name] or join one with /fed_join [name].")
+		return c.Send("⚠️ Your Clan isn't part of a Federation yet. A Leader can found one with /fed_found [name] or join one with /fed_join [name].")
 	}
 
 	panelText := fmt.Sprintf(
-		"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\n"+
-			"%s %s\n"+
-			"🌐━━━━━━━━━━━━━━━━━━━━━━🌐\n"+
-			"📜 %s\n\n"+
-			"🏴 MEMBER CLANS:\n",
-		fedIcon, fedName, fedDesc,
+		"%s\n"+divider+"\n📜 %s\n\n🏴 %s\n",
+		htmlBold(fedIcon+" "+htmlEscape(fedName)), htmlEscape(fedDesc), htmlBold("MEMBER CLANS"),
 	)
 
 	rows, err := h.DB.QueryContext(ctx, `
@@ -126,18 +123,18 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 			var name string
 			var members int
 			if scanErr := rows.Scan(&name, &members); scanErr == nil {
-				panelText += fmt.Sprintf("🏴 %s (%d members)\n", name, members)
+				panelText += fmt.Sprintf("🏴 %s (%s members)\n", htmlEscape(name), htmlCode(fmt.Sprintf("%d", members)))
 			}
 		}
 		rows.Close()
 	}
 
-	panelText += "🌐━━━━━━━━━━━━━━━━━━━━━━🌐"
+	panelText += divider
 
-	return c.Send(panelText, keyboards.EconomyNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// HandleFoundFederation (/fed_found [name]) - a Clan King founds a new
+// HandleFoundFederation (/fed_found [name]) - a Clan Leader founds a new
 // Federation, deliberately costly since it's a major milestone.
 func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 	ctx := context.Background()
@@ -148,15 +145,15 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 
 	name := c.Message().Payload
 	if name == "" {
-		return c.Send(fmt.Sprintf("⚠️ Usage: /fed_found [name]\n💰 Cost: %.0f Crystal\n🔒 Only your Clan's King can found a Federation.", federationFoundCost))
+		return c.Send(fmt.Sprintf("⚠️ Usage: /fed_found [name]\n💰 Cost: %.0f Crystal\n🔒 Only your Clan's Leader can found a Federation.", federationFoundCost))
 	}
 
-	clanID, isKing, err := h.getMyClan(ctx, sender.ID)
+	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
-	if !isKing {
-		return c.Send("❌ Only your Clan's King can found a Federation.")
+	if !isLeader {
+		return c.Send("❌ Only your Clan's Leader can found a Federation.")
 	}
 
 	var existingFed sql.NullString
@@ -193,10 +190,11 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 		return c.Send("⚠️ Error founding Federation.")
 	}
 
-	return c.Send(fmt.Sprintf("🌐🎉 FEDERATION FOUNDED: \"%s\"! Other Clan Kings can now join with /fed_join %s", name, name))
+	return c.Send(fmt.Sprintf("🌐🎉 %s: \"%s\"! Other Clan Leaders can now join with %s",
+		htmlBold("FEDERATION FOUNDED"), htmlEscape(name), htmlCode(fmt.Sprintf("/fed_join %s", htmlEscape(name)))), telebot.ModeHTML)
 }
 
-// HandleJoinFederation (/fed_join [name]) - a Clan King brings their whole
+// HandleJoinFederation (/fed_join [name]) - a Clan Leader brings their whole
 // Clan into an existing Federation.
 func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 	ctx := context.Background()
@@ -210,16 +208,16 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 		return c.Send("⚠️ Usage: /fed_join [federation name]")
 	}
 
-	clanID, isKing, err := h.getMyClan(ctx, sender.ID)
+	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
-	if !isKing {
-		return c.Send("❌ Only your Clan's King can join a Federation.")
+	if !isLeader {
+		return c.Send("❌ Only your Clan's Leader can join a Federation.")
 	}
 
 	// BUGFIX: HandleFoundFederation already blocks founding while in a
-	// Federation, but this had no equivalent check - a King could
+	// Federation, but this had no equivalent check - a Leader could
 	// silently switch Federations without ever running /fed_leave.
 	var existingFed sql.NullString
 	_ = h.DB.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", clanID).Scan(&existingFed)
@@ -238,10 +236,10 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 		return c.Send("⚠️ Error joining Federation.")
 	}
 
-	return c.Send(fmt.Sprintf("🌐✅ Your Clan has joined \"%s\"!", name))
+	return c.Send(fmt.Sprintf("🌐✅ Your Clan has joined \"%s\"!", htmlEscape(name)), telebot.ModeHTML)
 }
 
-// HandleLeaveFederation (/fed_leave) - a Clan King removes their Clan from
+// HandleLeaveFederation (/fed_leave) - a Clan Leader removes their Clan from
 // its current Federation.
 func (h *FederationHandler) HandleLeaveFederation(c telebot.Context) error {
 	ctx := context.Background()
@@ -250,12 +248,12 @@ func (h *FederationHandler) HandleLeaveFederation(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
-	clanID, isKing, err := h.getMyClan(ctx, sender.ID)
+	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first.")
 	}
-	if !isKing {
-		return c.Send("❌ Only your Clan's King can leave a Federation.")
+	if !isLeader {
+		return c.Send("❌ Only your Clan's Leader can leave a Federation.")
 	}
 
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET federation_id = NULL WHERE id = $1", clanID)

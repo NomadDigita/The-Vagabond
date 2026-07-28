@@ -120,3 +120,29 @@ not a handler file), the remaining ~15 tick-engine notifications (tax
 collection, exploration discovery, ETA/proximity alerts), and world.go.
 Recommend diplomacy.go and federation.go as wave 8 (the two largest
 remaining unaudited handler files at 294 and 267 lines).
+
+Wave 8 covered: diplomacy.go and federation.go. Both rich-formatted;
+escaped user-authored Clan names (`otherName`/`myClanName`/`targetName`
+in diplomacy.go) and Federation names (`name`/`fedName` in
+federation.go - federations only ever get a player-chosen `name` at
+founding time, `icon`/`description` are DB defaults per migration 014
+and never player-set, but `description` was escaped anyway as a
+defense-in-depth measure since nothing currently prevents a future
+change from letting it be set). Also fixed a real (if purely cosmetic)
+terminology inconsistency found during the audit: both files called
+the Clan's top role "King"/"Clan King" throughout (player-facing text,
+code comments, and the `isKing` variable name) while `clan.go` - the
+actual clan/guild system - consistently calls the exact same role
+(`clans.leader_id`) "Leader" everywhere. Renamed every occurrence in
+both files to "Leader"/`isLeader` for consistency; the underlying
+`leader_id == userID` check was already correct and is unchanged.
+
+Still plain text / not yet audited: starvation.go (tick notifications
+in `internal/engine/starvation`, not a handler file), the remaining
+~15 tick-engine notifications (tax collection, exploration discovery,
+ETA/proximity alerts), and world.go. No large unaudited handler files
+remain above ~250 lines - recommend wave 9 target the tick-engine
+notification strings directly (grep `internal/engine/` for
+`INSERT INTO notifications` / `notifications.Queue` calls not already
+covered by a polished handler file) rather than another whole-file
+pass.
