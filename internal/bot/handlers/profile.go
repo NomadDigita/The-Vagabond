@@ -177,7 +177,7 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 			"🔗 Your Referral Link:\n%s\n\n"+
 			"🔑 Your Code: %s\n"+
 			"👥 Friends Referred: %d\n"+
-			"🎁 Reward per referral: 50,000 Metal + 500 🔮 Crystal + 50,000 Neuro Cores\n\n",
+			"🎁 Reward per referral: 25,000 of every resource for both of you\n\n",
 		referralLink, code, referralCount,
 	)
 

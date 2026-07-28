@@ -2195,6 +2195,37 @@ which cost real time re-deriving them twice.
   committed state throughout. `gofmt -l` caught and fixed two more
   pre-existing formatting issues in `world.go`/`hero.go`.
 
+- **Following session (project owner's direct request, not the UI
+  polish sequence above): onboarding overhaul + starting-resource and
+  teleport/Ghost-Protocol bugs.** Full detail in
+  `BUGS_AND_INCONSISTENCIES.md`; summary: (1) non-referred starting
+  resources fixed from a lopsided split to a flat 25,000 across all 9
+  resources, faction bonus (+500 Electricity / +1,500 Scrap) kept as a
+  layer on top; (2) the referral bonus was a flat +50k Metal/+500
+  Crystal/+50k Neuro regardless of the base pack - reworked into a
+  genuine +25,000-to-everything top-up (new `topUpAllResources` helper)
+  so a referred player cleanly ends up at 2x/50,000 across the board
+  instead of an uneven 3x-on-some/barely-1x-on-others mix; (3) naming-
+  first onboarding - a new player now names their outpost as the very
+  first thing after picking a faction, before seeing resources or
+  location, via a new `users.state = 'naming'` gate and a free-text
+  capture handler mirroring admin.go's guided-input pattern; (4) a new
+  deterministic town/country flavor-naming system
+  (`spawnlocation.go`, `flavorLocation`) so every location-showing
+  screen (onboarding, dashboard, teleport, Ghost Protocol) describes a
+  base the same way without a schema change; (5) a real bug -
+  `/newjobteleport`/`/ghostprotocol` assigned the literal region string
+  `"Unknown Sector"`, which matches none of
+  `internal/engine/world.Continents`, silently and permanently excluding
+  any relocated base from weather events - fixed via a shared
+  `allocateCoordinate` helper that also fixes a smaller pre-existing
+  coordinate-collision issue; (6) the faction-choice screen's displayed
+  starting bonus was 10x wrong (showed +50/+150, code has always granted
+  +500/+1,500) - fixed to match reality. Added
+  `spawnlocation_test.go` (7 tests). Verified with a full `go build
+  ./... && go vet ./... && go test ./...` pass and a checksum-confirmed
+  `go.mod`/`go.sum` restore.
+
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)

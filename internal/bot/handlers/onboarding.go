@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,6 +46,36 @@ var referralMilestones = []struct {
 	{25, 250000, 2500, 250000},
 }
 
+// topUpAllResources adds amount to all nine resources for a camp,
+// respecting the storage cap (via storagecap.Clamp) the same way any
+// other post-creation resource grant does - unlike the initial Welcome
+// Pack insert, which deliberately starts a brand-new player above their
+// tiny starting cap and is never clamped.
+func topUpAllResources(ctx context.Context, db *sql.DB, campID string, amount float64) error {
+	var scrap, rations, electricity, neuro, metal, crystal, hydrogen, dollars, ether float64
+	err := db.QueryRowContext(ctx, "SELECT scrap, rations, electricity, neuro_cores, metal, crystal, hydrogen, dollars, ether FROM resources WHERE encampment_id = $1", campID).
+		Scan(&scrap, &rations, &electricity, &neuro, &metal, &crystal, &hydrogen, &dollars, &ether)
+	if err != nil {
+		return err
+	}
+	capAmt := storagecap.CapFor(ctx, db, campID)
+	newScrap, _ := storagecap.Clamp(scrap, amount, capAmt)
+	newRations, _ := storagecap.Clamp(rations, amount, capAmt)
+	newElectricity, _ := storagecap.Clamp(electricity, amount, capAmt)
+	newNeuro, _ := storagecap.Clamp(neuro, amount, capAmt)
+	newMetal, _ := storagecap.Clamp(metal, amount, capAmt)
+	newCrystal, _ := storagecap.Clamp(crystal, amount, capAmt)
+	newHydrogen, _ := storagecap.Clamp(hydrogen, amount, capAmt)
+	newDollars, _ := storagecap.Clamp(dollars, amount, capAmt)
+	newEther, _ := storagecap.Clamp(ether, amount, capAmt)
+	_, err = db.ExecContext(ctx, `
+		UPDATE resources SET scrap = $1, rations = $2, electricity = $3, neuro_cores = $4,
+			metal = $5, crystal = $6, hydrogen = $7, dollars = $8, ether = $9
+		WHERE encampment_id = $10`,
+		newScrap, newRations, newElectricity, newNeuro, newMetal, newCrystal, newHydrogen, newDollars, newEther, campID)
+	return err
+}
+
 func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -64,6 +93,10 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 	if err == nil {
 		if user.Faction == "" {
 			return h.renderFactionChoice(c, sender.ID)
+		}
+
+		if user.State == "naming" {
+			return sendNamingPrompt(c, user.FirstName)
 		}
 
 		var camp models.Encampment
@@ -113,9 +146,8 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"⛏️ Miners: %d / %d active | Idle: %d\n"+
 				"🚀 Transits: %d outbound transits running\n\n"+
 				"Faction: %s\n"+
-				"🌍 Territory: Encampment located in [%s]\n"+
 				"⛺ Encampment: %s\n"+
-				"📍 Location: [X: %d, Y: %d]\n\n"+
+				"📍 Settled near %s\n\n"+
 				"CURRENT RESOURCE BALANCES:\n"+
 				"⚙️ Scrap: %.1f\n"+
 				"🥫 Rations: %.1f\n"+
@@ -123,7 +155,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 				"━━━━━━━━━━━━━━━━━━━━━━\n"+
 				"Use the command manual below to learn terminal shortcuts.",
 			user.FirstName, systemState, activeMiners, ownedMiners, ownedMiners-activeMiners, outboundCount,
-			formatFactionLabel(user.Faction), region, camp.Name, myX, myY, res.Scrap, res.Rations, res.Electricity,
+			formatFactionLabel(user.Faction), htmlEscape(camp.Name), locationDescriptor(myX, myY, region), res.Scrap, res.Rations, res.Electricity,
 		)
 
 		selector := &telebot.ReplyMarkup{}
@@ -134,7 +166,7 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 			selector.Row(btnWarehouse, btnManual),
 		)
 
-		return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), dashboard, selector)
+		return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), dashboard, selector)
 	}
 
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -167,19 +199,17 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 		selector.Row(btnNomads),
 	)
 
-	welcomeText := "━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"⚠️ SYSTEM INTRUSION DETECTED\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━\n" +
-		"WARNING: Faction registration required. Deploy your core systems:\n\n" +
-		"🛡️ [Metal Vanguard]\n" +
+	welcomeText := htmlBold("⚠️ SYSTEM INTRUSION DETECTED") + "\n" + divider +
+		"\nWARNING: Faction registration required. Deploy your core systems:\n\n" +
+		htmlBold("🛡️ Metal Vanguard") + "\n" +
 		"High-Tech remnant order. Focuses on electricity conservation.\n" +
-		"Starting Bonus: +50.0 Electricity Cells\n\n" +
-		"⚙️ [Rust Nomads]\n" +
+		"Starting Bonus: +" + htmlCode("500") + " Electricity Cells\n\n" +
+		htmlBold("⚙️ Rust Nomads") + "\n" +
 		"Scrappy survival coalition. Focuses on resource collection.\n" +
-		"Starting Bonus: +150.0 Scrap\n" +
-		"━━━━━━━━━━━━━━━━━━━━━━"
+		"Starting Bonus: +" + htmlCode("1,500") + " Scrap\n" +
+		divider
 
-	return c.Send(welcomeText, selector)
+	return c.Send(welcomeText, telebot.ModeHTML, selector)
 }
 
 // nameChangeCostCrystal and nameChangeCostDollars are deliberately steep -
@@ -331,50 +361,12 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	continents := []string{"Africa", "Europe", "Asia", "Americas"}
 	spawnedContinent := continents[sender.ID%4]
 
-	var coordID string
-	var x, y int
-	var success bool
-
-	// Decouple Seeding Loop: Seeding random source exactly once outside of the coordinate calculation loop
-	rSource := rand.NewSource(time.Now().UnixNano() + sender.ID)
-	rGen := rand.New(rSource)
-
-	for attempt := 0; attempt < 15; attempt++ {
-		// Style Refactor (QF1003): Substituted sequential if-else logic with clean Go switch matching
-		switch spawnedContinent {
-		case "Africa":
-			x = rGen.Intn(991) + 10 // [10, 1000]
-			y = rGen.Intn(991) + 10 // [10, 1000]
-		case "Europe":
-			x = -(rGen.Intn(991) + 10) // [-1000, -10]
-			y = rGen.Intn(991) + 10    // [10, 1000]
-		case "Asia":
-			x = rGen.Intn(991) + 10    // [10, 1000]
-			y = -(rGen.Intn(991) + 10) // [-1000, -10]
-		default: // Americas
-			x = -(rGen.Intn(991) + 10) // [-1000, -10]
-			y = -(rGen.Intn(991) + 10) // [-1000, -10]
-		}
-
-		biome := "wasteland"
-		if rGen.Float64() < 0.30 {
-			biome = "ruins"
-		}
-
-		insertCoord := `
-			INSERT INTO coordinates (x, y, biome, danger_level, region, terrain) 
-			VALUES ($1, $2, $3, 1, $4, $3) 
-			ON CONFLICT (x, y) DO NOTHING
-			RETURNING id`
-
-		err = tx.QueryRowContext(ctx, insertCoord, x, y, biome, spawnedContinent).Scan(&coordID)
-		if err == nil {
-			success = true
-			break
-		}
-	}
-
-	if !success {
+	// Decouple Seeding Loop: seed exactly once, deterministically per
+	// player, for an even initial spread across each continent's
+	// quadrant (see spawnlocation.go's allocateCoordinate for the
+	// retry-on-collision + continent-quadrant logic itself).
+	coordID, _, _, err := allocateCoordinate(ctx, tx, time.Now().UnixNano()+sender.ID, spawnedContinent)
+	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Spawning coordinate allocator failed. Please retry registration."})
 	}
 
@@ -384,44 +376,53 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	isNewCamp := errors.Is(err, sql.ErrNoRows)
 	var startingScrap, startingEnergy float64
 	if isNewCamp {
-		campName := fmt.Sprintf("Outpost-%d", telegramID%1000)
+		// Temporary placeholder only - HandleOnboardingPendingInput
+		// (users.state = 'naming', set below) overwrites this with the
+		// player's own chosen name before they see anything else. Never
+		// player-facing as a "final" name.
+		placeholderName := fmt.Sprintf("Unnamed-Outpost-%d", telegramID)
 		insertCamp := `
 			INSERT INTO encampments (user_id, name, coordinate_id, level) 
 			VALUES ($1, $2, $3, 1) 
 			RETURNING id`
-		err = tx.QueryRowContext(ctx, insertCamp, telegramID, campName, coordID).Scan(&campID)
+		err = tx.QueryRowContext(ctx, insertCamp, telegramID, placeholderName, coordID).Scan(&campID)
 		if err != nil {
 			log.Printf("Failed creating encampment: %v", err)
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		startingScrap = 1000.0
-		startingEnergy = 250.0
+		// Welcome Pack: every brand-new, non-referred survivor starts
+		// with 25,000 of all nine resources - a flat, equal baseline
+		// across the board rather than the old lopsided split (1,000
+		// Scrap/50 Rations/250 Electricity with everything else in the
+		// low hundreds). Referred players effectively double this (see
+		// the referral-bonus block below), since it tops up the same
+		// baseline by another 25,000 of everything. The small per-
+		// faction bonus below is a flavor differentiator layered on top
+		// of the shared baseline, not a replacement for it.
+		const startingBaseline = 25000.0
+		startingScrap = startingBaseline
+		startingEnergy = startingBaseline
 		if faction == "steel_vanguard" {
 			startingEnergy += 500.0
 		} else {
 			startingScrap += 1500.0
 		}
 
-		// Welcome Pack: every brand-new survivor starts with a stake in
-		// ALL nine resources, not just the three the old flow granted
-		// (Scrap/Rations/Electricity, with everything else defaulting to
-		// zero). Metal/Hydrogen/Dollars/Neuro give a real head start on
-		// early buildings and trades; Crystal and Ether stay deliberately
-		// small since they're the game's scarce/premium resources.
 		const (
-			startingNeuro    = 50.0
-			startingMetal    = 200.0
-			startingCrystal  = 20.0
-			startingHydrogen = 40.0
-			startingDollars  = 300.0
-			startingEther    = 5.0
+			startingRations  = startingBaseline
+			startingNeuro    = startingBaseline
+			startingMetal    = startingBaseline
+			startingCrystal  = startingBaseline
+			startingHydrogen = startingBaseline
+			startingDollars  = startingBaseline
+			startingEther    = startingBaseline
 		)
 
 		insertRes := `
 			INSERT INTO resources (encampment_id, scrap, rations, electricity, neuro_cores, metal, crystal, hydrogen, dollars, ether) 
-			VALUES ($1, $2, 50.00, $3, $4, $5, $6, $7, $8, $9)`
-		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingEnergy,
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+		_, err = tx.ExecContext(ctx, insertRes, campID, startingScrap, startingRations, startingEnergy,
 			startingNeuro, startingMetal, startingCrystal, startingHydrogen, startingDollars, startingEther)
 		if err != nil {
 			log.Printf("Failed creating resources: %v", err)
@@ -434,6 +435,13 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		// This only ever runs inside the isNewCamp guard, so it can't be
 		// replayed to keep extending someone's trial.
 		_, _ = tx.ExecContext(ctx, "UPDATE users SET premium_until = NOW() + INTERVAL '7 days' WHERE telegram_id = $1", telegramID)
+
+		// Gate on naming: the very first thing a brand-new survivor does
+		// after picking a faction is name their outpost (see
+		// HandleOnboardingPendingInput), before they see their resources,
+		// location, or anything else. state flips back to 'active' once
+		// naming completes.
+		_, _ = tx.ExecContext(ctx, "UPDATE users SET state = 'naming' WHERE telegram_id = $1", telegramID)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -449,34 +457,38 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	var referrerID sql.NullInt64
 	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
 	if isNewCamp && referrerID.Valid {
-		const refMetal, refCrystal, refNeuro = 50000.0, 500.0, 50000.0
+		// referralBonusPerResource tops up all nine resources by the same
+		// amount as the base Welcome Pack (startingBaseline above), so a
+		// referred player's total starting stake becomes a clean 2x
+		// (50,000) of every resource rather than the old flat 50,000
+		// Metal / 500 Crystal / 50,000 Neuro Cores special-case, which
+		// left most resources untouched and wildly overshot others
+		// (Metal/Neuro would've ended up at 3x once stacked on top of
+		// the now-25,000 baseline, Crystal barely above 1x). Applied to
+		// the referrer too, as their reward for bringing in a new
+		// survivor - not meant to double their whole economy, just a
+		// flat top-up like any other referral bonus.
+		const referralBonusPerResource = 25000.0
 
-		var curMetal, curCrystal, curNeuro float64
-		_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal, &curNeuro)
-		myCap := storagecap.CapFor(ctx, h.DB, campID)
-		newMetal, _ := storagecap.Clamp(curMetal, refMetal, myCap)
-		newCrystal, _ := storagecap.Clamp(curCrystal, refCrystal, myCap)
-		newNeuro, _ := storagecap.Clamp(curNeuro, refNeuro, myCap)
-		_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", newMetal, newCrystal, newNeuro, campID)
+		if err := topUpAllResources(ctx, h.DB, campID, referralBonusPerResource); err != nil {
+			log.Printf("Failed applying referral bonus to new player %d: %v", telegramID, err)
+		}
 
 		var referrerCampID string
 		if refErr := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", referrerID.Int64).Scan(&referrerCampID); refErr == nil {
-			var refCurMetal, refCurCrystal, refCurNeuro float64
-			_ = h.DB.QueryRowContext(ctx, "SELECT metal, crystal, neuro_cores FROM resources WHERE encampment_id = $1", referrerCampID).Scan(&refCurMetal, &refCurCrystal, &refCurNeuro)
-			referrerCap := storagecap.CapFor(ctx, h.DB, referrerCampID)
-			refNewMetal, _ := storagecap.Clamp(refCurMetal, refMetal, referrerCap)
-			refNewCrystal, _ := storagecap.Clamp(refCurCrystal, refCrystal, referrerCap)
-			refNewNeuro, _ := storagecap.Clamp(refCurNeuro, refNeuro, referrerCap)
-			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", refNewMetal, refNewCrystal, refNewNeuro, referrerCampID)
+			if err := topUpAllResources(ctx, h.DB, referrerCampID, referralBonusPerResource); err != nil {
+				log.Printf("Failed applying referral bonus to referrer %d: %v", referrerID.Int64, err)
+			}
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
-				fmt.Sprintf("🎁 %s: %s joined using your code! You both received %s Metal, %s 🔮 Crystal, %s Neuro Cores.",
-					htmlBold("REFERRAL BONUS"), htmlCode(htmlEscape(sender.FirstName)), htmlCode("50,000"), htmlCode("500"), htmlCode("50,000")))
+				fmt.Sprintf("🎁 %s: %s joined using your code! You both received %s of every resource.",
+					htmlBold("REFERRAL BONUS"), htmlCode(htmlEscape(sender.FirstName)), htmlCode(fmt.Sprintf("%.0f", referralBonusPerResource))))
 
 			// Milestone tiers: grant a one-time bonus the first time the
 			// referrer's total referral count crosses a threshold.
 			var referralCount, tierClaimed int
 			_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE referred_by = $1", referrerID.Int64).Scan(&referralCount)
 			_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_tier_claimed, 0) FROM users WHERE telegram_id = $1", referrerID.Int64).Scan(&tierClaimed)
+			referrerCap := storagecap.CapFor(ctx, h.DB, referrerCampID)
 
 			for _, m := range referralMilestones {
 				if referralCount >= m.Count && tierClaimed < m.Count {
@@ -498,47 +510,7 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 
 	if isNewCamp {
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction system deployed! Welcome survivor."})
-
-		welcome := fmt.Sprintf(
-			"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"🛰️ COGNITIVE CORE BOOTED\n"+
-				"━━━━━━━━━━━━━━━━━━━━━━\n"+
-				"Welcome to the wastes, Commander %s.\n"+
-				"Your terminal is now integrated into [%s].\n"+
-				"Your base has successfully spawned in territory: [%s]\n"+
-				"📍 Location Coordinates: [X: %d, Y: %d]\n\n"+
-				"%s\n\n"+
-				"🎁 WELCOME PACK — DEPLOYED TO YOUR WAREHOUSE\n"+
-				"⚙️ Scrap: %.0f\n"+
-				"🥫 Rations: 50\n"+
-				"⚡ Electricity Cells: %.0f\n"+
-				"🧠 Neuro Cores: 50\n"+
-				"🔩 Metal: 200\n"+
-				"🔮 Crystal: 20\n"+
-				"🎈 Hydrogen: 40\n"+
-				"💵 Dollars: 300\n"+
-				"✨ Ether: 5\n\n"+
-				"🧠 7-DAY COGNITIVE AGENT TRIAL — ACTIVATED\n"+
-				"Your Cognitive Agent (normally a Premium-only module) is unlocked "+
-				"free for the next 7 days. Set a mode in /agent and it keeps working "+
-				"your outpost even while you're offline — no charge, no card, nothing "+
-				"to cancel.\n\n"+
-				"%s",
-			sender.FirstName, formatFactionLabel(faction), spawnedContinent, x, y,
-			gameDescriptionText, startingScrap, startingEnergy, gettingStartedGuideText,
-		)
-
-		selector := &telebot.ReplyMarkup{}
-		btnWarehouse := selector.Data("📦 Warehouse Stocks", "view_warehouse")
-		btnAgent := selector.Data("🧠 Cognitive Agent", "open_agent")
-		btnRefer := selector.Data("👥 Refer a Friend", "open_refer")
-		btnManual := selector.Data("📖 Survival Manual", "view_manual")
-		selector.Inline(
-			selector.Row(btnWarehouse, btnAgent),
-			selector.Row(btnRefer, btnManual),
-		)
-
-		return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), welcome, selector)
+		return sendNamingPrompt(c, sender.FirstName)
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Faction already active."})
@@ -570,7 +542,7 @@ const gettingStartedGuideText = "🗺️ GETTING STARTED — YOUR FIRST 10 MINUT
 	"2️⃣ Open the ⛺ Outpost Camp Menu and spend Scrap upgrading your Tent and Generator first.\n" +
 	"3️⃣ Boot your 🧠 Cognitive Agent (free for 7 days) and set it to Collector mode so it keeps gathering while you're away.\n" +
 	"4️⃣ Once you've got a few Soldiers, open ⚔️ Tactical Combat to scan for nearby targets.\n" +
-	"5️⃣ Run /refer to get your personal invite link — 50,000 Metal + 500 🔮 Crystal + 50,000 Neuro Cores per friend who joins, plus bigger milestone bonuses at 5/10/25 referrals.\n" +
+	"5️⃣ Run /refer to get your personal invite link — 25,000 of every resource per friend who joins, plus bigger milestone bonuses at 5/10/25 referrals.\n" +
 	"6️⃣ Whenever you need a refresher on any menu, /help has the full Survival Training Manual, and /guide brings this quickstart back up.\n" +
 	"━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -579,4 +551,120 @@ func formatFactionLabel(f string) string {
 		return "🛡️ Metal Vanguard"
 	}
 	return "⚙️ Rust Nomads"
+}
+
+// outpostNameRegex validates any player-chosen outpost name - both the
+// mandatory first-naming prompt below and the paid /name rename command
+// (HandleRenameOutpost) share this exact rule.
+var outpostNameRegex = regexp.MustCompile(`^[a-zA-Z0-9 \-]+$`)
+
+// sendNamingPrompt is the very first thing a brand-new survivor sees
+// after picking a faction - before their resources, location, or
+// anything else. Also re-sent from HandleStart if someone abandons
+// onboarding mid-naming and comes back via /start.
+func sendNamingPrompt(c telebot.Context, firstName string) error {
+	prompt := htmlBold("🛰️ ONE LAST STEP") + "\n" + divider +
+		"\nWelcome to the wastes, Commander " + htmlEscape(firstName) + ".\n\n" +
+		"Before you see your resources or your new home, name your outpost. " +
+		"This is your public callsign everywhere you're identified - battle reports, rankings, and leaderboards.\n\n" +
+		"✍️ Reply with a name (3-20 characters, letters/numbers/spaces/hyphens only)."
+	return c.Send(prompt, telebot.ModeHTML)
+}
+
+// HandleOnboardingPendingInput consumes a plain-text reply as the
+// player's chosen outpost name, but only while users.state = 'naming'
+// (set by HandleFactionCallback the moment a brand-new camp is
+// created). Registered in cmd/bot/main.go's OnText chain, same pattern
+// as admin.go's HandleAdminPendingInput: returns handled=false
+// immediately for anyone not mid-naming, so it's a no-op for every
+// other message in the game.
+func (h *OnboardingHandler) HandleOnboardingPendingInput(c telebot.Context) (handled bool, err error) {
+	sender := c.Sender()
+	if sender == nil {
+		return false, nil
+	}
+
+	ctx := context.Background()
+	var state string
+	var campID string
+	dbErr := h.DB.QueryRowContext(ctx, `
+		SELECT u.state, e.id FROM users u
+		JOIN encampments e ON e.user_id = u.telegram_id
+		WHERE u.telegram_id = $1`, sender.ID).Scan(&state, &campID)
+	if dbErr != nil || state != "naming" {
+		return false, nil
+	}
+
+	newName := strings.TrimSpace(c.Text())
+	if len(newName) < 3 || len(newName) > 20 {
+		return true, c.Send("❌ Invalid Length: Name must be 3-20 characters. Try again.")
+	}
+	if !outpostNameRegex.MatchString(newName) {
+		return true, c.Send("❌ Invalid Characters: Only letters, numbers, spaces, and hyphens are allowed. Try again.")
+	}
+
+	var existing string
+	if h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE LOWER(name) = LOWER($1) AND id != $2", newName, campID).Scan(&existing) == nil {
+		return true, c.Send("❌ Name Taken: Another survivor already claims that name. Try again.")
+	}
+
+	if _, err := h.DB.ExecContext(ctx, "UPDATE encampments SET name = $1 WHERE id = $2", newName, campID); err != nil {
+		log.Printf("Failed setting first-time outpost name for %d: %v", sender.ID, err)
+		return true, c.Send("⚠️ Error saving your outpost name. Try again.")
+	}
+	if _, err := h.DB.ExecContext(ctx, "UPDATE users SET state = 'active' WHERE telegram_id = $1", sender.ID); err != nil {
+		log.Printf("Failed activating account for %d after naming: %v", sender.ID, err)
+	}
+
+	return true, h.sendWelcomeComplete(ctx, c, sender.ID, sender.FirstName, campID, newName)
+}
+
+// sendWelcomeComplete fires once, right after a brand-new survivor
+// finishes the mandatory naming step above: it reveals their faction,
+// resources, and where in the wastes they've settled (a named town and
+// country within their assigned continent - see spawnlocation.go's
+// flavorLocation - rather than raw coordinates or a bare continent
+// name).
+func (h *OnboardingHandler) sendWelcomeComplete(ctx context.Context, c telebot.Context, telegramID int64, firstName, campID, campName string) error {
+	var faction string
+	var scrap, electricity float64
+	var region string
+	var x, y int
+	err := h.DB.QueryRowContext(ctx, `
+		SELECT u.faction, r.scrap, r.electricity, co.region, co.x, co.y
+		FROM resources r
+		JOIN encampments e ON e.id = r.encampment_id
+		JOIN coordinates co ON co.id = e.coordinate_id
+		JOIN users u ON u.telegram_id = e.user_id
+		WHERE r.encampment_id = $1`, campID).Scan(&faction, &scrap, &electricity, &region, &x, &y)
+	if err != nil {
+		log.Printf("Failed loading welcome-complete details for %d: %v", telegramID, err)
+		return c.Send("⚠️ Your outpost is named and ready, but the welcome summary failed to load. Use /start to see your dashboard.")
+	}
+
+	welcome := htmlBold("🛰️ COGNITIVE CORE BOOTED") + "\n" + divider + "\n" +
+		fmt.Sprintf("Welcome to the wastes, Commander %s.\n", htmlEscape(firstName)) +
+		fmt.Sprintf("Faction: %s\n", formatFactionLabel(faction)) +
+		fmt.Sprintf("Your outpost, %s, has spawned near %s.\n\n", htmlBold(htmlEscape(campName)), locationDescriptor(x, y, region)) +
+		gameDescriptionText + "\n\n" +
+		htmlBold("🎁 WELCOME PACK — DEPLOYED TO YOUR WAREHOUSE") + "\n" +
+		fmt.Sprintf("⚙️ Scrap: %s\n🥫 Rations: %s\n⚡ Electricity Cells: %s\n🧠 Neuro Cores: %s\n🔩 Metal: %s\n🔮 Crystal: %s\n🎈 Hydrogen: %s\n💵 Dollars: %s\n✨ Ether: %s\n\n",
+			htmlCode(fmt.Sprintf("%.0f", scrap)), htmlCode("25,000"), htmlCode(fmt.Sprintf("%.0f", electricity)), htmlCode("25,000"),
+			htmlCode("25,000"), htmlCode("25,000"), htmlCode("25,000"), htmlCode("25,000"), htmlCode("25,000")) +
+		htmlBold("🧠 7-DAY COGNITIVE AGENT TRIAL — ACTIVATED") + "\n" +
+		"Your Cognitive Agent (normally a Premium-only module) is unlocked free for the next 7 days. " +
+		"Set a mode in /agent and it keeps working your outpost even while you're offline — no charge, no card, nothing to cancel.\n\n" +
+		gettingStartedGuideText
+
+	selector := &telebot.ReplyMarkup{}
+	btnWarehouse := selector.Data("📦 Warehouse Stocks", "view_warehouse")
+	btnAgent := selector.Data("🧠 Cognitive Agent", "open_agent")
+	btnRefer := selector.Data("👥 Refer a Friend", "open_refer")
+	btnManual := selector.Data("📖 Survival Manual", "view_manual")
+	selector.Inline(
+		selector.Row(btnWarehouse, btnAgent),
+		selector.Row(btnRefer, btnManual),
+	)
+
+	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), welcome, selector)
 }

@@ -575,6 +575,9 @@ func main() {
 	// unaffected - HandleAdminPendingInput returns handled=false
 	// immediately for them.
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
+		if handled, err := onboarding.HandleOnboardingPendingInput(c); handled {
+			return err
+		}
 		if handled, err := admin.HandleAdminPendingInput(c); handled {
 			return err
 		}

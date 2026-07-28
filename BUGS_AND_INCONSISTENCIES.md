@@ -305,3 +305,109 @@ byte-identical before and after (twice - once before the gofmt pass,
 once after). `gofmt -l` also caught and fixed two more pre-existing
 (not introduced this session) formatting issues (`world.go`, `hero.go`
 - stray trailing whitespace and a missing final newline).
+
+---
+
+**Following session (project owner's direct request, not part of the UI
+polish sequence above): onboarding overhaul + real starting-resource
+and teleport/Ghost-Protocol bugs.**
+
+1. **Starting resources for non-referred players fixed to 25,000 flat
+   across all 9 resources** (was a lopsided 1,000 Scrap / 50 Rations /
+   250 Electricity / 200 Metal / 20 Crystal / 40 Hydrogen / 300 Dollars
+   / 5 Ether / 50 Neuro Cores split). The small per-faction bonus
+   (+500 Electricity for Metal Vanguard, +1,500 Scrap for Rust Nomads)
+   stays as a flavor differentiator layered on top of the shared
+   25,000 baseline, not a replacement for it.
+
+2. **Referral bonus reworked into a genuine 2x, not the old mismatched
+   flat top-up.** The referral bonus was a flat +50,000 Metal / +500
+   Crystal / +50,000 Neuro Cores regardless of the base pack - once the
+   base pack is 25,000 flat, that would have made a referred player's
+   Metal/Neuro end up at 3x (75,000) while Crystal barely moved past 1x
+   (25,020) and the other 6 resources got nothing extra at all. Replaced
+   with a flat +25,000 top-up to *all 9* resources for both the new
+   player and their referrer (new helper `topUpAllResources`), so a
+   referred player now cleanly ends up at 50,000 of everything - an
+   honest 2x. Milestone bonuses (5/10/25 referral count) were untouched,
+   since the request was specifically about the base per-referral
+   reward. Updated the two other places that quoted the old flat
+   figures: `gettingStartedGuideText` (onboarding.go) and `/refer`'s
+   panel text (profile.go).
+
+3. **Naming-first onboarding.** Previously, a new player's outpost was
+   silently auto-named `Outpost-<telegramID%1000>` and they only saw
+   their real dashboard afterward. Now, the very first thing a player
+   sees after picking a faction is a mandatory "name your outpost"
+   prompt - before resources, location, or anything else - via a new
+   `users.state = 'naming'` gate and a free-text capture handler
+   (`HandleOnboardingPendingInput`, registered in `cmd/bot/main.go`'s
+   `OnText` chain ahead of `admin.HandleAdminPendingInput`, same pattern
+   admin.go already established for guided multi-step input). The camp
+   is created with a throwaway placeholder name
+   (`Unnamed-Outpost-<telegramID>`) immediately overwritten the moment
+   naming completes; `HandleStart` re-shows the naming prompt instead of
+   the normal dashboard if a player abandons onboarding mid-naming and
+   comes back. Name validation (3-20 chars, letters/numbers/spaces/
+   hyphens, uniqueness) reuses the exact same rule as the existing paid
+   `/name` rename command (`outpostNameRegex`), just free and one-time
+   during onboarding.
+
+4. **New deterministic town/country flavor-naming system**
+   (`spawnlocation.go`): every screen that shows a player's base location
+   (onboarding completion, the returning-player `/start` dashboard,
+   `/newjobteleport`, `/ghostprotocol`) now describes it as e.g. "Ashford
+   Hollow, the Kalahari Reaches (Africa Territory)" instead of raw
+   `[X, Y]` coordinates or a bare continent name. Deliberately NOT a new
+   DB column: `flavorLocation(x, y, continent)` is a pure, seeded
+   function of the coordinate itself, so the same base always describes
+   itself the same way on every screen with zero migration and zero risk
+   of the display drifting from the stored coordinate. Town/country
+   names are fictional (no real-world country names), matching the
+   post-collapse setting.
+
+5. **Real bug fixed: `/newjobteleport` and `/ghostprotocol` were
+   assigning the literal region string `"Unknown Sector"`** to every
+   relocated base - which matches none of the four names in
+   `internal/engine/world.Continents`, the canonical list every
+   per-continent system (weather events, and anything built on it later)
+   keys off of. A player who ever teleported or used Ghost Protocol had
+   their base silently and permanently excluded from weather events
+   afterward, with no error or indication anything was wrong - exactly
+   the kind of silent, hard-to-notice gameplay bug schema-first
+   discipline exists to catch. Both commands now roll a real continent
+   (`randomContinent`, uniform across all four - a genuine reroll, unlike
+   onboarding's per-player deterministic spread) and generate coordinates
+   in that continent's correct quadrant via a new shared
+   `allocateCoordinate` helper, which also fixes a second, smaller
+   pre-existing issue: the old teleport/Ghost-Protocol coordinate
+   allocation used `ON CONFLICT (x,y) DO UPDATE SET x = EXCLUDED.x
+   RETURNING id`, a trick that always returns a row even on collision -
+   meaning two players could, at rare-but-nonzero odds, end up sharing
+   the literal same coordinate row after teleporting. `allocateCoordinate`
+   reuses onboarding's safer retry-on-collision loop instead (both
+   onboarding and teleport/Ghost Protocol now share one implementation).
+
+6. **Bonus find while touching this code: the faction-choice screen's
+   displayed starting bonus was 10x wrong** ("+50.0 Electricity Cells" /
+   "+150.0 Scrap" shown, but the code has always granted +500 / +1,500)
+   - a real, pre-existing display bug, unrelated to anything above but
+   directly in the text being edited. Fixed to match what the code
+   actually grants.
+
+Added `internal/bot/handlers/spawnlocation_test.go` (7 tests): continent/
+quadrant sign correctness, `randomContinent` always returns a valid
+`world.Continents` entry, `flavorLocation` determinism and its fallback
+for an unrecognized continent, every continent having at least one
+flavor country defined, the shared name-validation regex, and a guard
+that `locationDescriptor`'s output never contains escaped-entity
+artifacts (documenting why it's safe to skip `htmlEscape` there - every
+input is fixed content, never player text). Verified with a full
+`go build ./... && go vet ./... && go test ./...` pass and a checksum-
+confirmed `go.mod`/`go.sum` restore.
+
+No existing test asserted the old resource amounts, camp-name scheme, or
+"Unknown Sector" string, so nothing needed updating for the changed
+behavior itself - `onboarding_referral_test.go`'s existing coverage
+(referral code generation, milestone ordering) was untouched by any of
+this and still passes.

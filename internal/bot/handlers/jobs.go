@@ -181,19 +181,8 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
 	}
 
-	newX := rand.Intn(10000)
-	newY := rand.Intn(10000)
-	biomes := []string{"wasteland", "irradiated_zone", "scrapyard", "ashfields", "frozen_tundra"}
-	terrains := []string{"flat", "mountainous", "coastal", "urban_ruins"}
-	biome := biomes[rand.Intn(len(biomes))]
-	terrain := terrains[rand.Intn(len(terrains))]
-
-	var newCoordID string
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO coordinates (x, y, biome, danger_level, region, terrain) 
-		VALUES ($1, $2, $3, $4, $5, $6) 
-		ON CONFLICT (x, y) DO UPDATE SET x = EXCLUDED.x
-		RETURNING id`, newX, newY, biome, rand.Intn(5)+1, "Unknown Sector", terrain).Scan(&newCoordID)
+	newContinent := randomContinent(rand.New(rand.NewSource(time.Now().UnixNano())))
+	newCoordID, newX, newY, err := allocateCoordinate(ctx, tx, time.Now().UnixNano(), newContinent)
 	if err != nil {
 		return c.Send("⚠️ Error finding new coordinates.")
 	}
@@ -205,7 +194,7 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 		return c.Send("⚠️ Error completing teleport.")
 	}
 
-	return c.Send(fmt.Sprintf("🌀✨ %s Your outpost now stands at %s in a %s biome.", htmlBold("TELEPORT COMPLETE!"), htmlCode(fmt.Sprintf("[%d, %d]", newX, newY)), biome), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("🌀✨ %s Your outpost now stands near %s.", htmlBold("TELEPORT COMPLETE!"), locationDescriptor(newX, newY, newContinent)), telebot.ModeHTML)
 }
 
 // ghostProtocolCooldown and ghostProtocolCostFraction are deliberately
@@ -279,19 +268,8 @@ func (h *JobsHandler) doGhostProtocol(ctx context.Context, campID string) (strin
 	}
 	scrapCost, metalCost, crystalCost, dollarsCost := scrap*ghostProtocolCostFraction, metal*ghostProtocolCostFraction, crystal*ghostProtocolCostFraction, dollars*ghostProtocolCostFraction
 
-	newX := rand.Intn(10000)
-	newY := rand.Intn(10000)
-	biomes := []string{"wasteland", "irradiated_zone", "scrapyard", "ashfields", "frozen_tundra"}
-	terrains := []string{"flat", "mountainous", "coastal", "urban_ruins"}
-	biome := biomes[rand.Intn(len(biomes))]
-	terrain := terrains[rand.Intn(len(terrains))]
-
-	var newCoordID string
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO coordinates (x, y, biome, danger_level, region, terrain)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (x, y) DO UPDATE SET x = EXCLUDED.x
-		RETURNING id`, newX, newY, biome, rand.Intn(5)+1, "Unknown Sector", terrain).Scan(&newCoordID)
+	newContinent := randomContinent(rand.New(rand.NewSource(time.Now().UnixNano())))
+	newCoordID, newX, newY, err := allocateCoordinate(ctx, tx, time.Now().UnixNano(), newContinent)
 	if err != nil {
 		return "⚠️ Error finding new coordinates.", err
 	}
@@ -311,9 +289,8 @@ func (h *JobsHandler) doGhostProtocol(ctx context.Context, campID string) (strin
 		return "⚠️ Error completing Ghost Protocol.", err
 	}
 
-	return fmt.Sprintf("👻 %s Every scout and raider who'd locked your position has lost that lock. Your outpost now stands at %s in a %s biome, at a cost of %s Scrap, %s Metal, %s Crystal, and %s Dollars.",
-		htmlBold("GHOST PROTOCOL EXECUTED"),
-		htmlCode(fmt.Sprintf("[%d, %d]", newX, newY)), biome,
+	return fmt.Sprintf("👻 %s Every scout and raider who'd locked your position has lost that lock. Your outpost now stands near %s, at a cost of %s Scrap, %s Metal, %s Crystal, and %s Dollars.",
+		htmlBold("GHOST PROTOCOL EXECUTED"), locationDescriptor(newX, newY, newContinent),
 		htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)),
 		htmlCode(fmt.Sprintf("%.0f", crystalCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))), nil
 }
