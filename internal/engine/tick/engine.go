@@ -739,6 +739,7 @@ func (e *Engine) ProcessTick() {
 		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
 		{"supply_convoys", e.processSupplyConvoys},
 		{"ai_civilization_growth", e.growAICivilizations},
+		{"ai_civilization_decisions", e.decideAIFactionActions},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
 		{"mining", e.resolveCompletedMiningQueues},

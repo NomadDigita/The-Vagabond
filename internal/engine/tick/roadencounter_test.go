@@ -71,6 +71,7 @@ func seedEncampment(t *testing.T, db *sql.DB, telegramID int64, name string, x, 
 		t.Fatalf("seeding encampment: %v", err)
 	}
 	_, _ = db.Exec("INSERT INTO resources (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
+	_, _ = db.Exec("INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 	return campID
 }
 
