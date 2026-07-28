@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"gopkg.in/telebot.v3"
 )
@@ -622,11 +623,24 @@ func (h *AdminHandler) doSetTaxRate(ctx context.Context, rate int) (string, erro
 	if rate < 0 || rate > 10 {
 		return "⚠️ Tax rate must be a whole number between 0 and 10 (percent).", errors.New("tax rate out of range")
 	}
+	var oldRate int
+	_ = h.DB.QueryRowContext(ctx, "SELECT tax_rate_percent FROM tax_law WHERE id = 1").Scan(&oldRate)
+
 	_, err := h.DB.ExecContext(ctx, "UPDATE tax_law SET tax_rate_percent = $1 WHERE id = 1", rate)
 	if err != nil {
 		log.Printf("Failed updating tax rate: %v", err)
 		return "⚠️ Error updating tax law.", err
 	}
+
+	// Server-wide broadcast, not just an admin-panel confirmation - see
+	// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3. Non-mutable
+	// ("general") for now; see that doc's open question 2 on whether this
+	// should get its own mutable category instead.
+	broadcastMsg := fmt.Sprintf("💰 WASTELAND TAX LAW UPDATED: Daily rate changes from %d%% to %d%%.", oldRate, rate)
+	if err := notifications.QueueToAllPlayers(ctx, h.DB, broadcastMsg, "general"); err != nil {
+		log.Printf("Failed broadcasting tax rate change: %v", err)
+	}
+
 	return "💰 " + htmlBold("WASTELAND TAX LAW UPDATED") + ": Daily rate is now " + htmlCode(fmt.Sprintf("%d%%", rate)) + ".", nil
 }
 

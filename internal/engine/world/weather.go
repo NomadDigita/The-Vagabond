@@ -7,6 +7,8 @@ import (
 	"log"
 	"math/rand"
 	"time"
+
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 )
 
 type WeatherEngine struct {
@@ -67,6 +69,14 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 				if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 					log.Printf("Failed writing world-event clear headline: %v", err)
 				}
+				// Direct push, not just the passive world_news feed - see
+				// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3.
+				// Non-mutable ("general") for now; see that doc's open
+				// question 2 on whether this should get its own mutable
+				// category instead.
+				if err := notifications.QueueToRegion(ctx, tx, continent, headline, "general"); err != nil {
+					log.Printf("Failed broadcasting world-event clear notification for %s: %v", continent, err)
+				}
 			}
 		}
 
@@ -87,6 +97,11 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		headline := eventHeadline(newEvent, continent)
 		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 			log.Printf("Failed writing world-event news headline: %v", err)
+		}
+		// Same headline text pushed directly, so the world_news feed and
+		// the direct notification never say different things (section 5.3).
+		if err := notifications.QueueToRegion(ctx, tx, continent, headline, "general"); err != nil {
+			log.Printf("Failed broadcasting world-event notification for %s: %v", continent, err)
 		}
 
 		log.Printf("World Event Pass: [%s] triggered over %s (expires %s).", newEvent, continent, expiresAt.Format(time.RFC3339))
