@@ -2109,6 +2109,50 @@ which cost real time re-deriving them twice.
   `engine.go` rather than picking a new file - it's too large for one
   more full pass.
 
+- **Following session (core game, not AI Systems Roadmap): UI Polish
+  wave 10 — finished `engine.go`'s remaining notification strings.**
+  Went through every one of the ~25 remaining plain-text
+  `INSERT INTO notifications`/`notifications.Queue` sites individually:
+  tax payout, exploration-dispatch-success, scan-sweep report,
+  boss-already-defeated, survivors-returned-home, co-op cancelled/
+  departed, idle-miner alert, espionage downlink, arena-queue-timeout,
+  construction-complete, route-contact discovery (both directions),
+  road-contact battle + resolved/timeout, route-incident onset,
+  conditions-cleared, and all three convoy outcomes. Escaped every
+  user-authored name found (encampment names, and a Telegram
+  `first_name` in the scan-sweep report - confirmed that's genuinely
+  free text a user controls, same risk as an encampment name).
+  `engine.go`'s notification strings are now believed complete - every
+  call site in the file was individually checked this wave rather than
+  sampled.
+
+  **Process note for future sessions:** partway through this wave, a
+  checkpoint `go build` added the temporary `replace gopkg.in/telebot.v3
+  => .../go-telebot/telebot/v3` line to `go.mod`, and the next
+  checkpoint's backup-before-append step captured that already-modified
+  `go.mod` as its "original" backup - so the routine restore silently
+  left the replace line (and matching `go.sum` entries) committed to
+  the working tree. Caught before this commit via `git diff go.mod
+  go.sum` showing unexpected changes, fixed by resetting both files to
+  `origin/main`'s actual committed content
+  (`git show origin/main:go.mod > go.mod`) rather than trusting the
+  local backup file, and the final verification pass confirmed via an
+  md5sum checksum taken before and after that `go.mod`/`go.sum` were
+  byte-identical to their committed state. **Lesson: when doing several
+  checkpoint builds in one session, verify the restore actually landed
+  (`git diff go.mod go.sum` should be empty) before trusting the next
+  checkpoint's backup - don't just assume the backup/restore pair
+  worked because it printed no errors.**
+
+  Verified with a full `go build ./... && go vet ./... && go test
+  ./...` pass (all green, zero gameplay logic changed - formatting/
+  escaping only). Remaining scope for a future wave: audit
+  `internal/bot/handlers/world.go` for any unpolished panels, and
+  confirm (rather than spot-check) that no package outside
+  `internal/engine/tick`, `internal/engine/agent`,
+  `internal/engine/starvation`, and `internal/bot/handlers` emits
+  notifications.
+
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)

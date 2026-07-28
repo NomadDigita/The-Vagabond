@@ -212,3 +212,50 @@ using `htmlBoldTick`/`htmlEscapeTick`) before this session added the 12
 listed above. **~25 sites in `engine.go` remain plain text** - recommend
 wave 10 continue there directly (line-by-line, the file is too large
 for one more full pass) rather than picking a new file.
+
+Wave 10 finished the remaining plain-text sites in `engine.go`: tax
+payout, exploration-dispatch-success, automatic-scan-sweep report,
+boss-already-defeated, survivors-returned-home (both branches),
+co-op-lobby cancelled/departed, idle-miner alert, espionage downlink
+report, arena-queue-timeout, construction-complete, route-contact
+discovery (both directions), the road-contact battle notification plus
+its resolved/timeout variants, route-incident onset, conditions-
+cleared, and all three supply-convoy outcomes (missed-contact,
+ambushed, arrived) - about 20 more sites. Escaped every user-authored
+name found along the way: encampment names (`ex.defenderName`,
+`contactName`, `c.campName`, `t.campName`, `s.spyName` (already done),
+`targetName` in the espionage downlink report) and the scanned rival's
+Telegram first name (`targetOwnerName` in the automatic-scan-sweep
+report - confirmed via `internal/db/schema/schema.go` that Telegram
+`first_name` is free text the platform lets a user set, same treatment
+as an encampment name). Confirmed several sites needed NO escaping
+because the interpolated value is fixed game content rather than
+player text: World Boss names (seeded via `schema.go`, not player-set),
+arena bracket labels ("2v2"/"3v3"), and route-incident type labels.
+Confirmed a few sites were already effectively safe despite not going
+through the `htmlBoldTick`/`htmlCodeTick` helper functions by name -
+they already had literal `<b>`/`<code>` tags with no interpolated
+names, or reused an already-escaped `battlereport.Render()` /
+already-built formatted-string result from a few lines up.
+
+**`internal/engine/tick/engine.go`'s notification strings are now
+believed complete** - every "INSERT INTO notifications" /
+"notifications.Queue" call site in the file was individually checked
+this wave. Verified with a full `go build ./... && go vet ./... && go
+test ./...` pass, confirmed with an md5sum checksum diff that
+`go.mod`/`go.sum` were byte-identical to their committed state before
+and after the verification build (a wave-10-internal mistake earlier
+in the session left the temporary telebot.v3 replace-directive
+uncommitted-but-unrestored between two checkpoint builds; caught before
+commit, not shipped - see the matching PROJECT_MASTER_PLAN.md entry for
+the full account so this exact mistake isn't repeated).
+
+Remaining scope for a future wave: `internal/bot/handlers/world.go`
+(not yet audited - the Wasteland Broadcast Radio panel is already
+`ModeHTML` + `htmlEscape`'d per this file's own read, but the file may
+have other unpolished panels), and a repo-wide grep for
+`INSERT INTO notifications` / `notifications.Queue` outside
+`internal/engine/tick`, `internal/engine/agent`,
+`internal/engine/starvation`, and `internal/bot/handlers` to confirm no
+other package emits notifications at all (spot-checked, not
+exhaustively confirmed).

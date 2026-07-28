@@ -242,7 +242,8 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 			log.Printf("Failed resolving world discovery for exploration dispatch %s: %v", d.id, discoveryErr)
 		}
 
-		message := fmt.Sprintf("🧭✅ EXPEDITION SUCCESSFUL: Your outpost has claimed %s! +%.0f %s credited to your reserves.", d.siteName, d.rewardAmount, d.rewardType)
+		message := fmt.Sprintf("🧭✅ %s: Your outpost has claimed %s! +%s %s credited to your reserves.",
+			htmlBoldTick("EXPEDITION SUCCESSFUL"), htmlCodeTick(d.siteName), htmlCodeTick(fmt.Sprintf("%.0f", d.rewardAmount)), d.rewardType)
 		if discoveryNote != "" {
 			message += "\n\n" + discoveryNote
 		}
@@ -355,12 +356,10 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		reportMsg := fmt.Sprintf(
-			"📡🔄 AUTOMATIC SCAN SWEEP COMPLETE\n\n"+
-				"🎯 Rival Detected: %s (Commander: %s)\n"+
-				"📍 Coordinates: [%d, %d]\n"+
-				"♻️ Estimated Scrap: %.0f\n\n"+
-				"💡 Use /scout %s for a full manual intel report.",
-			targetName, targetOwnerName, targetX, targetY, targetScrap, targetOwnerName,
+			"📡🔄 %s\n\n🎯 Rival Detected: %s (Commander: %s)\n📍 Coordinates: %s\n♻️ Estimated Scrap: %s\n\n💡 Use %s for a full manual intel report.",
+			htmlBoldTick("AUTOMATIC SCAN SWEEP COMPLETE"), htmlCodeTick(htmlEscapeTick(targetName)), htmlCodeTick(htmlEscapeTick(targetOwnerName)),
+			htmlCodeTick(fmt.Sprintf("%d, %d", targetX, targetY)), htmlCodeTick(fmt.Sprintf("%.0f", targetScrap)),
+			htmlCodeTick(fmt.Sprintf("/scout %s", htmlEscapeTick(targetOwnerName))),
 		)
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.userID, reportMsg)
 	}
@@ -411,7 +410,7 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 			// no fight happens, survivors just turn back immediately.
 			_, _ = tx.ExecContext(ctx, "UPDATE world_boss_attacks SET state = 'returning', resolve_time = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 minute') WHERE id = $2", m.marchMinutes, m.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.userID,
-				fmt.Sprintf("🏳️ %s was already defeated by another survivor before your forces arrived. Turning back - no fight, no losses.", m.bossName))
+				fmt.Sprintf("🏳️ %s was already defeated by another survivor before your forces arrived. Turning back - no fight, no losses.", htmlBoldTick(m.bossName)))
 			continue
 		}
 
@@ -523,7 +522,8 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 
 		if r.soldiers+r.mechs > 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.userID,
-				fmt.Sprintf("🚚 SURVIVORS RETURNED HOME: 🪖 %d Soldiers, 🤖 %d Mechs made it back from the World Boss engagement.", r.soldiers, r.mechs))
+				fmt.Sprintf("🚚 %s: 🪖 %s Soldiers, 🤖 %s Mechs made it back from the World Boss engagement.",
+					htmlBoldTick("SURVIVORS RETURNED HOME"), htmlCodeTick(fmt.Sprintf("%d", r.soldiers)), htmlCodeTick(fmt.Sprintf("%d", r.mechs))))
 		} else {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.userID,
 				"💀 No survivors returned from that World Boss engagement.")
@@ -823,7 +823,7 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", sols, mechs, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", r.id)
 
-			cancelMsg := "🤝 CO-OP NOTICE: Your staged lobby was cancelled and initial forces refunded because no ally commanders joined before departure."
+			cancelMsg := "🤝 " + htmlBoldTick("CO-OP NOTICE") + ": Your staged lobby was cancelled and initial forces refunded because no ally commanders joined before departure."
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, cancelMsg)
 			continue
 		}
@@ -850,7 +850,7 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", arrival, r.id)
 
-		launchMsg := "🤝 CO-OP LOBBY DEPARTED: The staging window expired. Your joint military forces have successfully departed towards target."
+		launchMsg := "🤝 " + htmlBoldTick("CO-OP LOBBY DEPARTED") + ": The staging window expired. Your joint military forces have successfully departed towards target."
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, launchMsg)
 	}
 	return nil
@@ -892,7 +892,8 @@ func (e *Engine) notifyIdleMiners(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, t := range targets {
-		alert := fmt.Sprintf("⛏️ WORKSTATION ALERT: Outpost [%s] currently has %d idle miners stationed in the hangar. Open Active Mining on camp deck to deploy them!", t.campName, t.idle)
+		alert := fmt.Sprintf("⛏️ %s: Outpost %s currently has %s idle miners stationed in the hangar. Open Active Mining on camp deck to deploy them!",
+			htmlBoldTick("WORKSTATION ALERT"), htmlCodeTick(htmlEscapeTick(t.campName)), htmlCodeTick(fmt.Sprintf("%d", t.idle)))
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", t.userID, alert)
 	}
 
@@ -1083,17 +1084,10 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		_ = tx.QueryRowContext(ctx, "SELECT scrap, rations FROM resources WHERE encampment_id = $1", s.targetID).Scan(&scrap, &rations)
 
 		spyReport := fmt.Sprintf(
-			"🛰️ ESPIONAGE DOWNLINK COMPLETED!\n\n"+
-				"Your spy satellite has returned safely to hangar. Telemetry fully decrypted:\n\n"+
-				"Target Outpost: %s\n\n"+
-				"DECRYPTED RESOURCES:\n"+
-				"⚙️ Scrap: %.1f\n"+
-				"🥫 Rations: %.1f\n\n"+
-				"MODULE STATUS GRID:\n"+
-				"⛺ Tent: Level %d\n"+
-				"⚙️ Scrap Heap: Level %d\n"+
-				"⚡ Generator: Level %d",
-			targetName, scrap, rations, tentLvl, heapLvl, genLvl,
+			"🛰️ %s\n\nYour spy satellite has returned safely to hangar. Telemetry fully decrypted:\n\nTarget Outpost: %s\n\n%s\n⚙️ Scrap: %s\n🥫 Rations: %s\n\n%s\n⛺ Tent: Level %s\n⚙️ Scrap Heap: Level %s\n⚡ Generator: Level %s",
+			htmlBoldTick("ESPIONAGE DOWNLINK COMPLETED!"), htmlCodeTick(htmlEscapeTick(targetName)),
+			htmlBoldTick("DECRYPTED RESOURCES:"), htmlCodeTick(fmt.Sprintf("%.1f", scrap)), htmlCodeTick(fmt.Sprintf("%.1f", rations)),
+			htmlBoldTick("MODULE STATUS GRID:"), htmlCodeTick(fmt.Sprintf("%d", tentLvl)), htmlCodeTick(fmt.Sprintf("%d", heapLvl)), htmlCodeTick(fmt.Sprintf("%d", genLvl)),
 		)
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.spyUserID, spyReport)
@@ -1427,7 +1421,8 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 				newDollars, _ := storagecap.Clamp(curDollars, refundDollars, qCap)
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, qCampID)
 
-				alert := fmt.Sprintf("⏳ ARENA QUEUE TIMEOUT\n\nNo equivalent opponents were found for the %s queue. Your entry fee of $%.0f has been refunded.", b, refundDollars)
+				alert := fmt.Sprintf("⏳ %s\n\nNo equivalent opponents were found for the %s queue. Your entry fee of %s has been refunded.",
+					htmlBoldTick("ARENA QUEUE TIMEOUT"), htmlCodeTick(b), htmlCodeTick(fmt.Sprintf("$%.0f", refundDollars)))
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", q.userID, alert)
 			}
 		}
@@ -1493,11 +1488,8 @@ func (e *Engine) resolveCompletedUpgrades(ctx context.Context, tx *sql.Tx) error
 		}
 
 		alertMsg := fmt.Sprintf(
-			"🏗️ CONSTRUCTION COMPLETE\n\n"+
-				"Outpost: %s\n"+
-				"Upgrade completed successfully!\n"+
-				"Your [%s] has successfully reached Level %d.",
-			c.campName, c.modType, newLvl,
+			"🏗️ %s\n\nOutpost: %s\nUpgrade completed successfully!\nYour %s has successfully reached Level %s.",
+			htmlBoldTick("CONSTRUCTION COMPLETE"), htmlCodeTick(htmlEscapeTick(c.campName)), htmlCodeTick(c.modType), htmlCodeTick(fmt.Sprintf("%d", newLvl)),
 		)
 
 		insertNotification := `
@@ -1681,7 +1673,7 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		}
 		if isRealPlayer(raid.attackerUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", raid.attackerUserID,
-				fmt.Sprintf("📡 ROUTE CONTACT: Your expedition passed close enough to discover Outpost [%s]. It is now visible in the Tactical Target Matrix.", contactName))
+				fmt.Sprintf("📡 %s: Your expedition passed close enough to discover Outpost %s. It is now visible in the Tactical Target Matrix.", htmlBoldTick("ROUTE CONTACT"), htmlCodeTick(htmlEscapeTick(contactName))))
 		}
 
 		// Being seen is reciprocal knowledge. The contact has not been
@@ -1694,7 +1686,7 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		}
 		if affected, _ := result.RowsAffected(); affected == 1 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", contactUserID,
-				"📡 ROUTE CONTACT: Your sensors detected a foreign expedition moving near your outpost. Its commander has now discovered your location.")
+				"📡 "+htmlBoldTick("ROUTE CONTACT")+": Your sensors detected a foreign expedition moving near your outpost. Its commander has now discovered your location.")
 		}
 	}
 	return nil
@@ -1832,8 +1824,8 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 				{b.attackerUserID, a.attackerName},
 			} {
 				msg := fmt.Sprintf(
-					"🚧 ROAD CONTACT!\n\nYour expedition has encountered forces commanded by [%s] on the road.\nYou have %ds to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass them peacefully.",
-					side.otherName, deadlineSeconds,
+					"🚧 %s\n\nYour expedition has encountered forces commanded by %s on the road.\nYou have %s to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass them peacefully.",
+					htmlBoldTick("ROAD CONTACT!"), htmlCodeTick(htmlEscapeTick(side.otherName)), htmlCodeTick(fmt.Sprintf("%ds", deadlineSeconds)),
 				)
 				if isRealPlayer(side.userID) {
 					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", side.userID, msg)
@@ -1901,9 +1893,9 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
 			if userID != 0 {
-				note := "🛣️ ROAD CONTACT RESOLVED: Both columns continued on their way without engaging."
+				note := "🛣️ " + htmlBoldTick("ROAD CONTACT RESOLVED") + ": Both columns continued on their way without engaging."
 				if outcome == "timeout" {
-					note = "🛣️ ROAD CONTACT RESOLVED: No attack order was given in time - your column continued on its way."
+					note = "🛣️ " + htmlBoldTick("ROAD CONTACT RESOLVED") + ": No attack order was given in time - your column continued on its way."
 				}
 				_ = notifications.Queue(ctx, tx, userID, note, "route_status")
 			}
@@ -2040,7 +2032,8 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 
 		icon, label := routeIncidentPresentation(incidentType)
 		hours := int(roadcombat.IncidentDuration(severity).Hours())
-		msg := fmt.Sprintf("%s %s: Your column has been forced to make temporary camp by conditions on the road. Expected clear time: ~%dh. The journey will resume automatically once conditions improve.", icon, label, hours)
+		msg := fmt.Sprintf("%s %s: Your column has been forced to make temporary camp by conditions on the road. Expected clear time: ~%s. The journey will resume automatically once conditions improve.",
+			icon, htmlBoldTick(label), htmlCodeTick(fmt.Sprintf("%dh", hours)))
 		if effectNote != "" {
 			msg += "\n" + effectNote
 		}
@@ -2200,7 +2193,7 @@ func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) err
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", row.raidID).Scan(&userID)
 		if userID != 0 {
 			_ = notifications.Queue(ctx, tx, userID,
-				"☀️ CONDITIONS CLEARED: Your column has broken camp and resumed its journey.", "route_status")
+				"☀️ "+htmlBoldTick("CONDITIONS CLEARED")+": Your column has broken camp and resumed its journey.", "route_status")
 		}
 	}
 	return nil
@@ -2262,7 +2255,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&userID)
 			if userID != 0 {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
-					"📦❌ CONVOY MISSED CONTACT: Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies were lost, but the Hauler and Tanker crews made it back home.")
+					"📦❌ "+htmlBoldTick("CONVOY MISSED CONTACT")+": Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies were lost, but the Hauler and Tanker crews made it back home.")
 			}
 			continue
 		}
@@ -2277,7 +2270,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&homeUserID)
 			if homeUserID != 0 {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", homeUserID,
-					"📦💥 CONVOY AMBUSHED: Your resupply convoy was ambushed en route and lost, along with its Hauler and Tanker crews. The stranded column is still waiting for supplies.")
+					"📦💥 "+htmlBoldTick("CONVOY AMBUSHED")+": Your resupply convoy was ambushed en route and lost, along with its Hauler and Tanker crews. The stranded column is still waiting for supplies.")
 			}
 			continue
 		}
@@ -2310,7 +2303,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", c.targetRaidID).Scan(&userID)
 		if userID != 0 {
 			_ = notifications.Queue(ctx, tx, userID,
-				"📦✅ CONVOY ARRIVED: Reinforcement supplies have reached your stranded column. The journey resumes.", "route_status")
+				"📦✅ "+htmlBoldTick("CONVOY ARRIVED")+": Reinforcement supplies have reached your stranded column. The journey resumes.", "route_status")
 		}
 	}
 	return nil
