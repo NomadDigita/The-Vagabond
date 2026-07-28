@@ -1679,8 +1679,10 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			continue
 		}
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", raid.attackerUserID,
-			fmt.Sprintf("📡 ROUTE CONTACT: Your expedition passed close enough to discover Outpost [%s]. It is now visible in the Tactical Target Matrix.", contactName))
+		if isRealPlayer(raid.attackerUserID) {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", raid.attackerUserID,
+				fmt.Sprintf("📡 ROUTE CONTACT: Your expedition passed close enough to discover Outpost [%s]. It is now visible in the Tactical Target Matrix.", contactName))
+		}
 
 		// Being seen is reciprocal knowledge. The contact has not been
 		// attacked yet, but knows a foreign force crossed its road.
@@ -1833,7 +1835,9 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 					"🚧 ROAD CONTACT!\n\nYour expedition has encountered forces commanded by [%s] on the road.\nYou have %ds to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass them peacefully.",
 					side.otherName, deadlineSeconds,
 				)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", side.userID, msg)
+				if isRealPlayer(side.userID) {
+					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", side.userID, msg)
+				}
 			}
 		}
 	}
@@ -2319,6 +2323,26 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 const aiCivilizationMaxSoldiersPerLevel = 25
 const aiCivilizationMaxMechsPerLevel = 4
 
+// isRealPlayer reports whether a user_id belongs to an actual Telegram
+// account rather than one of the synthetic negative-telegram_id rows
+// seedAICivilizations creates for AI factions (see cmd/bot/main.go). Real
+// Telegram user IDs are always positive, so this is a cheap, reliable
+// check. Needed as of the Phase 6 AI decision loop
+// (internal/engine/tick/aidecisions.go): AI factions can now be a raid's
+// attacker_id for the first time (previously only ever a defender/
+// target), and every attacker-facing notification insert below - written
+// back when "attacker" always meant a real player - would otherwise queue
+// a notification for an unreachable synthetic user_id. The notifications
+// dispatcher (internal/engine/notifications) has no such guard itself and
+// silently `continue`s past a failed send without marking the row sent,
+// so an unguarded call site here doesn't just fail once - it permanently
+// wastes one of the dispatcher's `LIMIT 10` drain slots every 3s poll,
+// forever. Guarding at the point of insertion is cheaper and clearer than
+// teaching the generic dispatcher about AI factions.
+func isRealPlayer(userID int64) bool {
+	return userID > 0
+}
+
 // growAICivilizations implements MMO_WORLD_EVOLUTION_PLAN.md Phase 6's
 // "gather resources, build units, expand" requirement for persistent AI
 // factions (seeded by seedAICivilizations in cmd/bot/main.go). Growth is
@@ -2622,7 +2646,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				r.stolenScrap, r.stolenMetal, r.stolenCrystal, r.stolenRations, r.stolenElectricity, r.stolenHydrogen, r.stolenNeuroCores, r.stolenDollars,
 			)
 			queryNotif := "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)"
-			_, _ = tx.ExecContext(ctx, queryNotif, r.attackerUserID, alertMsg)
+			if isRealPlayer(r.attackerUserID) {
+				_, _ = tx.ExecContext(ctx, queryNotif, r.attackerUserID, alertMsg)
+			}
 			continue
 		}
 
@@ -2643,7 +2669,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				htmlBoldTick(htmlEscapeTick(r.defenderName)),
 				htmlItalicTick("Decisive Resolution progress starting next tick cycle."),
 			)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
+			if isRealPlayer(r.attackerUserID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
+			}
 
 			if r.defenderID.Valid && r.defenderUserID != 0 {
 				defenderEngagedAlert := fmt.Sprintf(
@@ -3321,7 +3349,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			reportText += "\n\n" + strings.TrimSpace(weatherNotice)
 		}
 
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, reportText)
+		if isRealPlayer(r.attackerUserID) {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, reportText)
+		}
 		if r.defenderID.Valid && r.defenderUserID != 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, reportText)
 		}
@@ -3357,7 +3387,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 						"⏳ Return march engaged, arriving in <code>%.0f minutes</code>.",
 					primaryBuggies, salvageScrap, salvageMetal, salvageCrystal, returnMinutes,
 				)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, salvageAlert)
+				if isRealPlayer(r.attackerUserID) {
+					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, salvageAlert)
+				}
 			} else {
 				_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
 			}
@@ -3427,7 +3459,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				htmlCodeTick(fmt.Sprintf("%.1f", primaryNeuroCoresShare)), htmlCodeTick(fmt.Sprintf("$%.0f", primaryDollarsShare)),
 				htmlCodeTick(fmt.Sprintf("%.0f minutes", returnMinutes)), htmlCodeTick(fmt.Sprintf("%.0f minutes", r.baseMarchMinutes)),
 			)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, etaAlert)
+			if isRealPlayer(r.attackerUserID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, etaAlert)
+			}
 
 			if r.defenderID.Valid {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0), rations = GREATEST(rations - $5, 0), electricity = GREATEST(electricity - $6, 0), hydrogen = GREATEST(hydrogen - $7, 0), neuro_cores = GREATEST(neuro_cores - $8, 0), dollars = GREATEST(dollars - $9, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String, stolenRations, stolenElectricity, stolenHydrogen, stolenNeuroCores, stolenDollars)
