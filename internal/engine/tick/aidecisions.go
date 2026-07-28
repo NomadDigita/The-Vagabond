@@ -20,6 +20,16 @@ const aiDecisionCadence = 20 * time.Minute
 // come, not a metronome. See the plan doc's "Step 3: intent selection".
 const aiRaidProbabilityWhenEligible = 0.40
 
+// aiVsAIRaidProbabilityWhenEligible is the separate, lower probability used
+// when a fair target happens to be another AI faction rather than a human.
+// AI-vs-AI conflict is now in scope (see
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, which supersedes
+// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note), but
+// should stay rare background texture rather than the AI's default
+// behavior - the player-facing case (AI raiding a human) should still
+// dominate.
+const aiVsAIRaidProbabilityWhenEligible = 0.12
+
 // aiFractionOfGarrisonCommitted caps how much of a faction's home garrison
 // a single raid can commit, so a faction that raids never strips its own
 // defense to zero - mirrors the spirit of the human "Manual Defense
@@ -93,12 +103,13 @@ func (e *Engine) decideAIFactionActions(ctx context.Context, tx *sql.Tx) error {
 // aiRaidTarget is a real player's encampment an AI faction has already
 // discovered and could fairly raid.
 type aiRaidTarget struct {
-	id     string
-	name   string
-	level  int
-	x, y   int
-	region string
-	userID int64
+	id          string
+	name        string
+	level       int
+	x, y        int
+	region      string
+	userID      int64
+	isAIFaction bool
 }
 
 func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int, region string) error {
@@ -107,11 +118,17 @@ func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID s
 		return fmt.Errorf("selecting raid target: %w", err)
 	}
 
-	if target != nil && rand.Float64() < aiRaidProbabilityWhenEligible {
-		return e.launchAIRaid(ctx, tx, factionID, *target)
+	if target != nil {
+		raidProbability := aiRaidProbabilityWhenEligible
+		if target.isAIFaction {
+			raidProbability = aiVsAIRaidProbabilityWhenEligible
+		}
+		if rand.Float64() < raidProbability {
+			return e.launchAIRaid(ctx, tx, factionID, *target)
+		}
 	}
 
-	undiscoveredCount, err := e.countUndiscoveredRealPlayers(ctx, tx, factionID, region)
+	undiscoveredCount, err := e.countUndiscoveredTargets(ctx, tx, factionID, region)
 	if err != nil {
 		return fmt.Errorf("counting undiscovered targets: %w", err)
 	}
@@ -127,19 +144,20 @@ func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID s
 	return nil
 }
 
-// countUndiscoveredRealPlayers mirrors the WHERE clause
+// countUndiscoveredTargets mirrors the WHERE clause
 // resolveExplorationDiscovery uses to find a human's next undiscovered
-// target, adapted for an AI faction as the observer and explicitly
-// excluding other AI factions - AI-vs-AI raids are out of scope, see
-// AI_FACTION_DECISION_LOOP_PLAN.md's "Deliberately out of scope".
-func (e *Engine) countUndiscoveredRealPlayers(ctx context.Context, tx *sql.Tx, observerCampID, region string) (int, error) {
+// target, adapted for an AI faction as the observer. Other AI factions now
+// count as valid undiscovered targets too - AI-vs-AI conflict is in scope,
+// see AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2 (which
+// supersedes AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of
+// scope" note).
+func (e *Engine) countUndiscoveredTargets(ctx context.Context, tx *sql.Tx, observerCampID, region string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.id <> $1
-		  AND e.is_ai_faction = FALSE
 		  AND c.region = $2
 		  AND NOT EXISTS (
 				SELECT 1 FROM encampment_discoveries d
@@ -148,10 +166,11 @@ func (e *Engine) countUndiscoveredRealPlayers(ctx context.Context, tx *sql.Tx, o
 	return count, err
 }
 
-// aiScout discovers exactly one undiscovered real player in the faction's
-// home continent - the AI-faction-as-observer counterpart to
+// aiScout discovers exactly one undiscovered target (a real player or,
+// since this is now in scope, another AI faction) in the faction's home
+// continent - the AI-faction-as-observer counterpart to
 // resolveExplorationDiscovery. No notification is sent to the discovered
-// player: a human's own exploration discovering a rival doesn't notify
+// party: a human's own exploration discovering a rival doesn't notify
 // the rival either (discovery is silent both ways today), so this doesn't
 // introduce a new asymmetry.
 func (e *Engine) aiScout(ctx context.Context, tx *sql.Tx, factionID, region string) error {
@@ -161,7 +180,6 @@ func (e *Engine) aiScout(ctx context.Context, tx *sql.Tx, factionID, region stri
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE e.id <> $1
-		  AND e.is_ai_faction = FALSE
 		  AND c.region = $2
 		  AND NOT EXISTS (
 				SELECT 1 FROM encampment_discoveries d
@@ -192,9 +210,13 @@ func (e *Engine) aiScout(ctx context.Context, tx *sql.Tx, factionID, region stri
 	return nil
 }
 
-// pickFairAIRaidTarget returns an already-discovered real player this
-// faction could raid without exceeding aiMaxLevelsBelowSelfForFairTarget,
-// or nil if none qualifies. Never considers another AI faction a target.
+// pickFairAIRaidTarget returns an already-discovered target (a real
+// player, or - now that AI-vs-AI conflict is in scope, see
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2 - another AI
+// faction) this faction could raid without exceeding
+// aiMaxLevelsBelowSelfForFairTarget, or nil if none qualifies. The
+// fairness band applies identically regardless of who's on the other
+// side; AI-vs-AI doesn't get a special exemption from it.
 func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int) (*aiRaidTarget, error) {
 	minLevel := factionLevel - aiMaxLevelsBelowSelfForFairTarget
 	if minLevel < 1 {
@@ -202,12 +224,11 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT e.id, e.name, e.level, c.x, c.y, c.region, e.user_id
+		SELECT e.id, e.name, e.level, c.x, c.y, c.region, e.user_id, e.is_ai_faction
 		FROM encampment_discoveries d
 		JOIN encampments e ON e.id = d.target_encampment_id
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE d.observer_encampment_id = $1
-		  AND e.is_ai_faction = FALSE
 		  AND e.level >= $2
 		  AND NOT EXISTS (
 				SELECT 1 FROM raids r
@@ -223,7 +244,7 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 
 	for rows.Next() {
 		var t aiRaidTarget
-		if err := rows.Scan(&t.id, &t.name, &t.level, &t.x, &t.y, &t.region, &t.userID); err == nil {
+		if err := rows.Scan(&t.id, &t.name, &t.level, &t.x, &t.y, &t.region, &t.userID, &t.isAIFaction); err == nil {
 			return &t, nil
 		}
 	}
@@ -295,10 +316,16 @@ func (e *Engine) launchAIRaid(ctx context.Context, tx *sql.Tx, factionID string,
 		return fmt.Errorf("debiting AI faction garrison: %w", err)
 	}
 
-	var factionName string
-	_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", factionID).Scan(&factionName)
-	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)",
-		fmt.Sprintf("⚠️ HOSTILE CONTACT: %s has deployed forces toward Outpost [%s].", factionName, target.name))
+	// Nobody reads a newsfeed of two bots fighting each other - suppress
+	// the public world_news headline for AI-vs-AI raids, but still keep
+	// the audit trail in ai_faction_decisions below (that should record
+	// everything, headline or not).
+	if !target.isAIFaction {
+		var factionName string
+		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", factionID).Scan(&factionName)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)",
+			fmt.Sprintf("⚠️ HOSTILE CONTACT: %s has deployed forces toward Outpost [%s].", factionName, target.name))
+	}
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO ai_faction_decisions (encampment_id, intent, target_encampment_id, resulting_raid_id, reason) VALUES ($1, 'raid', $2, $3, $4)",
 		factionID, target.id, raidID, fmt.Sprintf("committed %d soldiers, %d mechs", commitSoldiers, commitMechs))

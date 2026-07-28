@@ -3,6 +3,7 @@ package tick
 import (
 	"context"
 	"database/sql"
+	"math/rand"
 	"testing"
 	"time"
 )
@@ -21,14 +22,20 @@ func setGarrison(t *testing.T, db *sql.DB, campID string, soldiers, mechs int) {
 	}
 }
 
-func TestAIScoutDiscoversAnUndiscoveredRealPlayerNotAnotherAIFaction(t *testing.T) {
+// TestAIScoutCanDiscoverAnotherAIFaction verifies aiScout no longer
+// excludes AI factions as scouting targets - AI-vs-AI conflict is now in
+// scope (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, superseding
+// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note).
+// Faction Beta is seeded first (closer/earlier established), so the
+// existing danger/established_at ordering picks it before the player.
+func TestAIScoutCanDiscoverAnotherAIFaction(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
 	faction := seedEncampment(t, db, 2001, "Faction Alpha", 0, 0, "TestRegion", true)
-	seedEncampment(t, db, 2002, "Faction Beta", 1, 1, "TestRegion", true) // another AI, must never be scouted
-	player := seedEncampment(t, db, 2003, "Player Camp", 2, 2, "TestRegion", false)
+	otherFaction := seedEncampment(t, db, 2002, "Faction Beta", 1, 1, "TestRegion", true)
+	seedEncampment(t, db, 2003, "Player Camp", 2, 2, "TestRegion", false)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -46,8 +53,8 @@ func TestAIScoutDiscoversAnUndiscoveredRealPlayerNotAnotherAIFaction(t *testing.
 	if err != nil {
 		t.Fatalf("expected a discovery row, got error: %v", err)
 	}
-	if discoveredID != player {
-		t.Errorf("expected the AI faction to discover the real player %s, discovered %s instead", player, discoveredID)
+	if discoveredID != otherFaction {
+		t.Errorf("expected the AI faction to be able to discover another AI faction %s, discovered %s instead", otherFaction, discoveredID)
 	}
 
 	var decisionIntent string
@@ -60,7 +67,7 @@ func TestAIScoutDiscoversAnUndiscoveredRealPlayerNotAnotherAIFaction(t *testing.
 	}
 }
 
-func TestPickFairAIRaidTargetExcludesTooWeakPlayersAndOtherAIFactions(t *testing.T) {
+func TestPickFairAIRaidTargetAppliesFairnessBandToAIFactionsToo(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
@@ -69,17 +76,17 @@ func TestPickFairAIRaidTargetExcludesTooWeakPlayersAndOtherAIFactions(t *testing
 	setAILevel(t, db, faction, 10)
 
 	weakPlayer := seedEncampment(t, db, 2005, "Weak Player", 1, 0, "TestRegion", false)
-	setAILevel(t, db, weakPlayer, 1) // 9 levels below - must be excluded
-	fairPlayer := seedEncampment(t, db, 2006, "Fair Player", 2, 0, "TestRegion", false)
-	setAILevel(t, db, fairPlayer, 9) // 1 level below - within the fairness band
-	otherFaction := seedEncampment(t, db, 2007, "Faction Delta", 3, 0, "TestRegion", true)
-	setAILevel(t, db, otherFaction, 9) // fair by level, but is an AI faction - must be excluded
+	setAILevel(t, db, weakPlayer, 1) // 9 levels below - must be excluded regardless of AI/human
+	weakFaction := seedEncampment(t, db, 2007, "Faction Delta", 3, 0, "TestRegion", true)
+	setAILevel(t, db, weakFaction, 1) // 9 levels below - must be excluded, being an AI faction is no exemption
+	fairFaction := seedEncampment(t, db, 2006, "Faction Fair", 2, 0, "TestRegion", true)
+	setAILevel(t, db, fairFaction, 9) // 1 level below - within the fairness band, and now a valid target
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	for _, target := range []string{weakPlayer, fairPlayer, otherFaction} {
+	for _, target := range []string{weakPlayer, weakFaction, fairFaction} {
 		if _, err := tx.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, target); err != nil {
 			t.Fatalf("seeding discovery: %v", err)
 		}
@@ -100,8 +107,11 @@ func TestPickFairAIRaidTargetExcludesTooWeakPlayersAndOtherAIFactions(t *testing
 	if target == nil {
 		t.Fatal("expected a fair target to be found")
 	}
-	if target.id != fairPlayer {
-		t.Errorf("expected the fair target %s (level 9), got %s", fairPlayer, target.id)
+	if target.id != fairFaction {
+		t.Errorf("expected the fair AI-faction target %s (level 9), got %s", fairFaction, target.id)
+	}
+	if !target.isAIFaction {
+		t.Error("expected the returned target to be flagged as an AI faction")
 	}
 }
 
@@ -178,12 +188,15 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 	}
 }
 
-// TestAIFactionNeverRaidsAnotherAIFaction is the probabilistic-absence
-// check for the raid path, mirroring
-// TestEvaluateRoadBaseEncountersExcludesAIFactionBases's pattern from
-// roadencounter_test.go: run the full decision loop many times and assert
-// zero AI-vs-AI raids ever appear, not just check once.
-func TestAIFactionNeverRaidsAnotherAIFaction(t *testing.T) {
+// TestAIFactionCanRaidAnotherAIFactionRarely mirrors
+// TestEvaluateRoadBaseEncountersExcludesAIFactionBases's probabilistic
+// pattern from roadencounter_test.go, but inverted from this codebase's
+// earlier behavior: AI-vs-AI conflict is now in scope
+// (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2), so running many
+// iterations at aiVsAIRaidProbabilityWhenEligible should eventually
+// produce at least one AI-vs-AI raid, and it should never generate a
+// public world_news headline.
+func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
@@ -194,14 +207,11 @@ func TestAIFactionNeverRaidsAnotherAIFaction(t *testing.T) {
 	factionB := seedEncampment(t, db, 2011, "Faction Eta", 1, 0, "TestRegion", true)
 	setAILevel(t, db, factionB, 5)
 
-	// Force-discover factionB from factionA's perspective, as if a bug
-	// let it happen - the exclusion must hold even if a discovery row
-	// exists, not just because scouting never targets an AI faction.
 	if _, err := db.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", factionA, factionB); err != nil {
 		t.Fatalf("seeding discovery: %v", err)
 	}
 
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 60; i++ {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatalf("begin tx: %v", err)
@@ -211,7 +221,7 @@ func TestAIFactionNeverRaidsAnotherAIFaction(t *testing.T) {
 			_ = tx.Rollback()
 			t.Fatalf("pickFairAIRaidTarget: %v", err)
 		}
-		if target != nil {
+		if target != nil && target.isAIFaction && rand.Float64() < aiVsAIRaidProbabilityWhenEligible {
 			if err := e.launchAIRaid(ctx, tx, factionA, *target); err != nil {
 				_ = tx.Rollback()
 				t.Fatalf("launchAIRaid: %v", err)
@@ -220,12 +230,21 @@ func TestAIFactionNeverRaidsAnotherAIFaction(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
+		// Garrison is finite and each raid debits it - replenish so later
+		// iterations can still commit forces even after earlier raids fired.
+		setGarrison(t, db, factionA, 200, 100)
 	}
 
 	var count int
 	_ = db.QueryRow("SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND defender_id = $2", factionA, factionB).Scan(&count)
-	if count != 0 {
-		t.Errorf("expected zero AI-vs-AI raids, got %d", count)
+	if count == 0 {
+		t.Error("expected at least one AI-vs-AI raid across 60 iterations at a 12% probability, got zero")
+	}
+
+	var newsCount int
+	_ = db.QueryRow("SELECT COUNT(*) FROM world_news WHERE headline LIKE '%Faction Eta%'").Scan(&newsCount)
+	if newsCount != 0 {
+		t.Errorf("expected AI-vs-AI raids on Faction Eta to never generate a public world_news headline, got %d", newsCount)
 	}
 }
 
