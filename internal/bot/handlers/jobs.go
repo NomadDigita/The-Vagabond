@@ -180,6 +180,118 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("🌀✨ %s Your outpost now stands at %s in a %s biome.", htmlBold("TELEPORT COMPLETE!"), htmlCode(fmt.Sprintf("[%d, %d]", newX, newY)), biome), telebot.ModeHTML)
 }
 
+// ghostProtocolCooldown and ghostProtocolCostFraction are deliberately
+// severe compared to /newjobteleport's cheap, frequent utility cost -
+// per the project owner's own words ("very very very costly," "once in
+// 3 months"). Cost is a fraction of *current* holdings rather than a
+// fixed absolute number, so it stays meaningfully painful regardless of
+// where the live economy's typical balances land - there's no historical
+// usage data yet to calibrate a fixed number against (see
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4 and its "Open
+// questions" item 1). Treat both as tunable constants to revisit after a
+// few weeks of real usage, same spirit as aidecisions.go's
+// aiMaxLevelsBelowSelfForFairTarget.
+const (
+	ghostProtocolCooldown     = 90 * 24 * time.Hour
+	ghostProtocolCostFraction = 0.50
+)
+
+// HandleGhostProtocol (/ghostprotocol) is a separate, far more severe
+// action than /newjobteleport - see
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4 for why the
+// existing cheap/frequent teleport was deliberately NOT repurposed for
+// this. In addition to relocating (reusing /newjobteleport's random-
+// coordinate logic), this deletes every known_locations row where this
+// encampment is the target - every scout/attacker who'd locked this
+// base's position loses that lock and must rediscover it from scratch.
+// encampment_discoveries (the permanent "have you ever heard of this
+// entity" relationship) is untouched - only the coordinate lock resets.
+func (h *JobsHandler) HandleGhostProtocol(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	message, err := h.doGhostProtocol(ctx, campID)
+	if err != nil {
+		return c.Send(message)
+	}
+	return c.Send(message, telebot.ModeHTML)
+}
+
+// doGhostProtocol is the testable core of HandleGhostProtocol, following
+// the same pattern as admin.go's doSetTaxRate: no telebot.Context
+// dependency, so it can be exercised directly against a real database in
+// tests. Returns the message to send and, on failure, a non-nil error
+// (in which case the message is a plain-text failure notice, not HTML).
+func (h *JobsHandler) doGhostProtocol(ctx context.Context, campID string) (string, error) {
+	var lastGhost sql.NullTime
+	_ = h.DB.QueryRowContext(ctx, "SELECT last_ghost_protocol_at FROM encampments WHERE id = $1", campID).Scan(&lastGhost)
+	if lastGhost.Valid && time.Since(lastGhost.Time) < ghostProtocolCooldown {
+		remaining := ghostProtocolCooldown - time.Since(lastGhost.Time)
+		return fmt.Sprintf("⏳ Ghost Protocol is on cooldown for another %.0f days.", remaining.Hours()/24), errors.New("on cooldown")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "⚠️ Ghost Protocol failed.", err
+	}
+	defer tx.Rollback()
+
+	var scrap, metal, crystal, dollars float64
+	err = tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &metal, &crystal, &dollars)
+	if err != nil {
+		return "⚠️ Error reading your resources.", err
+	}
+	scrapCost, metalCost, crystalCost, dollarsCost := scrap*ghostProtocolCostFraction, metal*ghostProtocolCostFraction, crystal*ghostProtocolCostFraction, dollars*ghostProtocolCostFraction
+
+	newX := rand.Intn(10000)
+	newY := rand.Intn(10000)
+	biomes := []string{"wasteland", "irradiated_zone", "scrapyard", "ashfields", "frozen_tundra"}
+	terrains := []string{"flat", "mountainous", "coastal", "urban_ruins"}
+	biome := biomes[rand.Intn(len(biomes))]
+	terrain := terrains[rand.Intn(len(terrains))]
+
+	var newCoordID string
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO coordinates (x, y, biome, danger_level, region, terrain)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (x, y) DO UPDATE SET x = EXCLUDED.x
+		RETURNING id`, newX, newY, biome, rand.Intn(5)+1, "Unknown Sector", terrain).Scan(&newCoordID)
+	if err != nil {
+		return "⚠️ Error finding new coordinates.", err
+	}
+
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2, crystal = crystal - $3, dollars = dollars - $4 WHERE encampment_id = $5",
+		scrapCost, metalCost, crystalCost, dollarsCost, campID); err != nil {
+		return "⚠️ Error deducting Ghost Protocol's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE encampments SET coordinate_id = $1, last_ghost_protocol_at = CURRENT_TIMESTAMP WHERE id = $2", newCoordID, campID); err != nil {
+		return "⚠️ Error relocating.", err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM known_locations WHERE target_encampment_id = $1", campID); err != nil {
+		return "⚠️ Error clearing intel locks on your position.", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Error completing Ghost Protocol.", err
+	}
+
+	return fmt.Sprintf("👻 %s Every scout and raider who'd locked your position has lost that lock. Your outpost now stands at %s in a %s biome, at a cost of %s Scrap, %s Metal, %s Crystal, and %s Dollars.",
+		htmlBold("GHOST PROTOCOL EXECUTED"),
+		htmlCode(fmt.Sprintf("[%d, %d]", newX, newY)), biome,
+		htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)),
+		htmlCode(fmt.Sprintf("%.0f", crystalCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))), nil
+}
+
+
+
 // HandleOrbitalManeuver (/newjoborbitalmaneuver) grants a temporary
 // defense rating boost.
 func (h *JobsHandler) HandleOrbitalManeuver(c telebot.Context) error {

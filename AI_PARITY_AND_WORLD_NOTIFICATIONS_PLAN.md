@@ -1,20 +1,31 @@
 # AI Full Parity, Long-Range Scouting, and World-Event Broadcasts Plan
 
-Status: not started - this is the design, written before any of it exists.
-Read this whole file before writing code. It covers five features the
-project owner asked for together; they're grouped in one document because
-several of them share touchpoints (the scouting rework and the discovery-
-permanence rule are two halves of one mechanic, and "AI full parity"
-touches almost every system this file's other sections also touch), but
-each section is buildable and testable independently - see "Suggested
-build order" at the end for a safe sequencing.
+Status (updated by the implementing session): items 1 (leaderboard, 1.2),
+2 (AI-vs-AI), 5 (world-event broadcasts), and 3.4 (discovery permanence +
+Ghost Protocol, including the AI decision loop's new `'flee'` intent) are
+built, tested against real Postgres, and merged to `main`. Remaining:
+3.1-3.3/3.5-3.7 (the long-range scouting mechanic itself) and 1.4/1.5 (AI
+passive-target parity + total-defeat/victory audit).
 
-This supersedes two "deliberately out of scope" notes in
-`AI_FACTION_DECISION_LOOP_PLAN.md` (AI-vs-AI raids, and dedicated
-scouting/spying) - both are now in scope, per direct instruction. Read
-that file first if you haven't; this one assumes you have and doesn't
-re-explain the AI decision loop, `roadMover`, `roadcombat`, or the
-discovery-gating principle already established there.
+The "Open questions for the project owner" below were explicitly handed
+to this implementing session to decide rather than block on (per direct
+instruction, given other developers are also active on this project and
+everything is documented for continuity either way). Decisions made,
+each treated as a tunable starting constant, not a final number:
+1. **Ghost Protocol cost**: 50% of *current* Scrap/Metal/Crystal/Dollars
+   (proportional, not a fixed absolute number - see 3.4's own reasoning
+   for why a fixed number can't be calibrated without live-economy data
+   yet). Cooldown: 90 days, as suggested.
+2. **World-event broadcast category**: non-mutable (`"general"`), the
+   doc's own recommendation - weather/tax changes are closer to security/
+   policy notices than routine chatter.
+3. Not yet relevant - decide when scouting (3.1-3.3) is built.
+4. **Leaderboard display**: interleaved with a 🤖 prefix, as recommended,
+   implemented in commit `50e64e3`.
+5. Not yet audited - deferred to build order item 6 (1.4/1.5), as planned.
+
+Revisit any of these once real usage data exists, same spirit as this
+plan's own advice on `aiMaxLevelsBelowSelfForFairTarget`.
 
 ---
 

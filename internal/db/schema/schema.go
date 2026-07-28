@@ -918,5 +918,31 @@ func Statements() []string {
 			CONSTRAINT ai_faction_decisions_intent CHECK (intent IN ('scout', 'raid', 'idle'))
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_faction_decisions_encampment ON ai_faction_decisions(encampment_id, decided_at DESC);`,
+
+		// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4: discovery
+		// permanence and Ghost Protocol. known_locations is a NEW concept,
+		// distinct from encampment_discoveries (a permanent boolean "have
+		// I ever heard of this entity" relationship, which stays
+		// untouched) - this table stores an actual coordinate SNAPSHOT,
+		// locked at discovery time, so an attacker acts on where they
+		// last saw a target rather than re-reading its live position
+		// every time. Ghost Protocol (see jobs.go's HandleGhostProtocol)
+		// is the only thing that deletes rows here.
+		`CREATE TABLE IF NOT EXISTS known_locations (
+			observer_encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			target_encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			x INT NOT NULL,
+			y INT NOT NULL,
+			region VARCHAR(50) NOT NULL,
+			locked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (observer_encampment_id, target_encampment_id)
+		);`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS last_ghost_protocol_at TIMESTAMP WITH TIME ZONE;`,
+		// AI factions get a new possible decision-loop intent, 'flee'
+		// (chosen when a faction's resources have been ground down by
+		// repeated raiding - see aidecisions.go's maybeFlee), which needs
+		// its own slot in the existing CHECK constraint.
+		`ALTER TABLE ai_faction_decisions DROP CONSTRAINT IF EXISTS ai_faction_decisions_intent;`,
+		`ALTER TABLE ai_faction_decisions ADD CONSTRAINT ai_faction_decisions_intent CHECK (intent IN ('scout', 'raid', 'idle', 'flee'));`,
 	}
 }

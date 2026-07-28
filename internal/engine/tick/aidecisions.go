@@ -113,6 +113,14 @@ type aiRaidTarget struct {
 }
 
 func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int, region string) error {
+	fled, err := e.maybeAIFlee(ctx, tx, factionID)
+	if err != nil {
+		return fmt.Errorf("checking whether to flee: %w", err)
+	}
+	if fled {
+		return nil
+	}
+
 	target, err := e.pickFairAIRaidTarget(ctx, tx, factionID, factionLevel)
 	if err != nil {
 		return fmt.Errorf("selecting raid target: %w", err)
@@ -256,6 +264,86 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 // AI_FACTION_DECISION_LOOP_PLAN.md's "Step 6" for why this precision
 // matters - the entire downstream combat/road/loot/notification pipeline
 // only works correctly if every field a human raid sets is set here too).
+// aiFleeGarrisonThreshold is the "reduced below some threshold by
+// repeated raiding" heuristic from section 3.4 - a faction with fewer
+// than this many total soldiers+mechs left is treated as desperate
+// enough to consider fleeing. Deliberately a small absolute number
+// rather than a fraction of historical peak: simpler to reason about,
+// and this session's own note on aiMaxLevelsBelowSelfForFairTarget
+// applies here too - a tunable starting guess, not a precisely-right
+// number.
+//
+// aiFleeCooldown and aiFleeCostFraction mirror jobs.go's
+// ghostProtocolCooldown/ghostProtocolCostFraction exactly (an AI faction
+// gets no special exemption from Ghost Protocol's real cost/cadence) -
+// duplicated here rather than imported since bot/handlers and
+// engine/tick are separate packages and those constants are
+// intentionally unexported; if either value changes, update both.
+const (
+	aiFleeGarrisonThreshold = 10
+	aiFleeCooldown          = 90 * 24 * time.Hour
+	aiFleeCostFraction      = 0.50
+)
+
+// maybeAIFlee is the AI decision loop's use of Ghost Protocol (see
+// jobs.go's HandleGhostProtocol for the human-facing equivalent and the
+// full design rationale). Reuses the exact same cooldown and
+// proportional-cost formula, so an AI faction gets no special exemption
+// from Ghost Protocol's real cost - it just happens to be cheap in
+// absolute terms when the faction is already down to near-nothing,
+// which is exactly when this triggers.
+func (e *Engine) maybeAIFlee(ctx context.Context, tx *sql.Tx, factionID string) (bool, error) {
+	var soldiers, mechs int
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers,0), COALESCE(mechs,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", factionID).Scan(&soldiers, &mechs); err != nil {
+		return false, fmt.Errorf("loading garrison for flee check: %w", err)
+	}
+	if soldiers+mechs >= aiFleeGarrisonThreshold {
+		return false, nil
+	}
+
+	var lastGhost sql.NullTime
+	if err := tx.QueryRowContext(ctx, "SELECT last_ghost_protocol_at FROM encampments WHERE id = $1", factionID).Scan(&lastGhost); err != nil {
+		return false, fmt.Errorf("loading last Ghost Protocol time: %w", err)
+	}
+	if lastGhost.Valid && time.Since(lastGhost.Time) < aiFleeCooldown {
+		return false, nil
+	}
+
+	var scrap, metal, crystal, dollars float64
+	if err := tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", factionID).Scan(&scrap, &metal, &crystal, &dollars); err != nil {
+		return false, fmt.Errorf("loading resources for flee cost: %w", err)
+	}
+
+	newX := rand.Intn(10000)
+	newY := rand.Intn(10000)
+	var newCoordID string
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO coordinates (x, y, biome, danger_level, region, terrain)
+		VALUES ($1, $2, 'wasteland', 1, 'Unknown Sector', 'flat')
+		ON CONFLICT (x, y) DO UPDATE SET x = EXCLUDED.x
+		RETURNING id`, newX, newY).Scan(&newCoordID)
+	if err != nil {
+		return false, fmt.Errorf("finding new coordinates to flee to: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2, crystal = crystal - $3, dollars = dollars - $4 WHERE encampment_id = $5",
+		scrap*aiFleeCostFraction, metal*aiFleeCostFraction, crystal*aiFleeCostFraction, dollars*aiFleeCostFraction, factionID); err != nil {
+		return false, fmt.Errorf("deducting flee cost: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE encampments SET coordinate_id = $1, last_ghost_protocol_at = CURRENT_TIMESTAMP WHERE id = $2", newCoordID, factionID); err != nil {
+		return false, fmt.Errorf("relocating fleeing faction: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM known_locations WHERE target_encampment_id = $1", factionID); err != nil {
+		return false, fmt.Errorf("clearing intel locks on fleeing faction: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO ai_faction_decisions (encampment_id, intent, reason) VALUES ($1, 'flee', $2)",
+		factionID, fmt.Sprintf("garrison reduced to %d soldiers + %d mechs, invoked Ghost Protocol", soldiers, mechs)); err != nil {
+		return false, fmt.Errorf("logging flee decision: %w", err)
+	}
+
+	return true, nil
+}
+
 func (e *Engine) launchAIRaid(ctx context.Context, tx *sql.Tx, factionID string, target aiRaidTarget) error {
 	var originX, originY int
 	var originRegion string

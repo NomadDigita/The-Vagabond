@@ -28,6 +28,104 @@ func setGarrison(t *testing.T, db *sql.DB, campID string, soldiers, mechs int) {
 // AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note).
 // Faction Beta is seeded first (closer/earlier established), so the
 // existing danger/established_at ordering picks it before the player.
+// TestMaybeAIFlee_TriggersWhenGarrisonIsDesperatelyLow verifies the AI
+// decision loop's use of Ghost Protocol (section 3.4): a faction with a
+// near-zero garrison relocates, pays the proportional cost, and clears
+// any known_locations rows targeting it.
+func TestMaybeAIFlee_TriggersWhenGarrisonIsDesperatelyLow(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2101, "Faction Desperate", 0, 0, "TestRegion", true)
+	if _, err := db.Exec("UPDATE workshop_inventory SET soldiers = 2, mechs = 1 WHERE encampment_id = $1", faction); err != nil {
+		t.Fatalf("seeding low garrison: %v", err)
+	}
+	if _, err := db.Exec("UPDATE resources SET scrap = 100, metal = 200, crystal = 50, dollars = 400 WHERE encampment_id = $1", faction); err != nil {
+		t.Fatalf("seeding resources: %v", err)
+	}
+	var originalCoordID string
+	if err := db.QueryRow("SELECT coordinate_id FROM encampments WHERE id = $1", faction).Scan(&originalCoordID); err != nil {
+		t.Fatalf("reading original coordinate: %v", err)
+	}
+
+	observer := seedEncampment(t, db, 2102, "Observer Faction", 1, 1, "TestRegion", true)
+	if _, err := db.Exec("INSERT INTO known_locations (observer_encampment_id, target_encampment_id, x, y, region) VALUES ($1, $2, 0, 0, 'TestRegion')", observer, faction); err != nil {
+		t.Fatalf("seeding known_locations: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	fled, err := e.maybeAIFlee(ctx, tx, faction)
+	if err != nil {
+		t.Fatalf("maybeAIFlee: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if !fled {
+		t.Fatal("expected the faction to flee given a garrison of only 3 total units")
+	}
+
+	var newCoordID string
+	_ = db.QueryRow("SELECT coordinate_id FROM encampments WHERE id = $1", faction).Scan(&newCoordID)
+	if newCoordID == originalCoordID {
+		t.Error("expected the faction to have relocated")
+	}
+
+	var scrap float64
+	_ = db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", faction).Scan(&scrap)
+	if scrap != 50 {
+		t.Errorf("expected 50%% of scrap (100 -> 50) to be deducted, got %v", scrap)
+	}
+
+	var knownLocationsCount int
+	_ = db.QueryRow("SELECT COUNT(*) FROM known_locations WHERE target_encampment_id = $1", faction).Scan(&knownLocationsCount)
+	if knownLocationsCount != 0 {
+		t.Error("expected known_locations targeting the fleeing faction to be cleared")
+	}
+
+	var decisionIntent string
+	_ = db.QueryRow("SELECT intent FROM ai_faction_decisions WHERE encampment_id = $1 ORDER BY decided_at DESC LIMIT 1", faction).Scan(&decisionIntent)
+	if decisionIntent != "flee" {
+		t.Errorf("expected the logged decision intent to be 'flee', got %q", decisionIntent)
+	}
+}
+
+// TestMaybeAIFlee_DoesNothingWithAHealthyGarrison is the negative case:
+// a faction well above the threshold never flees.
+func TestMaybeAIFlee_DoesNothingWithAHealthyGarrison(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2103, "Faction Healthy", 0, 0, "TestRegion", true)
+	if _, err := db.Exec("UPDATE workshop_inventory SET soldiers = 500, mechs = 100 WHERE encampment_id = $1", faction); err != nil {
+		t.Fatalf("seeding healthy garrison: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	fled, err := e.maybeAIFlee(ctx, tx, faction)
+	if err != nil {
+		t.Fatalf("maybeAIFlee: %v", err)
+	}
+	if fled {
+		t.Error("expected a healthy-garrison faction to never flee")
+	}
+}
+
+// TestAIScoutCanDiscoverAnotherAIFaction verifies aiScout no longer
+// excludes AI factions as scouting targets - AI-vs-AI conflict is now in
+// scope (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, superseding
+// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note).
+// Faction Beta is seeded first (closer/earlier established), so the
+// existing danger/established_at ordering picks it before the player.
 func TestAIScoutCanDiscoverAnotherAIFaction(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

@@ -465,6 +465,7 @@ func main() {
 	bot.Handle("/newjobhyperspeed", jobs.HandleHyperSpeed)
 	bot.Handle("/newjobextendplanet", jobs.HandleExtendPlanet)
 	bot.Handle("/newjobteleport", jobs.HandleTeleport)
+	bot.Handle("/ghostprotocol", jobs.HandleGhostProtocol)
 	bot.Handle("/newjoborbitalmaneuver", jobs.HandleOrbitalManeuver)
 	bot.Handle("/newjobrepairunits", jobs.HandleRepairUnits)
 	bot.Handle("/newjobrepairbuildings", jobs.HandleRepairBuildings)
