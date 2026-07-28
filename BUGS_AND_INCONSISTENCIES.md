@@ -45,6 +45,31 @@ next, grouped by how serious they are.
    whole clan, the other spends Crystal). Promoting someone is a real
    power grant now, not a cosmetic label.
 
+5. **Notification dispatcher had no guard against synthetic (AI-faction)
+   user IDs.** Surfaced while reviewing the Phase 6 AI decision loop
+   (`internal/engine/tick/aidecisions.go`, merged by a parallel session -
+   see `AI_FACTION_DECISION_LOOP_PLAN.md`/`AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md`),
+   which is the first time an AI faction can ever be a raid's
+   `attacker_id` rather than only ever a defender/target. AI factions'
+   seeded `users` rows use a synthetic *negative* `telegram_id` (see
+   `seedAICivilizations`), which no real Telegram chat exists for.
+   `notifications.Queue()`/the raw `INSERT INTO notifications` call
+   sites have no check for this, and the dispatcher's `drainQueue()`
+   silently `continue`s past a failed send without ever marking that row
+   `is_sent` - so a notification queued for an AI faction wouldn't just
+   fail once, it would retry forever, permanently wasting one of the
+   dispatcher's `LIMIT 10` drain slots every 3s poll. The AI decision
+   loop's own raid-launch code already guards its *first* "target found"
+   notification (`if !target.isAIFaction`), but every downstream
+   attacker-facing site in `resolveRaidCombats`, `discoverRouteContacts`,
+   `evaluateRoadEncounters`, and `evaluateRoadBaseEncounters` - all
+   written back when "attacker" always meant a real player - was still
+   unguarded, and an AI-launched raid flows through every one of them.
+   **Fixed:** added `isRealPlayer(userID int64) bool { return userID >
+   0 }` in `engine.go` (real Telegram IDs are always positive) and
+   wrapped all seven of those call sites plus the one in
+   `roadbaseencounter.go`.
+
 ## Confirmed still-open items from prior sessions (re-verified today)
 
 4. **`coordinates.danger_level` is stored but never read by any game
@@ -53,9 +78,11 @@ next, grouped by how serious they are.
    difficulty, encounter rates, or AI behavior from it. Either wire it
    up or remove the column/field to stop it looking load-bearing.
 
-5. **Guild roles are still binary (`Leader` / `Soldier`)** — confirmed
-   in `clan.go`; no officer/mid-tier role exists despite some UI copy
-   implying a hierarchy. Matches ADR notes from previous sessions.
+5. **~~Guild roles are still binary (`Leader` / `Soldier`)~~ — no longer
+   accurate.** This note predates UI Polish Wave 6 (`clan.go`'s
+   `canManageClan()` helper): Co-Leader is now a real, narrower-than-
+   Leader permission tier (Applications, Kick-a-Soldier-only, Guild
+   Icon/Description), not a cosmetic label. See item 4 above.
 
 ## Cosmetic/UX inconsistencies fixed in this pass
 
