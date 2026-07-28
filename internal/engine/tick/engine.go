@@ -176,8 +176,8 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 						newDollars, _ := storagecap.Clamp(curDollars, share, wCap)
 						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, w.campID)
 						alertMsg := fmt.Sprintf(
-							"💰🏆 DAILY TAX PAYOUT! 🏆💰\n\nAs a Top-3 ranked survivor, you received 💵 $%.2f from the Wasteland Tax Law (%d%% rate) collected from all players!",
-							share, taxRate,
+							"💰🏆 %s\n\nAs a Top-3 ranked survivor, you received 💵 %s from the Wasteland Tax Law (%s rate) collected from all players!",
+							htmlBoldTick("DAILY TAX PAYOUT!"), htmlCodeTick(fmt.Sprintf("$%.2f", share)), htmlCodeTick(fmt.Sprintf("%d%%", taxRate)),
 						)
 						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, alertMsg)
 					}
@@ -1195,31 +1195,31 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		// instead of spam every 3 seconds.
 		if oldRations > 25.0 && newRations <= 25.0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🍖 RATIONS RUNNING LOW: Your marching force toward [%s] is down to %.0f%% rations.", ex.defenderName, newRations))
+				fmt.Sprintf("🍖 %s: Your marching force toward %s is down to %s rations.", htmlBoldTick("RATIONS RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newRations))))
 		} else if oldRations > 0 && newRations <= 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🍖❌ OUT OF RATIONS: Your force marching on [%s] has run out of rations! Combat strength will suffer until they return.", ex.defenderName))
+				fmt.Sprintf("🍖❌ %s: Your force marching on %s has run out of rations! Combat strength will suffer until they return.", htmlBoldTick("OUT OF RATIONS"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 		}
 		if oldAmmo > 25.0 && newAmmo <= 25.0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🎖️ AMMUNITION RUNNING LOW: Your marching force toward [%s] is down to %.0f%% ammunition.", ex.defenderName, newAmmo))
+				fmt.Sprintf("🎖️ %s: Your marching force toward %s is down to %s ammunition.", htmlBoldTick("AMMUNITION RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newAmmo))))
 		} else if oldAmmo > 0 && newAmmo <= 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🎖️❌ OUT OF AMMUNITION: Your force marching on [%s] has run dry! Combat strength will suffer until they return.", ex.defenderName))
+				fmt.Sprintf("🎖️❌ %s: Your force marching on %s has run dry! Combat strength will suffer until they return.", htmlBoldTick("OUT OF AMMUNITION"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 		}
 		if oldElectricity > 25.0 && newElectricity <= 25.0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("⚡ FIELD POWER LOW: Your expedition toward [%s] is down to %.0f%% carried electricity.", ex.defenderName, newElectricity))
+				fmt.Sprintf("⚡ %s: Your expedition toward %s is down to %s carried electricity.", htmlBoldTick("FIELD POWER LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newElectricity))))
 		} else if oldElectricity > 0 && newElectricity <= 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("⚡❌ FIELD POWER DEPLETED: High-tech units marching on [%s] are losing effectiveness until reinforcements arrive or they return.", ex.defenderName))
+				fmt.Sprintf("⚡❌ %s: High-tech units marching on %s are losing effectiveness until reinforcements arrive or they return.", htmlBoldTick("FIELD POWER DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 		}
 		if oldLogistics > 25.0 && newLogistics <= 25.0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🔩 LOGISTICS SUPPLIES LOW: Your expedition toward [%s] is down to %.0f%% repair/grid equipment.", ex.defenderName, newLogistics))
+				fmt.Sprintf("🔩 %s: Your expedition toward %s is down to %s repair/grid equipment.", htmlBoldTick("LOGISTICS SUPPLIES LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newLogistics))))
 		} else if oldLogistics > 0 && newLogistics <= 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🔩❌ LOGISTICS DEPLETED: Vehicles and grid equipment in the force marching on [%s] are no longer fully operational.", ex.defenderName))
+				fmt.Sprintf("🔩❌ %s: Vehicles and grid equipment in the force marching on %s are no longer fully operational.", htmlBoldTick("LOGISTICS DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 		}
 
 		// Phase 5 milestone 4: the two failure modes are NOT the same.
@@ -1241,7 +1241,7 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		if ex.state == "marching" && foodAmmoOut {
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'awaiting_reinforcement', paused_at = CURRENT_TIMESTAMP WHERE id = $1", ex.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🛑 COLUMN HALTED: Your force marching on [%s] has run out of food and ammunition and cannot continue. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
+				fmt.Sprintf("🛑 %s: Your force marching on %s has run out of food and ammunition and cannot continue. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", htmlBoldTick("COLUMN HALTED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 		} else if ex.state == "marching" && powerOut {
 			var wasOffline bool
 			var outageTicks int
@@ -1251,12 +1251,12 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 			if outageTicks > powerOutageGraceTicks {
 				_, _ = tx.ExecContext(ctx, "UPDATE raids SET movement_state = 'awaiting_reinforcement', paused_at = CURRENT_TIMESTAMP, power_outage_ticks = $1 WHERE id = $2", outageTicks, ex.id)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-					fmt.Sprintf("🛑 COLUMN HALTED: Sustained power/logistics failure in the force marching on [%s] has finally forced a full halt. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", ex.defenderName))
+					fmt.Sprintf("🛑 %s: Sustained power/logistics failure in the force marching on %s has finally forced a full halt. Dispatch a resupply convoy or order a retreat from your ⚔️ Expedition Radar.", htmlBoldTick("COLUMN HALTED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 			} else {
 				_, _ = tx.ExecContext(ctx, "UPDATE raids SET high_tech_offline = TRUE, power_outage_ticks = $1 WHERE id = $2", outageTicks, ex.id)
 				if !wasOffline {
 					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-						fmt.Sprintf("⚠️ HIGH TECH OFFLINE: Power/logistics failure in the force marching on [%s] has disabled Mech and capital-unit tech bonuses. The column presses on, but a full halt follows if power isn't restored soon.", ex.defenderName))
+						fmt.Sprintf("⚠️ %s: Power/logistics failure in the force marching on %s has disabled Mech and capital-unit tech bonuses. The column presses on, but a full halt follows if power isn't restored soon.", htmlBoldTick("HIGH TECH OFFLINE"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
 				}
 			}
 		} else if ex.state == "marching" {
@@ -2461,10 +2461,8 @@ func (e *Engine) emitRaidRadarWarnings(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		proximityAlert := fmt.Sprintf(
-			"🛰️ RADAR WARNING: An offensive fleet is approaching your coordinate perimeter!\n"+
-				"Hostile Force: Outpost [%s]\n"+
-				"Estimated impact: %d minute(s). Your radar network detected it at the current warning range.",
-			alert.attackerName, int(math.Ceil(remaining)),
+			"🛰️ %s: An offensive fleet is approaching your coordinate perimeter!\nHostile Force: Outpost %s\nEstimated impact: %s. Your radar network detected it at the current warning range.",
+			htmlBoldTick("RADAR WARNING"), htmlCodeTick(htmlEscapeTick(alert.attackerName)), htmlCodeTick(fmt.Sprintf("%d minute(s)", int(math.Ceil(remaining)))),
 		)
 		if _, err := tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", alert.defenderID, proximityAlert); err != nil {
 			return fmt.Errorf("queueing raid radar warning: %w", err)
@@ -3421,10 +3419,12 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'returning', stolen_scrap = $1, stolen_metal = $4, stolen_crystal = $5, stolen_rations = $6, stolen_electricity = $7, stolen_hydrogen = $8, stolen_neuro_cores = $9, stolen_dollars = $10, resolve_time = $2, leg_started_at = CURRENT_TIMESTAMP, leg_total_minutes = $11, movement_state = 'moving' WHERE id = $3", primaryShare, resolveTime, r.id, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare, returnMinutes)
 
 			etaAlert := fmt.Sprintf(
-				"🚚 SALVAGE COMPLETE, RETURN MARCH ENGAGED\n\n"+
-					"Carrying ⚙️ %.0f Scrap, 🔩 %.0f Metal, 🔮 %.0f Crystal, 🍖 %.0f Rations, ⚡ %.0f Electricity, 💧 %.0f Hydrogen, 🧠 %.1f Neuro Cores, 💵 $%.0f home.\n"+
-					"⏳ ETA: %.0f minutes (outbound trip was %.0f minutes; extra weight from the loot adds travel time).",
-				primaryShare, primaryMetalShare, primaryCrystalShare, primaryRationsShare, primaryElectricityShare, primaryHydrogenShare, primaryNeuroCoresShare, primaryDollarsShare, returnMinutes, r.baseMarchMinutes,
+				"🚚 %s\n\nCarrying ⚙️ %s Scrap, 🔩 %s Metal, 🔮 %s Crystal, 🍖 %s Rations, ⚡ %s Electricity, 💧 %s Hydrogen, 🧠 %s Neuro Cores, 💵 %s home.\n⏳ ETA: %s (outbound trip was %s; extra weight from the loot adds travel time).",
+				htmlBoldTick("SALVAGE COMPLETE, RETURN MARCH ENGAGED"),
+				htmlCodeTick(fmt.Sprintf("%.0f", primaryShare)), htmlCodeTick(fmt.Sprintf("%.0f", primaryMetalShare)), htmlCodeTick(fmt.Sprintf("%.0f", primaryCrystalShare)),
+				htmlCodeTick(fmt.Sprintf("%.0f", primaryRationsShare)), htmlCodeTick(fmt.Sprintf("%.0f", primaryElectricityShare)), htmlCodeTick(fmt.Sprintf("%.0f", primaryHydrogenShare)),
+				htmlCodeTick(fmt.Sprintf("%.1f", primaryNeuroCoresShare)), htmlCodeTick(fmt.Sprintf("$%.0f", primaryDollarsShare)),
+				htmlCodeTick(fmt.Sprintf("%.0f minutes", returnMinutes)), htmlCodeTick(fmt.Sprintf("%.0f minutes", r.baseMarchMinutes)),
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, etaAlert)
 

@@ -67,11 +67,8 @@ func (e *Engine) RunStarvationPass(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = GREATEST(soldiers - 1, 0) WHERE encampment_id = $1", c.id)
 
 			alertMsg := fmt.Sprintf(
-				"⚠️ STARVATION DESERTION\n\n"+
-					"Outpost: %s\n"+
-					"Your rations are fully depleted. "+
-					"Due to starvation, one of your soldiers has deserted the encampment.",
-				c.name,
+				"⚠️ %s\n\nOutpost: %s\nYour rations are fully depleted. Due to starvation, one of your soldiers has deserted the encampment.",
+				htmlBoldStarvation("STARVATION DESERTION"), htmlCodeStarvation(htmlEscapeStarvation(c.name)),
 			)
 
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID, alertMsg)

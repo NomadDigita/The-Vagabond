@@ -146,3 +146,42 @@ notification strings directly (grep `internal/engine/` for
 `INSERT INTO notifications` / `notifications.Queue` calls not already
 covered by a polished handler file) rather than another whole-file
 pass.
+
+Wave 9 covered a first pass of the tick-engine notification strings
+(as recommended above): `collectDailyTax`'s Top-3 payout alert, the
+full march-supply-depletion cluster in `resolveExpeditionRationsAndAmmo`
+(rations/ammo/electricity/logistics threshold warnings, column-halted,
+high-tech-offline - 10 sites), the radar proximity warning, and the
+salvage/return-march ETA notification in `internal/engine/tick/engine.go`;
+plus the two road-base-encounter notifications and the
+"resolved without engaging" alert in
+`internal/engine/tick/roadbaseencounter.go`; plus one notification each
+in `internal/engine/agent/agent.go` (agent deactivation, agent
+auto-upgrade) and `internal/engine/starvation/starvation.go` (starvation
+desertion). Since `internal/engine/*` packages can't import
+`internal/bot/handlers` (would create an import cycle / breaks the
+package-per-feature convention), added local `htmlEscapeAgent`/
+`htmlBoldAgent`/`htmlCodeAgent` and `htmlEscapeStarvation`/
+`htmlBoldStarvation`/`htmlCodeStarvation` helpers (each package's own
+`render.go`, mirroring the existing `internal/engine/tick/render.go`
+pattern) rather than reusing `internal/bot/handlers`' or each other's.
+Escaped every user-authored encampment name embedded in these
+notifications (`ex.defenderName`, `alert.attackerName`, `baseName`,
+`m.attackerName`, `a.CampName`, `c.name`). Confirmed the
+`starvation.go` Ghost Mode `world_news` headline does NOT need the same
+treatment: `internal/bot/handlers/world.go` already `htmlEscape()`s the
+entire aggregated news-feed text at render time, so a raw name in that
+headline is safe by the time a player sees it - only the direct
+notifications insert needed fixing. Verified with a full `go build
+./... && go vet ./... && go test ./...` pass (wave 7's GOPROXY=direct
+method); `gofmt -l` also caught and fixed a pre-existing missing
+trailing newline in `starvation.go` unrelated to this session's edits.
+
+`internal/engine/tick/engine.go` is 3459 lines with 49 total
+notification call sites; roughly a dozen were already polished by an
+earlier session (boss-slain, clan-war end/victory/defeat, espionage
+breach, arena win/loss, campaign-engagement-activated - all already
+using `htmlBoldTick`/`htmlEscapeTick`) before this session added the 12
+listed above. **~25 sites in `engine.go` remain plain text** - recommend
+wave 10 continue there directly (line-by-line, the file is too large
+for one more full pass) rather than picking a new file.

@@ -2081,6 +2081,34 @@ which cost real time re-deriving them twice.
   recommended wave 9 target is the tick-engine notification strings in
   `internal/engine/` directly instead of another whole-file pass.
 
+- **Following session (core game, not AI Systems Roadmap): UI Polish
+  wave 9 — first pass on tick-engine notification strings.** Polished
+  12 notification sites: `collectDailyTax`'s payout alert, the
+  10-site march-supply-depletion cluster, the radar proximity warning,
+  and the salvage-return ETA alert in `internal/engine/tick/engine.go`;
+  both notifications plus the peaceful-pass alert in
+  `internal/engine/tick/roadbaseencounter.go`; one each in
+  `internal/engine/agent/agent.go` and
+  `internal/engine/starvation/starvation.go`. Since `internal/engine/*`
+  packages deliberately can't import `internal/bot/handlers` (package-
+  per-feature convention, avoids an import cycle), added per-package
+  `render.go` files with local `htmlEscape*`/`htmlBold*`/`htmlCode*`
+  helpers for the `agent` and `starvation` packages, mirroring the
+  existing `internal/engine/tick/render.go` pattern rather than
+  reusing another package's copy. Escaped every user-authored
+  encampment name embedded in these notifications. Confirmed
+  `starvation.go`'s Ghost Mode `world_news` headline doesn't need the
+  same treatment - `world.go` already escapes the whole aggregated
+  news feed at render time. Verified with a full `go build ./... && go
+  vet ./... && go test ./...` pass; `gofmt -l` caught and fixed one
+  pre-existing (not introduced this session) missing trailing newline
+  in `starvation.go`. `internal/engine/tick/engine.go` has 49 total
+  notification call sites across 3459 lines - about a dozen were
+  already polished before this session, this session did 12 more,
+  **~25 remain plain text**. Recommended wave 10: continue directly in
+  `engine.go` rather than picking a new file - it's too large for one
+  more full pass.
+
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)

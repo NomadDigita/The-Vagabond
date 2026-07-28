@@ -92,10 +92,8 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE agent_tasks SET is_active = FALSE WHERE user_id = $1", a.UserID)
 
 			alertMsg := fmt.Sprintf(
-				"🔌 AGENT DEACTIVATED\n\n"+
-					"Outpost: %s\n"+
-					"Your automation agent has shut down due to complete depletion of Electricity Cells.",
-				a.CampName,
+				"🔌 %s\n\nOutpost: %s\nYour automation agent has shut down due to complete depletion of Electricity Cells.",
+				htmlBoldAgent("AGENT DEACTIVATED"), htmlCodeAgent(htmlEscapeAgent(a.CampName)),
 			)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
 			log.Printf("Agent auto-shut down for user %d: lack of electricity.", a.UserID)
@@ -218,11 +216,9 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				}
 
 				alertMsg := fmt.Sprintf(
-					"🤖 AGENT AUTOMATED CONSTRUCTION\n\n"+
-						"Outpost: %s\n"+
-						"Your Agent has initiated an upgrade on your [%s] to Level %d.\n"+
-						"⚙️ Construction Cost: %d Scrap deducted.",
-					a.CampName, modType, lvl+1, cost,
+					"🤖 %s\n\nOutpost: %s\nYour Agent has initiated an upgrade on your %s to Level %s.\n⚙️ Construction Cost: %s Scrap deducted.",
+					htmlBoldAgent("AGENT AUTOMATED CONSTRUCTION"), htmlCodeAgent(htmlEscapeAgent(a.CampName)),
+					htmlCodeAgent(modType), htmlCodeAgent(fmt.Sprintf("%d", lvl+1)), htmlCodeAgent(fmt.Sprintf("%d", cost)),
 				)
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", a.UserID, alertMsg)
 				log.Printf("Agent [Builder] auto-triggered upgrade for module %s level %d on camp %s", modType, lvl+1, a.CampName)

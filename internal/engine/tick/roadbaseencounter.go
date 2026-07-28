@@ -143,10 +143,12 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 
 		deadlineSeconds := int(roadcombat.ResponseWindow.Seconds())
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.attackerUserID,
-			fmt.Sprintf("🚧 ROAD CONTACT: Your expedition passed close to Outpost [%s].\nYou have %ds to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass it peacefully.", baseName, deadlineSeconds))
+			fmt.Sprintf("🚧 %s: Your expedition passed close to Outpost %s.\nYou have %s to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass it peacefully.",
+				htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(baseName)), htmlCodeTick(fmt.Sprintf("%ds", deadlineSeconds))))
 		if baseUserID != 0 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", baseUserID,
-				fmt.Sprintf("📡 ROAD CONTACT: A foreign expedition commanded by [%s] passed close to your outpost. It may attack; your home garrison stands ready.", m.attackerName))
+				fmt.Sprintf("📡 %s: A foreign expedition commanded by %s passed close to your outpost. It may attack; your home garrison stands ready.",
+					htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(m.attackerName))))
 		}
 	}
 
@@ -198,7 +200,7 @@ func (e *Engine) expireRoadBaseEncounters(ctx context.Context, tx *sql.Tx) error
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
 			if userID != 0 {
 				_ = notifications.Queue(ctx, tx, userID,
-					"🛣️ ROAD CONTACT RESOLVED: Your column continued on its way without engaging the outpost.", "route_status")
+					"🛣️ "+htmlBoldTick("ROAD CONTACT RESOLVED")+": Your column continued on its way without engaging the outpost.", "route_status")
 			}
 		}
 	}
