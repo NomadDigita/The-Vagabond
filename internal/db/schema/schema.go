@@ -944,5 +944,36 @@ func Statements() []string {
 		// its own slot in the existing CHECK constraint.
 		`ALTER TABLE ai_faction_decisions DROP CONSTRAINT IF EXISTS ai_faction_decisions_intent;`,
 		`ALTER TABLE ai_faction_decisions ADD CONSTRAINT ai_faction_decisions_intent CHECK (intent IN ('scout', 'raid', 'idle', 'flee'));`,
+
+		// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.2: long-range
+		// scouting's data model. A wholly separate feature from
+		// exploration_sites/exploration_dispatches (guaranteed-resource
+		// personal exploration, unrelated purpose) - deliberately its own
+		// table, per the plan's explicit instruction not to touch that
+		// system for this.
+		`CREATE TABLE IF NOT EXISTS scout_missions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			scouts_committed INT NOT NULL,
+			phase VARCHAR(20) NOT NULL DEFAULT 'searching',
+			started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			found_target_encampment_id UUID REFERENCES encampments(id) ON DELETE SET NULL,
+			found_at TIMESTAMP WITH TIME ZONE,
+			found_x INT,
+			found_y INT,
+			found_region VARCHAR(50),
+			return_eta TIMESTAMP WITH TIME ZONE,
+			return_leg_started_at TIMESTAMP WITH TIME ZONE,
+			return_leg_total_minutes DOUBLE PRECISION,
+			origin_x INT,
+			origin_y INT,
+			bonus_discovery_encampment_id UUID REFERENCES encampments(id) ON DELETE SET NULL,
+			last_status_notified_at TIMESTAMP WITH TIME ZONE,
+			resources_returned_summary TEXT,
+			completed_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT scout_missions_phase CHECK (phase IN ('searching', 'returning', 'complete'))
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_scout_missions_searching ON scout_missions(encampment_id) WHERE phase = 'searching';`,
+		`CREATE INDEX IF NOT EXISTS idx_scout_missions_returning ON scout_missions(return_eta) WHERE phase = 'returning';`,
 	}
 }

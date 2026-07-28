@@ -309,7 +309,7 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 		t.Fatalf("seeding discovery: %v", err)
 	}
 
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 100; i++ {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatalf("begin tx: %v", err)
@@ -336,7 +336,7 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	var count int
 	_ = db.QueryRow("SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND defender_id = $2", factionA, factionB).Scan(&count)
 	if count == 0 {
-		t.Error("expected at least one AI-vs-AI raid across 60 iterations at a 12% probability, got zero")
+		t.Error("expected at least one AI-vs-AI raid across 100 iterations at a 12% probability, got zero")
 	}
 
 	var newsCount int

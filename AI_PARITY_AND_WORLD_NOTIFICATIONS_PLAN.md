@@ -1,11 +1,12 @@
 # AI Full Parity, Long-Range Scouting, and World-Event Broadcasts Plan
 
 Status (updated by the implementing session): items 1 (leaderboard, 1.2),
-2 (AI-vs-AI), 5 (world-event broadcasts), and 3.4 (discovery permanence +
-Ghost Protocol, including the AI decision loop's new `'flee'` intent) are
-built, tested against real Postgres, and merged to `main`. Remaining:
-3.1-3.3/3.5-3.7 (the long-range scouting mechanic itself) and 1.4/1.5 (AI
-passive-target parity + total-defeat/victory audit).
+2 (AI-vs-AI), 5 (world-event broadcasts), 3.4 (discovery permanence +
+Ghost Protocol, including the AI decision loop's new `'flee'` intent),
+and 3.1-3.3/3.5-3.7 (long-range scouting itself) are all built, tested
+against real Postgres, and merged to `main`. Remaining: 1.4/1.5 (AI
+passive-target parity + total-defeat/victory audit) - the last item on
+the suggested build order.
 
 The "Open questions for the project owner" below were explicitly handed
 to this implementing session to decide rather than block on (per direct
@@ -19,7 +20,10 @@ each treated as a tunable starting constant, not a final number:
 2. **World-event broadcast category**: non-mutable (`"general"`), the
    doc's own recommendation - weather/tax changes are closer to security/
    policy notices than routine chatter.
-3. Not yet relevant - decide when scouting (3.1-3.3) is built.
+3. **Scouting risk**: risk-free, matching section 3.5's own default (no
+   scout-loss mechanic added). Flagging here per the doc's own request in
+   case that's the wrong call - easy to add a loss chance later without
+   touching the rest of the mechanic.
 4. **Leaderboard display**: interleaved with a 🤖 prefix, as recommended,
    implemented in commit `50e64e3`.
 5. Not yet audited - deferred to build order item 6 (1.4/1.5), as planned.

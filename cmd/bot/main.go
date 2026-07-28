@@ -333,6 +333,7 @@ func main() {
 	ether := handlers.NewEtherHandler(db)
 	jobs := handlers.NewJobsHandler(db)
 	exploration := handlers.NewExplorationHandler(db)
+	scoutMissions := handlers.NewScoutMissionsHandler(db)
 	diplomacy := handlers.NewDiplomacyHandler(db)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
@@ -444,6 +445,8 @@ func main() {
 	bot.Handle("/fed_join", federation.HandleJoinFederation)
 	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
 	bot.Handle("/explore", exploration.HandleExplorePanel)
+	bot.Handle("/scout", scoutMissions.HandleDispatchScoutMission)
+	bot.Handle("/scoutstatus", scoutMissions.HandleScoutStatus)
 	bot.Handle("/diplomacy", diplomacy.HandleDiplomacyPanel)
 	bot.Handle("/ally", diplomacy.HandleProposeAlliance)
 	bot.Handle("/nap", diplomacy.HandleProposeNAP)

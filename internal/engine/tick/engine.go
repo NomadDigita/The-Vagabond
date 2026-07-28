@@ -752,6 +752,7 @@ func (e *Engine) ProcessTick() {
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
 		{"exploration_resolve", e.resolveExplorationDispatches},
+		{"scout_missions", e.processScoutMissions},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, "DELETE FROM world_events WHERE expires_at < CURRENT_TIMESTAMP")
 			return err
