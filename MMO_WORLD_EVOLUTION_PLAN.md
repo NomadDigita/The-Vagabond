@@ -10,11 +10,16 @@ separate provider-agnostic AI infrastructure workstream documented in
 `PROJECT_MASTER_PLAN.md`.
 
 **Resuming Phase 6 (persistent AI civilizations)?** The foundational tier
-(seeded, passive, raidable AI factions) is done - see the "Completed
-implementation detail" section below. The remaining half (AI factions that
-actually decide to scout/raid) has a full, ready-to-implement design at
-`AI_FACTION_DECISION_LOOP_PLAN.md` - read that file first, it's written
-specifically so this doesn't need to be re-derived.
+(seeded, passive, raidable AI factions) is done, and the decision loop
+(AI factions scouting/raiding) is also done - see the "Completed
+implementation detail" section below. What's not yet built - AI full
+parity (leaderboard, total-defeat economics), AI-vs-AI conflict,
+long-range scouting (search-until-found, discovery permanence, a costly
+"Ghost Protocol" escape teleport), and world-event broadcast
+notifications - has a full, ready-to-implement design at
+`AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md`. `AI_FACTION_DECISION_LOOP_PLAN.md`
+covers the (now-shipped) decision loop itself and is still worth reading
+first for context on how an AI faction takes an action at all.
 
 ## Operating rules
 
