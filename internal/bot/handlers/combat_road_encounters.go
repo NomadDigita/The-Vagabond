@@ -13,6 +13,26 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
+// isRealPlayer reports whether a user_id belongs to an actual Telegram
+// account, as opposed to an AI faction's synthetic negative telegram_id
+// (see cmd/bot/main.go's seedAICivilizations). This is the handlers-
+// package twin of internal/engine/tick/engine.go's isRealPlayer -
+// duplicated rather than exported across packages because it's a single
+// comparison, and because this package and the tick engine hold different
+// transaction contexts that shouldn't be coupled just to share one line.
+//
+// Needed here specifically because an AI-launched raid (Phase 6's
+// decision loop, internal/engine/tick/aidecisions.go) can now be either
+// side of a road encounter a HUMAN resolves by tapping Attack/Continue -
+// every "notify the other commander" site in this file was written back
+// when "the other commander" always meant a real player, and is unguarded
+// without this check. See BUGS_AND_INCONSISTENCIES.md for the sibling bug
+// this was found alongside (the tick-engine side of the same issue,
+// already fixed there).
+func isRealPlayer(userID int64) bool {
+	return userID > 0
+}
+
 // loadRoadFieldForce loads the mobile combat force, supply status, and
 // military tech level for one side of a road encounter, in the shape
 // roadcombat.Power/CasualtiesFor expect. It intentionally ignores buggies,
@@ -245,7 +265,7 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed', movement_state = 'moving', active_encounter_id = NULL WHERE id = $1", side.raidID)
 			var wipedUserID int64
 			_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", side.raidID).Scan(&wipedUserID)
-			if wipedUserID != 0 {
+			if isRealPlayer(wipedUserID) {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", wipedUserID,
 					"💀 "+htmlBold("COLUMN DESTROYED")+": Your expedition was wiped out in a road battle. No survivors returned.")
 			}
@@ -273,7 +293,7 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	} {
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", side.raidID).Scan(&userID)
-		if userID == 0 {
+		if !isRealPlayer(userID) {
 			continue
 		}
 		var headline string
@@ -463,7 +483,7 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 
 	var defenderUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", encampmentID).Scan(&defenderUserID)
-	if defenderUserID != 0 {
+	if isRealPlayer(defenderUserID) {
 		var attackerName string
 		_ = tx.QueryRowContext(ctx, "SELECT name FROM encampments WHERE id = $1", attackerID).Scan(&attackerName)
 		var defenderHeadline string
@@ -538,7 +558,7 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 		var attackerID string
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
-			if userID != 0 {
+			if isRealPlayer(userID) {
 				_ = notifications.Queue(ctx, tx, userID,
 					"🛣️ "+htmlBold("ROAD CONTACT RESOLVED")+": Both columns continued on their way without engaging.", "route_status")
 			}
