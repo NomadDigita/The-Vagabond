@@ -33,6 +33,17 @@ func medalFor(rank int) string {
 	}
 }
 
+// displayName returns the escaped name for leaderboard display, prefixed
+// with 🤖 for AI factions so parity in the score doesn't come at the cost
+// of honest labeling in the text (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md
+// section 1.2).
+func displayName(name string, isAIFaction bool) string {
+	if isAIFaction {
+		return "🤖 " + htmlEscape(name)
+	}
+	return htmlEscape(name)
+}
+
 func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -40,11 +51,14 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	panelText := "🏆 " + htmlBold("GLOBAL WASTELAND RANKING") + " 🏆\n" + divider + "\n\n"
 
 	// ── Top Players ────────────────────────────────────────────────
+	// AI factions are ranked identically to humans here (full parity -
+	// they earned the score the same way), but are visually marked with
+	// a 🤖 prefix so the distinction stays honest in the display line.
+	// See AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.2.
 	panelText += "👑 " + htmlBold("TOP SURVIVORS") + "\n"
 	topPlayersQuery := fmt.Sprintf(`
-		SELECT e.name, %s AS score
+		SELECT e.name, e.is_ai_faction, %s AS score
 		FROM encampments e
-		WHERE e.is_ai_faction = FALSE
 		ORDER BY score DESC
 		LIMIT 15`, scoring.ScoreExpr)
 
@@ -53,9 +67,10 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 		rank := 1
 		for rows.Next() {
 			var name string
+			var isAI bool
 			var score float64
-			if scanErr := rows.Scan(&name, &score); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. %s — 🏅 %s pts\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("%.0f", score)))
+			if scanErr := rows.Scan(&name, &isAI, &score); scanErr == nil {
+				panelText += fmt.Sprintf("%s %d. %s — 🏅 %s pts\n", medalFor(rank), rank, displayName(name, isAI), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
@@ -65,9 +80,8 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	// ── Top Skilled (military-only) ───────────────────────────────
 	panelText += "\n⚔️ " + htmlBold("TOP SKILLED (Military Might)") + "\n"
 	topSkilledQuery := fmt.Sprintf(`
-		SELECT e.name, %s AS mil_score
+		SELECT e.name, e.is_ai_faction, %s AS mil_score
 		FROM encampments e
-		WHERE e.is_ai_faction = FALSE
 		ORDER BY mil_score DESC
 		LIMIT 5`, scoring.MilitaryScoreExpr)
 
@@ -76,9 +90,10 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 		rank := 1
 		for rows2.Next() {
 			var name string
+			var isAI bool
 			var score float64
-			if scanErr := rows2.Scan(&name, &score); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. %s — ⚔️ %s Combat Rating\n", medalFor(rank), rank, htmlEscape(name), htmlCode(fmt.Sprintf("%.0f", score)))
+			if scanErr := rows2.Scan(&name, &isAI, &score); scanErr == nil {
+				panelText += fmt.Sprintf("%s %d. %s — ⚔️ %s Combat Rating\n", medalFor(rank), rank, displayName(name, isAI), htmlCode(fmt.Sprintf("%.0f", score)))
 				rank++
 			}
 		}
