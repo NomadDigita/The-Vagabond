@@ -469,7 +469,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			refNewNeuro, _ := storagecap.Clamp(refCurNeuro, refNeuro, referrerCap)
 			_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", refNewMetal, refNewCrystal, refNewNeuro, referrerCampID)
 			_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
-				fmt.Sprintf("🎁 REFERRAL BONUS: %s joined using your code! You both received 50,000 Metal, 500 🔮 Crystal, 50,000 Neuro Cores.", sender.FirstName))
+				fmt.Sprintf("🎁 %s: %s joined using your code! You both received %s Metal, %s 🔮 Crystal, %s Neuro Cores.",
+					htmlBold("REFERRAL BONUS"), htmlCode(htmlEscape(sender.FirstName)), htmlCode("50,000"), htmlCode("500"), htmlCode("50,000")))
 
 			// Milestone tiers: grant a one-time bonus the first time the
 			// referrer's total referral count crosses a threshold.
@@ -487,7 +488,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 					_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2, neuro_cores = $3 WHERE encampment_id = $4", mNewMetal, mNewCrystal, mNewNeuro, referrerCampID)
 					_, _ = h.DB.ExecContext(ctx, "UPDATE users SET referral_tier_claimed = $1 WHERE telegram_id = $2", m.Count, referrerID.Int64)
 					_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", referrerID.Int64,
-						fmt.Sprintf("🏆 REFERRAL MILESTONE: %d friends recruited! Bonus: %.0f Metal, %.0f 🔮 Crystal, %.0f Neuro Cores.", m.Count, m.Metal, m.Crystal, m.Neuro))
+						fmt.Sprintf("🏆 %s: %s friends recruited! Bonus: %s Metal, %s 🔮 Crystal, %s Neuro Cores.",
+							htmlBold("REFERRAL MILESTONE"), htmlCode(fmt.Sprintf("%d", m.Count)), htmlCode(fmt.Sprintf("%.0f", m.Metal)), htmlCode(fmt.Sprintf("%.0f", m.Crystal)), htmlCode(fmt.Sprintf("%.0f", m.Neuro))))
 					tierClaimed = m.Count
 				}
 			}

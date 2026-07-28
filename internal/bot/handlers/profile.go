@@ -266,7 +266,7 @@ func (h *ProfileHandler) HandleMsg(c telebot.Context) error {
 		return c.Send("🔇 This player has muted you - your message wasn't delivered.")
 	}
 
-	alertMsg := fmt.Sprintf("💬 MESSAGE from %s:\n\n%s", sender.FirstName, messageText)
+	alertMsg := fmt.Sprintf("💬 %s %s:\n\n%s", htmlBold("MESSAGE from"), htmlCode(htmlEscape(sender.FirstName)), htmlEscape(messageText))
 	_, err = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 	if err != nil {
 		return c.Send("⚠️ Error sending message.")

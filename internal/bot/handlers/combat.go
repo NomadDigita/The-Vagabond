@@ -987,9 +987,8 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		WHERE r.id = $1`, raidID).Scan(&creatorUserID, &targetOutpostName)
 
 	alertCreatorMsg := fmt.Sprintf(
-		"🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined your raid forces!\n"+
-			"They have departed on Leg 1 and are rallying to your base. Once they arrive, they will be stationed for battle.",
-		sender.Username,
+		"🤝 %s: Allied Commander %s has joined your raid forces!\nThey have departed on Leg 1 and are rallying to your base. Once they arrive, they will be stationed for battle.",
+		htmlBold("CO-OP LOBBY UPDATE"), htmlCode("@"+htmlEscape(sender.Username)),
 	)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, alertCreatorMsg)
 
@@ -999,7 +998,8 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 		for rowsHelpers.Next() {
 			var hUserID int64
 			if err := rowsHelpers.Scan(&hUserID); err == nil {
-				alertMsg := fmt.Sprintf("🤝 CO-OP LOBBY UPDATE: Allied Commander @%s has joined the raid forces! They are rallying to the lead base.", sender.Username)
+				alertMsg := fmt.Sprintf("🤝 %s: Allied Commander %s has joined the raid forces! They are rallying to the lead base.",
+					htmlBold("CO-OP LOBBY UPDATE"), htmlCode("@"+htmlEscape(sender.Username)))
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", hUserID, alertMsg)
 			}
 		}
@@ -1912,7 +1912,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 				for _, rVal := range refunds {
 					_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", rVal.soldiers, rVal.mechs, rVal.campID)
 
-					cancelAlert := "↩️ CO-OP STAGE CANCELLED: The lobby creator has dismantled the campaign. Your contributed forces have returned safely to base."
+					cancelAlert := "↩️ " + htmlBold("CO-OP STAGE CANCELLED") + ": The lobby creator has dismantled the campaign. Your contributed forces have returned safely to base."
 					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", rVal.userID, cancelAlert)
 				}
 			}
@@ -1967,7 +1967,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			for _, rVal := range refunds {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", rVal.soldiers, rVal.mechs, rVal.campID)
 
-				retreatAlert := "↩️ CO-OP MISSION ABORTED: The raid creator has ordered a strategic retreat. Your contributed survivors have returned safely to base."
+				retreatAlert := "↩️ " + htmlBold("CO-OP MISSION ABORTED") + ": The raid creator has ordered a strategic retreat. Your contributed survivors have returned safely to base."
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", rVal.userID, retreatAlert)
 			}
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raid_coop_members WHERE raid_id = $1", raidID)

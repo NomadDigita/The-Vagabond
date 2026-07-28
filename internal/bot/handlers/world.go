@@ -46,7 +46,7 @@ func (h *WorldHandler) HandleWorldFeed(c telebot.Context) error {
 		FROM world_news 
 		ORDER BY logged_at DESC 
 		LIMIT 5`
-	
+
 	rows, err := h.DB.QueryContext(ctx, queryNews)
 	var newsText string
 	if err != nil {
@@ -169,7 +169,7 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 
 	broadcastMsg := c.Message().Payload
 	if broadcastMsg == "" {
-		return c.Send("⚠️ Broadcast Failed: Payload empty. Syntax: `/broadcast [message]`")
+		return c.Send("⚠️ Broadcast Failed: Payload empty. Syntax: "+htmlCode("/broadcast [message]"), telebot.ModeHTML)
 	}
 
 	ctx := context.Background()
@@ -203,8 +203,12 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - 50.0 WHERE encampment_id = $1", campID)
 
-	// 3. Write dynamic dispatch to global world_news radio bulletin feed
-	headline := fmt.Sprintf("📻 OUTPOST BROADCAST: Encampment [%s] dispatched message: %q", campName, broadcastMsg)
+	// 3. Write dynamic dispatch to global world_news radio bulletin feed.
+	// No htmlEscape here: HandleWorldFeed already htmlEscape()s the entire
+	// aggregated news feed text at render time, so a raw player name/message
+	// is safe by the time it reaches a screen (same pattern documented in
+	// starvation.go's render.go).
+	headline := fmt.Sprintf("📻 OUTPOST BROADCAST: Encampment [%s] dispatched message: \"%s\"", campName, broadcastMsg)
 	_, err = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline)
 	if err != nil {
 		return c.Send("⚠️ Failed to modulate regional frequencies.")
@@ -216,7 +220,7 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE c.x BETWEEN $1 AND $2 AND c.y BETWEEN $3 AND $4`
-	
+
 	rows, err := tx.QueryContext(ctx, queryTargets, myX-1, myX+1, myY-1, myY+1)
 	if err != nil {
 		log.Printf("Failed querying sector targets: %v", err)
@@ -235,8 +239,8 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 
 	// 5. Queue inbox notifications for nearby outposts
 	formattedMsg := fmt.Sprintf(
-		"📡 SECTOR BROADCAST (CO-ORDINATOR @%s from [%s]):\n\n\"%s\"",
-		sender.Username, campName, broadcastMsg,
+		"📡 %s (Coordinator %s from %s):\n\n%s",
+		htmlBold("SECTOR BROADCAST"), htmlCode("@"+htmlEscape(sender.Username)), htmlCode(htmlEscape(campName)), htmlEscape(broadcastMsg),
 	)
 
 	for _, targetID := range targets {
@@ -244,5 +248,6 @@ func (h *WorldHandler) HandleSectorBroadcast(c telebot.Context) error {
 	}
 
 	_ = tx.Commit()
-	return c.Send(fmt.Sprintf("📡 Broadcast successfully modulated over sector [%d, %d]. Logged to news feeds and dispatched to %d active proximity lines.", myX, myY, len(targets)), keyboards.CombatNavigation())
+	return c.Send(fmt.Sprintf("📡 Broadcast successfully modulated over sector %s. Logged to news feeds and dispatched to %s active proximity lines.",
+		htmlCode(fmt.Sprintf("[%d, %d]", myX, myY)), htmlCode(fmt.Sprintf("%d", len(targets)))), telebot.ModeHTML, keyboards.CombatNavigation())
 }

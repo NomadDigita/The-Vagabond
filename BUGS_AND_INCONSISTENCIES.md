@@ -250,12 +250,58 @@ uncommitted-but-unrestored between two checkpoint builds; caught before
 commit, not shipped - see the matching PROJECT_MASTER_PLAN.md entry for
 the full account so this exact mistake isn't repeated).
 
-Remaining scope for a future wave: `internal/bot/handlers/world.go`
-(not yet audited - the Wasteland Broadcast Radio panel is already
-`ModeHTML` + `htmlEscape`'d per this file's own read, but the file may
-have other unpolished panels), and a repo-wide grep for
-`INSERT INTO notifications` / `notifications.Queue` outside
-`internal/engine/tick`, `internal/engine/agent`,
-`internal/engine/starvation`, and `internal/bot/handlers` to confirm no
-other package emits notifications at all (spot-checked, not
-exhaustively confirmed).
+Wave 11 did both of the above. `world.go`'s two main panels
+(`HandleWorldFeed`, `HandleSectorMap`) were already fully rich-formatted
+by an earlier session; `HandleSectorBroadcast` (`/broadcast`) was not -
+rich-formatted it and escaped `campName`/`broadcastMsg`/`sender.Username`
+in the player-facing notification (the `world_news` headline itself
+still doesn't need escaping - same reasoning as `starvation.go`'s Ghost
+Mode headline, since `world.go` escapes the whole aggregated feed at
+render time). Also cleaned up that headline's use of Go's `%q` verb,
+which added stray backslash-escaping artifacts to a player-facing
+bulletin line - switched to a plain quoted `%s`.
+
+The repo-wide grep for every `INSERT INTO notifications`/
+`notifications.Queue`/`notifications.QueueToRegion`/
+`notifications.QueueToAllPlayers` call site turned up real, previously-
+unaudited work in five more handler files: `exchange.go` (market-sale
+alert), `hero.go` (commander level-up - this one was built via raw SQL
+string concatenation rather than the usual Go-side `fmt.Sprintf`,
+converted to the standard pattern), `onboarding.go` (referral bonus +
+milestone alerts, escaping `sender.FirstName`), `profile.go` (the
+`/msg` player-to-player direct message), `clan.go` (new clan
+application alert), and `combat.go` (four co-op-lobby notifications).
+`silo.go` was already fully polished, nothing to do there.
+
+**Worth flagging specifically:** `profile.go`'s `/msg` command was
+inserting a player's raw, completely unescaped free-text message body
+directly into another player's notification. Unlike most of this
+polish work (cosmetic/consistency), this one was a real, if minor,
+bug - since the notification dispatcher auto-detects HTML per message,
+a sender who typed a stray `<` or `>` (or deliberately tried to inject
+`<b>`/other tags to spoof formatting in the recipient's inbox) could
+have broken the send or altered how their message displayed. Now
+escaped like every other free-text field in the codebase.
+
+**New architectural note:** `internal/engine/world/weather.go`
+(added by the parallel session's "World-event broadcasts" commit)
+shares one `eventHeadline()`/`eventLabel()` string between the plain
+`world_news` feed (safe - escaped downstream) and a new direct-push
+notification via `notifications.QueueToRegion` (sent as-is, no
+wrapping escape). Deliberately left unformatted rather than adding
+`<b>` tags: doing so would leak literal `&lt;b&gt;` into the news feed
+display, since `world.go` escapes the *entire* aggregated feed text
+including any tags already embedded in a headline. No player data is
+interpolated into either string (only fixed event-type/continent
+enums), so there's no escaping *bug* here, just an intentional
+formatting trade-off - noting it so a future session doesn't "fix" it
+into a display bug. If this is ever revisited, the correct fix is
+building two separate strings (one plain for `world_news`, one
+HTML-formatted for the direct push) rather than sharing one.
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass; confirmed with an md5sum checksum that `go.mod`/`go.sum` were
+byte-identical before and after (twice - once before the gofmt pass,
+once after). `gofmt -l` also caught and fixed two more pre-existing
+(not introduced this session) formatting issues (`world.go`, `hero.go`
+- stray trailing whitespace and a missing final newline).

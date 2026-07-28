@@ -65,7 +65,7 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 			INSERT INTO heroes (encampment_id, name, trait, injuries, battles_survived, superpower, level, xp) 
 			VALUES ($1, $2, $3, $4, 0, $5, 1, 0) 
 			RETURNING id, name, trait, injuries, battles_survived, COALESCE(superpower, ''), COALESCE(level, 1), COALESCE(xp, 0)`
-		
+
 		err = h.DB.QueryRowContext(ctx, insertHero, campID, heroName, heroTrait, heroInjuries, heroSuperpower).Scan(&heroID, &heroName, &heroTrait, &heroInjuries, &battlesSurvived, &heroSuperpower, &lvl, &xp)
 		if err != nil {
 			log.Printf("Failed creating elite hero: %v", err)
@@ -259,13 +259,14 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 		if scrap < 50.0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap! Need 50."})
 		}
-		
+
 		newXp := currentXp + 20
 		newLvl := currentLvl
 		if newXp >= 100 {
 			newLvl++
 			newXp = 0
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, '🏆 COMMANDER LEVEL UP: Your Hero commander has successfully reached Level ' || $2::text || '!', FALSE)", sender.ID, newLvl)
+			levelUpMsg := fmt.Sprintf("🏆 %s: Your Hero commander has successfully reached Level %s!", htmlBold("COMMANDER LEVEL UP"), htmlCode(fmt.Sprintf("%d", newLvl)))
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID, levelUpMsg)
 		}
 
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 50.0 WHERE encampment_id = $1", campID)

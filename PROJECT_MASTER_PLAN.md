@@ -2153,6 +2153,48 @@ which cost real time re-deriving them twice.
   `internal/engine/starvation`, and `internal/bot/handlers` emits
   notifications.
 
+- **Following session (core game, not AI Systems Roadmap): UI Polish
+  wave 11 — `world.go`'s `/broadcast` handler, plus a repo-wide
+  notification audit.** `world.go`'s two main panels
+  (`HandleWorldFeed`, `HandleSectorMap`) were already fully polished by
+  an earlier session; `HandleSectorBroadcast` (`/broadcast`) was not -
+  rich-formatted it and escaped `campName`/`broadcastMsg`/
+  `sender.Username` in the player-facing notification (the shared
+  `world_news` headline itself still doesn't need escaping, same
+  reasoning as `starvation.go`'s Ghost Mode headline). Also replaced
+  that headline's `%q` verb, which added stray Go-string-escaping
+  artifacts to a player-facing bulletin line, with a plain quoted `%s`.
+
+  The repo-wide grep for every notification call site (as recommended
+  after wave 10) found real unaudited work in five more handler files:
+  `exchange.go`, `hero.go` (converted from raw SQL string concatenation
+  to the standard Go-side `fmt.Sprintf` pattern), `onboarding.go`,
+  `profile.go`, `clan.go`, and `combat.go` (four sites). `silo.go` was
+  already fully polished. **Worth flagging specifically:** `profile.go`'s
+  `/msg` command was inserting a player's raw, completely unescaped
+  free-text message body directly into another player's notification -
+  since the dispatcher auto-detects HTML per message, a stray `<`/`>`
+  (or a deliberate injection attempt) could have broken the send or
+  spoofed formatting in the recipient's inbox. A real, if minor, bug -
+  not just cosmetic - now fixed alongside the cosmetic work.
+
+  **New architectural note, not a bug:** `internal/engine/world/
+  weather.go` (added by the parallel session's world-event-broadcasts
+  commit) shares one `eventHeadline()` string between the plain
+  `world_news` feed (safe - escaped downstream by `world.go`) and a new
+  direct-push notification via `notifications.QueueToRegion` (sent
+  as-is). Deliberately left unformatted rather than adding `<b>` tags,
+  since that would leak literal `&lt;b&gt;` into the news feed - no
+  player data is interpolated into it anyway (only fixed event-type/
+  continent enums), so there's no escaping bug, just a documented
+  trade-off for a future session to respect rather than "fix."
+
+  Verified with a full `go build ./... && go vet ./... && go test
+  ./...` pass; confirmed via md5sum checksum (twice - before and after
+  a gofmt pass) that `go.mod`/`go.sum` stayed byte-identical to their
+  committed state throughout. `gofmt -l` caught and fixed two more
+  pre-existing formatting issues in `world.go`/`hero.go`.
+
 ## 7. Future Ideas (unscoped, not committed to any phase)
 
 - A `SummarizingMemoryStore` decorator (per the note in `memory.go`)

@@ -215,7 +215,8 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 
 	var sellerUserID int64
 	_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", sellerID).Scan(&sellerUserID)
-	alertMsg := fmt.Sprintf("💱 MARKET SALE: Another player has purchased your public listing for %d %s. +$%.0f transferred instantly to reserves.", qty, itemType, price)
+	alertMsg := fmt.Sprintf("💱 %s: Another player has purchased your public listing for %s %s. +%s transferred instantly to reserves.",
+		htmlBold("MARKET SALE"), htmlCode(fmt.Sprintf("%d", qty)), itemType, htmlCode(fmt.Sprintf("$%.0f", price)))
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sellerUserID, alertMsg)
 
 	_ = tx.Commit()

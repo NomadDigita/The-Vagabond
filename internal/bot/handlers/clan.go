@@ -236,7 +236,8 @@ func (h *ClanHandler) HandleApplyToClanCallback(c telebot.Context) error {
 	}
 
 	senderName := sender.FirstName
-	alertMsg := fmt.Sprintf("📬 NEW CLAN APPLICATION: %s wants to join %s! Review it via /clan.", senderName, clanName)
+	alertMsg := fmt.Sprintf("📬 %s: %s wants to join %s! Review it via %s.",
+		htmlBold("NEW CLAN APPLICATION"), htmlCode(htmlEscape(senderName)), htmlCode(htmlEscape(clanName)), htmlCode("/clan"))
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", leaderID, alertMsg)
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("📨 Application sent to %s! Awaiting Leader approval.", clanName)})
