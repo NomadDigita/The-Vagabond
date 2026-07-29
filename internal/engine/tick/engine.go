@@ -179,7 +179,9 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 							"💰🏆 %s\n\nAs a Top-3 ranked survivor, you received 💵 %s from the Wasteland Tax Law (%s rate) collected from all players!",
 							htmlBoldTick("DAILY TAX PAYOUT!"), htmlCodeTick(fmt.Sprintf("$%.2f", share)), htmlCodeTick(fmt.Sprintf("%d%%", taxRate)),
 						)
-						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, alertMsg)
+						if isRealPlayer(w.userID) {
+							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, alertMsg)
+						}
 					}
 				}
 			}
@@ -833,13 +835,15 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 		_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET state = 'stationed' WHERE raid_id = $1", r.id)
 
 		var myX, myY int
-		_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.attackerID).Scan(&myX, &myY)
+		var myRegion string
+		_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.attackerID).Scan(&myX, &myY, &myRegion)
 
 		var defX, defY int
+		var defRegion string
 		if r.defenderID.Valid {
-			_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&defX, &defY)
+			_ = tx.QueryRowContext(ctx, "SELECT c.x, c.y, c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.defenderID.String).Scan(&defX, &defY, &defRegion)
 		} else {
-			defX, defY = 1, 1
+			defX, defY, defRegion = 1, 1, myRegion
 		}
 
 		steps := math.Abs(float64(defX-myX)) + math.Abs(float64(defY-myY))
@@ -848,8 +852,22 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 		}
 		marchingMinutes := steps * 10.0
 		arrival := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
+		legStartedAt := time.Now().UTC()
 
-		_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'marching', resolve_time = $1 WHERE id = $2", arrival, r.id)
+		// Populate the same origin/destination/region/leg-clock columns
+		// HandleConfirmHangarLaunchCallback sets on solo launches - without
+		// these, evaluateRoadEncounters/evaluateRoadBaseEncounters (which
+		// both filter on origin_x IS NOT NULL) can never see a co-op raid
+		// launched through this staged-lobby path, so it silently skips
+		// Phase 3/4/5's road-encounter/weather system entirely. See
+		// BUGS_AND_INCONSISTENCIES.md for the full writeup.
+		_, _ = tx.ExecContext(ctx, `
+			UPDATE raids SET state = 'marching', resolve_time = $1,
+			                 origin_x = $2, origin_y = $3, destination_x = $4, destination_y = $5,
+			                 origin_region = $6, destination_region = $7,
+			                 leg_started_at = $8, leg_total_minutes = $9, base_march_minutes = $9
+			WHERE id = $10`,
+			arrival, myX, myY, defX, defY, myRegion, defRegion, legStartedAt, marchingMinutes, r.id)
 
 		launchMsg := "🤝 " + htmlBoldTick("CO-OP LOBBY DEPARTED") + ": The staging window expired. Your joint military forces have successfully departed towards target."
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", creatorUserID, launchMsg)
@@ -1029,7 +1047,9 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 				"The spy satellite is now returning to orbit. You have <code>%d seconds</code> left to launch an Interceptor Drone and vaporize the intel before it lands. ⏳",
 			htmlBoldTick("ESPIONAGE BREACH:"), htmlBoldTick(htmlEscapeTick(s.spyName)), int(returnDuration.Seconds()),
 		)
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.targetUserID, defenderAlert)
+		if isRealPlayer(s.targetUserID) {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.targetUserID, defenderAlert)
+		}
 	}
 
 	// Step 2: Process Returning Spy Satellites landing back at base (resolved = TRUE)
@@ -1190,32 +1210,48 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		// player gets one heads-up at 25% and one at empty per resource,
 		// instead of spam every 3 seconds.
 		if oldRations > 25.0 && newRations <= 25.0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🍖 %s: Your marching force toward %s is down to %s rations.", htmlBoldTick("RATIONS RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newRations))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🍖 %s: Your marching force toward %s is down to %s rations.", htmlBoldTick("RATIONS RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newRations))))
+			}
 		} else if oldRations > 0 && newRations <= 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🍖❌ %s: Your force marching on %s has run out of rations! Combat strength will suffer until they return.", htmlBoldTick("OUT OF RATIONS"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🍖❌ %s: Your force marching on %s has run out of rations! Combat strength will suffer until they return.", htmlBoldTick("OUT OF RATIONS"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			}
 		}
 		if oldAmmo > 25.0 && newAmmo <= 25.0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🎖️ %s: Your marching force toward %s is down to %s ammunition.", htmlBoldTick("AMMUNITION RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newAmmo))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🎖️ %s: Your marching force toward %s is down to %s ammunition.", htmlBoldTick("AMMUNITION RUNNING LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newAmmo))))
+			}
 		} else if oldAmmo > 0 && newAmmo <= 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🎖️❌ %s: Your force marching on %s has run dry! Combat strength will suffer until they return.", htmlBoldTick("OUT OF AMMUNITION"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🎖️❌ %s: Your force marching on %s has run dry! Combat strength will suffer until they return.", htmlBoldTick("OUT OF AMMUNITION"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			}
 		}
 		if oldElectricity > 25.0 && newElectricity <= 25.0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("⚡ %s: Your expedition toward %s is down to %s carried electricity.", htmlBoldTick("FIELD POWER LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newElectricity))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("⚡ %s: Your expedition toward %s is down to %s carried electricity.", htmlBoldTick("FIELD POWER LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newElectricity))))
+			}
 		} else if oldElectricity > 0 && newElectricity <= 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("⚡❌ %s: High-tech units marching on %s are losing effectiveness until reinforcements arrive or they return.", htmlBoldTick("FIELD POWER DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("⚡❌ %s: High-tech units marching on %s are losing effectiveness until reinforcements arrive or they return.", htmlBoldTick("FIELD POWER DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			}
 		}
 		if oldLogistics > 25.0 && newLogistics <= 25.0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🔩 %s: Your expedition toward %s is down to %s repair/grid equipment.", htmlBoldTick("LOGISTICS SUPPLIES LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newLogistics))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🔩 %s: Your expedition toward %s is down to %s repair/grid equipment.", htmlBoldTick("LOGISTICS SUPPLIES LOW"), htmlCodeTick(htmlEscapeTick(ex.defenderName)), htmlCodeTick(fmt.Sprintf("%.0f%%", newLogistics))))
+			}
 		} else if oldLogistics > 0 && newLogistics <= 0 {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
-				fmt.Sprintf("🔩❌ %s: Vehicles and grid equipment in the force marching on %s are no longer fully operational.", htmlBoldTick("LOGISTICS DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			if isRealPlayer(ex.userID) {
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
+					fmt.Sprintf("🔩❌ %s: Vehicles and grid equipment in the force marching on %s are no longer fully operational.", htmlBoldTick("LOGISTICS DEPLETED"), htmlCodeTick(htmlEscapeTick(ex.defenderName))))
+			}
 		}
 
 		// Phase 5 milestone 4: the two failure modes are NOT the same.
@@ -1685,7 +1721,7 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 		if err != nil {
 			return fmt.Errorf("recording reciprocal route contact: %w", err)
 		}
-		if affected, _ := result.RowsAffected(); affected == 1 {
+		if affected, _ := result.RowsAffected(); affected == 1 && isRealPlayer(contactUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", contactUserID,
 				"📡 "+htmlBoldTick("ROUTE CONTACT")+": Your sensors detected a foreign expedition moving near your outpost. Its commander has now discovered your location.")
 		}
@@ -1893,7 +1929,7 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 		var attackerID string
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
-			if userID != 0 {
+			if isRealPlayer(userID) {
 				note := "🛣️ " + htmlBoldTick("ROAD CONTACT RESOLVED") + ": Both columns continued on their way without engaging."
 				if outcome == "timeout" {
 					note = "🛣️ " + htmlBoldTick("ROAD CONTACT RESOLVED") + ": No attack order was given in time - your column continued on its way."
@@ -2038,7 +2074,9 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 		if effectNote != "" {
 			msg += "\n" + effectNote
 		}
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID, msg)
+		if isRealPlayer(c.userID) {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", c.userID, msg)
+		}
 	}
 
 	return e.clearRouteWeatherIncidents(ctx, tx)
@@ -2192,7 +2230,7 @@ func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) err
 
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", row.raidID).Scan(&userID)
-		if userID != 0 {
+		if isRealPlayer(userID) {
 			_ = notifications.Queue(ctx, tx, userID,
 				"☀️ "+htmlBoldTick("CONDITIONS CLEARED")+": Your column has broken camp and resumed its journey.", "route_status")
 		}
@@ -2254,7 +2292,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + $1, tankers = tankers + $2 WHERE encampment_id = $3", c.haulersCommitted, c.tankersCommitted, c.homeID)
 			var userID int64
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&userID)
-			if userID != 0 {
+			if isRealPlayer(userID) {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", userID,
 					"📦❌ "+htmlBoldTick("CONVOY MISSED CONTACT")+": Your resupply convoy reached the column's last known position, but it had already moved on or returned. The supplies were lost, but the Hauler and Tanker crews made it back home.")
 			}
@@ -2269,7 +2307,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'ambushed' WHERE id = $1", c.id)
 			var homeUserID int64
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&homeUserID)
-			if homeUserID != 0 {
+			if isRealPlayer(homeUserID) {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", homeUserID,
 					"📦💥 "+htmlBoldTick("CONVOY AMBUSHED")+": Your resupply convoy was ambushed en route and lost, along with its Hauler and Tanker crews. The stranded column is still waiting for supplies.")
 			}
@@ -2302,7 +2340,7 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 
 		var userID int64
 		_ = tx.QueryRowContext(ctx, "SELECT ea.user_id FROM raids r JOIN encampments ea ON ea.id = r.attacker_id WHERE r.id = $1", c.targetRaidID).Scan(&userID)
-		if userID != 0 {
+		if isRealPlayer(userID) {
 			_ = notifications.Queue(ctx, tx, userID,
 				"📦✅ "+htmlBoldTick("CONVOY ARRIVED")+": Reinforcement supplies have reached your stranded column. The journey resumes.", "route_status")
 		}
@@ -2507,8 +2545,10 @@ func (e *Engine) emitRaidRadarWarnings(ctx context.Context, tx *sql.Tx) error {
 			"🛰️ %s: An offensive fleet is approaching your coordinate perimeter!\nHostile Force: Outpost %s\nEstimated impact: %s. Your radar network detected it at the current warning range.",
 			htmlBoldTick("RADAR WARNING"), htmlCodeTick(htmlEscapeTick(alert.attackerName)), htmlCodeTick(fmt.Sprintf("%d minute(s)", int(math.Ceil(remaining)))),
 		)
-		if _, err := tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", alert.defenderID, proximityAlert); err != nil {
-			return fmt.Errorf("queueing raid radar warning: %w", err)
+		if isRealPlayer(alert.defenderID) {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", alert.defenderID, proximityAlert); err != nil {
+				return fmt.Errorf("queueing raid radar warning: %w", err)
+			}
 		}
 	}
 	return nil
@@ -2647,7 +2687,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 					var helperUserID int64
 					_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", s.campID).Scan(&helperUserID)
-					if helperUserID != 0 {
+					if isRealPlayer(helperUserID) {
 						helperAlert := fmt.Sprintf("🚀 <b>RETURN MARCH COMPLETED</b>: Your contributed forces survived the co-op campaign and have returned safely to your own base (<code>+%d Soldiers, +%d Mechs</code>). 🎖️", s.soldiers, s.mechs)
 						_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", helperUserID, helperAlert)
 					}
@@ -2691,7 +2731,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, arrivalAlert)
 			}
 
-			if r.defenderID.Valid && r.defenderUserID != 0 {
+			if r.defenderID.Valid && isRealPlayer(r.defenderUserID) {
 				defenderEngagedAlert := fmt.Sprintf(
 					"⚔️ %s\n\n"+
 						"Hostile forces from Outpost %s have arrived and are actively engaging your defenses! 🚨\n"+
@@ -3384,7 +3424,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if isRealPlayer(r.attackerUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, reportText)
 		}
-		if r.defenderID.Valid && r.defenderUserID != 0 {
+		if r.defenderID.Valid && isRealPlayer(r.defenderUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, reportText)
 		}
 

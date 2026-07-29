@@ -770,10 +770,11 @@ func (h *CombatHandler) HandleSpyCallback(c telebot.Context) error {
 	btnIntercept := selector.Data("🛡️ Launch Interceptor Drone", "launch_interceptor", spyID)
 	selector.Inline(selector.Row(btnIntercept))
 
-	defenderUser := &telebot.User{ID: defenderUserID}
-	_, err = c.Bot().Send(defenderUser, defenderAlert, selector)
-	if err != nil {
-		log.Printf("Failsafe satellite alerts failed: %v", err)
+	if isRealPlayer(defenderUserID) {
+		defenderUser := &telebot.User{ID: defenderUserID}
+		if _, sendErr := c.Bot().Send(defenderUser, defenderAlert, selector); sendErr != nil {
+			log.Printf("Failsafe satellite alerts failed: %v", sendErr)
+		}
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Satellite positioned! Syncing telemetry stream..."})
@@ -1738,20 +1739,26 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	var insertRaid string
 	if isAI {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, route_progress, route_progress_at, route_leg_minutes)
-			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9, 0.0, CURRENT_TIMESTAMP, $3)
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
 			VALUES ($1, NULL, 'marching', $2, $3, 100.0, 100.0, 100.0, 100.0, $4, $5, $6, $7, $8, $9, $10, $3)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
+		err = tx.QueryRowContext(ctx, insertRaid, myCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
 	} else {
 		insertRaid = `
-			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, route_progress, route_progress_at, route_leg_minutes)
-			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10, 0.0, CURRENT_TIMESTAMP, $4)
 			INSERT INTO raids (attacker_id, defender_id, state, resolve_time, base_march_minutes, attacker_rations, attacker_ammo, attacker_electricity, attacker_logistics, origin_x, origin_y, destination_x, destination_y, origin_region, destination_region, leg_started_at, leg_total_minutes)
 			VALUES ($1, $2, 'marching', $3, $4, 100.0, 100.0, 100.0, 100.0, $5, $6, $7, $8, $9, $10, $11, $4)
 			RETURNING id`
-		_ = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
+		err = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
+	}
+	if err != nil {
+		// Was previously `_ = ...Scan(...)`, silently discarded - which is
+		// exactly how the two-INSERT-statements-concatenated-with-no-
+		// separator bug this replaces went unnoticed: a guaranteed SQL
+		// syntax error aborted the transaction (rolling back the resource/
+		// unit deduction above), yet the code continued straight through
+		// to a "campaign launched" success animation regardless. See
+		// BUGS_AND_INCONSISTENCIES.md for the full writeup.
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Launch failed - your forces and supplies were not committed. Please try again."})
 	}
 
 	_, _ = tx.ExecContext(ctx, "INSERT INTO raid_forces (raid_id, hero_id, soldiers_mobilized, mechs_mobilized, buggies_mobilized, route_type, destroyers_mobilized, bombers_mobilized, battlecruisers_mobilized, deathstars_mobilized, liberators_mobilized, wraiths_mobilized, ships_mobilized, jets_mobilized, nukes_mobilized, haulers_mobilized, tankers_mobilized, cargo_mk1_mobilized, cargo_mk2_mobilized, cargo_mk3_mobilized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)", raidID, heroID, mobSoldiers, mobMechs, mobBuggies, routeType, mobDestroyers, mobBombers, mobBC, mobDS, mobLiberators, mobWraiths, mobShips, mobJets, mobNukes, mobHaulers, mobTankers, mobCargoMk1, mobCargoMk2, mobCargoMk3)
@@ -1759,7 +1766,9 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	newsHeadline := fmt.Sprintf("🚀 MILITARY DEPLOYMENT: Outpost [%s] has deployed marching forces towards Outpost [%s] over [%s Route].", sender.FirstName, defenderName, routeType)
 	_, _ = tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
-	_ = tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Launch failed - your forces and supplies were not committed. Please try again."})
+	}
 
 	msg, errAnim := c.Bot().Send(c.Recipient(), "📡 INITIATING SECTOR MARCH TELEMETRY...")
 	if errAnim == nil {
