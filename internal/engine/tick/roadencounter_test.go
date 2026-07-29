@@ -194,7 +194,12 @@ func TestEvaluateRoadEncountersDoesNotPairACommanderWithThemselves(t *testing.T)
 	}
 }
 
-func TestEvaluateRoadBaseEncountersExcludesAIFactionBases(t *testing.T) {
+// TestEvaluateRoadBaseEncountersCanTargetAIFactionBases verifies the
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4 fix: an AI
+// faction's base is no longer excluded from road-base encounters. A
+// human column marching past one can now be forced into the same
+// Attack/Continue decision it would face against another human's base.
+func TestEvaluateRoadBaseEncountersCanTargetAIFactionBases(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 
@@ -216,13 +221,14 @@ func TestEvaluateRoadBaseEncountersExcludesAIFactionBases(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-	}
 
-	var count int
-	_ = db.QueryRow("SELECT COUNT(*) FROM road_base_encounters").Scan(&count)
-	if count != 0 {
-		t.Errorf("expected zero road_base_encounters against an AI-faction base, got %d (AI/seeded settlements have their own recon/skirmish flow)", count)
+		var count int
+		_ = db.QueryRow("SELECT COUNT(*) FROM road_base_encounters").Scan(&count)
+		if count > 0 {
+			return // success - an encounter against the AI-faction base fired
+		}
 	}
+	t.Error("expected a road_base_encounter against the AI-faction base within 40 attempts at EncounterRollChance")
 }
 
 func TestEvaluateRoadBaseEncountersFreezesTheColumnAndRecordsMutualDiscovery(t *testing.T) {

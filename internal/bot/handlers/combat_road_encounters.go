@@ -326,24 +326,62 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	return c.Send(resultText, telebot.ModeHTML, keyboards.MainNavigation())
 }
 
+// aiGarrisonReserveFraction is the fraction of an AI faction's current
+// workshop_inventory.soldiers/mechs treated as its "always-home" defense
+// reserve for road-base encounters, per
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4. A real player's
+// garrisoned_soldiers/garrisoned_mechs is a deliberate choice made once on
+// their Hero Commander panel and then read verbatim; no AI faction has
+// ever made that choice (garrisoned_soldiers/garrisoned_mechs reads 0,0
+// for every one of them), so reading that column for an AI base would
+// make it a free, uncontested win for any human column that stumbles into
+// it - not parity, a trivially exploitable farm. Computed fresh at
+// encounter-resolution time rather than stored, the same way a human's
+// actual mobilized-vs-garrisoned split is a live, in-the-moment decision.
+//
+// Deliberately a separate constant from aidecisions.go's
+// aiFractionOfGarrisonCommitted (which caps a raid's OUTGOING commitment
+// at 65%, implying ~35% stays home) rather than reusing it or its
+// complement: "how much a raid commits" and "how much is left over to
+// defend an ambush" are different tuning knobs that happen to start in
+// the same neighborhood, not the same knob wearing two hats.
+const aiGarrisonReserveFraction = 0.20
+
 // loadBaseGarrisonForce loads a passive base's standing home-defense
-// reserve (workshop_inventory.garrisoned_soldiers/garrisoned_mechs - units
-// the owner explicitly withheld from every draft, see hero.go's Manual
-// Defense Garrison) as a roadcombat.FieldForce. This is deliberately a
-// lighter force than the base's full raid-defense computation (no defense
-// grid, turrets, or drafted-but-not-yet-launched units): a road ambush is a
+// reserve as a roadcombat.FieldForce. This is deliberately a lighter
+// force than the base's full raid-defense computation (no defense grid,
+// turrets, or drafted-but-not-yet-launched units): a road ambush is a
 // field skirmish against whoever the base kept at home, not a full siege.
-// A commander who wants to actually raid the base's economy for loot still
-// needs to launch a real raid through the normal /raid flow, with all of
-// that system's existing protections (shields, pacts, etc.) intact.
-func (h *CombatHandler) loadBaseGarrisonForce(ctx context.Context, tx *sql.Tx, encampmentID string) (roadcombat.FieldForce, error) {
+// A commander who wants to actually raid the base's economy for loot
+// still needs to launch a real raid through the normal /raid flow, with
+// all of that system's existing protections (shields, pacts, etc.)
+// intact.
+//
+// For a real player, this reads workshop_inventory.garrisoned_soldiers/
+// garrisoned_mechs - units the owner explicitly withheld from every
+// draft, see hero.go's Manual Defense Garrison. For an AI faction, see
+// aiGarrisonReserveFraction's doc comment above: that column is never
+// set, so this instead computes a synthetic reserve from the faction's
+// live soldiers/mechs pool.
+func (h *CombatHandler) loadBaseGarrisonForce(ctx context.Context, tx *sql.Tx, encampmentID string, isAIFaction bool) (roadcombat.FieldForce, error) {
 	var f roadcombat.FieldForce
-	err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0)
-		FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`, encampmentID).
-		Scan(&f.Soldiers, &f.Mechs)
-	if err != nil {
-		return f, err
+	if isAIFaction {
+		var soldiers, mechs int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COALESCE(soldiers,0), COALESCE(mechs,0)
+			FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`, encampmentID).
+			Scan(&soldiers, &mechs); err != nil {
+			return f, err
+		}
+		f.Soldiers = int(float64(soldiers) * aiGarrisonReserveFraction)
+		f.Mechs = int(float64(mechs) * aiGarrisonReserveFraction)
+	} else {
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0)
+			FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE`, encampmentID).
+			Scan(&f.Soldiers, &f.Mechs); err != nil {
+			return f, err
+		}
 	}
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(military_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", encampmentID).Scan(&f.MilitaryTechLvl)
 	if f.MilitaryTechLvl < 1 {
@@ -352,12 +390,30 @@ func (h *CombatHandler) loadBaseGarrisonForce(ctx context.Context, tx *sql.Tx, e
 	return f, nil
 }
 
-// applyBaseGarrisonSurvivors writes back the post-battle survivor counts
-// for a base's home-defense reserve.
-func (h *CombatHandler) applyBaseGarrisonSurvivors(ctx context.Context, tx *sql.Tx, encampmentID string, s roadcombat.FieldForce) error {
+// applyBaseGarrisonCasualties writes back a road-base-encounter's
+// casualties (not survivors - see below for why) to whichever pool the
+// defending force's garrison actually came from. For a real player, that
+// pool is garrisoned_soldiers/garrisoned_mechs (the entire thing was
+// committed, so this is equivalent to writing back survivors). For an AI
+// faction, only aiGarrisonReserveFraction of its live soldiers/mechs was
+// ever committed to this specific skirmish - the rest of the faction's
+// force wasn't involved and must not be touched - so this subtracts the
+// casualties from the live pool instead of overwriting it with the
+// (partial) survivor count.
+func (h *CombatHandler) applyBaseGarrisonCasualties(ctx context.Context, tx *sql.Tx, encampmentID string, lost roadcombat.FieldForce, isAIFaction bool) error {
+	if isAIFaction {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE workshop_inventory SET
+				soldiers = GREATEST(soldiers - $1, 0),
+				mechs = GREATEST(mechs - $2, 0)
+			WHERE encampment_id = $3`, lost.Soldiers, lost.Mechs, encampmentID)
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `
-		UPDATE workshop_inventory SET garrisoned_soldiers = $1, garrisoned_mechs = $2
-		WHERE encampment_id = $3`, s.Soldiers, s.Mechs, encampmentID)
+		UPDATE workshop_inventory SET
+			garrisoned_soldiers = GREATEST(garrisoned_soldiers - $1, 0),
+			garrisoned_mechs = GREATEST(garrisoned_mechs - $2, 0)
+		WHERE encampment_id = $3`, lost.Soldiers, lost.Mechs, encampmentID)
 	return err
 }
 
@@ -417,7 +473,9 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not load your force composition."})
 	}
-	garrison, err := h.loadBaseGarrisonForce(ctx, tx, encampmentID)
+	var baseIsAIFaction bool
+	_ = tx.QueryRowContext(ctx, "SELECT is_ai_faction FROM encampments WHERE id = $1", encampmentID).Scan(&baseIsAIFaction)
+	garrison, err := h.loadBaseGarrisonForce(ctx, tx, encampmentID, baseIsAIFaction)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Could not load the outpost's home garrison."})
 	}
@@ -429,12 +487,11 @@ func (h *CombatHandler) HandleRoadBaseEncounterCallback(c telebot.Context) error
 	myLost := roadcombat.CasualtiesFor(myForce, result.ACasualtyFraction)
 	garrisonLost := roadcombat.CasualtiesFor(garrison, result.BCasualtyFraction)
 	mySurvivors := roadcombat.Survivors(myForce, myLost)
-	garrisonSurvivors := roadcombat.Survivors(garrison, garrisonLost)
 
 	if err := h.applyRoadSurvivors(ctx, tx, raidID, mySurvivors); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to apply casualties."})
 	}
-	if err := h.applyBaseGarrisonSurvivors(ctx, tx, encampmentID, garrisonSurvivors); err != nil {
+	if err := h.applyBaseGarrisonCasualties(ctx, tx, encampmentID, garrisonLost, baseIsAIFaction); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to apply casualties."})
 	}
 

@@ -2317,6 +2317,30 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 const aiCivilizationMaxSoldiersPerLevel = 25
 const aiCivilizationMaxMechsPerLevel = 4
 
+// economicCollapseWarningThreshold gates the "ECONOMIC COLLAPSE" warning
+// added per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5 - a
+// combined post-raid resource total (Scrap+Metal+Crystal+Rations+
+// Electricity+Dollars) below this is treated as "critically depleted."
+// Deliberately a small absolute number rather than a fraction of some
+// baseline: a genuinely new player's starting stockpile is itself only in
+// the low hundreds, so this needs to stay well below that to mean
+// anything. Tunable starting constant, not a precisely-right number - the
+// project owner should revisit alongside the raid loot percentages
+// themselves if new-player balance ever gets tuned.
+const economicCollapseWarningThreshold = 50.0
+
+// economicCollapseWarning returns the appended report text when a
+// defeated defender's post-raid resource total is critically low, or ""
+// otherwise. Pulled out as its own pure function specifically so this
+// section 1.5 addition has a unit-testable seam, independent of standing
+// up a full resolveRaidCombats integration test.
+func economicCollapseWarning(remainingTotal float64) string {
+	if remainingTotal >= economicCollapseWarningThreshold {
+		return ""
+	}
+	return "\n\n💀 " + htmlBoldTick("ECONOMIC COLLAPSE") + ": Sustained raiding has left this outpost's stockpiles critically depleted."
+}
+
 // isRealPlayer reports whether a user_id belongs to an actual Telegram
 // account rather than one of the synthetic negative-telegram_id rows
 // seedAICivilizations creates for AI factions (see cmd/bot/main.go). Real
@@ -3341,6 +3365,20 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		reportText := battlereport.Render(report)
 		if weatherNotice != "" {
 			reportText += "\n\n" + strings.TrimSpace(weatherNotice)
+		}
+		// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5: the game
+		// already allows "lose everything" through sustained, repeated
+		// raiding (0.6^n of resources survive after n full-loot raids -
+		// under 8% by the 5th), but nothing ever told the defender that's
+		// what's happening to them. This is purely a communication
+		// addition - no new mechanic, no floor added or removed, just
+		// naming what the existing math already does once someone's down
+		// to near-nothing.
+		if !defenderStillStanding && r.defenderID.Valid {
+			remainingTotal := math.Max(defenderScrap-primaryShare, 0) + math.Max(defenderMetal-primaryMetalShare, 0) +
+				math.Max(defenderCrystal-primaryCrystalShare, 0) + math.Max(defenderRations-primaryRationsShare, 0) +
+				math.Max(defenderElectricity-primaryElectricityShare, 0) + math.Max(defenderDollars-primaryDollarsShare, 0)
+			reportText += economicCollapseWarning(remainingTotal)
 		}
 
 		if isRealPlayer(r.attackerUserID) {

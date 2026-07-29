@@ -1,12 +1,12 @@
 # AI Full Parity, Long-Range Scouting, and World-Event Broadcasts Plan
 
-Status (updated by the implementing session): items 1 (leaderboard, 1.2),
-2 (AI-vs-AI), 5 (world-event broadcasts), 3.4 (discovery permanence +
-Ghost Protocol, including the AI decision loop's new `'flee'` intent),
-and 3.1-3.3/3.5-3.7 (long-range scouting itself) are all built, tested
-against real Postgres, and merged to `main`. Remaining: 1.4/1.5 (AI
-passive-target parity + total-defeat/victory audit) - the last item on
-the suggested build order.
+Status (updated by the implementing session): **all six build-order items
+are complete** - leaderboard parity (1.2), AI-vs-AI (2), world-event
+broadcasts (5), discovery permanence + Ghost Protocol (3.4, including the
+AI decision loop's new `'flee'` intent), long-range scouting (3.1-3.3/
+3.5-3.7), and AI passive-target parity + the total-defeat/victory
+communication audit (1.4/1.5) - all built, tested against real Postgres,
+and merged to `main`.
 
 The "Open questions for the project owner" below were explicitly handed
 to this implementing session to decide rather than block on (per direct
@@ -26,7 +26,14 @@ each treated as a tunable starting constant, not a final number:
    touching the rest of the mechanic.
 4. **Leaderboard display**: interleaved with a 🤖 prefix, as recommended,
    implemented in commit `50e64e3`.
-5. Not yet audited - deferred to build order item 6 (1.4/1.5), as planned.
+5. **Total-defeat/victory audit**: audited `resolveRaidCombats` end-to-end
+   for a hidden resource floor - found none (every deduction already uses
+   `GREATEST(x - loss, 0)`, a plain non-negative floor, not an artificial
+   protection above zero). No mechanic was missing or added; per the
+   doc's own framing, only the "communicate this is possible" gap was
+   real, addressed with a new economic-collapse warning appended to a
+   defeated defender's battle report below `economicCollapseWarningThreshold`
+   (50, a tunable starting number - see that constant's own comment).
 
 Revisit any of these once real usage data exists, same spirit as this
 plan's own advice on `aiMaxLevelsBelowSelfForFairTarget`.

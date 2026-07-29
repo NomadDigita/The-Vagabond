@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 // TestDoGhostProtocol_DeductsProportionalCostAndClearsLocks verifies the
 // core mechanic from AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section
 // 3.4: relocates the camp, deducts ghostProtocolCostFraction of current

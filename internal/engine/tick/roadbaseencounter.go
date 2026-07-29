@@ -16,15 +16,20 @@ import (
 // reveals a passive base to a passing expedition, but never forced a
 // decision - a column would just keep marching. This mirrors
 // evaluateRoadEncounters (expedition-vs-expedition) but against a
-// stationary, real-player-owned base instead of a second moving column.
-// AI/seeded settlements are excluded via encampments.is_ai_faction = FALSE
-// (they run their own recon/skirmish flow; see resolveExplorationDiscovery
-// / Phase 2). Earlier versions of this query tried to exclude them by
-// requiring a JOIN on users, on the assumption AI-owned encampments had no
-// real users row - Phase 6 (persistent AI civilizations, built afterward)
-// actually gives each AI faction a genuine users row (required by
-// encampments.user_id's FK/UNIQUE constraint), which silently broke that
-// assumption. Caught by TestEvaluateRoadBaseEncountersExcludesAIFactionBases.
+// stationary base instead of a second moving column.
+//
+// AI factions were previously excluded here too (encampments.is_ai_faction
+// = FALSE), matching the same exclusion pattern AI-vs-AI raids and
+// scouting used to have - removed per
+// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4: "everything
+// should affect them too." An AI faction has never set a manual home-
+// defense garrison (workshop_inventory.garrisoned_soldiers/
+// garrisoned_mechs - nobody's played its Hero Commander panel), so
+// HandleRoadBaseEncounterCallback in combat_road_encounters.go gives it a
+// synthetic reserve computed from its live soldiers/mechs pool instead of
+// reading that always-zero column - see loadBaseGarrisonForce's doc
+// comment for the full reasoning on why a straight parity fix would have
+// been a free, uncontested win for any human passing by.
 //
 // Runs its own fresh query rather than reusing evaluateRoadEncounters'
 // in-memory movers slice, since that slice may already be stale within the
@@ -83,7 +88,6 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 			FROM encampments e
 			JOIN coordinates c ON c.id = e.coordinate_id
 			WHERE e.id <> $1
-			  AND e.is_ai_faction = FALSE
 			  AND c.region = $2
 			  AND ABS(c.x - $3) <= $4 AND ABS(c.y - $5) <= $4
 			ORDER BY ABS(c.x - $3) + ABS(c.y - $5)
