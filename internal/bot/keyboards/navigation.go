@@ -64,12 +64,13 @@ func CombatNavigation() *telebot.ReplyMarkup {
 	btnNews := menu.Text("📻 Wasteland Radio")
 	btnArena := menu.Text("🏟️ Combat Arena")
 	btnExplore := menu.Text("🧭 World Exploration")
+	btnScout := menu.Text("🔭 Long-Range Scouting")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnRadar),
 		menu.Row(btnNews, btnArena),
-		menu.Row(btnExplore),
+		menu.Row(btnExplore, btnScout),
 		menu.Row(btnBack),
 	)
 

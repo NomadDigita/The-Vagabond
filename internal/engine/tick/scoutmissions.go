@@ -124,7 +124,7 @@ func (e *Engine) processSearchingScoutMissions(ctx context.Context, tx *sql.Tx) 
 			continue
 		}
 		if isRealPlayer(m.userID) {
-			if err := notifications.Queue(ctx, tx, m.userID, "🔭 Your scout party continues searching the wasteland - no contact yet.", "route_status"); err != nil {
+			if err := notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "route_status"); err != nil {
 				log.Printf("Failed queuing scout mission %s status ping: %v", m.id, err)
 			}
 		}
@@ -163,7 +163,7 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 			return execErr
 		}
 		if isRealPlayer(m.userID) {
-			return notifications.Queue(ctx, tx, m.userID, "🔭 Your scout party continues searching the wasteland - no contact yet.", "route_status")
+			return notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "route_status")
 		}
 		return nil
 	}
@@ -212,8 +212,8 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 
 	if isRealPlayer(m.userID) {
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf(
-			"🎯 CONTACT! Your scout party located Outpost [%s]. Its position is now locked in your intel and it's marked in your Tactical Target Matrix. Beginning the journey home - ETA %.0f minutes.",
-			targetName, marchingMinutes), "route_status"); err != nil {
+			"🎯 %s\n\nYour Scout Walkers located Outpost %s. Its position is now locked in your intel and marked in your Tactical Target Matrix.\n\n🚶 Beginning the journey home - ETA %s.",
+			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(fmt.Sprintf("%.0f min", marchingMinutes))), "route_status"); err != nil {
 			return err
 		}
 	}
@@ -225,7 +225,7 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 	// your road) - just a heads-up that they're now on someone's radar.
 	if isRealPlayer(targetUserID) {
 		if err := notifications.Queue(ctx, tx, targetUserID,
-			"📡 A distant scouting party has located and locked in your outpost's position. You may want to check your defenses.", "general"); err != nil {
+			"📡 "+htmlBoldTick("SPOTTED")+": A distant scouting party has located and locked in your outpost's position. You may want to check your defenses.", "general"); err != nil {
 			return err
 		}
 	}
@@ -292,7 +292,8 @@ func (e *Engine) completeReturnedScoutMissions(ctx context.Context, tx *sql.Tx) 
 			continue
 		}
 
-		summary := fmt.Sprintf("+%.0f Scrap, +%.0f Metal", scrapGain-discardedScrap, metalGain-discardedMetal)
+		summary := fmt.Sprintf("%s %.0f Scrap, %s %.0f Metal",
+			resourceEmojiTick("scrap"), scrapGain-discardedScrap, resourceEmojiTick("metal"), metalGain-discardedMetal)
 		if _, err := tx.ExecContext(ctx, "UPDATE scout_missions SET phase = 'complete', completed_at = CURRENT_TIMESTAMP, resources_returned_summary = $1 WHERE id = $2", summary, m.id); err != nil {
 			log.Printf("Failed marking scout mission %s complete: %v", m.id, err)
 			continue
@@ -301,9 +302,10 @@ func (e *Engine) completeReturnedScoutMissions(ctx context.Context, tx *sql.Tx) 
 		if !isRealPlayer(m.userID) {
 			continue
 		}
-		message := fmt.Sprintf("🔭✅ SCOUT PARTY RETURNED: Your %d scouts are home safely, bringing %s.", m.scoutsCommitted, summary)
+		message := fmt.Sprintf("🔭✅ %s\n\n%s Scout Walkers are home safely, bringing back:\n%s",
+			htmlBoldTick("SCOUT PARTY RETURNED"), htmlCodeTick(fmt.Sprintf("%d", m.scoutsCommitted)), summary)
 		if m.bonusName.Valid {
-			message += fmt.Sprintf(" Along the way home, they also spotted Outpost [%s] - added to your Tactical Target Matrix.", m.bonusName.String)
+			message += fmt.Sprintf("\n\n🎯 Along the way home, they also spotted Outpost %s - added to your Tactical Target Matrix.", htmlBoldTick(htmlEscapeTick(m.bonusName.String)))
 		}
 		if err := notifications.Queue(ctx, tx, m.userID, message, "route_status"); err != nil {
 			log.Printf("Failed queuing scout mission %s completion notification: %v", m.id, err)
@@ -379,7 +381,8 @@ func (e *Engine) pingInTransitScoutMissions(ctx context.Context, tx *sql.Tx) err
 		if remaining < 0 {
 			remaining = 0
 		}
-		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf("🚶 Your scout party is en route home. ETA: %.0f minutes.", remaining.Minutes()), "route_status"); err != nil {
+		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf("🚶 %s: your Scout Walkers are en route home. ETA: %s.",
+			htmlBoldTick("EN ROUTE"), htmlCodeTick(fmt.Sprintf("%.0f min", remaining.Minutes()))), "route_status"); err != nil {
 			log.Printf("Failed queuing scout mission %s en-route ping: %v", m.id, err)
 		}
 	}
@@ -431,7 +434,7 @@ func (e *Engine) scoutMissionBonusDiscovery(ctx context.Context, tx *sql.Tx, m i
 	}
 	if isRealPlayer(bonusUserID) {
 		if err := notifications.Queue(ctx, tx, bonusUserID,
-			"📡 A distant scouting party passed near your outpost and spotted your position.", "general"); err != nil {
+			"📡 "+htmlBoldTick("SPOTTED")+": A distant scouting party passed near your outpost and spotted your position.", "general"); err != nil {
 			return err
 		}
 	}

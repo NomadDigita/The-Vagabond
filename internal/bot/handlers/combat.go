@@ -186,8 +186,13 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 			WHERE observer_encampment_id = $1 AND target_key = $2
 		)`, myCampID, worldintel.RogueDroneNestKey).Scan(&knowsRogueNest)
 	if knowsRogueNest {
+		// The Rogue Drone Nest has no real encampments row and no real
+		// coordinate (see worldintel.RogueDroneNestKey's doc comment) -
+		// this used to hardcode a fake "(Sector 1,1)" here regardless of
+		// the player's actual position, which was just wrong information
+		// dressed up as a coordinate. Say what it actually is instead.
 		dashboard += "🤖 " + htmlBold("DISCOVERED AI CONTACT") + "\n" +
-			"👹 [AI] Rogue Drone Nest " + htmlCode("(Sector 1,1)") + "\n" +
+			"👹 " + htmlBold("Rogue Drone Nest") + " " + htmlItalic("(a roaming threat, not a fixed outpost - no coordinates to report)") + "\n" +
 			"    💰 Loot Yield: Metal/Crystal/Scrap | ⏱️ Journey Time: Dynamic\n" +
 			"    🔍 " + htmlItalic("Recon first to see exactly what you're facing!") + "\n\n"
 
