@@ -445,7 +445,7 @@ func main() {
 	bot.Handle("/fed_join", federation.HandleJoinFederation)
 	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
 	bot.Handle("/explore", exploration.HandleExplorePanel)
-	bot.Handle("/scout", scoutMissions.HandleDispatchScoutMission)
+	bot.Handle("/scoutmission", scoutMissions.HandleDispatchScoutMission)
 	bot.Handle("/scoutstatus", scoutMissions.HandleScoutStatus)
 	bot.Handle("/diplomacy", diplomacy.HandleDiplomacyPanel)
 	bot.Handle("/ally", diplomacy.HandleProposeAlliance)

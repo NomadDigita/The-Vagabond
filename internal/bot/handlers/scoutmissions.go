@@ -19,7 +19,7 @@ func NewScoutMissionsHandler(db *sql.DB) *ScoutMissionsHandler {
 	return &ScoutMissionsHandler{DB: db}
 }
 
-// HandleDispatchScoutMission (/scout <count>) commits count scouts from
+// HandleDispatchScoutMission (/scoutmission <count>) commits count scouts from
 // workshop_inventory to a long-range scout mission - the human-facing
 // entry point for AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3's
 // scouting rework. One mission at a time per outpost, same one-dispatch
@@ -35,7 +35,7 @@ func (h *ScoutMissionsHandler) HandleDispatchScoutMission(c telebot.Context) err
 
 	count, err := strconv.Atoi(strings.TrimSpace(c.Message().Payload))
 	if err != nil || count <= 0 {
-		return c.Send("🔭 Usage: /scout <number of scouts to commit>, e.g. /scout 5")
+		return c.Send("🔭 Usage: /scoutmission <number of scouts to commit>, e.g. /scoutmission 5")
 	}
 
 	var campID string
@@ -104,7 +104,7 @@ func (h *ScoutMissionsHandler) HandleScoutStatus(c telebot.Context) error {
 		WHERE sm.encampment_id = $1 AND sm.phase IN ('searching', 'returning')
 		ORDER BY sm.started_at DESC LIMIT 1`, campID).Scan(&phase, &scoutsCommitted, &foundName, &returnETA)
 	if err == sql.ErrNoRows {
-		return c.Send("🔭 No scout party is currently out. Use /scout <count> to dispatch one.")
+		return c.Send("🔭 No scout party is currently out. Use /scoutmission <count> to dispatch one.")
 	}
 	if err != nil {
 		return c.Send("⚠️ Error checking scout status.")
@@ -123,6 +123,6 @@ func (h *ScoutMissionsHandler) HandleScoutStatus(c telebot.Context) error {
 		}
 		return c.Send(msg + ".")
 	default:
-		return c.Send("🔭 No scout party is currently out. Use /scout <count> to dispatch one.")
+		return c.Send("🔭 No scout party is currently out. Use /scoutmission <count> to dispatch one.")
 	}
 }
