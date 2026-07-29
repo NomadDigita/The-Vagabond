@@ -70,6 +70,71 @@ next, grouped by how serious they are.
    wrapped all seven of those call sites plus the one in
    `roadbaseencounter.go`.
 
+6. **CRITICAL, LIVE BUG (now fixed): every solo raid launch was silently
+   broken.** `HandleConfirmHangarLaunchCallback` in `combat.go` - wired to
+   the real "🚀 Launch Direct/Stealth/Safe" buttons via
+   `bot.Handle("\fconfirm_launch", ...)` - built its `raids` INSERT as two
+   `INSERT INTO raids (...) VALUES (...)` clauses concatenated with no
+   semicolon or separator, a guaranteed Postgres syntax error (extended-
+   protocol `Parse` messages can't contain more than one statement). The
+   error was silently discarded (`_ = tx.QueryRowContext(...).Scan(...)`),
+   which aborted the entire transaction on execution - rolling back the
+   resource/unit deduction that happened earlier in the same `tx` - while
+   the handler still sent a full "campaign launched" success animation
+   regardless. Net effect: tap Launch, watch the animation, nothing
+   actually happens - no raid, resources untouched (rolled back), no
+   error shown. This was previously found and documented as *dormant*
+   (unreachable, since nothing called this function) - it is not dormant;
+   it's the main solo-raid dispatch path. **Fixed:** merged into one
+   valid INSERT (kept the `leg_started_at`/`leg_total_minutes` columns
+   the tick engine actually reads for position tracking -
+   `route_progress`/`route_progress_at`/`route_leg_minutes` already
+   default/COALESCE to sane values everywhere they're read, confirmed by
+   tracing every read site) and stopped discarding the insert/commit
+   errors, so a genuine failure now tells the player instead of lying to
+   them.
+
+7. **The co-op raid-launch path had the identical missing-columns gap.**
+   `autoLaunchExpiredStagedRaids` (the tick pass that promotes a staged
+   co-op raid to `state = 'marching'`) only ever set `state` and
+   `resolve_time` - never `origin_x/origin_y/destination_x/destination_y/
+   origin_region/destination_region/leg_started_at/leg_total_minutes`.
+   Both `evaluateRoadEncounters` and `evaluateRoadBaseEncounters` filter
+   on `origin_x IS NOT NULL`, so a co-op raid launched this way was
+   invisible to the entire Phase 3/4/5 road-encounter/weather system.
+   **Fixed** to populate the same columns the solo path (item 6 above)
+   now does.
+
+8. **Repo-wide follow-up audit on the `isRealPlayer` notification guard
+   (item 5 above): found several more real gaps it missed.** Went
+   through essentially every `INSERT INTO notifications`/
+   `notifications.Queue` call site in `internal/engine/tick` (~50 of
+   them) checking whether the `userID` involved could ever be an AI
+   faction's synthetic negative ID. Fixed: `applyActiveLogisticsConsumption`'s
+   8 rations/ammo/electricity/logistics threshold alerts (an AI-launched
+   raid's supplies deplete through this same shared function); the
+   espionage target-side notification in `resolvePendingEspionageMissions`
+   (AI factions are valid spy targets) plus the direct synchronous
+   Telegram `Send` in `HandleSpyCallback` (added a package-local
+   `isRealPlayer` in `internal/bot/handlers` - can't share the tick
+   package's unexported one across packages); weather/route-incident
+   pause alerts; the raid radar proximity warning; reciprocal
+   route-contact discovery (a base can reciprocally discover the
+   expedition that discovered it, and that base can be an AI faction);
+   and the top-3 leaderboard tax-payout notification, now reachable by AI
+   factions since the AI-parity leaderboard feature landed. **Also
+   found something older and more impactful than any of the above**: the
+   defender-side checks in `resolveRaidCombats` used `r.defenderUserID !=
+   0` rather than `> 0` - `!= 0` does *not* exclude AI factions' negative
+   synthetic IDs, so this specific gap has existed since Phase 6's
+   foundational tier first shipped (AI factions have always been valid
+   raid *targets*, long before any AI decision loop existed to make them
+   attackers too). Fixed both sites the same way. Cross-checked several
+   more `!= 0` guards (world boss, clan war, cognitive agent, exploration
+   dispatch, co-op lobby, arena, idle-miner) and confirmed those are
+   genuinely player-only features AI factions can't currently reach -
+   left as-is rather than churning code with no behavioral effect.
+
 ## Confirmed still-open items from prior sessions (re-verified today)
 
 4. **`coordinates.danger_level` is stored but never read by any game
