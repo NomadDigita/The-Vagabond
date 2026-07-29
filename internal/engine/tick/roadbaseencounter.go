@@ -151,7 +151,7 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 				fmt.Sprintf("🚧 %s: Your expedition passed close to Outpost %s.\nYou have %s to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass it peacefully.",
 					htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(baseName)), htmlCodeTick(fmt.Sprintf("%ds", deadlineSeconds))))
 		}
-		if baseUserID != 0 {
+		if isRealPlayer(baseUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", baseUserID,
 				fmt.Sprintf("📡 %s: A foreign expedition commanded by %s passed close to your outpost. It may attack; your home garrison stands ready.",
 					htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(m.attackerName))))

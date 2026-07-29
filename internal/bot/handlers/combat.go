@@ -408,7 +408,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	}
 
 	querySpies := `
-		SELECT s.id, ea.name, ed.name, s.created_at, (s.spy_id = $1) as is_outbound, s.resolved
+		SELECT s.id, ea.name, ed.name, s.resolve_time, (s.spy_id = $1) as is_outbound, s.resolved
 		FROM spy_missions s
 		JOIN encampments ea ON ea.id = s.spy_id
 		JOIN encampments ed ON ed.id = s.target_id
@@ -420,10 +420,19 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		defer rowsSpies.Close()
 		for rowsSpies.Next() {
 			var spyID, eaName, edName string
-			var createdAt time.Time
+			var resolveTime time.Time
 			var isOutbound, resolved bool
-			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &createdAt, &isOutbound, &resolved); err == nil {
-				timeLeft := 120 - int(time.Since(createdAt.UTC()).Seconds())
+			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &resolveTime, &isOutbound, &resolved); err == nil {
+				// Real remaining time until resolve_time - the same field
+				// resolvePendingEspionageMissions actually checks - not a
+				// fixed 120s window from created_at. The outbound scan and
+				// return-flight legs are both distance-based (see
+				// HandleSpyCallback's steps*1.5-minutes-per-tile formula)
+				// and can genuinely take many hours for a long-distance
+				// target; showing a fake 2-minute countdown made this look
+				// permanently stuck at "0s remaining" long before the real
+				// flight was anywhere close to done.
+				timeLeft := int(time.Until(resolveTime.UTC()).Seconds())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}

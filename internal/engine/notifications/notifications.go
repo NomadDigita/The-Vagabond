@@ -16,6 +16,35 @@ type Dispatcher struct {
 	stopChan chan struct{}
 }
 
+// maxNotificationAttempts is how many times drainQueue retries a
+// notification before giving up on it - see notifications' schema
+// comment on failed_attempts for why this exists: without a cap, one
+// permanently-undeliverable message can occupy a slot in every future
+// LIMIT-10 batch forever, starving every genuinely new notification
+// behind it for every player, not just the one who can't receive it.
+const maxNotificationAttempts = 5
+
+// recordFailedAttempt increments a notification's failed_attempts and
+// reports whether the caller should give up on it (in which case it's
+// marked is_sent = TRUE so it stops occupying a slot in every future
+// drainQueue batch) rather than retry it again. Pulled out as its own
+// function specifically so this has a unit-testable seam independent of
+// needing a real, network-connected *telebot.Bot to exercise drainQueue's
+// send-failure path end-to-end.
+func recordFailedAttempt(ctx context.Context, db querier, id string) (gaveUp bool, err error) {
+	var attempts int
+	if err := db.QueryRowContext(ctx, "UPDATE notifications SET failed_attempts = failed_attempts + 1 WHERE id = $1 RETURNING failed_attempts", id).Scan(&attempts); err != nil {
+		return false, err
+	}
+	if attempts < maxNotificationAttempts {
+		return false, nil
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE notifications SET is_sent = TRUE WHERE id = $1", id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func NewDispatcher(db *sql.DB, bot *telebot.Bot) *Dispatcher {
 	return &Dispatcher{
 		DB:       db,
@@ -68,7 +97,7 @@ func (d *Dispatcher) drainQueue() {
 
 	// Select unsent notifications
 	query := `
-		SELECT id, user_id, message 
+		SELECT id, user_id, message, failed_attempts 
 		FROM notifications 
 		WHERE is_sent = FALSE 
 		ORDER BY queued_at ASC 
@@ -82,15 +111,16 @@ func (d *Dispatcher) drainQueue() {
 	defer rows.Close()
 
 	type pending struct {
-		id      string
-		userID  int64
-		message string
+		id             string
+		userID         int64
+		message        string
+		failedAttempts int
 	}
 
 	var queue []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.userID, &p.message); err == nil {
+		if err := rows.Scan(&p.id, &p.userID, &p.message, &p.failedAttempts); err == nil {
 			queue = append(queue, p)
 		}
 	}
@@ -140,6 +170,23 @@ func (d *Dispatcher) drainQueue() {
 		_, err := d.Bot.Send(targetUser, k.message, opts...)
 		if err != nil {
 			log.Printf("Dispatcher failed to deliver notification to %d: %v", k.userID, err)
+			// A permanently-undeliverable message (blocked bot, malformed
+			// HTML, oversized text, stale chat) must not retry forever:
+			// with a fixed LIMIT 10 oldest-first batch, enough stuck rows
+			// occupy every slot in every future batch and starve every
+			// genuinely new notification behind them - for any player,
+			// any feature. Give up after maxNotificationAttempts rather
+			// than silently blocking the whole queue.
+			for _, id := range ids {
+				gaveUp, recordErr := recordFailedAttempt(ctx, d.DB, id)
+				if recordErr != nil {
+					log.Printf("Dispatcher failed recording delivery failure for notification %s: %v", id, recordErr)
+					continue
+				}
+				if gaveUp {
+					log.Printf("Dispatcher giving up on notification %s to %d after %d failed attempts: %.200s", id, k.userID, maxNotificationAttempts, k.message)
+				}
+			}
 			continue
 		}
 

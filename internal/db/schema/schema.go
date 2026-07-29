@@ -463,6 +463,19 @@ func Statements() []string {
 			is_sent BOOLEAN DEFAULT FALSE,
 			queued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);`,
+		// A notification that can never actually be delivered (player
+		// blocked the bot, malformed HTML tripping Telegram's "can't
+		// parse entities" 400, a message over Telegram's 4096-char cap,
+		// a stale/invalid chat) used to retry forever with no limit and
+		// no way to tell it apart from a message that's just waiting its
+		// turn. Worse: notifications.Dispatcher.drainQueue polls a fixed
+		// LIMIT 10 oldest-first batch every 3 seconds - if enough
+		// permanently-failing rows accumulate at the front of that
+		// queue, they occupy every slot in every batch forever, and
+		// genuinely new notifications behind them - for any player, any
+		// feature - never get a turn at all. See drainQueue's updated
+		// give-up-after-N-attempts logic, which this column supports.
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS failed_attempts INT NOT NULL DEFAULT 0;`,
 
 		`CREATE TABLE IF NOT EXISTS world_state (
 			id INT PRIMARY KEY,
