@@ -204,7 +204,7 @@ func (e *Engine) expireRoadBaseEncounters(ctx context.Context, tx *sql.Tx) error
 		var attackerID string
 		if err := tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", x.raidID).Scan(&attackerID); err == nil {
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", attackerID).Scan(&userID)
-			if userID != 0 {
+			if isRealPlayer(userID) {
 				_ = notifications.Queue(ctx, tx, userID,
 					"🛣️ "+htmlBoldTick("ROAD CONTACT RESOLVED")+": Your column continued on its way without engaging the outpost.", "route_status")
 			}
