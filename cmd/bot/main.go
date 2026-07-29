@@ -477,6 +477,21 @@ func main() {
 	bot.Handle("/newjobautoscan", jobs.HandleAutoScanAlias)
 	bot.Handle("/newjobadvancedscan", jobs.HandleAdvancedScanAlias)
 	bot.Handle("/newjobpublishtrade", jobs.HandlePublishTradeAlias)
+
+	// Jobs section buttons (mother/child keyboard pair, see
+	// internal/bot/keyboards/navigation.go's JobsNavigation doc comment -
+	// this is purely additive discoverability on top of the slash
+	// commands above, which keep working unchanged).
+	bot.Handle("🛠️ Odd Jobs", jobs.HandleJobsPanel)
+	bot.Handle("🚀 HyperSpeed Mission", jobs.HandleHyperSpeed)
+	bot.Handle("🌍 Extend Planet", jobs.HandleExtendPlanet)
+	bot.Handle("🌀 Teleport Outpost", jobs.HandleTeleport)
+	bot.Handle("👻 Ghost Protocol", jobs.HandleGhostProtocol)
+	bot.Handle("🛰️ Orbital Maneuver", jobs.HandleOrbitalManeuver)
+	bot.Handle("🔧 Repair Units", jobs.HandleRepairUnits)
+	bot.Handle("🏚️ Repair Buildings", jobs.HandleRepairBuildings)
+	bot.Handle("☀️ Gather Sunlight", jobs.HandleGatherSunlight)
+
 	bot.Handle("/ai_status", aiStatus.HandleAIStatus)
 	bot.Handle("/ai_status_toggle", aiStatus.HandleAIStatusToggle)
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
@@ -608,6 +623,7 @@ func main() {
 	bot.Handle("\froad_base_encounter", combat.HandleRoadBaseEncounterCallback)
 	bot.Handle("\fdispatch_convoy", combat.HandleDispatchConvoy)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
+	bot.Handle("\fcraft_qty", factory.HandleCraftQuantityCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
 	bot.Handle("\fattack_boss", boss.HandleAttackBossCallback)
 	bot.Handle("\frebellion_donate", rebellion.HandleRebellionDonateCallback)

@@ -255,10 +255,246 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 	return renderOrEdit(c, panelText, selector)
 }
 
+// craftSpec is one buildable item's cost/target-column/labeling, used by
+// the generic multi-quantity crafting flow below. Previously each item
+// was a fully separate switch case in HandleCraftCallback, hand-coding
+// the same cost-check/deduct/increment shape 20+ times with quantity
+// hardcoded to 1 - that made "produce more than one at a time" require
+// rewriting every case identically (and easy to get inconsistent across
+// them). This table is the single place quantity, cost, and target
+// column live now; the actual crafting logic in HandleCraftQuantityCallback
+// is written once and applies to every item.
+type craftSpec struct {
+	dbColumn    string             // workshop_inventory column to increment
+	cost        map[string]float64 // resources table column -> cost PER UNIT
+	label       string             // display name, singular (a trailing "s" is added for plural messaging)
+	verb        string             // past-tense verb for the success message, e.g. "recruited"
+	maxPerOrder int                // hard ceiling on quantity for a single craft order
+	isVehicle   bool               // true => after crafting, return to the Vehicles panel instead of Recruit
+}
+
+// defaultMaxPerOrder is the "up to 20x at once" ceiling for ordinary
+// units. Units that deliberately get a lower ceiling say so explicitly
+// in their own craftSpec entry below, with a comment explaining why -
+// never silently omit maxPerOrder and fall back to this for something
+// that shouldn't get it.
+const defaultMaxPerOrder = 20
+
+// hardcodedCraftSpecs covers the units that predate the content package's
+// canonical registry (internal/game/content/units.go's doc comment: "the
+// SpaceHunt-revival content spine... every new unit added going forward
+// should be defined here first" - these are the ones from before that
+// convention started, not yet migrated). Costs here are unchanged from
+// the original single-unit switch cases - this refactor changes HOW
+// quantity is handled, not what anything costs.
+var hardcodedCraftSpecs = map[string]craftSpec{
+	"soldier": {
+		dbColumn: "soldiers", cost: map[string]float64{"rations": 50.0, "metal": 10.0},
+		label: "Soldier", verb: "recruited", maxPerOrder: defaultMaxPerOrder,
+	},
+	"drone": {
+		dbColumn: "drones", cost: map[string]float64{"metal": 100.0, "crystal": 10.0},
+		label: "Tactical Drone", verb: "assembled", maxPerOrder: defaultMaxPerOrder,
+	},
+	"mech": {
+		dbColumn: "mechs", cost: map[string]float64{"metal": 1000.0, "crystal": 70.0},
+		label: "Colossus Mech", verb: "forged", maxPerOrder: defaultMaxPerOrder,
+	},
+	"nuke": {
+		dbColumn: "nukes", cost: map[string]float64{"metal": 2500.0, "crystal": 510.0},
+		label: "Nuclear Device", verb: "assembled",
+		// Deliberately excluded from the 20x default: a single Nuclear
+		// Device already carries +1500 Detonation, by far the highest
+		// power-per-unit in the game. Twenty in one order would let a
+		// single craft action reshape the server's balance far more than
+		// any other bulk order - capped low enough that mass-producing
+		// them still takes real, deliberate repetition.
+		maxPerOrder: 3,
+	},
+	"destroyer": {
+		dbColumn: "destroyers", cost: map[string]float64{"metal": 800.0, "crystal": 55.0},
+		label: "Destroyer", verb: "forged", maxPerOrder: defaultMaxPerOrder,
+	},
+	"bomber": {
+		dbColumn: "bombers", cost: map[string]float64{"metal": 1300.0, "crystal": 60.0},
+		label: "Bomber", verb: "assembled", maxPerOrder: defaultMaxPerOrder,
+	},
+	"buggy": {
+		dbColumn: "buggies", cost: map[string]float64{"metal": 120.0},
+		label: "Scrap Buggy", verb: "crafted", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+	"ship": {
+		dbColumn: "ships", cost: map[string]float64{"metal": 300.0},
+		label: "Clipper Ship", verb: "constructed", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+	"jet": {
+		dbColumn: "jets", cost: map[string]float64{"metal": 1100.0, "hydrogen": 200.0},
+		label: "Cargo Jet", verb: "constructed", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+	"hauler": {
+		dbColumn: "haulers", cost: map[string]float64{"metal": 550.0},
+		label: "Resource Hauler", verb: "constructed", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+	"tanker": {
+		dbColumn: "tankers", cost: map[string]float64{"metal": 400.0, "hydrogen": 100.0},
+		label: "Fuel Tanker", verb: "constructed", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+	"rig": {
+		dbColumn: "rigs", cost: map[string]float64{"metal": 650.0},
+		label: "Recovery Rig", verb: "constructed", maxPerOrder: defaultMaxPerOrder, isVehicle: true,
+	},
+}
+
+// craftSpecFor resolves an item key to its craftSpec, checking the
+// pre-content-package units above first, then falling back to
+// content.FindUnit for everything registered there (scout,
+// battlecruiser, deathstar, liberator, wraith, observer, guardian,
+// piercing_missile, cargo_mk1/2/3) - reused live rather than copied, so
+// this table can never drift out of sync with the canonical registry.
+func craftSpecFor(item string) (craftSpec, bool) {
+	if item == "cargo_jet" {
+		item = "jet" // button callback data uses "cargo_jet"; same item, one spec entry
+	}
+	if spec, ok := hardcodedCraftSpecs[item]; ok {
+		return spec, true
+	}
+	unit, ok := content.FindUnit(item)
+	if !ok {
+		return craftSpec{}, false
+	}
+	maxPerOrder := defaultMaxPerOrder
+	if item == "deathstar" {
+		// Doomsday Rigs already have their own total-fleet cap tied to
+		// Outpost level (content.MaxDoomsdayRigs, checked separately in
+		// HandleCraftQuantityCallback since it's a cap on units OWNED,
+		// not units per order). Offering a "20x" button that will almost
+		// always fail against a cap that's usually 1-5 total would just
+		// be a confusing, near-always-rejected option - keep the
+		// per-order ceiling low and let the real cap be the binding one.
+		maxPerOrder = 3
+	}
+	return craftSpec{
+		dbColumn:    unit.Column,
+		cost:        unit.Cost,
+		label:       unit.Title,
+		verb:        "forged",
+		maxPerOrder: maxPerOrder,
+		isVehicle:   item == "cargo_mk1" || item == "cargo_mk2" || item == "cargo_mk3",
+	}, true
+}
+
+// quantityOptions returns the quantity buttons to offer for a given
+// spec's maxPerOrder - always includes 1x, then scales up to (and
+// including) maxPerOrder without offering an option above it.
+func quantityOptions(maxPerOrder int) []int {
+	all := []int{1, 5, 10, 20}
+	var out []int
+	for _, q := range all {
+		if q <= maxPerOrder {
+			out = append(out, q)
+		}
+	}
+	if len(out) == 0 || out[len(out)-1] != maxPerOrder {
+		out = append(out, maxPerOrder)
+	}
+	return out
+}
+
+// HandleCraftCallback ("\fcraft_item") is the first tap on a "Recruit X"/
+// "Forge X" button - it no longer crafts immediately, it opens the
+// quantity picker (HandleCraftQuantityCallback does the actual crafting).
+// This two-step shape mirrors how every other consequential action in
+// this game already confirms before committing resources (e.g. the road-
+// encounter Attack/Continue buttons) rather than firing on the very
+// first tap.
 func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
+	item := strings.ToLower(strings.TrimSpace(c.Args()[0]))
+	spec, ok := craftSpecFor(item)
+	if !ok {
+		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Unknown item."})
+	}
+
+	costLine := formatCraftCost(spec.cost)
+	panelText := fmt.Sprintf("⚒️ How many %s(s) to produce?\n\nCost per unit: %s", spec.label, costLine)
+
+	selector := &gopkg.ReplyMarkup{}
+	var rows []gopkg.Row
+	var row []gopkg.Btn
+	for _, qty := range quantityOptions(spec.maxPerOrder) {
+		btn := selector.Data(fmt.Sprintf("%dx", qty), "craft_qty", item, fmt.Sprintf("%d", qty))
+		row = append(row, btn)
+		if len(row) == 2 {
+			rows = append(rows, selector.Row(row...))
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, selector.Row(row...))
+	}
+	btnCancel := selector.Data("↩️ Cancel", "craft_qty", item, "0")
+	rows = append(rows, selector.Row(btnCancel))
+	selector.Inline(rows...)
+
+	return renderOrEdit(c, panelText, selector)
+}
+
+// formatCraftCost renders a per-unit cost map as a single readable line,
+// in a stable order (resources package convention elsewhere in this
+// codebase always lists Rations/Metal/Crystal/Hydrogen/Electricity/
+// Dollars/Neuro Cores in that order - matched here so cost lines read
+// consistently with every other panel in the game).
+func formatCraftCost(cost map[string]float64) string {
+	order := []struct{ key, label, emoji string }{
+		{"rations", "Rations", "🌾"},
+		{"metal", "Metal", "🔩"},
+		{"crystal", "Crystal", "🔮"},
+		{"hydrogen", "Hydrogen", "💧"},
+		{"electricity", "Electricity", "⚡"},
+		{"neuro_cores", "Neuro Cores", "🧠"},
+		{"dollars", "Dollars", "💵"},
+	}
+	var parts []string
+	for _, o := range order {
+		if amt, ok := cost[o.key]; ok && amt > 0 {
+			parts = append(parts, fmt.Sprintf("%s%.0f %s", o.emoji, amt, o.label))
+		}
+	}
+	if len(parts) == 0 {
+		return "free"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// HandleCraftQuantityCallback ("\fcraft_qty") performs the actual craft
+// for the quantity chosen on HandleCraftCallback's picker. Every cost
+// deduction and inventory increment happens ONCE per order, scaled by
+// quantity (a single `soldiers = soldiers + $1` with quantity as the
+// parameter) rather than looping the original single-unit logic N times -
+// both simpler and avoids N separate round-trips for what the player
+// experiences as one action.
+func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	item := strings.ToLower(strings.TrimSpace(c.Args()[0]))
+	args := c.Args()
+	if len(args) < 2 {
+		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Invalid crafting order."})
+	}
+	item := strings.ToLower(strings.TrimSpace(args[0]))
+	var quantity int
+	fmt.Sscanf(args[1], "%d", &quantity)
+
+	if quantity == 0 {
+		_ = c.Respond(&gopkg.CallbackResponse{Text: "↩️ Order cancelled."})
+		return h.HandleRecruitPanel(c)
+	}
+
+	spec, ok := craftSpecFor(item)
+	if !ok {
+		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Unknown item."})
+	}
+	if quantity < 1 || quantity > spec.maxPerOrder {
+		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Quantity must be between 1 and %d for this item.", spec.maxPerOrder)})
+	}
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
@@ -269,24 +505,30 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Secure Hangar Allocator: Ensure the workshop row is fully allocated inside active transaction block
 	queryUpsert := `
 		INSERT INTO workshop_inventory (encampment_id) 
 		VALUES ($1) 
 		ON CONFLICT (encampment_id) DO UPDATE SET encampment_id = EXCLUDED.encampment_id`
 	_, _ = tx.ExecContext(ctx, queryUpsert, campID)
 
-	var rations, metal, crystal, hydrogen float64
-	queryRes := `SELECT rations, metal, crystal, hydrogen FROM resources WHERE encampment_id = $1 FOR UPDATE`
-	_ = tx.QueryRowContext(ctx, queryRes, campID).Scan(&rations, &metal, &crystal, &hydrogen)
+	var resourceLevels struct{ rations, metal, crystal, hydrogen, neuroCores, dollars, electricity float64 }
+	_ = tx.QueryRowContext(ctx, `
+		SELECT rations, metal, crystal, hydrogen, COALESCE(neuro_cores,0), COALESCE(dollars,0), COALESCE(electricity,0)
+		FROM resources WHERE encampment_id = $1 FOR UPDATE`, campID).
+		Scan(&resourceLevels.rations, &resourceLevels.metal, &resourceLevels.crystal, &resourceLevels.hydrogen,
+			&resourceLevels.neuroCores, &resourceLevels.dollars, &resourceLevels.electricity)
+	held := map[string]float64{
+		"rations": resourceLevels.rations, "metal": resourceLevels.metal, "crystal": resourceLevels.crystal,
+		"hydrogen": resourceLevels.hydrogen, "neuro_cores": resourceLevels.neuroCores,
+		"dollars": resourceLevels.dollars, "electricity": resourceLevels.electricity,
+	}
 
-	// Hangar capacity check: total units (all types) can't exceed the
-	// Hangar-scaled cap. Deconstructing units (see deconstruct.go) frees
-	// space back up.
+	// Hangar capacity check, scaled by quantity - see the original
+	// single-unit version of this check (still the same cap formula,
+	// still the same set of columns summed) for why the cap exists.
 	var hangarLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", campID).Scan(&hangarLvl)
 	maxCapacity := 50 + hangarLvl*20
-
 	var totalUnits int
 	_ = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(soldiers,0)+COALESCE(drones,0)+COALESCE(mechs,0)+COALESCE(nukes,0)+COALESCE(buggies,0)+COALESCE(ships,0)+COALESCE(jets,0)+
@@ -294,247 +536,63 @@ func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
 		       COALESCE(battlecruisers,0)+COALESCE(deathstars,0)+COALESCE(liberators,0)+COALESCE(wraiths,0)+COALESCE(observers,0)+
 		       COALESCE(guardians,0)+COALESCE(piercing_missiles,0)+COALESCE(cargo_mk1,0)+COALESCE(cargo_mk2,0)+COALESCE(cargo_mk3,0)
 		FROM workshop_inventory WHERE encampment_id = $1`, campID).Scan(&totalUnits)
-
-	if totalUnits >= maxCapacity {
-		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used. Upgrade your Hangar (Infrastructure Grid) or /deconstruct unused units.", totalUnits, maxCapacity)})
+	if totalUnits+quantity > maxCapacity {
+		room := maxCapacity - totalUnits
+		if room < 0 {
+			room = 0
+		}
+		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used, only room for %d more. Upgrade your Hangar or /deconstruct unused units.", totalUnits, maxCapacity, room)})
 	}
 
-	var successAlert string
-
-	switch item {
-	case "soldier":
-		if rations < 50.0 || metal < 10.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 50 Rations, 10 Metal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - 50.0, metal = metal - 10.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🪖 Soldier recruited successfully!"
-
-	case "drone":
-		if metal < 100.0 || crystal < 10.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 100 Metal, 10 Crystal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 100.0, crystal = crystal - 10.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET drones = drones + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛰️ Tactical Drone (Spy/Interceptor) assembled successfully!"
-
-	case "mech":
-		if metal < 1000.0 || crystal < 70.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 1000 Metal, 70 Crystal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 1000.0, crystal = crystal - 70.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET mechs = mechs + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🤖 Colossus Mech forged successfully!"
-
-	case "nuke":
-		if metal < 2500.0 || crystal < 510.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials!"})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 2500.0, crystal = crystal - 510.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET nukes = nukes + 1 WHERE encampment_id = $1", campID)
-		successAlert = "☢️ Nuclear Device assembled!"
-
-	case "destroyer":
-		if metal < 800.0 || crystal < 55.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 800 Metal, 55 Crystal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 800.0, crystal = crystal - 55.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET destroyers = destroyers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "💥 Destroyer forged successfully!"
-
-	case "bomber":
-		if metal < 1300.0 || crystal < 60.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 1300 Metal, 60 Crystal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 1300.0, crystal = crystal - 60.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET bombers = bombers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛩️ Bomber assembled successfully!"
-
-	case "scout":
-		scoutUnit, _ := content.FindUnit("scout")
-		if metal < scoutUnit.Cost["metal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal.", scoutUnit.Cost["metal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1 WHERE encampment_id = $2", scoutUnit.Cost["metal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET scouts = scouts + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛵 Scout Walker rolled off the assembly line!"
-
-	case "battlecruiser":
-		bcUnit, _ := content.FindUnit("battlecruiser")
-		if metal < bcUnit.Cost["metal"] || crystal < bcUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", bcUnit.Cost["metal"], bcUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", bcUnit.Cost["metal"], bcUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET battlecruisers = battlecruisers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚢👑 BATTLECRUISER LAUNCHED! The pride of your fleet stands ready!"
-
-	case "deathstar":
+	// Doomsday Rig's total-fleet cap (tied to Outpost level, not
+	// per-order) - see craftSpecFor's comment on why this stays a
+	// separate check rather than folding into maxPerOrder.
+	if item == "deathstar" {
 		var currentDS, campLvl int
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(deathstars, 0) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&currentDS)
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1) FROM encampments WHERE id = $1", campID).Scan(&campLvl)
 		maxDS := content.MaxDoomsdayRigs(campLvl)
-		if currentDS >= maxDS {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s). Level up to raise the cap.", campLvl, maxDS)})
-		}
-		dsUnit, _ := content.FindUnit("deathstar")
-		var neuroCores float64
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(neuro_cores, 0) FROM resources WHERE encampment_id = $1", campID).Scan(&neuroCores)
-		if metal < dsUnit.Cost["metal"] || crystal < dsUnit.Cost["crystal"] || neuroCores < dsUnit.Cost["neuro_cores"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal, %.0f Neuro Cores.", dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2, neuro_cores = neuro_cores - $3 WHERE encampment_id = $4", dsUnit.Cost["metal"], dsUnit.Cost["crystal"], dsUnit.Cost["neuro_cores"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET deathstars = deathstars + 1 WHERE encampment_id = $1", campID)
-		successAlert = fmt.Sprintf("🌑💀👑 THE DOOMSDAY RIG IS OPERATIONAL! (%d/%d) The Wasteland trembles at its shadow!", currentDS+1, maxDS)
-
-	case "buggy":
-		if metal < 120.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 120 Metal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 120.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET buggies = buggies + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚗 Scrap Buggy crafted successfully!"
-
-	case "ship":
-		if metal < 300.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 300 Metal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 300.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET ships = ships + 1 WHERE encampment_id = $1", campID)
-		successAlert = "⛵ Clipper Ship constructed!"
-
-	case "cargo_jet", "jet":
-		if metal < 1100.0 || hydrogen < 200.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials!"})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 1100.0, hydrogen = hydrogen - 200.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET jets = jets + 1 WHERE encampment_id = $1", campID)
-		successAlert = "✈️ Cargo Jet constructed successfully!"
-
-	case "hauler":
-		if metal < 550.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 550 Metal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 550.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚛 Resource Hauler constructed successfully!"
-
-	case "tanker":
-		if metal < 400.0 || hydrogen < 100.0 {
-			return c.Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 400 Metal, 100 Hydrogen."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 400.0, hydrogen = hydrogen - 100.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET tankers = tankers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛡️ Fuel Tanker constructed!"
-
-	case "rig":
-		if metal < 650.0 {
-			return gopkg.Context(c).Respond(&gopkg.CallbackResponse{Text: "❌ Insufficient Materials! Need 650 Metal."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 650.0 WHERE encampment_id = $1", campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET rigs = rigs + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🔧 Recovery Rig constructed!"
-
-	case "liberator":
-		libUnit, _ := content.FindUnit("liberator")
-		if metal < libUnit.Cost["metal"] || crystal < libUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", libUnit.Cost["metal"], libUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", libUnit.Cost["metal"], libUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET liberators = liberators + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🦅 Liberator forged successfully!"
-
-	case "wraith":
-		wrUnit, _ := content.FindUnit("wraith")
-		if metal < wrUnit.Cost["metal"] || crystal < wrUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", wrUnit.Cost["metal"], wrUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", wrUnit.Cost["metal"], wrUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET wraiths = wraiths + 1 WHERE encampment_id = $1", campID)
-		successAlert = "👻 Wraith forged successfully - cloaking field online!"
-
-	case "observer":
-		obsUnit, _ := content.FindUnit("observer")
-		if metal < obsUnit.Cost["metal"] || crystal < obsUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", obsUnit.Cost["metal"], obsUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", obsUnit.Cost["metal"], obsUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET observers = observers + 1 WHERE encampment_id = $1", campID)
-		successAlert = "👁️ Observer satellite deployed to garrison!"
-
-	case "guardian":
-		gdUnit, _ := content.FindUnit("guardian")
-		if metal < gdUnit.Cost["metal"] || crystal < gdUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", gdUnit.Cost["metal"], gdUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", gdUnit.Cost["metal"], gdUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET guardians = guardians + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🛡️🤖 Guardian walker garrisoned - Defense Grid reinforced!"
-
-	case "piercing_missile":
-		pmUnit, _ := content.FindUnit("piercing_missile")
-		if metal < pmUnit.Cost["metal"] || crystal < pmUnit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", pmUnit.Cost["metal"], pmUnit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", pmUnit.Cost["metal"], pmUnit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET piercing_missiles = piercing_missiles + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🎯☢️ Piercing Missile assembled - ready for Silo launch!"
-
-	case "cargo_mk1":
-		cm1Unit, _ := content.FindUnit("cargo_mk1")
-		if metal < cm1Unit.Cost["metal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal.", cm1Unit.Cost["metal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1 WHERE encampment_id = $2", cm1Unit.Cost["metal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk1 = cargo_mk1 + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚚 Cargo Ship Mk I constructed!"
-
-	case "cargo_mk2":
-		cm2Unit, _ := content.FindUnit("cargo_mk2")
-		if metal < cm2Unit.Cost["metal"] || crystal < cm2Unit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", cm2Unit.Cost["metal"], cm2Unit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", cm2Unit.Cost["metal"], cm2Unit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk2 = cargo_mk2 + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚚🚚 Cargo Ship Mk II constructed!"
-
-	case "cargo_mk3":
-		cm3Unit, _ := content.FindUnit("cargo_mk3")
-		if metal < cm3Unit.Cost["metal"] || crystal < cm3Unit.Cost["crystal"] {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %.0f Metal, %.0f Crystal.", cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"])})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"], campID)
-		_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET cargo_mk3 = cargo_mk3 + 1 WHERE encampment_id = $1", campID)
-		successAlert = "🚚🚚🚚 Cargo Ship Mk III constructed!"
-	}
-
-	// Engineering Bay: reduces effective material waste on any successful
-	// craft, refunding a flat amount scaled by building level rather than
-	// rewriting every craft case's cost check individually.
-	if successAlert != "" {
-		var engineeringBayLvl int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'engineering_bay'", campID).Scan(&engineeringBayLvl)
-		if engineeringBayLvl > 0 {
-			var curMetal, curCrystal float64
-			_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal)
-			storageCap := storagecap.CapFor(ctx, tx, campID)
-			newMetal, _ := storagecap.Clamp(curMetal, float64(engineeringBayLvl)*5.0, storageCap)
-			newCrystal, _ := storagecap.Clamp(curCrystal, float64(engineeringBayLvl)*1.0, storageCap)
-			_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2 WHERE encampment_id = $3", newMetal, newCrystal, campID)
+		if currentDS+quantity > maxDS {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s) total (you have %d). Level up to raise the cap.", campLvl, maxDS, currentDS)})
 		}
 	}
 
-	// Dynamic Post-Commit Success Dispatcher: Only sends notification after database safely registers changes
+	totalCost := make(map[string]float64, len(spec.cost))
+	for res, perUnit := range spec.cost {
+		need := perUnit * float64(quantity)
+		totalCost[res] = need
+		if held[res] < need {
+			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %s for %dx %s.", formatCraftCost(map[string]float64{res: need}), quantity, spec.label)})
+		}
+	}
+
+	for res, amt := range totalCost {
+		_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s - $1 WHERE encampment_id = $2", res, res), amt, campID)
+	}
+	_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE workshop_inventory SET %s = %s + $1 WHERE encampment_id = $2", spec.dbColumn, spec.dbColumn), quantity, campID)
+
+	// Engineering Bay refund - same flat-per-craft-ACTION amount as
+	// before (not multiplied by quantity): a 20-unit order is still one
+	// trip through the assembly line, not twenty separate ones.
+	var engineeringBayLvl int
+	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'engineering_bay'", campID).Scan(&engineeringBayLvl)
+	if engineeringBayLvl > 0 {
+		var curMetal, curCrystal float64
+		_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1", campID).Scan(&curMetal, &curCrystal)
+		storageCap := storagecap.CapFor(ctx, tx, campID)
+		newMetal, _ := storagecap.Clamp(curMetal, float64(engineeringBayLvl)*5.0, storageCap)
+		newCrystal, _ := storagecap.Clamp(curCrystal, float64(engineeringBayLvl)*1.0, storageCap)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = $1, crystal = $2 WHERE encampment_id = $3", newMetal, newCrystal, campID)
+	}
+
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing craft transaction: %v", err)
 		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	if successAlert != "" {
-		_ = c.Respond(&gopkg.CallbackResponse{Text: successAlert})
-	}
+	_ = c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("✅ %dx %s %s successfully!", quantity, spec.label, spec.verb)})
 
-	if item == "buggy" || item == "ship" || item == "cargo_jet" || item == "jet" || item == "hauler" || item == "tanker" || item == "rig" ||
-		item == "cargo_mk1" || item == "cargo_mk2" || item == "cargo_mk3" {
+	if spec.isVehicle {
 		return h.HandleVehiclesPanel(c)
 	}
 	return h.HandleRecruitPanel(c)

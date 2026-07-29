@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -24,6 +25,33 @@ func (h *JobsHandler) myCamp(ctx context.Context, userID int64) (string, error) 
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", userID).Scan(&campID)
 	return campID, err
+}
+
+// HandleJobsPanel is the "🛠️ Odd Jobs" mother-keyboard entry point -
+// plants the JobsNavigation child keyboard (via sendPanelWithNav, see
+// navhelper.go's doc comment for why a plain c.Send with two reply-markup
+// arguments would silently drop one of them) and shows a cost/cooldown
+// reference summary so a player can decide what to run without needing
+// to trigger each job blind. Every button on the JobsNavigation keyboard
+// fires its job directly - see that function's doc comment in
+// internal/bot/keyboards/navigation.go for why there's no further
+// sub-panel here.
+func (h *JobsHandler) HandleJobsPanel(c telebot.Context) error {
+	panelText := "🛠️━━━━━━━━━━━━━━━━━━━━━━🛠️\n" +
+		htmlBold("ODD JOBS - FIELD OPERATIONS") + "\n" +
+		"🛠️━━━━━━━━━━━━━━━━━━━━━━🛠️\n\n" +
+		"One-off actions that don't fit anywhere else - pick one from the menu below.\n\n" +
+		"🚀 " + htmlBold("HyperSpeed Mission") + " - 300 Electricity, halves your nearest active mission's remaining time.\n" +
+		"🌍 " + htmlBold("Extend Planet") + " - Metal + Crystal (scales with level), +1000 storage capacity permanently.\n" +
+		"🌀 " + htmlBold("Teleport Outpost") + " - 1000 Electricity, relocates you to a fresh coordinate. 24h cooldown.\n" +
+		"👻 " + htmlBold("Ghost Protocol") + " - severe cost, 90-day cooldown. Relocates AND erases every locked-on scout/attacker's fix on your position. Not a substitute for Teleport - see /ghostprotocol for the full breakdown before using it.\n" +
+		"🛰️ " + htmlBold("Orbital Maneuver") + " - 400 Electricity, a 2-hour tactical buff.\n" +
+		"🔧 " + htmlBold("Repair Units") + " - 200 Scrap, restores 5 lost Soldiers.\n" +
+		"🏚️ " + htmlBold("Repair Buildings") + " - 150 Scrap, clears structural damage.\n" +
+		"☀️ " + htmlBold("Gather Sunlight") + " - free, +150 Electricity. 30-minute cooldown.\n\n" +
+		"🛠️━━━━━━━━━━━━━━━━━━━━━━🛠️"
+
+	return sendPanelWithNavHTML(c, "🛠️ Accessing Field Operations...", keyboards.JobsNavigation(), panelText, &telebot.ReplyMarkup{})
 }
 
 // HandleHyperSpeed (/newjobhyperspeed) shaves time off your earliest
@@ -289,8 +317,6 @@ func (h *JobsHandler) doGhostProtocol(ctx context.Context, campID string) (strin
 		htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)),
 		htmlCode(fmt.Sprintf("%.0f", crystalCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))), nil
 }
-
-
 
 // HandleOrbitalManeuver (/newjoborbitalmaneuver) grants a temporary
 // defense rating boost.

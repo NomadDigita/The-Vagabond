@@ -16,6 +16,7 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnRanking := menu.Text("🏆 Global Ranking")
 	btnBosses := menu.Text("👹 World Bosses")
 	btnRebellion := menu.Text("✊ The Rebellion")
+	btnJobs := menu.Text("🛠️ Odd Jobs")
 	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
 	menu.Reply(
@@ -23,7 +24,7 @@ func MainNavigation() *telebot.ReplyMarkup {
 		menu.Row(btnCombat, btnEcon),
 		menu.Row(btnFactory, btnRanking),
 		menu.Row(btnBosses, btnRebellion),
-		menu.Row(btnAdmin),
+		menu.Row(btnJobs, btnAdmin),
 	)
 
 	return menu
@@ -104,6 +105,46 @@ func WorkshopNavigation() *telebot.ReplyMarkup {
 	menu.Reply(
 		menu.Row(btnRecruit, btnVehicles),
 		menu.Row(btnDeconstruct),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
+// JobsNavigation builds the custom submenu for one-off "Odd Jobs" utility
+// actions (previously slash-command-only, with no button discoverability
+// at all - every other section in this game has had a mother/child
+// keyboard pair since the original navigation.go; Jobs was the one
+// exception). Every button here fires its job directly rather than
+// opening a further sub-panel, matching how a leaf action inside any
+// other child menu (e.g. Admin's "⚡ Force Master Tick") behaves - no
+// extra reply-keyboard replant happens on tap, so this same keyboard
+// just stays on screen between jobs.
+//
+// Deliberately excludes jobs.go's four *Alias handlers
+// (HandleManualScanAlias/HandleAutoScanAlias/HandleAdvancedScanAlias/
+// HandlePublishTradeAlias) - those aren't real actions, just text
+// pointers telling the player which *other* panel to use instead, and
+// would read as broken buttons here ("tap this button to be told to go
+// tap a different button elsewhere").
+func JobsNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnHyperSpeed := menu.Text("🚀 HyperSpeed Mission")
+	btnExtendPlanet := menu.Text("🌍 Extend Planet")
+	btnTeleport := menu.Text("🌀 Teleport Outpost")
+	btnGhostProtocol := menu.Text("👻 Ghost Protocol")
+	btnOrbitalManeuver := menu.Text("🛰️ Orbital Maneuver")
+	btnRepairUnits := menu.Text("🔧 Repair Units")
+	btnRepairBuildings := menu.Text("🏚️ Repair Buildings")
+	btnGatherSunlight := menu.Text("☀️ Gather Sunlight")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnHyperSpeed, btnExtendPlanet),
+		menu.Row(btnTeleport, btnGhostProtocol),
+		menu.Row(btnOrbitalManeuver, btnRepairUnits),
+		menu.Row(btnRepairBuildings, btnGatherSunlight),
 		menu.Row(btnBack),
 	)
 
