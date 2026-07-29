@@ -24,8 +24,52 @@ func seedScoutMission(t *testing.T, db *sql.DB, encampmentID string, phase strin
 // undiscovered target gets a permanent encampment_discoveries row AND a
 // known_locations coordinate snapshot, the mission transitions to
 // 'returning' with a computed ETA, and both parties are notified
-// appropriately (the scout's owner gets a route_status ping, the found
-// party gets a non-mutable "general" heads-up).
+// appropriately (the scout's owner gets a non-mutable "general" contact
+// alert - not "route_status": a discovery event must never be
+// mutable/muteable, per notifications/preferences.go's own contract -
+// the found party gets a non-mutable "general" heads-up too).
+// TestScoutMissionFindsTarget_ContactAlertSurvivesRouteStatusMute is a
+// regression test for a real reported bug: the CONTACT!/discovery
+// notification was originally (incorrectly) tagged "route_status", a
+// mutable category. A player who'd muted routine route pings (the
+// "still searching" chatter) would then also silently lose the one
+// notification that actually mattered - their scout finding a base.
+// Discovery alerts must never be mutable, per notifications/
+// preferences.go's own MutableCategories contract.
+func TestScoutMissionFindsTarget_ContactAlertSurvivesRouteStatusMute(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	scout := seedEncampment(t, db, 4007, "Muted Scout Origin", 0, 0, "TestRegion", false)
+	seedEncampment(t, db, 4008, "Muted Distant Target", 50, 0, "OtherRegion", false)
+	if _, err := db.Exec(`
+		INSERT INTO notification_preferences (user_id, mute_route_status) VALUES ($1, TRUE)
+		ON CONFLICT (user_id) DO UPDATE SET mute_route_status = TRUE`, int64(4007)); err != nil {
+		t.Fatalf("seeding muted preference: %v", err)
+	}
+
+	missionID := seedScoutMission(t, db, scout, "searching", 5)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	m := searchingScoutMission{id: missionID, encampmentID: scout, scoutsCommitted: 5, userID: 4007, originX: 0, originY: 0}
+	if err := e.scoutMissionFindsTarget(ctx, tx, m); err != nil {
+		t.Fatalf("scoutMissionFindsTarget: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var notifiedCount int
+	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND message LIKE '%CONTACT%'", int64(4007)).Scan(&notifiedCount)
+	if notifiedCount == 0 {
+		t.Error("expected the CONTACT! discovery notification to reach the player even with route_status muted")
+	}
+}
+
 func TestScoutMissionFindsTarget_LocksLocationAndTransitionsToReturning(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -75,10 +119,10 @@ func TestScoutMissionFindsTarget_LocksLocationAndTransitionsToReturning(t *testi
 	}
 
 	var scoutNotified, targetNotified int
-	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND category = 'route_status'", int64(4001)).Scan(&scoutNotified)
+	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND category = 'general'", int64(4001)).Scan(&scoutNotified)
 	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND category = 'general'", int64(4002)).Scan(&targetNotified)
 	if scoutNotified == 0 {
-		t.Error("expected the scouting player to receive a route_status contact notification")
+		t.Error("expected the scouting player to receive a non-mutable 'general' contact notification (a discovery alert must never be muteable)")
 	}
 	if targetNotified == 0 {
 		t.Error("expected the discovered player to receive a non-mutable 'general' heads-up")

@@ -211,9 +211,17 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 	}
 
 	if isRealPlayer(m.userID) {
+		// "general" (non-mutable), not "route_status": the periodic
+		// "still searching" ping above is routine chatter and fine to
+		// mute, but this is the actual discovery event - the entire
+		// payoff of the mission - and MutableCategories' own contract
+		// (notifications/preferences.go) is explicit that discovery
+		// alerts must never be suppressible. This was previously tagged
+		// "route_status" by mistake, meaning a player who'd muted the
+		// routine pings would silently lose this one too.
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf(
 			"🎯 %s\n\nYour Scout Walkers located Outpost %s. Its position is now locked in your intel and marked in your Tactical Target Matrix.\n\n🚶 Beginning the journey home - ETA %s.",
-			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(fmt.Sprintf("%.0f min", marchingMinutes))), "route_status"); err != nil {
+			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(fmt.Sprintf("%.0f min", marchingMinutes))), "general"); err != nil {
 			return err
 		}
 	}
