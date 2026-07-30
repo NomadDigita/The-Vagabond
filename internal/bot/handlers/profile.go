@@ -19,6 +19,27 @@ func NewProfileHandler(db *sql.DB) *ProfileHandler {
 	return &ProfileHandler{DB: db}
 }
 
+// HandleProfilePanel is the "📊 Player Profile" mother-keyboard entry
+// point - plants the ProfileNavigation child keyboard. Every button on
+// it fires its own report/panel directly (same leaf-action shape as
+// Jobs/Advisors).
+func (h *ProfileHandler) HandleProfilePanel(c telebot.Context) error {
+	panelText := "📊━━━━━━━━━━━━━━━━━━━━━━📊\n" +
+		htmlBold("COMMANDER DASHBOARD") + "\n" +
+		"📊━━━━━━━━━━━━━━━━━━━━━━📊\n\n" +
+		"Everything about your standing and settings - pick a report below.\n\n" +
+		"📈 " + htmlBold("Server Stats") + " - world-wide totals.\n" +
+		"🪖 " + htmlBold("My Units") + " - your full garrison breakdown.\n" +
+		"📜 " + htmlBold("My Missions") + " - active raids/expeditions at a glance.\n" +
+		"🗺️ " + htmlBold("My Destinations") + " - saved raid targets.\n" +
+		"📰 " + htmlBold("Event Log") + " - recent sector news.\n" +
+		"⚙️ " + htmlBold("Settings") + " - alert toggles, incl. muting routine route-status pings.\n" +
+		"📖 " + htmlBold("Player Guide") + " - how to play, from the top.\n\n" +
+		"📊━━━━━━━━━━━━━━━━━━━━━━📊"
+
+	return sendPanelWithNavHTML(c, "📊 Loading Commander Dashboard...", keyboards.ProfileNavigation(), panelText, &telebot.ReplyMarkup{})
+}
+
 // ── /description ─────────────────────────────────────────────────────
 
 func (h *ProfileHandler) HandleDescription(c telebot.Context) error {

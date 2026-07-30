@@ -30,6 +30,8 @@ func allKeyboards() map[string]*telebot.ReplyMarkup {
 		"EconomyNavigation":  EconomyNavigation(),
 		"WorkshopNavigation": WorkshopNavigation(),
 		"JobsNavigation":     JobsNavigation(),
+		"AdvisorsNavigation": AdvisorsNavigation(),
+		"ProfileNavigation":  ProfileNavigation(),
 		"AdminNavigation":    AdminNavigation(),
 	}
 }
@@ -110,5 +112,69 @@ func TestMainNavigationHasOddJobsEntry(t *testing.T) {
 	}
 	if !found {
 		t.Error("MainNavigation is missing the '🛠️ Odd Jobs' entry point into JobsNavigation")
+	}
+}
+
+// TestAdvisorsNavigationHasBackButton and TestMainNavigationHasAdvisorsEntry
+// mirror the Jobs guards above for the AI Advisors mother/child pair.
+func TestAdvisorsNavigationHasBackButton(t *testing.T) {
+	kb := AdvisorsNavigation()
+	found := false
+	for _, row := range kb.ReplyKeyboard {
+		for _, btn := range row {
+			if btn.Text == "⬅️ Back to HQ" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("AdvisorsNavigation is missing the standard '⬅️ Back to HQ' button")
+	}
+}
+
+func TestMainNavigationHasAdvisorsEntry(t *testing.T) {
+	kb := MainNavigation()
+	found := false
+	for _, row := range kb.ReplyKeyboard {
+		for _, btn := range row {
+			if btn.Text == "🎓 AI Advisors" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("MainNavigation is missing the '🎓 AI Advisors' entry point into AdvisorsNavigation")
+	}
+}
+
+// TestProfileNavigationHasBackButton and TestMainNavigationHasProfileEntry
+// mirror the same guards for the Player Profile mother/child pair.
+func TestProfileNavigationHasBackButton(t *testing.T) {
+	kb := ProfileNavigation()
+	found := false
+	for _, row := range kb.ReplyKeyboard {
+		for _, btn := range row {
+			if btn.Text == "⬅️ Back to HQ" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("ProfileNavigation is missing the standard '⬅️ Back to HQ' button")
+	}
+}
+
+func TestMainNavigationHasProfileEntry(t *testing.T) {
+	kb := MainNavigation()
+	found := false
+	for _, row := range kb.ReplyKeyboard {
+		for _, btn := range row {
+			if btn.Text == "📊 Player Profile" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("MainNavigation is missing the '📊 Player Profile' entry point into ProfileNavigation")
 	}
 }

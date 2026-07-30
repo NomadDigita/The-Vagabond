@@ -17,6 +17,8 @@ func MainNavigation() *telebot.ReplyMarkup {
 	btnBosses := menu.Text("👹 World Bosses")
 	btnRebellion := menu.Text("✊ The Rebellion")
 	btnJobs := menu.Text("🛠️ Odd Jobs")
+	btnAdvisors := menu.Text("🎓 AI Advisors")
+	btnProfile := menu.Text("📊 Player Profile")
 	btnAdmin := menu.Text("🏛️ Admin Terminal")
 
 	menu.Reply(
@@ -24,7 +26,8 @@ func MainNavigation() *telebot.ReplyMarkup {
 		menu.Row(btnCombat, btnEcon),
 		menu.Row(btnFactory, btnRanking),
 		menu.Row(btnBosses, btnRebellion),
-		menu.Row(btnJobs, btnAdmin),
+		menu.Row(btnJobs, btnAdvisors),
+		menu.Row(btnProfile, btnAdmin),
 	)
 
 	return menu
@@ -65,12 +68,14 @@ func CombatNavigation() *telebot.ReplyMarkup {
 	btnArena := menu.Text("🏟️ Combat Arena")
 	btnExplore := menu.Text("🧭 World Exploration")
 	btnScout := menu.Text("🔭 Long-Range Scouting")
+	btnMap := menu.Text("🗺️ Sector Map")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnScan, btnRadar),
 		menu.Row(btnNews, btnArena),
 		menu.Row(btnExplore, btnScout),
+		menu.Row(btnMap),
 		menu.Row(btnBack),
 	)
 
@@ -84,11 +89,13 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
 	btnExchange := menu.Text("💱 Market Exchange")
+	btnEther := menu.Text("🛒 Ether Shop")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnExchange, btnBack),
+		menu.Row(btnExchange, btnEther),
+		menu.Row(btnBack),
 	)
 
 	return menu
@@ -152,6 +159,64 @@ func JobsNavigation() *telebot.ReplyMarkup {
 	return menu
 }
 
+// AdvisorsNavigation builds the custom submenu for the AI Advisory Corps
+// (PROJECT_MASTER_PLAN.md's Phase E-J roadmap - 8 distinct AI advisor
+// personas that were entirely slash-command-only before this, with zero
+// button discoverability anywhere in the game, not even from the
+// thematically-adjacent "🧠 Automation Agent" panel). Same "leaf action,
+// no further sub-panel" shape as JobsNavigation - every button here
+// renders its advisor's full report directly.
+func AdvisorsNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnBattleAnalyst := menu.Text("⚔️ Battle Analyst")
+	btnEconomyAdvisor := menu.Text("💹 Economy Advisor")
+	btnGalaxyAdvisor := menu.Text("🌌 Galaxy Advisor")
+	btnGuildAssistant := menu.Text("🤝 Guild Assistant")
+	btnResearchPlanner := menu.Text("🔬 Research Planner")
+	btnFleetCommander := menu.Text("🚀 Fleet Commander")
+	btnNPCIntel := menu.Text("🛰️ NPC Intel")
+	btnGovernor := menu.Text("🏛️ Governor")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnBattleAnalyst, btnEconomyAdvisor),
+		menu.Row(btnGalaxyAdvisor, btnGuildAssistant),
+		menu.Row(btnResearchPlanner, btnFleetCommander),
+		menu.Row(btnNPCIntel, btnGovernor),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
+// ProfileNavigation builds the custom submenu for player-facing info
+// panels and settings. Every button here was slash-command-only before
+// this - notably /settings itself, which had zero button access despite
+// being where the route_status notification mute toggle actually lives.
+func ProfileNavigation() *telebot.ReplyMarkup {
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+
+	btnStats := menu.Text("📈 Server Stats")
+	btnUnits := menu.Text("🪖 My Units")
+	btnMissions := menu.Text("📜 My Missions")
+	btnDestinations := menu.Text("🗺️ My Destinations")
+	btnLog := menu.Text("📰 Event Log")
+	btnSettings := menu.Text("⚙️ Settings")
+	btnGuide := menu.Text("📖 Player Guide")
+	btnBack := menu.Text("⬅️ Back to HQ")
+
+	menu.Reply(
+		menu.Row(btnStats, btnUnits),
+		menu.Row(btnMissions, btnDestinations),
+		menu.Row(btnLog, btnSettings),
+		menu.Row(btnGuide),
+		menu.Row(btnBack),
+	)
+
+	return menu
+}
+
 // AdminNavigation builds the custom submenu for administrator actions.
 func AdminNavigation() *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -159,11 +224,14 @@ func AdminNavigation() *telebot.ReplyMarkup {
 	btnTick := menu.Text("⚡ Force Master Tick")
 	btnResources := menu.Text("🪙 Inject Resources")
 	btnMetrics := menu.Text("🛰️ Server Metrics")
+	btnBalance := menu.Text("⚖️ Balance Report")
+	btnWeekly := menu.Text("📅 Weekly Report")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnTick, btnResources),
-		menu.Row(btnMetrics, btnBack),
+		menu.Row(btnMetrics, btnBalance),
+		menu.Row(btnWeekly, btnBack),
 	)
 
 	return menu

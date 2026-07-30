@@ -152,6 +152,11 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 		btnDeclare := selector.Data("⚔️ Declare War", "declare_clan_war", clanID.String)
 		buttons = append(buttons, selector.Row(btnDeclare))
 	}
+	btnDiplomacy := selector.Data("🤝 Diplomacy", "open_diplomacy", "0")
+	btnFederation := selector.Data("🌐 My Federation", "open_federation", "0")
+	btnBrowseFeds := selector.Data("🔍 Browse Federations", "open_federations_browse", "0")
+	buttons = append(buttons, selector.Row(btnDiplomacy, btnFederation))
+	buttons = append(buttons, selector.Row(btnBrowseFeds))
 	btnLeave := selector.Data("🚪 Leave Clan", "leave_clan", clanID.String)
 	buttons = append(buttons, selector.Row(btnLeave))
 

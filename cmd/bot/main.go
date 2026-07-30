@@ -392,6 +392,7 @@ func main() {
 	// --- AI NPC Intelligence wiring (Phase I, independent AI roadmap branch) ---
 	aiNPCIntel := npcintel.New(db, aiService)
 	npcIntelHandler := handlers.NewNPCIntelHandler(aiNPCIntel)
+	advisorsHandler := handlers.NewAdvisorsHandler(db)
 
 	// --- AI Developer Console wiring (Phase J, independent AI roadmap branch) ---
 	// Reuses admin.AdminIDs (already parsed above) rather than re-parsing
@@ -420,6 +421,7 @@ func main() {
 	bot.Handle("/scout", combat.HandleScout)
 	bot.Handle("/factory", factory.HandleFactoryPanel)
 	bot.Handle("/map", world.HandleSectorMap)
+	bot.Handle("🗺️ Sector Map", world.HandleSectorMap)
 	bot.Handle("/help", onboarding.HandleHelp)
 	bot.Handle("/guide", onboarding.HandleGuide)
 	bot.Handle("/inventory", econ.HandleWarehouseReserves)
@@ -440,7 +442,9 @@ func main() {
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("/rebellion", rebellion.HandleRebellionPanel)
 	bot.Handle("/federations", federation.HandleFederationsPanel)
+	bot.Handle("\fopen_federations_browse", federation.HandleFederationsPanel)
 	bot.Handle("/federation", federation.HandleMyFederationPanel)
+	bot.Handle("\fopen_federation", federation.HandleMyFederationPanel)
 	bot.Handle("/fed_found", federation.HandleFoundFederation)
 	bot.Handle("/fed_join", federation.HandleJoinFederation)
 	bot.Handle("/fed_leave", federation.HandleLeaveFederation)
@@ -448,6 +452,7 @@ func main() {
 	bot.Handle("/scoutmission", scoutMissions.HandleDispatchScoutMission)
 	bot.Handle("/scoutstatus", scoutMissions.HandleScoutStatus)
 	bot.Handle("/diplomacy", diplomacy.HandleDiplomacyPanel)
+	bot.Handle("\fopen_diplomacy", diplomacy.HandleDiplomacyPanel)
 	bot.Handle("/ally", diplomacy.HandleProposeAlliance)
 	bot.Handle("/nap", diplomacy.HandleProposeNAP)
 	bot.Handle("/break_pact", diplomacy.HandleBreakPact)
@@ -463,6 +468,7 @@ func main() {
 	bot.Handle("/stats", profile.HandleStats)
 	bot.Handle("/units", profile.HandleUnits)
 	bot.Handle("/ether", ether.HandleEtherShop)
+	bot.Handle("🛒 Ether Shop", ether.HandleEtherShop)
 	bot.Handle("/missions", profile.HandleMissions)
 	bot.Handle("/destinations", profile.HandleDestinations)
 	bot.Handle("/newjobhyperspeed", jobs.HandleHyperSpeed)
@@ -492,6 +498,32 @@ func main() {
 	bot.Handle("🏚️ Repair Buildings", jobs.HandleRepairBuildings)
 	bot.Handle("☀️ Gather Sunlight", jobs.HandleGatherSunlight)
 
+	// AI Advisors section buttons (mother/child keyboard pair, matching
+	// the Jobs pattern above) - purely additive discoverability on top of
+	// the slash commands already registered elsewhere for these same
+	// handlers, which keep working unchanged.
+	bot.Handle("🎓 AI Advisors", advisorsHandler.HandleAdvisorsPanel)
+	bot.Handle("⚔️ Battle Analyst", battleAnalystHandler.HandleBattleAnalyst)
+	bot.Handle("💹 Economy Advisor", econAdvisorHandler.HandleEconomyAdvisor)
+	bot.Handle("🌌 Galaxy Advisor", galaxyAdvisorHandler.HandleGalaxyAdvisor)
+	bot.Handle("🤝 Guild Assistant", guildAssistantHandler.HandleGuildAssistant)
+	bot.Handle("🔬 Research Planner", researchPlannerHandler.HandleResearchPlanner)
+	bot.Handle("🚀 Fleet Commander", fleetCommanderHandler.HandleFleetCommander)
+	bot.Handle("🛰️ NPC Intel", npcIntelHandler.HandleNPCIntel)
+	bot.Handle("🏛️ Governor", governorHandler.HandleGovernor)
+
+	// Player Profile section buttons (mother/child keyboard pair) -
+	// notably gives /settings its first button access ever, despite it
+	// being where the route_status notification mute toggle actually lives.
+	bot.Handle("📊 Player Profile", profile.HandleProfilePanel)
+	bot.Handle("📈 Server Stats", profile.HandleStats)
+	bot.Handle("🪖 My Units", profile.HandleUnits)
+	bot.Handle("📜 My Missions", profile.HandleMissions)
+	bot.Handle("🗺️ My Destinations", profile.HandleDestinations)
+	bot.Handle("📰 Event Log", profile.HandleLog)
+	bot.Handle("⚙️ Settings", profile.HandleSettings)
+	bot.Handle("📖 Player Guide", onboarding.HandleGuide)
+
 	bot.Handle("/ai_status", aiStatus.HandleAIStatus)
 	bot.Handle("/ai_status_toggle", aiStatus.HandleAIStatusToggle)
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
@@ -515,9 +547,11 @@ func main() {
 	bot.Handle("/npc_intel", npcIntelHandler.HandleNPCIntel)
 	bot.Handle("\fnpc_intel_refresh", npcIntelHandler.HandleNPCIntelRefreshCallback)
 	bot.Handle("/weekly_report", devConsoleHandler.HandleWeeklyReport)
+	bot.Handle("📅 Weekly Report", devConsoleHandler.HandleWeeklyReport)
 	bot.Handle("\fdev_console_refresh", devConsoleHandler.HandleDevConsoleRefreshCallback)
 	bot.Handle("/admin_ask", devConsoleHandler.HandleAdminAsk)
 	bot.Handle("/balance_report", devConsoleHandler.HandleBalanceReport)
+	bot.Handle("⚖️ Balance Report", devConsoleHandler.HandleBalanceReport)
 	bot.Handle("\fbalance_report_refresh", devConsoleHandler.HandleBalanceReportRefreshCallback)
 	bot.Handle("👹 World Bosses", boss.HandleBossPanel)
 	bot.Handle("✊ The Rebellion", rebellion.HandleRebellionPanel)
