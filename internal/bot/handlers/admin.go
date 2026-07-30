@@ -373,7 +373,7 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 				htmlCode(htmlEscape(ar.defenderName)) + " has been aborted due to an administrative database reset. Remaining forces have returned safely."
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ar.attackerUserID, attackerAlert)
 
-			if ar.defenderUserID != 0 {
+			if isRealPlayer(ar.defenderUserID) {
 				defenderAlert := "🛡️ " + htmlBold("SYSTEM UPDATE") + ": The hostile campaign marching towards your base from Outpost " +
 					htmlCode(htmlEscape(ar.attackerName)) + " was aborted due to an administrative database reset."
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ar.defenderUserID, defenderAlert)

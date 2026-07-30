@@ -164,7 +164,7 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🚨 ICBM INTERCEPTED: Target's Anti-Missile Battery shot it down!"})
 
-			if defenderUserID != 0 {
+			if isRealPlayer(defenderUserID) {
 				defenderAlert := fmt.Sprintf(
 					"🛡️ %s\n\n"+
 						"Our Anti-Missile Battery successfully shot down an incoming tactical ICBM strike from Outpost %s! 🎉\n\n"+
@@ -188,7 +188,7 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🚨 ICBM INTERCEPTED: Target shielding blocked the strike!"})
 
-		if defenderUserID != 0 {
+		if isRealPlayer(defenderUserID) {
 			defenderAlert := fmt.Sprintf(
 				"🛡️ %s\n\n"+
 					"Our Nuclear Shielding installations have successfully intercepted and destroyed an incoming tactical ICBM strike from Outpost %s! 🎉\n\n"+
@@ -222,7 +222,7 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	newsHeadline := fmt.Sprintf("💥 DETONATION ALERT: Commander %s launched an ICBM. Outpost %s suffered catastrophic nuclear damage.", sender.FirstName, defenderName)
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
-	if defenderUserID != 0 {
+	if isRealPlayer(defenderUserID) {
 		defenderAlert := fmt.Sprintf(
 			"💥 %s\n\n"+
 				"An ICBM warhead launched by Outpost %s has detonated directly on your base! ☢️\n\n"+
@@ -309,7 +309,7 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 			_ = tx.Commit()
 			_ = c.Respond(&telebot.CallbackResponse{Text: "🚨 PIERCING MISSILE INTERCEPTED: Target's Anti-Missile Battery shot it down!"})
 
-			if defenderUserID != 0 {
+			if isRealPlayer(defenderUserID) {
 				defenderAlert := fmt.Sprintf(
 					"🛡️ %s\n\n"+
 						"Our Anti-Missile Battery successfully shot down an incoming Piercing Missile strike from Outpost %s! 🎉\n\n"+
@@ -345,7 +345,7 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 	newsHeadline := fmt.Sprintf("🎯 PIERCING STRIKE ALERT: Commander %s launched a Piercing Missile. Outpost %s's Defense Grid turrets took direct structural damage.", sender.FirstName, defenderName)
 	_, _ = h.DB.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", newsHeadline)
 
-	if defenderUserID != 0 {
+	if isRealPlayer(defenderUserID) {
 		defenderAlert := fmt.Sprintf(
 			"🎯☢️ %s\n\n"+
 				"A Piercing Missile launched by Outpost %s has slipped past your Nuclear Shields entirely and detonated directly on your Defense Grid! 💥\n\n"+
