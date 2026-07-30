@@ -298,11 +298,11 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 					activeQueuesText += "⚙️ ACTIVE EXTRACTION PROCESSORS:\n"
 					hasQueues = true
 				}
-				timeLeft := int(rReady.UTC().Sub(time.Now().UTC()).Seconds())
+				timeLeft := rReady.UTC().Sub(time.Now().UTC())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
-				activeQueuesText += fmt.Sprintf("• ⛏️ %s Miner: %ds remaining to finish extraction\n", strings.Title(rType), timeLeft)
+				activeQueuesText += fmt.Sprintf("• ⛏️ %s Miner: %s remaining to finish extraction\n", strings.Title(rType), formatDuration(timeLeft))
 			}
 		}
 		if hasQueues {

@@ -1044,8 +1044,8 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 
 		defenderAlert := fmt.Sprintf(
 			"🛰️ %s Outpost %s has successfully scanned your warehouse telemetry!\n"+
-				"The spy satellite is now returning to orbit. You have <code>%d seconds</code> left to launch an Interceptor Drone and vaporize the intel before it lands. ⏳",
-			htmlBoldTick("ESPIONAGE BREACH:"), htmlBoldTick(htmlEscapeTick(s.spyName)), int(returnDuration.Seconds()),
+				"The spy satellite is now returning to orbit. You have <code>%s</code> left to launch an Interceptor Drone and vaporize the intel before it lands. ⏳",
+			htmlBoldTick("ESPIONAGE BREACH:"), htmlBoldTick(htmlEscapeTick(s.spyName)), formatDurationTick(returnDuration),
 		)
 		if isRealPlayer(s.targetUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", s.targetUserID, defenderAlert)
@@ -1852,7 +1852,6 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, a.attackerID, b.attackerID)
 			_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, b.attackerID, a.attackerID)
 
-			deadlineSeconds := int(roadcombat.ResponseWindow.Seconds())
 			for _, side := range []struct {
 				userID    int64
 				otherName string
@@ -1862,7 +1861,7 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 			} {
 				msg := fmt.Sprintf(
 					"🚧 %s\n\nYour expedition has encountered forces commanded by %s on the road.\nYou have %s to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass them peacefully.",
-					htmlBoldTick("ROAD CONTACT!"), htmlCodeTick(htmlEscapeTick(side.otherName)), htmlCodeTick(fmt.Sprintf("%ds", deadlineSeconds)),
+					htmlBoldTick("ROAD CONTACT!"), htmlCodeTick(htmlEscapeTick(side.otherName)), htmlCodeTick(formatDurationTick(roadcombat.ResponseWindow)),
 				)
 				if isRealPlayer(side.userID) {
 					_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", side.userID, msg)

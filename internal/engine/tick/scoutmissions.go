@@ -221,7 +221,7 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 		// routine pings would silently lose this one too.
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf(
 			"🎯 %s\n\nYour Scout Walkers located Outpost %s. Its position is now locked in your intel and marked in your Tactical Target Matrix.\n\n🚶 Beginning the journey home - ETA %s.",
-			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(fmt.Sprintf("%.0f min", marchingMinutes))), "general"); err != nil {
+			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(formatDurationTick(time.Duration(marchingMinutes*float64(time.Minute))))), "general"); err != nil {
 			return err
 		}
 	}
@@ -390,7 +390,7 @@ func (e *Engine) pingInTransitScoutMissions(ctx context.Context, tx *sql.Tx) err
 			remaining = 0
 		}
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf("🚶 %s: your Scout Walkers are en route home. ETA: %s.",
-			htmlBoldTick("EN ROUTE"), htmlCodeTick(fmt.Sprintf("%.0f min", remaining.Minutes()))), "route_status"); err != nil {
+			htmlBoldTick("EN ROUTE"), htmlCodeTick(formatDurationTick(remaining))), "route_status"); err != nil {
 			log.Printf("Failed queuing scout mission %s en-route ping: %v", m.id, err)
 		}
 	}

@@ -1,6 +1,45 @@
 package handlers
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// formatDuration renders a duration the way a player actually thinks
+// about time - "2h 15m" or "3d 6h", not "8100s" - by picking the two
+// largest non-zero units (seconds only appear on their own once under a
+// minute). Negative or zero durations always show "0s" rather than a
+// negative number, since every caller uses this for a countdown that's
+// either still running or has already elapsed.
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int64(d.Seconds())
+
+	weeks := total / (7 * 24 * 3600)
+	total %= 7 * 24 * 3600
+	days := total / (24 * 3600)
+	total %= 24 * 3600
+	hours := total / 3600
+	total %= 3600
+	minutes := total / 60
+	seconds := total % 60
+
+	switch {
+	case weeks > 0:
+		return fmt.Sprintf("%dw %dd", weeks, days)
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	case minutes > 0:
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
+}
 
 // This file holds small, dependency-free helpers used to render richer
 // Telegram messages via HTML parse mode (bold/italic/underline/code/

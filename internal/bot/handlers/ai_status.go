@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"gopkg.in/telebot.v3"
@@ -86,8 +87,8 @@ func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 		}
 	}
 
-	b.WriteString(fmt.Sprintf("\nMaster switch: %v | Per-user daily cap: $%.2f | Cache TTL: %ds",
-		h.Service.Config.Enabled, h.Service.Config.MaxUserCostPerDayUSD, h.Service.Config.CacheTTLSeconds))
+	b.WriteString(fmt.Sprintf("\nMaster switch: %v | Per-user daily cap: $%.2f | Cache TTL: %s",
+		h.Service.Config.Enabled, h.Service.Config.MaxUserCostPerDayUSD, formatDuration(time.Duration(h.Service.Config.CacheTTLSeconds)*time.Second)))
 
 	return c.Send(b.String())
 }

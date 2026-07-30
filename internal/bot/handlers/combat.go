@@ -168,11 +168,11 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 					dashboard += "🤝 " + htmlBold("ACTIVE CO-OP RECRUITMENT LOBBIES") + "\n"
 					hasCoops = true
 				}
-				timeLeft := int(resTime.UTC().Sub(time.Now().UTC()).Seconds())
+				timeLeft := resTime.UTC().Sub(time.Now().UTC())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
-				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  ⏳ Departure window expires in: %s\n\n", htmlEscape(aName), htmlEscape(dName), htmlCode(fmt.Sprintf("%ds", timeLeft)))
+				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  ⏳ Departure window expires in: %s\n\n", htmlEscape(aName), htmlEscape(dName), htmlCode(formatDuration(timeLeft)))
 				btnJoin := selector.Data(fmt.Sprintf("🤝 Join %s", aName), "join_coop", rID)
 				buttons = append(buttons, selector.Row(btnJoin))
 			}
@@ -252,7 +252,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var detected bool
 			if err := rowsOut.Scan(&rID, &dName, &resTime, &rState, &rRound, &rRations, &rAmmo, &originRegion, &originX, &originY, &destinationRegion, &destinationX, &destinationY, &rMovementState, &pauseReason, &cargoCarried, &detected); err == nil {
 				diff := resTime.UTC().Sub(time.Now().UTC())
-				timeLeft := int(diff.Seconds())
+				timeLeft := diff
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
@@ -272,15 +272,15 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				}
 				switch rState {
 				case "marching":
-					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n%s   Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
+					outboundText += fmt.Sprintf("🚀 OUTBOUND EXPEDITION [%d] (MARCHING):\n   Target: %s\n%s   Arrival: %s (%s remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				case "staged":
 					var coopCount int
 					_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM raid_coop_members WHERE raid_id = $1", rID).Scan(&coopCount)
-					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Commanders joined: %d (auto-launches at the window below regardless of headcount)\n   Departure Window: %s (%ds remaining)\n\n", index, dName, coopCount, resTime.UTC().Format("15:04:05"), timeLeft)
+					outboundText += fmt.Sprintf("🤝 STAGED CO-OP RAID [%d] (PREPARING):\n   Target: %s\n   Commanders joined: %d (auto-launches at the window below regardless of headcount)\n   Departure Window: %s (%s remaining)\n\n", index, dName, coopCount, resTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				case "returning":
-					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n%s   Base Arrival: %s (%ds remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), timeLeft)
+					outboundText += fmt.Sprintf("↩️ RETURN MARCH [%d] (RETURNING):\n   Target: %s\n%s   Base Arrival: %s (%s remaining)\n\n", index, dName, routeLine, resTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				default:
-					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%ds remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), timeLeft, rRations, rAmmo)
+					outboundText += fmt.Sprintf("⚔️ ACTIVE ENGAGEMENT [%d] (COMBAT - Round %d):\n   Target: %s\n   Decisive Resolution: %s (%s remaining)\n   Supplies: Rations %.0f%% | Ammunition: %.0f%%\n\n", index, rRound, dName, resTime.UTC().Format("15:04:05"), formatDuration(timeLeft), rRations, rAmmo)
 				}
 				switch rMovementState {
 				case "camped":
@@ -335,11 +335,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					enemyName = nameA
 					myRaidID = raidBID
 				}
-				secondsLeft := int(time.Until(deadline.UTC()).Seconds())
-				if secondsLeft < 0 {
-					secondsLeft = 0
+				timeLeft := time.Until(deadline.UTC())
+				if timeLeft < 0 {
+					timeLeft = 0
 				}
-				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Forces of [%s]\n   Decide within %ds or your column continues past them.\n\n", enemyName, secondsLeft)
+				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Forces of [%s]\n   Decide within %s or your column continues past them.\n\n", enemyName, formatDuration(timeLeft))
 				btnAttack := selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID, myRaidID)
 				btnContinue := selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID, myRaidID)
 				buttons = append(buttons, selector.Row(btnAttack, btnContinue))
@@ -387,14 +387,14 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var resolveTime time.Time
 			if scanErr := rowsIn.Scan(&attackerName, &resolveTime, &rState); scanErr == nil {
 				diff := resolveTime.UTC().Sub(time.Now().UTC())
-				timeLeft := int(diff.Seconds())
+				timeLeft := diff
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
 				if rState == "marching" {
-					inboundText += fmt.Sprintf("🚨 INBOUND INVASION WARNING!\n   Hostile Force: Outpost [%s]\n   March Arrival: %s (%ds remaining)\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+					inboundText += fmt.Sprintf("🚨 INBOUND INVASION WARNING!\n   Hostile Force: Outpost [%s]\n   March Arrival: %s (%s remaining)\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				} else {
-					inboundText += fmt.Sprintf("💥 BASE SIEGE UNDERWAY!\n   Invading Force: Outpost [%s]\n   Silo Impact Window: %s (%ds remaining)\n\n⚠️ TIP: Repair defensive modules immediately!\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+					inboundText += fmt.Sprintf("💥 BASE SIEGE UNDERWAY!\n   Invading Force: Outpost [%s]\n   Silo Impact Window: %s (%s remaining)\n\n⚠️ TIP: Repair defensive modules immediately!\n\n", attackerName, resolveTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				}
 			}
 		}
@@ -432,21 +432,21 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				// target; showing a fake 2-minute countdown made this look
 				// permanently stuck at "0s remaining" long before the real
 				// flight was anywhere close to done.
-				timeLeft := int(time.Until(resolveTime.UTC()).Seconds())
+				timeLeft := time.Until(resolveTime.UTC())
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
 				if isOutbound {
 					if !resolved {
-						spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%ds remaining)\n\n", edName, timeLeft)
+						spyText += fmt.Sprintf("🛰️ ACTIVE OUTBOUND SCAN: Scanning %s\n   Uplink Status: Decrypting (%s remaining)\n\n", edName, formatDuration(timeLeft))
 					} else {
-						spyText += fmt.Sprintf("↩️ SATELLITE RETURNING: Carrying Intel from %s\n   Arrival Status: Downlinking (%ds remaining)\n\n", edName, timeLeft)
+						spyText += fmt.Sprintf("↩️ SATELLITE RETURNING: Carrying Intel from %s\n   Arrival Status: Downlinking (%s remaining)\n\n", edName, formatDuration(timeLeft))
 					}
 				} else {
 					if !resolved {
-						spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%ds remaining)\n\n", eaName, timeLeft)
+						spyText += fmt.Sprintf("📡 INCOMING ESPIONAGE BREACH: Rival %s\n   Uplink Status: Intercept Window (%s remaining)\n\n", eaName, formatDuration(timeLeft))
 					} else {
-						spyText += fmt.Sprintf("📡 RETREAT INTERCEPT WINDOW: Rival %s\n   Status: Chase Chase Chase! (%ds remaining)\n\n", eaName, timeLeft)
+						spyText += fmt.Sprintf("📡 RETREAT INTERCEPT WINDOW: Rival %s\n   Status: Chase Chase Chase! (%s remaining)\n\n", eaName, formatDuration(timeLeft))
 					}
 					btnIntercept := selector.Data("🛡️ Launch Interceptor Drone", "launch_interceptor", spyID)
 					buttons = append(buttons, selector.Row(btnIntercept))
@@ -475,17 +475,17 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var resolveTime time.Time
 			if scanErr := rowsBoss.Scan(&bossName, &bState, &resolveTime); scanErr == nil {
 				diff := resolveTime.UTC().Sub(time.Now().UTC())
-				timeLeft := int(diff.Seconds())
+				timeLeft := diff
 				if timeLeft < 0 {
 					timeLeft = 0
 				}
 				switch bState {
 				case "marching":
-					bossText += fmt.Sprintf("🐲 BOSS ASSAULT (MARCHING): Target: %s\n   ETA: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+					bossText += fmt.Sprintf("🐲 BOSS ASSAULT (MARCHING): Target: %s\n   ETA: %s (%s remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				case "returning":
-					bossText += fmt.Sprintf("↩️ BOSS ASSAULT (RETURNING): Target: %s\n   Base Arrival: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+					bossText += fmt.Sprintf("↩️ BOSS ASSAULT (RETURNING): Target: %s\n   Base Arrival: %s (%s remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				default:
-					bossText += fmt.Sprintf("⚔️ BOSS ENGAGEMENT LIVE: Target: %s\n   Resolution: %s (%ds remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), timeLeft)
+					bossText += fmt.Sprintf("⚔️ BOSS ENGAGEMENT LIVE: Target: %s\n   Resolution: %s (%s remaining)\n\n", bossName, resolveTime.UTC().Format("15:04:05"), formatDuration(timeLeft))
 				}
 			}
 		}
@@ -2031,7 +2031,7 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 }
 func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attackerName string, resolveTime time.Time) error {
 	diff := resolveTime.UTC().Sub(time.Now().UTC())
-	timeLeft := int(diff.Seconds())
+	timeLeft := diff
 	if timeLeft < 0 {
 		timeLeft = 0
 	}
@@ -2046,7 +2046,7 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 		htmlBold("EXPEDITION COMMAND PANEL"),
 		htmlEscape(attackerName),
 		htmlCode(resolveTime.UTC().Format("15:04:05")),
-		htmlCode(fmt.Sprintf("%ds", timeLeft)),
+		htmlCode(formatDuration(timeLeft)),
 		htmlItalic("Use the action buttons to speed up or abort the current expedition."),
 	)
 

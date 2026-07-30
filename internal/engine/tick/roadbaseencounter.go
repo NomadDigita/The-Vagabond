@@ -145,11 +145,10 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 		_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, m.attackerID, baseID)
 		_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, baseID, m.attackerID)
 
-		deadlineSeconds := int(roadcombat.ResponseWindow.Seconds())
 		if isRealPlayer(m.attackerUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.attackerUserID,
 				fmt.Sprintf("🚧 %s: Your expedition passed close to Outpost %s.\nYou have %s to decide: Attack, or Continue on your way (open your ⚔️ Expedition Radar to choose). Taking no action lets your column pass it peacefully.",
-					htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(baseName)), htmlCodeTick(fmt.Sprintf("%ds", deadlineSeconds))))
+					htmlBoldTick("ROAD CONTACT"), htmlCodeTick(htmlEscapeTick(baseName)), htmlCodeTick(formatDurationTick(roadcombat.ResponseWindow))))
 		}
 		if isRealPlayer(baseUserID) {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", baseUserID,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
@@ -238,7 +239,8 @@ func (h *ScoutMissionsHandler) renderScoutStatus(ctx context.Context, campID str
 		}
 		body += "\n"
 		if returnETA.Valid {
-			body += fmt.Sprintf("⏱️ ETA: %s\n", htmlCode(returnETA.Time.UTC().Format("15:04 MST")))
+			remaining := time.Until(returnETA.Time.UTC())
+			body += fmt.Sprintf("⏱️ ETA: %s (%s remaining)\n", htmlCode(returnETA.Time.UTC().Format("15:04 MST")), htmlCode(formatDuration(remaining)))
 		}
 		return body + divider, true, nil
 	default:
