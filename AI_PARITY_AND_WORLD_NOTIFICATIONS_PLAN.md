@@ -13,6 +13,21 @@ to this implementing session to decide rather than block on (per direct
 instruction, given other developers are also active on this project and
 everything is documented for continuity either way). Decisions made,
 each treated as a tunable starting constant, not a final number:
+
+**2026-08-01 update - some of the specific numbers below are now stale.**
+The project owner gave direct tuning instructions that day (see
+`AI_AND_SCOUTING_EXPANSION_PLAN.md` item 2 for the full record):
+`aiVsAIRaidProbabilityWhenEligible` was raised from 0.12 to 0.35, and the
+fairness band this doc describes as "how far below itself may a faction
+raid" was inverted entirely - a faction may now only raid a target at its
+own level or above, never below, plus a new overdue-raid guarantee
+mechanism was added for level-4+ real players. The design reasoning below
+(why a band exists at all, why AI-vs-AI needed its own probability, the
+"start conservative" philosophy) is still accurate; just don't trust the
+specific numbers or the "below itself" direction anywhere in this file -
+`internal/engine/tick/aidecisions.go`'s own comments are the current
+source of truth for the exact constants.
+
 1. **Ghost Protocol cost**: 50% of *current* Scrap/Metal/Crystal/Dollars
    (proportional, not a fixed absolute number - see 3.4's own reasoning
    for why a fixed number can't be calibrated without live-economy data

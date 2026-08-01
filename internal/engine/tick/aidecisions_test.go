@@ -165,7 +165,15 @@ func TestAIScoutCanDiscoverAnotherAIFaction(t *testing.T) {
 	}
 }
 
-func TestPickFairAIRaidTargetAppliesFairnessBandToAIFactionsToo(t *testing.T) {
+// TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel verifies
+// the 2026-08-01 fairness inversion: a faction may only raid a target at
+// its own level or above, never below - "lower level can attack higher
+// level but higher level can't attack lower level," per the project
+// owner. Runs pickFairAIRaidTarget many times since it randomizes
+// between the normal and wide band on each call; a below-level target
+// must never appear in any of them, and an at-or-above-level target must
+// appear at least once.
+func TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
@@ -173,18 +181,25 @@ func TestPickFairAIRaidTargetAppliesFairnessBandToAIFactionsToo(t *testing.T) {
 	faction := seedEncampment(t, db, 2004, "Faction Gamma", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 10)
 
-	weakPlayer := seedEncampment(t, db, 2005, "Weak Player", 1, 0, "TestRegion", false)
-	setAILevel(t, db, weakPlayer, 1) // 9 levels below - must be excluded regardless of AI/human
-	weakFaction := seedEncampment(t, db, 2007, "Faction Delta", 3, 0, "TestRegion", true)
-	setAILevel(t, db, weakFaction, 1) // 9 levels below - must be excluded, being an AI faction is no exemption
-	fairFaction := seedEncampment(t, db, 2006, "Faction Fair", 2, 0, "TestRegion", true)
-	setAILevel(t, db, fairFaction, 9) // 1 level below - within the fairness band, and now a valid target
+	farBelowPlayer := seedEncampment(t, db, 2005, "Weak Player", 1, 0, "TestRegion", false)
+	setAILevel(t, db, farBelowPlayer, 1) // far below - must always be excluded
+
+	oneBelowFaction := seedEncampment(t, db, 2007, "Faction Delta", 3, 0, "TestRegion", true)
+	setAILevel(t, db, oneBelowFaction, 9) // 1 level BELOW - the exact case the project owner called out
+	// as the one that "should almost never" happen anymore: must be excluded now, even though the old
+	// (pre-2026-08-01) rule would have allowed it.
+
+	twoAboveFaction := seedEncampment(t, db, 2006, "Faction Fair", 2, 0, "TestRegion", true)
+	setAILevel(t, db, twoAboveFaction, 12) // 2 levels ABOVE, inside the normal band - a valid "punch up" target.
+
+	sameLevelFaction := seedEncampment(t, db, 2015, "Faction Even", 4, 0, "TestRegion", true)
+	setAILevel(t, db, sameLevelFaction, 10) // exactly level - allowed, "at or above" includes equal.
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	for _, target := range []string{weakPlayer, weakFaction, fairFaction} {
+	for _, target := range []string{farBelowPlayer, oneBelowFaction, twoAboveFaction, sameLevelFaction} {
 		if _, err := tx.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, target); err != nil {
 			t.Fatalf("seeding discovery: %v", err)
 		}
@@ -193,23 +208,123 @@ func TestPickFairAIRaidTargetAppliesFairnessBandToAIFactionsToo(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	tx, err = db.BeginTx(ctx, nil)
+	seenAboveOrSame := false
+	for i := 0; i < 50; i++ {
+		tx2, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		target, err := e.pickFairAIRaidTarget(ctx, tx2, faction, 10)
+		_ = tx2.Rollback()
+		if err != nil {
+			t.Fatalf("pickFairAIRaidTarget: %v", err)
+		}
+		if target == nil {
+			continue
+		}
+		if target.id == farBelowPlayer || target.id == oneBelowFaction {
+			t.Fatalf("pickFairAIRaidTarget returned a below-own-level target %q - attack-up-only rule violated", target.name)
+		}
+		if target.id == twoAboveFaction || target.id == sameLevelFaction {
+			seenAboveOrSame = true
+		}
+	}
+	if !seenAboveOrSame {
+		t.Error("expected pickFairAIRaidTarget to sometimes return an at-or-above-level target across 50 attempts")
+	}
+}
+
+// TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability
+// verifies the second half of the 2026-08-01 direction: a discovered,
+// level-4+ real player who hasn't been raided in aiOverdueRaidThreshold
+// is returned by pickOverdueRaidTarget - the guarantee mechanism that
+// bypasses the probability roll entirely - while a target raided
+// recently, a target below the level floor, and another AI faction (not
+// eligible for this specific guarantee) are all correctly excluded.
+func TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2016, "Faction Iota", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 3)
+
+	overdueTarget := seedEncampment(t, db, 2017, "Overdue Player", 1, 0, "TestRegion", false)
+	setAILevel(t, db, overdueTarget, 12) // well above the level-4 floor, never raided - should be guaranteed-eligible
+
+	tooLowLevel := seedEncampment(t, db, 2018, "New Player", 2, 0, "TestRegion", false)
+	setAILevel(t, db, tooLowLevel, 3) // below aiOverdueMinTargetLevel (4) - must be excluded from the guarantee
+
+	recentlyRaidedTarget := seedEncampment(t, db, 2019, "Recently Raided Player", 3, 0, "TestRegion", false)
+	setAILevel(t, db, recentlyRaidedTarget, 12)
+
+	anotherAIFaction := seedEncampment(t, db, 2020, "Faction Kappa", 4, 0, "TestRegion", true)
+	setAILevel(t, db, anotherAIFaction, 12) // AI-vs-AI is deliberately excluded from this guarantee
+
+	for _, target := range []string{overdueTarget, tooLowLevel, recentlyRaidedTarget, anotherAIFaction} {
+		if _, err := db.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, target); err != nil {
+			t.Fatalf("seeding discovery: %v", err)
+		}
+	}
+	// recentlyRaidedTarget was raided 1 hour ago - well inside the 10-hour threshold.
+	if _, err := db.Exec(`
+		INSERT INTO raids (attacker_id, defender_id, state, resolve_time, created_at)
+		VALUES ($1, $2, 'resolved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP - INTERVAL '1 hour')`,
+		faction, recentlyRaidedTarget); err != nil {
+		t.Fatalf("seeding a recent raid: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	target, err := e.pickFairAIRaidTarget(ctx, tx, faction, 10)
+	target, err := e.pickOverdueRaidTarget(ctx, tx, faction, 3)
 	if err != nil {
-		t.Fatalf("pickFairAIRaidTarget: %v", err)
+		t.Fatalf("pickOverdueRaidTarget: %v", err)
 	}
 	if target == nil {
-		t.Fatal("expected a fair target to be found")
+		t.Fatal("expected an overdue target to be found")
 	}
-	if target.id != fairFaction {
-		t.Errorf("expected the fair AI-faction target %s (level 9), got %s", fairFaction, target.id)
+	if target.id != overdueTarget {
+		t.Errorf("expected the overdue target %s, got %s", overdueTarget, target.id)
 	}
-	if !target.isAIFaction {
-		t.Error("expected the returned target to be flagged as an AI faction")
+}
+
+// TestDecideOneAIFactionPrioritizesOverdueGuaranteeOverProbabilityRoll
+// verifies decideOneAIFaction actually raids an overdue-eligible target
+// on the very next decision, with no dependency on the probability roll
+// - the "no roll, no exception" guarantee.
+func TestDecideOneAIFactionPrioritizesOverdueGuaranteeOverProbabilityRoll(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2021, "Faction Lambda", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 3)
+	setGarrison(t, db, faction, 100, 50)
+
+	overdueTarget := seedEncampment(t, db, 2022, "Guaranteed Target", 1, 0, "TestRegion", false)
+	setAILevel(t, db, overdueTarget, 12)
+	if _, err := db.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, overdueTarget); err != nil {
+		t.Fatalf("seeding discovery: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := e.decideOneAIFaction(ctx, tx, faction, 3, "TestRegion"); err != nil {
+		t.Fatalf("decideOneAIFaction: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var raidCount int
+	_ = db.QueryRow("SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND defender_id = $2", faction, overdueTarget).Scan(&raidCount)
+	if raidCount != 1 {
+		t.Errorf("expected exactly one guaranteed raid against the overdue target, got %d", raidCount)
 	}
 }
 
@@ -288,12 +403,13 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 
 // TestAIFactionCanRaidAnotherAIFactionRarely mirrors
 // TestEvaluateRoadBaseEncountersExcludesAIFactionBases's probabilistic
-// pattern from roadencounter_test.go, but inverted from this codebase's
-// earlier behavior: AI-vs-AI conflict is now in scope
-// (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2), so running many
-// iterations at aiVsAIRaidProbabilityWhenEligible should eventually
-// produce at least one AI-vs-AI raid, and it should never generate a
-// public world_news headline.
+// pattern from roadencounter_test.go: AI-vs-AI conflict is in scope
+// (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2), and running many
+// iterations at aiVsAIRaidProbabilityWhenEligible should produce at least
+// one AI-vs-AI raid (comfortably so, now that the probability was raised
+// 2026-08-01 toward a twice-daily real-world cadence rather than staying
+// rare background texture), and it should never generate a public
+// world_news headline.
 func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -336,7 +452,7 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	var count int
 	_ = db.QueryRow("SELECT COUNT(*) FROM raids WHERE attacker_id = $1 AND defender_id = $2", factionA, factionB).Scan(&count)
 	if count == 0 {
-		t.Error("expected at least one AI-vs-AI raid across 100 iterations at a 12% probability, got zero")
+		t.Errorf("expected at least one AI-vs-AI raid across 100 iterations at aiVsAIRaidProbabilityWhenEligible (%.0f%%), got zero", aiVsAIRaidProbabilityWhenEligible*100)
 	}
 
 	var newsCount int

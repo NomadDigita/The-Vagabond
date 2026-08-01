@@ -207,7 +207,7 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 // AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4 and its "Open
 // questions" item 1). Treat both as tunable constants to revisit after a
 // few weeks of real usage, same spirit as aidecisions.go's
-// aiMaxLevelsBelowSelfForFairTarget.
+// aiFairnessNormalBandAbove/aiOverdueRaidThreshold constants.
 const (
 	ghostProtocolCooldown     = 90 * 24 * time.Hour
 	ghostProtocolCostFraction = 0.50

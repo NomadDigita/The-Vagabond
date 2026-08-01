@@ -20,15 +20,18 @@ const aiDecisionCadence = 20 * time.Minute
 // come, not a metronome. See the plan doc's "Step 3: intent selection".
 const aiRaidProbabilityWhenEligible = 0.40
 
-// aiVsAIRaidProbabilityWhenEligible is the separate, lower probability used
-// when a fair target happens to be another AI faction rather than a human.
-// AI-vs-AI conflict is now in scope (see
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, which supersedes
-// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note), but
-// should stay rare background texture rather than the AI's default
-// behavior - the player-facing case (AI raiding a human) should still
-// dominate.
-const aiVsAIRaidProbabilityWhenEligible = 0.12
+// aiVsAIRaidProbabilityWhenEligible is the separate probability used when
+// a fair target happens to be another AI faction rather than a human.
+// Raised 2026-08-01 from its original 0.12 ("rare background texture")
+// per explicit project owner direction: AI-vs-AI raids should actually
+// reach roughly twice-daily frequency, not stay a rare curiosity. At the
+// 20-minute cadence (aiDecisionCadence) each faction gets ~72 decisions/
+// day; 0.35 assumes a fair AI-vs-AI target is discovered and eligible on
+// a meaningful minority of those cycles, which combined with the
+// probability should land in the right neighborhood - this is a
+// first-pass estimate to be corrected from real play, not a derived
+// number, exactly like every other constant in this file.
+const aiVsAIRaidProbabilityWhenEligible = 0.35
 
 // aiFractionOfGarrisonCommitted caps how much of a faction's home garrison
 // a single raid can commit, so a faction that raids never strips its own
@@ -38,14 +41,58 @@ const aiVsAIRaidProbabilityWhenEligible = 0.12
 // set garrison reserve to read).
 const aiFractionOfGarrisonCommitted = 0.65
 
-// aiMaxLevelsBelowSelfForFairTarget: an AI faction will not raid a real
-// player whose level is more than this many levels below its own. This is
-// the fairness guardrail AI_FACTION_DECISION_LOOP_PLAN.md calls for -
-// protecting weak players from unrestrained AI aggression is a designer
-// responsibility, not something the AI "chooses". Deliberately
-// conservative; loosen only after observing AI factions are too passive
-// in practice, not by guessing up front.
-const aiMaxLevelsBelowSelfForFairTarget = 2
+// aiFairnessNormalBandAbove, aiFairnessWideBandAbove, and
+// aiFairnessWideBandChance replace the old "how far below itself may a
+// faction raid" guardrail (aiMaxLevelsBelowSelfForFairTarget) with the
+// inverted rule the project owner set 2026-08-01: "lower level can
+// attack higher level but higher level can't attack lower level." A
+// faction may now only raid a target at its own level or above, never
+// below - this protects newer/weaker players and weaker AI factions
+// from being farmed by anything stronger, while still letting a weak
+// side "punch up" for a real fight. It applies identically regardless of
+// whether the target is a human or another AI faction - the project
+// owner was explicit that near-level-or-higher is the same rule on both
+// sides (e.g. a level-9 faction reaching down to hit a level-7 one
+// "should almost never" happen anymore, exactly the case this inversion
+// closes off).
+//
+// aiFairnessNormalBandAbove is how far above its own level a faction
+// will normally consider. aiFairnessWideBandAbove is an occasionally-
+// used wider version so a faction that's currently the strongest thing
+// it has discovered within the normal band doesn't go permanently idle
+// - "sometimes widen the fairness band generally," per the project
+// owner - and aiFairnessWideBandChance is how often the wide band gets
+// used instead of the normal one. First-pass tuning guesses, same
+// caveat as every other constant here: loosen or tighten after
+// observing real play.
+const (
+	aiFairnessNormalBandAbove = 3
+	aiFairnessWideBandAbove   = 8
+	aiFairnessWideBandChance  = 0.25
+)
+
+// aiOverdueRaidThreshold and aiOverdueMinTargetLevel implement the
+// second half of the project owner's 2026-08-01 direction: independent
+// of the fairness band and the probability roll above, a real player at
+// or above aiOverdueMinTargetLevel who hasn't been the defender in any
+// raid for at least aiOverdueRaidThreshold, and who at least one AI
+// faction has already legitimately discovered and could raid under the
+// attack-up-only rule, gets raided on that faction's very next decision
+// cycle - no roll, no exception. This is what "sometimes... a dedicated
+// hasn't-been-raided-in-N-hours becomes eligible" means in practice: it
+// guarantees periodic pressure on higher-level players instead of
+// leaving it to chance whether the probability roll ever produces it.
+// 10 hours means a continuously-eligible level-10+ player sees roughly
+// 2-3 guaranteed hits/day from this mechanism alone (on top of whatever
+// the normal roll adds), which is what the "2 to 4 raids daily for
+// level 10+" ask was actually asking for. Deliberately restricted to
+// real players, not AI-vs-AI - AI-vs-AI frequency is handled entirely by
+// aiVsAIRaidProbabilityWhenEligible above. First-pass guess, same
+// tuning caveat as the rest of this file.
+const (
+	aiOverdueRaidThreshold  = 10 * time.Hour
+	aiOverdueMinTargetLevel = 4
+)
 
 // decideAIFactionActions is the second half of Phase 6 (persistent AI
 // civilizations) - see AI_FACTION_DECISION_LOOP_PLAN.md for the full
@@ -119,6 +166,12 @@ func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID s
 	}
 	if fled {
 		return nil
+	}
+
+	if overdue, err := e.pickOverdueRaidTarget(ctx, tx, factionID, factionLevel); err != nil {
+		return fmt.Errorf("selecting overdue raid target: %w", err)
+	} else if overdue != nil {
+		return e.launchAIRaid(ctx, tx, factionID, *overdue)
 	}
 
 	target, err := e.pickFairAIRaidTarget(ctx, tx, factionID, factionLevel)
@@ -221,15 +274,19 @@ func (e *Engine) aiScout(ctx context.Context, tx *sql.Tx, factionID, region stri
 // pickFairAIRaidTarget returns an already-discovered target (a real
 // player, or - now that AI-vs-AI conflict is in scope, see
 // AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2 - another AI
-// faction) this faction could raid without exceeding
-// aiMaxLevelsBelowSelfForFairTarget, or nil if none qualifies. The
-// fairness band applies identically regardless of who's on the other
-// side; AI-vs-AI doesn't get a special exemption from it.
+// faction) this faction could fairly raid, or nil if none qualifies.
+// "Fairly" means at or above the faction's own level, up to
+// aiFairnessNormalBandAbove levels above (or, on the
+// aiFairnessWideBandChance roll, up to aiFairnessWideBandAbove) - the
+// attack-up-only rule described where those constants are defined. The
+// band applies identically regardless of who's on the other side;
+// AI-vs-AI doesn't get a special exemption from it.
 func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int) (*aiRaidTarget, error) {
-	minLevel := factionLevel - aiMaxLevelsBelowSelfForFairTarget
-	if minLevel < 1 {
-		minLevel = 1
+	band := aiFairnessNormalBandAbove
+	if rand.Float64() < aiFairnessWideBandChance {
+		band = aiFairnessWideBandAbove
 	}
+	maxLevel := factionLevel + band
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.name, e.level, c.x, c.y, c.region, e.user_id, e.is_ai_faction
@@ -238,13 +295,14 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 		JOIN coordinates c ON c.id = e.coordinate_id
 		WHERE d.observer_encampment_id = $1
 		  AND e.level >= $2
+		  AND e.level <= $3
 		  AND NOT EXISTS (
 				SELECT 1 FROM raids r
 				WHERE r.attacker_id = $1 AND r.defender_id = e.id
 				  AND r.state IN ('marching', 'engaged')
 			)
 		ORDER BY random()
-		LIMIT 5`, factionID, minLevel)
+		LIMIT 5`, factionID, factionLevel, maxLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -257,6 +315,52 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 		}
 	}
 	return nil, nil
+}
+
+// pickOverdueRaidTarget implements the guarantee mechanism described at
+// aiOverdueRaidThreshold's definition: an already-discovered real player
+// (never another AI faction - AI-vs-AI frequency is handled separately
+// by aiVsAIRaidProbabilityWhenEligible) at or above aiOverdueMinTargetLevel,
+// at or above this faction's own level (still no exemption from the
+// attack-up-only rule - this only removes the probability roll, not the
+// other guardrails), who hasn't been raided by anyone in at least
+// aiOverdueRaidThreshold. Returns nil if no such target exists, in which
+// case the caller falls through to the normal probabilistic path.
+func (e *Engine) pickOverdueRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int) (*aiRaidTarget, error) {
+	minLevel := factionLevel
+	if aiOverdueMinTargetLevel > minLevel {
+		minLevel = aiOverdueMinTargetLevel
+	}
+
+	var t aiRaidTarget
+	err := tx.QueryRowContext(ctx, `
+		SELECT e.id, e.name, e.level, c.x, c.y, c.region, e.user_id, e.is_ai_faction
+		FROM encampment_discoveries d
+		JOIN encampments e ON e.id = d.target_encampment_id
+		JOIN coordinates c ON c.id = e.coordinate_id
+		WHERE d.observer_encampment_id = $1
+		  AND e.is_ai_faction = FALSE
+		  AND e.level >= $2
+		  AND NOT EXISTS (
+				SELECT 1 FROM raids r
+				WHERE r.attacker_id = $1 AND r.defender_id = e.id
+				  AND r.state IN ('marching', 'engaged')
+			)
+		  AND NOT EXISTS (
+				SELECT 1 FROM raids r
+				WHERE r.defender_id = e.id
+				  AND r.created_at > CURRENT_TIMESTAMP - ($3 * INTERVAL '1 minute')
+			)
+		ORDER BY random()
+		LIMIT 1`, factionID, minLevel, aiOverdueRaidThreshold.Minutes()).
+		Scan(&t.id, &t.name, &t.level, &t.x, &t.y, &t.region, &t.userID, &t.isAIFaction)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // launchAIRaid creates a real raids row with factionID as attacker_id,

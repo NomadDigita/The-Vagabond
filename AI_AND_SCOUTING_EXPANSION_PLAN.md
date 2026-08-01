@@ -70,45 +70,67 @@ Suggested shape:
 
 ## Item 2: AI raid/scout cadence and gating - tuning, not new mechanism
 
-All four constants at the top of `internal/engine/tick/aidecisions.go`
-are candidates for loosening, but **change them with real testing against
-a low-population world, not by guessing new numbers** - this is exactly
-the kind of balance change `AI_FACTION_DECISION_LOOP_PLAN.md` explicitly
-flagged as "a tunable starting guess... loosen only after observing AI
-factions are too passive in practice," and the 2026-08-01 investigation
-is the observation that justifies loosening it now:
+**Status: built and merged to `main` (2026-08-01), partially - see below
+for what was intentionally left out this round.** The project owner
+answered the two open questions this section originally posed directly
+(quoted, since precision matters for a balance decision):
 
-- `aiDecisionCadence` (currently 20 minutes/faction) - the player asked
-  for something closer to "constant" scouting and 2-4 raids/day per
-  higher-level player. With more factions from Item 1 *and* a shorter
-  cadence, worldwide raid volume compounds fast - tune these together,
-  not independently, or the server ends up far more aggressive than
-  intended.
-- `aiRaidProbabilityWhenEligible` (40%) / `aiVsAIRaidProbabilityWhenEligible`
-  (12%) - the player specifically asked for AI-vs-AI raids "at least
-  twice daily," which given an 8-(soon-more)-faction population and a
-  20-minute cadence is a very different ask than the current 12%
-  "rare background texture" framing in
-  `AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md` section 2 - that framing
-  needs to be explicitly revisited with the project owner, not silently
-  overridden, since a prior session made that "stay rare" call
-  deliberately.
-- `aiMaxLevelsBelowSelfForFairTarget` (2) - the player asked for level-4+
-  humans to be raidable at least once and level-10+ to face 2-4 AI
-  raids/day. Whether to widen the fairness band, or instead special-case
-  the per-level guarantee as its own mechanism (e.g. "a player above
-  level 10 who hasn't been raided by anything in N hours becomes
-  eligible regardless of the normal discovery/fairness gate") is a real
-  design choice - the latter guarantees the player-facing promise
-  directly instead of hoping the probabilities happen to produce it,
-  and is probably the more honest way to satisfy "isn't it supposed to
-  be constant?" Flag both options to the project owner rather than
-  picking silently.
-- Constant AI scouting (the player's literal ask) is already the
-  *fallback* behavior today - `decideOneAIFaction` scouts whenever it
-  doesn't raid - so shortening `aiDecisionCadence` alone makes scouting
-  itself feel closer to constant for free; no separate mechanism needed
-  for that part specifically.
+> 1: yes, let it actually hit twice daily (AI vs AI, but same level of
+> very near like never 9 can attack level 7 and vice versa and same)
+> also in the human vs AI (very near level or higher). But overall,
+> lower level can attack higher level but higher level can't attack
+> lower level.
+>
+> 2: make it to sometimes widen the fairness band generally and
+> sometimes a dedicated hasn't-been-raided-in-N-hour becomes eligible.
+
+What shipped in `internal/engine/tick/aidecisions.go`, matching that
+direction:
+
+- **Fairness direction inverted.** The old
+  `aiMaxLevelsBelowSelfForFairTarget` ("may raid up to 2 levels below
+  itself") is gone. `pickFairAIRaidTarget` now requires
+  `target.level >= faction.level` - attack up or equal, never down -
+  applied identically to human and AI-faction targets (answers the
+  "also in the human vs AI" line: there's only one fairness check in
+  this codebase and it never distinguished target type in the first
+  place, so no separate change was needed there).
+- **"Sometimes widen the fairness band generally"** is
+  `aiFairnessNormalBandAbove` (3 levels above, the common case) vs.
+  `aiFairnessWideBandAbove` (8 levels above, rolled `aiFairnessWideBandChance`
+  = 25% of the time) - literally "sometimes wider."
+- **"A dedicated hasn't-been-raided-in-N-hour becomes eligible"** is the
+  new `pickOverdueRaidTarget` + `aiOverdueRaidThreshold` (10 hours) +
+  `aiOverdueMinTargetLevel` (4) - checked first in `decideOneAIFaction`,
+  before the probability roll, and bypasses the roll entirely when it
+  finds a match. Restricted to real players (not AI-vs-AI, which is
+  handled by the probability bump below instead).
+- **AI-vs-AI "twice daily"**: `aiVsAIRaidProbabilityWhenEligible` raised
+  from 0.12 to 0.35. This is a probability, not a literal frequency
+  guarantee (unlike the overdue mechanism above, which is deliberately
+  human-only) - it's a first-pass number reasoned from the existing
+  20-minute cadence, not measured against real traffic. Flagged
+  explicitly in the code comment as needing correction from real play.
+- Added `TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel`
+  (replacing the old below-self-band test, now checking the *opposite*
+  direction is enforced), `TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability`,
+  and `TestDecideOneAIFactionPrioritizesOverdueGuaranteeOverProbabilityRoll`.
+  Updated the AI-vs-AI probability test's stale "12%" wording. Verified
+  with `go build ./... && go vet ./... && go test ./...` against real
+  Postgres (same temporary-`telebot.v3`-replace-then-revert process as
+  Item 3).
+
+**Deliberately not changed this round: `aiDecisionCadence` (still 20
+minutes).** The project owner's answers addressed fairness direction and
+raid probability directly, but didn't weigh in on cadence, and the
+original build-order note above is still correct that cadence,
+probability, and fairness compound together - changing cadence too on
+top of an already-inverted fairness rule and a bumped AI-vs-AI
+probability, all in the same pass, would make it much harder to tell
+which change caused which effect if the result needs correcting. If the
+"constant scouting" feel still isn't there after this round is observed
+in practice, shortening `aiDecisionCadence` is the next lever, but that's
+a follow-up decision, not bundled into this one.
 
 ## Item 3: Up to 3 concurrent scout missions per encampment, independent destinations/ETAs
 
@@ -194,13 +216,16 @@ several Scout Walkers riding together on any one of those three.
    most self-contained, no balance risk; the audit work (confirming the
    tick side had no singular-mission assumptions) turned out to already
    be satisfied by the existing per-row design.
-2. Item 2 (cadence/probability tuning) next, once the project owner has
-   answered the open questions below - cheap to change, but changing it
-   twice because the first guess was wrong is wasted test-writing effort.
-3. Item 1 (continuous spawning) last - the largest new subsystem, and the
-   one most likely to interact badly with Item 2's tuning if built first
-   (more factions + already-loosened cadence compounds fast; build and
-   observe with the fixed 8 first).
+2. ~~Item 2 (cadence/probability tuning) next~~ - **fairness direction and
+   AI-vs-AI probability done, merged 2026-08-01** per the project owner's
+   direct answers (quoted above); `aiDecisionCadence` deliberately left
+   unchanged this round, see the note at the end of Item 2.
+3. Item 1 (continuous spawning) next - the largest new subsystem, and the
+   one most likely to interact badly with Item 2's tuning if built before
+   Item 2's changes have been observed in practice (more factions on top
+   of an already-loosened fairness band and raised AI-vs-AI probability
+   compounds fast - build this against the fixed 8 first, watch how the
+   2026-08-01 tuning actually plays out, then reconsider).
 
 ## Testing strategy
 
@@ -216,13 +241,11 @@ mechanism from Item 2 gets built).
 
 ## Open questions for the project owner (don't guess these, ask)
 
+**Items 3 and 4 (both about Item 2) were answered 2026-08-01 - see
+Item 2's section above for the exact quote and what was built.** Item 1's
+two questions are still open and block starting that item:
+
 1. Item 1's actual target spawn rate - "3/day" and "every minutes and
    secs" aren't the same number; which one (or something else entirely)?
 2. Is there a ceiling on total AI faction count ever, or does the world
    just keep accumulating factions indefinitely?
-3. Item 2: raise `aiVsAIRaidProbabilityWhenEligible` to hit "twice
-   daily," or override the "should stay rare" design call from
-   `AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md` section 2 entirely?
-4. Item 2: widen the fairness band globally, or build the separate
-   per-level "hasn't been raided in N hours" guarantee mechanism
-   instead (or both)?
