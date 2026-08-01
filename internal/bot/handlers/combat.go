@@ -310,6 +310,20 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	// them to check here, since plain-text notifications can't carry
 	// inline buttons.
 	roadText := ""
+	// Road-contact Attack/Continue decisions get pulled out of the
+	// shared panel keyboard and sent as their own small, colored
+	// messages below (see the end of this function) - Telegram Bot
+	// API 9.4 (Feb 2026) added a real "style" field for exactly this
+	// kind of binary choice (danger/success/primary), and a genuine
+	// Attack-vs-Continue decision is the clearest possible case for it
+	// in this game. See keyboards/styled.go for how this works without
+	// needing a telebot.v3 library upgrade.
+	type roadContactPrompt struct {
+		text    string
+		attack  keyboards.StyledBtn
+		proceed keyboards.StyledBtn
+	}
+	var roadContacts []roadContactPrompt
 	queryRoad := `
 		SELECT re.id, re.raid_a_id, re.raid_b_id, re.response_deadline,
 		       ea.name, eb.name
@@ -340,9 +354,13 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					timeLeft = 0
 				}
 				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Forces of [%s]\n   Decide within %s or your column continues past them.\n\n", enemyName, formatDuration(timeLeft))
-				btnAttack := selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID, myRaidID)
-				btnContinue := selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID, myRaidID)
-				buttons = append(buttons, selector.Row(btnAttack, btnContinue))
+				contactText := "🚧 " + htmlBold("ROAD CONTACT") + "\n" + divider + "\n" +
+					fmt.Sprintf("Forces of %s are on your route.\n⏳ Decide within %s or your column continues past them peacefully.", htmlBold(htmlEscape(enemyName)), htmlCode(formatDuration(timeLeft))) + "\n" + divider
+				roadContacts = append(roadContacts, roadContactPrompt{
+					text:    contactText,
+					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID, myRaidID), keyboards.StyleDanger),
+					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID, myRaidID), keyboards.StyleSuccess),
+				})
 			}
 		}
 	}
@@ -364,9 +382,13 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var encID, myRaidID, baseName string
 			if err := rowsRoadBase.Scan(&encID, &myRaidID, &baseName); err == nil {
 				roadText += fmt.Sprintf("🚧 ROAD CONTACT: Outpost [%s]\n   Attack its home garrison, or continue past it.\n\n", baseName)
-				btnAttack := selector.Data(fmt.Sprintf("⚔️ Attack [%s]", baseName), "road_base_encounter", "attack", encID)
-				btnContinue := selector.Data(fmt.Sprintf("➡️ Continue [%s]", baseName), "road_base_encounter", "continue", encID)
-				buttons = append(buttons, selector.Row(btnAttack, btnContinue))
+				contactText := "🚧 " + htmlBold("ROAD CONTACT") + "\n" + divider + "\n" +
+					fmt.Sprintf("Outpost %s sits on your route.\nAttack its home garrison, or continue past it peacefully.", htmlBold(htmlEscape(baseName))) + "\n" + divider
+				roadContacts = append(roadContacts, roadContactPrompt{
+					text:    contactText,
+					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", baseName), "road_base_encounter", "attack", encID), keyboards.StyleDanger),
+					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", baseName), "road_base_encounter", "continue", encID), keyboards.StyleSuccess),
+				})
 			}
 		}
 	}
@@ -510,7 +532,21 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	)
 
 	selector.Inline(buttons...)
-	return sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
+	if err := sendPanelWithNav(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector); err != nil {
+		return err
+	}
+
+	// Sent as separate messages, after the main HUD, rather than folded
+	// into its keyboard: each is its own real decision with a deadline,
+	// and Bot API 9.4's colored buttons only work via the raw send path
+	// (see keyboards/styled.go) - they can't be mixed into the same
+	// telebot.ReplyMarkup.Inline() call as the HUD's other buttons.
+	for _, rc := range roadContacts {
+		if err := keyboards.SendStyled(c, rc.text, [][]keyboards.StyledBtn{{rc.attack, rc.proceed}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // HandleAutoScanToggle toggles the SpaceHunt-style "Automatic Scan" job:
