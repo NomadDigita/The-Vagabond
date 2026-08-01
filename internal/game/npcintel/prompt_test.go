@@ -76,7 +76,7 @@ func TestBuildUserPrompt_NoFleetPath(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "This Nest is Bomber-resistant.", "nest_reading": "Heavy Guardian presence blunts siege units.", "fleet_composition_advice": [{"unit": "bombers", "verdict": "bring_less", "reason": "8 Guardians counter your Bombers hard"}], "key_risk": "Your Bomber-heavy fleet underperforms here", "notes": "small nest, no Warlord"}`
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -90,7 +90,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "nest_reading": "", "fleet_composition_advice": [], "key_risk": "", "notes": ""}` + "\n```"
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -98,7 +98,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "bring more bombers probably"
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -112,7 +112,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Fleet looks solid.", "fleet_composition_advice": []}` + "\n\nGood luck out there!"
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose to be discarded, not trigger fallback")
 	}
@@ -120,7 +120,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Line one\nline two\", \"fleet_composition_advice\": []}"
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected sanitized control chars to allow parsing, got fallback")
 	}
@@ -130,7 +130,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 // is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This Nest's heavy Guardian garrison specifically counters your Bomber-heavy fleet compos`
-	rec := npcintel.ParseRecommendation(raw)
+	rec := npcintel.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

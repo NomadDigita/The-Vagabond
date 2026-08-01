@@ -76,7 +76,7 @@ func TestFormatBalanceForTelegram_StructuredPath(t *testing.T) {
 
 func TestParseBalanceRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Soldiers dominate usage.", "unit_notes": [{"unit": "bombers", "observation": "rarely used", "caution": "small sample"}], "recommended_focus": "investigate bomber cost", "notes": "correlational"}`
-	rec := devconsole.ParseBalanceRecommendation(raw)
+	rec := devconsole.ParseBalanceRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -87,7 +87,7 @@ func TestParseBalanceRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseBalanceRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "unit_notes": [], "recommended_focus": "", "notes": ""}` + "\n```"
-	rec := devconsole.ParseBalanceRecommendation(raw)
+	rec := devconsole.ParseBalanceRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -95,7 +95,7 @@ func TestParseBalanceRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseBalanceRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "bombers seem underused I guess"
-	rec := devconsole.ParseBalanceRecommendation(raw)
+	rec := devconsole.ParseBalanceRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -108,7 +108,7 @@ func TestParseBalanceRecommendation_FallsBackOnGarbage(t *testing.T) {
 // that never contained JSON at all.
 func TestParseBalanceRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Bombers show a striking pattern worth a closer look because their apparent win rate is high despite being rarely mobil`
-	rec := devconsole.ParseBalanceRecommendation(raw)
+	rec := devconsole.ParseBalanceRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

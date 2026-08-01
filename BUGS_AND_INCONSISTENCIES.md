@@ -583,3 +583,69 @@ Four issues reported by the user, all confirmed against the actual code
 Verified with a full `go build ./... && go vet ./... && go test ./...`
 pass and a checksum-confirmed `go.mod`/`go.sum` restore after using the
 `telebot.v3` replace directive locally to resolve the module.
+
+## Follow-up bug-hunt session (2026-08-01, later same day) — AI Advisor truncation confirmed still happening after the fix above
+
+User reported the truncation bug persisted specifically for the AI
+Advisors menu (Battle Analyst, Economy Advisor, Galaxy Advisor, Guild
+Assistant, Research Planner, Fleet Commander, NPC Intel, Governor):
+tapping one advisor after another, the second reply would come back
+cut off. Investigated rather than assuming the earlier fix (see
+section above / ADR-023) was incomplete without checking — it was.
+
+1. **Real bug, confirmed by re-reading every advisor's completion
+   call: the earlier fix only raised `MaxTokens` for the two Dev
+   Console report types (Weekly, Balance), not for any of the eight
+   actual AI Advisors, which were all still requesting 2048.** The
+   `enable_thinking:false` fix (ADR-023) stopped Qwen's reasoning
+   tokens from eating the budget, but 2048 visible tokens is still a
+   tight ceiling for an advisor writing a full reasoning + risk-
+   assessment + suggestion JSON object — genuinely not enough some of
+   the time, matching the user's "one works, the next doesn't" pattern
+   (whichever advisor's response happened to run longer that time hit
+   the wall). Raised all eight to 4096, matching the two report types
+   that were already fixed. Files: `fleetcommander/commander.go`,
+   `governor/governor.go`, `npcintel/intel.go`,
+   `researchplanner/planner.go`, `battleanalyst/analyst.go`,
+   `guildassistant/assistant.go`, `galaxyadvisor/advisor.go`,
+   `econadvisor/advisor.go`.
+
+2. **Real bug, found while investigating #1: `Service.Complete`
+   (`internal/ai/service.go`) cached every completion unconditionally,
+   including ones that got cut off.** With the default 120s cache TTL,
+   a truncated response would get served back verbatim to anything
+   that repeated the same request within that window — including the
+   player tapping "Refresh" on the exact report that had just
+   truncated, so refreshing looked like it did nothing. Now skips the
+   cache write whenever the provider's own stop/finish reason
+   indicates the completion was cut short (new `ai.
+   IsTruncatedStopReason`, checked against each provider's real wire
+   value — `"length"` for OpenAI-compatible/Ollama, `"max_tokens"` for
+   Anthropic, `"MAX_TOKENS"` for Gemini — see `CompletionResponse.
+   StopReason`, which every provider already populated but nothing
+   downstream previously read).
+
+3. **Real gap, not a bug exactly: truncation detection only ever
+   looked at the text itself (`ai.WasTruncated`'s brace-balance scan),
+   which structurally cannot see a response truncated before any `{`
+   was written at all** — confirmed by an existing test,
+   `TestParseRecommendation_FallsBackOnGarbage` in
+   `battleanalyst/prompt_test.go`, which explicitly asserts
+   `Truncated=false` for exactly that shape of input. Threaded each
+   provider's real stop reason through to every
+   `ParseRecommendation`/`ParseAnswer`/`ParseClassification` function
+   (now `(text string, stopReason string)`) across all eight advisors
+   plus the three Dev Console entry points (Weekly Report, Balance
+   Report, NL Query's classify+answer calls), OR'd with the existing
+   brace scan. New test
+   `TestParseRecommendation_StopReasonCatchesTruncationTextScanMisses`
+   demonstrates the previously-blind case is now caught.
+
+Full detail and the design rationale (why stop reason lives
+per-provider rather than a generic flag, why MaxTokens/cache fixes are
+repo-wide rather than per-package) is in ADR-025, PROJECT_MASTER_PLAN.md.
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass (temporary `telebot.v3` replace directive used locally to resolve
+the module against the sandbox's network allowlist, then reverted —
+`git diff go.mod go.sum` empty before commit).

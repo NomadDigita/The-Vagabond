@@ -132,10 +132,10 @@ func BuildUserPrompt(s Snapshot) string {
 // responses wrapped in markdown code fences (some models add them
 // despite instructions not to) by stripping a leading/trailing ```
 // fence before attempting to parse.
-func ParseRecommendation(text string) *Recommendation {
+func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 
 	var rec Recommendation
@@ -153,7 +153,7 @@ func ParseRecommendation(text string) *Recommendation {
 		return &rec
 	}
 
-	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // FormatForTelegram renders a Recommendation as a Telegram HTML-mode

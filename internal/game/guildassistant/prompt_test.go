@@ -69,7 +69,7 @@ func TestBuildUserPrompt_EmptyStatesPaths(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Solid roster, one weak applicant.", "recruitment_calls": [{"username": "newbie99", "recommendation": "accept", "reason": "low level but room to grow"}], "war_insight": "Leading by 400 points.", "recommended_focus": "keep pressing the war lead", "notes": "2 inactive members worth checking on"}`
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -83,7 +83,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "recruitment_calls": [], "war_insight": "", "recommended_focus": "", "notes": ""}` + "\n```"
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -91,7 +91,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "yeah accept everyone I guess"
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -105,7 +105,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Roster looks healthy.", "recruitment_calls": []}` + "\n\nLet me know if you want more detail!"
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose to be discarded, not trigger fallback")
 	}
@@ -113,7 +113,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Line one\nline two\", \"recruitment_calls\": []}"
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected sanitized control chars to allow parsing, got fallback")
 	}
@@ -123,7 +123,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 // is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This clan's roster is strong but the war record shows a concerning trend where losses have been mounting against oppon`
-	rec := guildassistant.ParseRecommendation(raw)
+	rec := guildassistant.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

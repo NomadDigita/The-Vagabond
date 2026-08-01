@@ -149,10 +149,10 @@ func writeRaidStats(b *strings.Builder, stats RaidStats, isAttacker bool) {
 
 // ParseRecommendation decodes the model's response text, tolerating a
 // markdown code fence the same way every other Phase B-J package does.
-func ParseRecommendation(text string) *Recommendation {
+func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 
 	var rec Recommendation
@@ -167,7 +167,7 @@ func ParseRecommendation(text string) *Recommendation {
 		return &rec
 	}
 
-	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // FormatForTelegram renders a Recommendation as a Telegram HTML-mode

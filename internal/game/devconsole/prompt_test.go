@@ -78,7 +78,7 @@ func TestBuildUserPrompt_CappedListNotice(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Steady week, healthy growth.", "highlights": ["2 new players", "no incidents"], "new_player_narrative": "Both joined mid-week.", "top_performer_narrative": "Fort Wasteland leads by a wide margin.", "recommendations_for_admins": "Nothing urgent.", "notes": "small sample"}`
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -92,7 +92,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "highlights": [], "new_player_narrative": "", "top_performer_narrative": "", "recommendations_for_admins": "", "notes": ""}` + "\n```"
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -100,7 +100,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "seems fine this week"
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -114,7 +114,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Quiet week.", "highlights": []}` + "\n\nLet me know if you want more detail."
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose to be discarded, not trigger fallback")
 	}
@@ -122,7 +122,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Line one\nline two\", \"highlights\": []}"
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected sanitized control chars to allow parsing, got fallback")
 	}
@@ -132,7 +132,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 // is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This week saw a healthy increase in new signups, largely concentrated in the Asia contin`
-	rec := devconsole.ParseRecommendation(raw)
+	rec := devconsole.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

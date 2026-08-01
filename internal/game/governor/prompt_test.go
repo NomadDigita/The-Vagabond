@@ -64,7 +64,7 @@ func TestBuildUserPrompt_ContainsKeyFacts(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade generator next.", "priority_actions": [{"action": "upgrade", "target": "generator", "reason": "electricity bottleneck"}], "storage_warning": "none", "expected_impact": "+20% electricity"}`
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -78,7 +78,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n{\"summary\": \"ok\", \"priority_actions\": []}\n```"
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence-wrapped JSON to still parse, got fallback")
 	}
@@ -89,7 +89,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "I think you should build more tents, honestly."
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -109,7 +109,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade the generator next, since it's your`
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
@@ -140,7 +140,7 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade generator next.", "priority_actions": []}` +
 		"\n\nLet me know if you'd like more detail on any of this!"
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
 	}
@@ -151,7 +151,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Base has a severe imbalance,\nwith nearly 100M of most resources.\", \"priority_actions\": []}"
-	rec := governor.ParseRecommendation(raw)
+	rec := governor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
 	}
@@ -161,7 +161,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 }
 
 func TestFormatForTelegram_FallbackPath(t *testing.T) {
-	rec := governor.ParseRecommendation("plain text advice")
+	rec := governor.ParseRecommendation("plain text advice", "")
 	out := governor.FormatForTelegram(rec)
 	if !strings.Contains(out, "plain text advice") {
 		t.Errorf("expected fallback text to be included verbatim, got: %s", out)
@@ -169,7 +169,7 @@ func TestFormatForTelegram_FallbackPath(t *testing.T) {
 }
 
 func TestFormatForTelegram_StructuredPath(t *testing.T) {
-	rec := governor.ParseRecommendation(`{"summary": "Focus on defense.", "priority_actions": [{"action": "upgrade", "target": "shield", "reason": "low defense tech"}], "storage_warning": "scrap near cap", "expected_impact": "safer base"}`)
+	rec := governor.ParseRecommendation(`{"summary": "Focus on defense.", "priority_actions": [{"action": "upgrade", "target": "shield", "reason": "low defense tech"}], "storage_warning": "scrap near cap", "expected_impact": "safer base"}`, "")
 	out := governor.FormatForTelegram(rec)
 	for _, want := range []string{"Focus on defense.", "upgrade", "shield", "scrap near cap", "safer base", "recommendation only"} {
 		if !strings.Contains(out, want) {

@@ -10,10 +10,11 @@ import (
 // fakeProvider lets tests control availability/failure without any
 // network or database dependency.
 type fakeProvider struct {
-	name      string
-	available bool
-	fail      bool
-	calls     int
+	name       string
+	available  bool
+	fail       bool
+	stopReason string
+	calls      int
 }
 
 func (f *fakeProvider) Name() string    { return f.name }
@@ -24,9 +25,10 @@ func (f *fakeProvider) Complete(ctx context.Context, req ai.CompletionRequest) (
 		return nil, errTestProviderFailure
 	}
 	return &ai.CompletionResponse{
-		Text:  "ok from " + f.name,
-		Model: "test-model",
-		Usage: ai.Usage{InputTokens: 10, OutputTokens: 10},
+		Text:       "ok from " + f.name,
+		Model:      "test-model",
+		Usage:      ai.Usage{InputTokens: 10, OutputTokens: 10},
+		StopReason: f.stopReason,
 	}, nil
 }
 
@@ -160,6 +162,40 @@ func TestComplete_ReturnsCachedResponseOnSecondCall(t *testing.T) {
 	}
 	if primary.calls != 1 {
 		t.Fatalf("expected provider to be called exactly once (cache hit on 2nd), got %d", primary.calls)
+	}
+}
+
+// A truncated response must never be cached: caching it would lock a
+// player who taps "Refresh" (or anything else that re-issues the same
+// request) into replaying the same cut-off text for the rest of the
+// TTL window instead of getting a fresh, hopefully-complete retry.
+func TestComplete_DoesNotCacheTruncatedResponse(t *testing.T) {
+	primary := &fakeProvider{name: "primary", available: true, stopReason: "length"}
+	svc, _ := newTestService(t, primary)
+
+	req := ai.CompletionRequest{
+		Feature:  "ai_battle_analyst",
+		UserID:   7,
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "analyze my raids"}},
+	}
+
+	resp1, err := svc.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error on first call: %v", err)
+	}
+	if resp1.Cached {
+		t.Fatalf("first call should never be reported as cached")
+	}
+
+	resp2, err := svc.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if resp2.Cached {
+		t.Fatalf("expected a truncated response to be skipped by the cache, so the retry hits the provider again")
+	}
+	if primary.calls != 2 {
+		t.Fatalf("expected provider to be called twice (truncated response must not satisfy the 2nd call from cache), got %d", primary.calls)
 	}
 }
 

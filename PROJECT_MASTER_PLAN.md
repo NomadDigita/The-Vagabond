@@ -779,6 +779,36 @@ new call sites, so a manual gut-check ("prefix + `|` + args, does a
 UUID make this too long?") is still needed when adding a new
 UUID-bearing button.
 
+**ADR-025: the previous truncation fix (ADR-023, `enable_thinking:
+false`) closed the Qwen reasoning-token leak but left two real gaps —
+this session closed both, confirmed by a live user report showing
+truncation persisting after ADR-023 shipped.** (1) `MaxTokens` was
+only doubled to 4096 for the two Dev Console report types (Weekly,
+Balance); the eight actual AI Advisors (Battle Analyst, Economy
+Advisor, Galaxy Advisor, Guild Assistant, Research Planner, Fleet
+Commander, NPC Intel, Governor) were left at 2048 on the assumption
+that the `enable_thinking` fix alone would be enough for them —
+confirmed insufficient by the user report ("click one advisor, then
+another, and the second gets truncated") and now matched to 4096.
+(2) `Service.Complete` cached every response unconditionally, so a
+response that *did* get cut off — from a slow model, a request that
+still exceeds even 4096, or a future regression — was replayed
+verbatim by `Cache.Get` for the rest of `AI_CACHE_TTL_SECONDS` (120s
+default), meaning a player tapping "Refresh" on a truncated report got
+the same broken text back instead of a fresh retry. Fixed by threading
+each provider's real `finish_reason`/`stop_reason` (`ai.
+IsTruncatedStopReason`, new helper) through to `Service.Complete`,
+which now skips the cache write when it indicates truncation, and
+also through every package's `ParseRecommendation`/`ParseAnswer`/
+`ParseClassification` (now `(text string, stopReason string)`), which
+OR it with the existing `ai.WasTruncated` brace-scan — the stop reason
+catches prose truncated before any `{` was written, which the
+brace-scan structurally cannot (see `TestParseRecommendation_
+FallsBackOnGarbage` in battleanalyst, which asserts `Truncated=false`
+for exactly that case when no stop reason is available). Both
+`MaxTokens` and cache-on-truncation apply repo-wide, not per-package,
+so no future advisor needs to remember to opt in.
+
 **ADR-017: Battle Analyst (Phase F) covers raids and arena battles
 only, not World Bosses — confirmed by re-auditing the schema, not
 inherited from an earlier session's claim.** A schema audit done

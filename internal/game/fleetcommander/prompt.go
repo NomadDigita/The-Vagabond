@@ -184,10 +184,10 @@ func writeComposition(b *strings.Builder, comp FleetComposition) {
 // markdown code fence the way governor.ParseRecommendation does. On
 // failure it falls back to Reasoning=<raw text> so the player always
 // gets something usable.
-func ParseRecommendation(text string) *Recommendation {
+func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &Recommendation{Reasoning: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &Recommendation{Reasoning: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 
 	var rec Recommendation
@@ -202,7 +202,7 @@ func ParseRecommendation(text string) *Recommendation {
 		return &rec
 	}
 
-	return &Recommendation{Reasoning: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &Recommendation{Reasoning: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // actionEmoji gives each recommendation a distinct glyph so players

@@ -98,10 +98,10 @@ func BuildBalanceUserPrompt(s BalanceSnapshot) string {
 	return b.String()
 }
 
-func ParseBalanceRecommendation(text string) *BalanceRecommendation {
+func ParseBalanceRecommendation(text string, stopReason string) *BalanceRecommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &BalanceRecommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &BalanceRecommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 	var rec BalanceRecommendation
 	if err := json.Unmarshal([]byte(candidate), &rec); err == nil && rec.Summary != "" {
@@ -111,7 +111,7 @@ func ParseBalanceRecommendation(text string) *BalanceRecommendation {
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
 		return &rec
 	}
-	return &BalanceRecommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &BalanceRecommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // FormatBalanceForTelegram renders a BalanceRecommendation as a
@@ -226,7 +226,7 @@ func (co *Console) RecommendBalance(ctx context.Context, callerUserID int64, win
 		return nil, fmt.Errorf("devconsole: balance ai completion failed: %w", err)
 	}
 
-	rec := ParseBalanceRecommendation(resp.Text)
+	rec := ParseBalanceRecommendation(resp.Text, resp.StopReason)
 
 	if co.AI.Memory != nil {
 		_ = co.AI.Memory.Append(ctx, callerUserID, balanceMemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

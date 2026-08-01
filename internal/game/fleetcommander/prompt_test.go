@@ -39,7 +39,7 @@ func TestBuildUserPrompt_NoHistoryPath(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "you outnumber them 2:1", "risk_assessment": "low", "suggested_split": ""}`
-	rec := fleetcommander.ParseRecommendation(raw)
+	rec := fleetcommander.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -50,7 +50,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "yeah go for it probably"
-	rec := fleetcommander.ParseRecommendation(raw)
+	rec := fleetcommander.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -68,7 +68,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "the target's garrison is`
-	rec := fleetcommander.ParseRecommendation(raw)
+	rec := fleetcommander.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
@@ -96,7 +96,7 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "you outnumber them"}` +
 		"\n\nGood luck out there!"
-	rec := fleetcommander.ParseRecommendation(raw)
+	rec := fleetcommander.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
 	}
@@ -107,7 +107,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"recommendation\": \"retreat\", \"confidence\": \"medium\", \"reasoning\": \"they have reinforcements\nincoming within 2 ticks\"}"
-	rec := fleetcommander.ParseRecommendation(raw)
+	rec := fleetcommander.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
 	}
@@ -117,7 +117,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 }
 
 func TestFormatForTelegram_StructuredPath(t *testing.T) {
-	rec := fleetcommander.ParseRecommendation(`{"recommendation": "retreat", "confidence": "medium", "reasoning": "garrison too strong", "risk_assessment": "high losses expected", "suggested_split": ""}`)
+	rec := fleetcommander.ParseRecommendation(`{"recommendation": "retreat", "confidence": "medium", "reasoning": "garrison too strong", "risk_assessment": "high losses expected", "suggested_split": ""}`, "")
 	out := fleetcommander.FormatForTelegram(rec)
 	for _, want := range []string{"RETREAT", "garrison too strong", "high losses expected", "recommendation only"} {
 		if !strings.Contains(out, want) {
@@ -127,7 +127,7 @@ func TestFormatForTelegram_StructuredPath(t *testing.T) {
 }
 
 func TestFormatForTelegram_FallbackPath(t *testing.T) {
-	rec := fleetcommander.ParseRecommendation("not json at all")
+	rec := fleetcommander.ParseRecommendation("not json at all", "")
 	out := fleetcommander.FormatForTelegram(rec)
 	if !strings.Contains(out, "not json at all") {
 		t.Errorf("expected raw fallback text included, got: %s", out)

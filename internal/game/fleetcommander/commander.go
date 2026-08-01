@@ -213,7 +213,7 @@ func (c *Commander) Recommend(ctx context.Context, userID int64) (*Recommendatio
 		UserID:      userID,
 		System:      SystemPrompt,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: userPrompt}},
-		MaxTokens:   2048,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 		JSONMode:    true,
 	})
@@ -221,7 +221,7 @@ func (c *Commander) Recommend(ctx context.Context, userID int64) (*Recommendatio
 		return nil, fmt.Errorf("fleetcommander: ai completion failed: %w", err)
 	}
 
-	rec := ParseRecommendation(resp.Text)
+	rec := ParseRecommendation(resp.Text, resp.StopReason)
 
 	if c.AI.Memory != nil {
 		_ = c.AI.Memory.Append(ctx, userID, MemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

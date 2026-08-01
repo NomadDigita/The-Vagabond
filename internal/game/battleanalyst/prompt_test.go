@@ -75,7 +75,7 @@ func TestBuildUserPrompt_DefenderStatsOmitStolenValueLine(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Strong attacker, weak defender.", "key_patterns": [{"observation": "defense losses high", "evidence": "12 avg losses/raid", "suggestion": "reinforce garrison"}], "recommended_focus": "shore up defense", "notes": "small arena sample"}`
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -89,7 +89,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "key_patterns": [], "recommended_focus": "", "notes": ""}` + "\n```"
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -97,7 +97,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "you lose a lot honestly"
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -112,7 +112,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Strong attacker.", "key_patterns": []}` +
 		"\n\nHope that helps!"
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose to be discarded, not trigger fallback")
 	}
@@ -120,7 +120,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Line one\nline two\", \"key_patterns\": []}"
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected sanitized control chars to allow parsing, got fallback")
 	}
@@ -130,12 +130,29 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 // is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This player's defense is weak because their garrison`
-	rec := battleanalyst.ParseRecommendation(raw)
+	rec := battleanalyst.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
 	if !rec.Truncated {
 		t.Errorf("expected Truncated=true for a response cut off mid-object")
+	}
+}
+
+// The brace-balance heuristic alone can't see truncation in prose cut
+// off before any '{' was written at all (TestParseRecommendation_
+// FallsBackOnGarbage above asserts exactly that blind spot). A
+// provider's real stop/finish reason doesn't have that limitation —
+// see ai.IsTruncatedStopReason — so passing it through should catch
+// what the text-only scan misses.
+func TestParseRecommendation_StopReasonCatchesTruncationTextScanMisses(t *testing.T) {
+	raw := "Based on the raid history, this player tends to"
+	rec := battleanalyst.ParseRecommendation(raw, "length")
+	if !rec.FellBackToRawText {
+		t.Fatalf("expected fallback for non-JSON text")
+	}
+	if !rec.Truncated {
+		t.Errorf("expected Truncated=true when stopReason indicates the provider hit its token limit, even with no JSON object present")
 	}
 }
 

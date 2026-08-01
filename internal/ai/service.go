@@ -98,7 +98,13 @@ func (s *Service) Complete(ctx context.Context, req CompletionRequest) (*Complet
 				log.Printf("ai: failed to record cost usage: %v", err)
 			}
 		}
-		if s.Cache != nil && s.Config.CacheTTLSeconds > 0 {
+		// Never cache a response that got cut off mid-completion —
+		// doing so would lock every caller (including a player
+		// tapping "Refresh") into replaying the same truncated
+		// output for the rest of the TTL window instead of getting
+		// a fresh, hopefully-complete retry. See ADR-025 in
+		// PROJECT_MASTER_PLAN.md.
+		if s.Cache != nil && s.Config.CacheTTLSeconds > 0 && !IsTruncatedStopReason(resp.StopReason) {
 			s.Cache.Set(cacheKey, resp, time.Duration(s.Config.CacheTTLSeconds)*time.Second)
 		}
 

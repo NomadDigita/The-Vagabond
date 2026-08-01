@@ -216,7 +216,7 @@ func (co *Console) Recommend(ctx context.Context, callerUserID int64, windowDays
 		return nil, fmt.Errorf("devconsole: ai completion failed: %w", err)
 	}
 
-	rec := ParseRecommendation(resp.Text)
+	rec := ParseRecommendation(resp.Text, resp.StopReason)
 
 	if co.AI.Memory != nil {
 		_ = co.AI.Memory.Append(ctx, callerUserID, MemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

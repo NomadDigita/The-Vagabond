@@ -89,10 +89,10 @@ func BuildClassificationUserPrompt(question string) string {
 // parseClassification decodes the classifier's response text,
 // tolerating a markdown code fence the same way every other Phase B-J
 // package does.
-func ParseClassification(text string) *IntentClassification {
+func ParseClassification(text string, stopReason string) *IntentClassification {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &IntentClassification{FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &IntentClassification{FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 	var ic IntentClassification
 	if err := json.Unmarshal([]byte(candidate), &ic); err == nil && ic.Intent != "" {
@@ -102,7 +102,7 @@ func ParseClassification(text string) *IntentClassification {
 	if err := json.Unmarshal([]byte(repaired), &ic); err == nil && ic.Intent != "" {
 		return &ic
 	}
-	return &IntentClassification{FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &IntentClassification{FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // AnswerRecommendation is the final, grounded natural-language answer.
@@ -128,10 +128,10 @@ func BuildAnswerUserPrompt(question, dataBlock string) string {
 		`{"answer": "...", "caveats": "..."}`, question, dataBlock)
 }
 
-func ParseAnswer(text string) *AnswerRecommendation {
+func ParseAnswer(text string, stopReason string) *AnswerRecommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
-		return &AnswerRecommendation{Answer: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+		return &AnswerRecommendation{Answer: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 	}
 	var rec AnswerRecommendation
 	if err := json.Unmarshal([]byte(candidate), &rec); err == nil && rec.Answer != "" {
@@ -141,7 +141,7 @@ func ParseAnswer(text string) *AnswerRecommendation {
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Answer != "" {
 		return &rec
 	}
-	return &AnswerRecommendation{Answer: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text)}
+	return &AnswerRecommendation{Answer: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
 // FormatAnswerForTelegram renders an AnswerRecommendation as a
@@ -191,7 +191,7 @@ func (co *Console) Ask(ctx context.Context, callerUserID int64, question string)
 		return nil, fmt.Errorf("devconsole: classification call failed: %w", err)
 	}
 
-	classification := ParseClassification(classifyResp.Text)
+	classification := ParseClassification(classifyResp.Text, classifyResp.StopReason)
 	if classification.FellBackToRawText || !IsKnownIntent(classification.Intent) {
 		return &AnswerRecommendation{
 			Answer: "I couldn't match that question to anything I know how to look up. Try asking about new players, top players, active users, totals, the economy, combat stats, clans, world state, or recent news.",
@@ -225,7 +225,7 @@ func (co *Console) Ask(ctx context.Context, callerUserID int64, question string)
 		return nil, fmt.Errorf("devconsole: answer call failed: %w", err)
 	}
 
-	rec := ParseAnswer(answerResp.Text)
+	rec := ParseAnswer(answerResp.Text, answerResp.StopReason)
 
 	if co.AI.Memory != nil {
 		_ = co.AI.Memory.Append(ctx, callerUserID, NLQueryMemoryScope, ai.Message{Role: ai.RoleAssistant, Content: answerResp.Text})

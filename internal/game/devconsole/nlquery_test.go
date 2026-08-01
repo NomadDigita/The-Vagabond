@@ -110,7 +110,7 @@ func TestClampLimit_TooHighClampedToMax(t *testing.T) {
 
 func TestParseClassification_ValidJSON(t *testing.T) {
 	raw := `{"intent": "top_players", "days": 0, "limit": 10}`
-	ic := devconsole.ParseClassification(raw)
+	ic := devconsole.ParseClassification(raw, "")
 	if ic.FellBackToRawText {
 		t.Fatalf("expected clean parse, got fallback")
 	}
@@ -120,7 +120,7 @@ func TestParseClassification_ValidJSON(t *testing.T) {
 }
 
 func TestParseClassification_FallsBackOnGarbage(t *testing.T) {
-	ic := devconsole.ParseClassification("I don't know what you mean")
+	ic := devconsole.ParseClassification("I don't know what you mean", "")
 	if !ic.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -133,7 +133,7 @@ func TestParseClassification_FallsBackOnGarbage(t *testing.T) {
 // the same as the intent being safe to run.
 func TestParseClassification_UnknownIntentStillRejectedByIsKnownIntent(t *testing.T) {
 	raw := `{"intent": "DROP TABLE users; --", "days": 7, "limit": 5}`
-	ic := devconsole.ParseClassification(raw)
+	ic := devconsole.ParseClassification(raw, "")
 	if ic.FellBackToRawText {
 		t.Fatalf("expected this to parse as valid JSON (the danger is in the intent value, not the JSON syntax)")
 	}
@@ -144,7 +144,7 @@ func TestParseClassification_UnknownIntentStillRejectedByIsKnownIntent(t *testin
 
 func TestParseClassification_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"intent": "totals", "days": 0, "limit": 0}` + "\n```"
-	ic := devconsole.ParseClassification(raw)
+	ic := devconsole.ParseClassification(raw, "")
 	if ic.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -154,7 +154,7 @@ func TestParseClassification_StripsMarkdownFence(t *testing.T) {
 // that never contained JSON at all.
 func TestParseClassification_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"intent": "top_players", "days": 7, "lim`
-	ic := devconsole.ParseClassification(raw)
+	ic := devconsole.ParseClassification(raw, "")
 	if !ic.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
@@ -165,7 +165,7 @@ func TestParseClassification_FallsBackOnTruncatedJSON(t *testing.T) {
 
 func TestParseAnswer_ValidJSON(t *testing.T) {
 	raw := `{"answer": "12 new players joined this week.", "caveats": "small sample"}`
-	rec := devconsole.ParseAnswer(raw)
+	rec := devconsole.ParseAnswer(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean parse, got fallback")
 	}
@@ -176,7 +176,7 @@ func TestParseAnswer_ValidJSON(t *testing.T) {
 
 func TestParseAnswer_FallsBackOnGarbage(t *testing.T) {
 	raw := "there were some new players I think"
-	rec := devconsole.ParseAnswer(raw)
+	rec := devconsole.ParseAnswer(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -190,7 +190,7 @@ func TestParseAnswer_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseAnswer_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"answer": "There were 12 new players this week, most of whom joined from the Asia contin`
-	rec := devconsole.ParseAnswer(raw)
+	rec := devconsole.ParseAnswer(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

@@ -170,3 +170,26 @@ func TestSanitizeJSONControlChars_DoesNotDoubleEscapeAlreadyEscaped(t *testing.T
 		t.Errorf("expected already-escaped sequence left alone, got: %q", out)
 	}
 }
+
+func TestIsTruncatedStopReason_RecognizesEachProviderConvention(t *testing.T) {
+	for _, reason := range []string{
+		"length",     // OpenAI-compatible (Qwen/DeepSeek/Grok) and Ollama
+		"max_tokens", // Anthropic
+		"MAX_TOKENS", // Gemini
+		"Length",     // case-insensitive
+	} {
+		if !IsTruncatedStopReason(reason) {
+			t.Errorf("expected %q to be recognized as a truncation stop reason", reason)
+		}
+	}
+}
+
+func TestIsTruncatedStopReason_IgnoresNormalStops(t *testing.T) {
+	for _, reason := range []string{
+		"end_turn", "stop", "STOP", "tool_use", "content_filter", "safety", "",
+	} {
+		if IsTruncatedStopReason(reason) {
+			t.Errorf("expected %q to NOT be treated as truncation", reason)
+		}
+	}
+}

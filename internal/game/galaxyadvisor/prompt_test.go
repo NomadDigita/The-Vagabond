@@ -69,7 +69,7 @@ func TestBuildUserPrompt_UnrecognizedEventType(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Your continent is under EMP; galaxy otherwise calm.", "home_continent_advice": "Automation is down, act manually.", "galaxy_outlook": "Europe has Acid Rain but Africa and Americas are clear.", "recommended_actions": [{"action": "delay automation-dependent tasks", "reason": "EMP disables agents"}], "notes": "EMP will clear on its own"}`
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -83,7 +83,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 	raw := "```json\n" + `{"summary": "ok", "home_continent_advice": "", "galaxy_outlook": "", "recommended_actions": [], "notes": ""}` + "\n```"
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fence to be stripped and JSON parsed, got fallback")
 	}
@@ -91,7 +91,7 @@ func TestParseRecommendation_StripsMarkdownFence(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "looks fine out there I guess"
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -105,7 +105,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "All clear.", "recommended_actions": []}` + "\n\nStay safe out there!"
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose to be discarded, not trigger fallback")
 	}
@@ -113,7 +113,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Line one\nline two\", \"recommended_actions\": []}"
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected sanitized control chars to allow parsing, got fallback")
 	}
@@ -123,7 +123,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 // is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Your continent is currently experiencing an EMP burst which has disabled all automat`
-	rec := galaxyadvisor.ParseRecommendation(raw)
+	rec := galaxyadvisor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}

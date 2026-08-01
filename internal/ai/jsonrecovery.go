@@ -135,6 +135,32 @@ func WasTruncated(text string) bool {
 	return depth > 0
 }
 
+// IsTruncatedStopReason reports whether a provider's raw stop/finish
+// reason indicates the completion was cut off because it hit its
+// token budget, as opposed to stopping normally or being blocked for
+// some other reason. This is a stronger signal than WasTruncated's
+// brace-balance heuristic: WasTruncated can only detect truncation
+// inside a JSON object that had already started (it returns false
+// for prose cut off before any '{', or for a truncated string value
+// that happens to leave braces balanced by coincidence), while every
+// provider reports this directly. Callers should check both — see
+// each package's ParseRecommendation, which now takes stopReason as
+// well as the raw text — since a provider that omits/misreports its
+// finish reason still falls back to the brace scan.
+//
+// Recognized values, one per provider (internal/ai/providers/*):
+// OpenAI-compatible (Qwen/DeepSeek/Grok/etc.) and Ollama both use
+// "length"; Anthropic uses "max_tokens"; Gemini uses "MAX_TOKENS".
+// The mock provider always reports "end_turn" and never matches.
+func IsTruncatedStopReason(stopReason string) bool {
+	switch strings.ToLower(stopReason) {
+	case "length", "max_tokens", "max_tokens_exceeded":
+		return true
+	default:
+		return false
+	}
+}
+
 // SanitizeJSONControlChars repairs the single most common way a
 // model's otherwise-valid-looking JSON fails Go's strict
 // encoding/json parser: a raw, unescaped control character (newline,

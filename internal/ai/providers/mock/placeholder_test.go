@@ -22,7 +22,7 @@ func TestMockPlaceholder_ParsesForGovernor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := governor.ParseRecommendation(resp.Text)
+	rec := governor.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock governor placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -34,7 +34,7 @@ func TestMockPlaceholder_ParsesForFleetCommander(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := fleetcommander.ParseRecommendation(resp.Text)
+	rec := fleetcommander.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock fleet commander placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -46,7 +46,7 @@ func TestMockPlaceholder_ParsesForEconAdvisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := econadvisor.ParseRecommendation(resp.Text)
+	rec := econadvisor.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock econ advisor placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -58,7 +58,7 @@ func TestMockPlaceholder_ParsesForResearchPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := researchplanner.ParseRecommendation(resp.Text)
+	rec := researchplanner.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock research planner placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -70,7 +70,7 @@ func TestMockPlaceholder_ParsesForBattleAnalyst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := battleanalyst.ParseRecommendation(resp.Text)
+	rec := battleanalyst.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock battle analyst placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -82,7 +82,7 @@ func TestMockPlaceholder_ParsesForGuildAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := guildassistant.ParseRecommendation(resp.Text)
+	rec := guildassistant.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock guild assistant placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -94,7 +94,7 @@ func TestMockPlaceholder_ParsesForGalaxyAdvisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := galaxyadvisor.ParseRecommendation(resp.Text)
+	rec := galaxyadvisor.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock galaxy advisor placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -106,7 +106,7 @@ func TestMockPlaceholder_ParsesForNPCIntel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := npcintel.ParseRecommendation(resp.Text)
+	rec := npcintel.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock NPC intel placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}
@@ -118,7 +118,7 @@ func TestMockPlaceholder_ParsesForDevConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := devconsole.ParseRecommendation(resp.Text)
+	rec := devconsole.ParseRecommendation(resp.Text, resp.StopReason)
 	if rec.FellBackToRawText {
 		t.Fatalf("expected mock dev console placeholder to parse as valid JSON, got fallback. Raw: %s", resp.Text)
 	}

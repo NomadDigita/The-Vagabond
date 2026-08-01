@@ -111,7 +111,7 @@ func (a *Advisor) Recommend(ctx context.Context, userID int64) (*Recommendation,
 		UserID:      userID,
 		System:      SystemPrompt,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: userPrompt}},
-		MaxTokens:   2048,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 		JSONMode:    true,
 	})
@@ -119,7 +119,7 @@ func (a *Advisor) Recommend(ctx context.Context, userID int64) (*Recommendation,
 		return nil, fmt.Errorf("galaxyadvisor: ai completion failed: %w", err)
 	}
 
-	rec := ParseRecommendation(resp.Text)
+	rec := ParseRecommendation(resp.Text, resp.StopReason)
 
 	if a.AI.Memory != nil {
 		_ = a.AI.Memory.Append(ctx, userID, MemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

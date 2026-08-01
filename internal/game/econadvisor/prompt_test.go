@@ -57,7 +57,7 @@ func TestBuildUserPrompt_EmptyMarketPath(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade warehouse.", "top_roi_actions": [{"action": "upgrade", "target": "warehouse", "reason": "near cap", "expected_gain": "+500 storage"}], "bottlenecks": "scrap near cap", "market_timing": "sell now", "trading_advice": "diversify"}`
-	rec := econadvisor.ParseRecommendation(raw)
+	rec := econadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected clean JSON parse, got fallback")
 	}
@@ -68,7 +68,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	raw := "sell your metal I guess"
-	rec := econadvisor.ParseRecommendation(raw)
+	rec := econadvisor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for non-JSON text")
 	}
@@ -83,7 +83,7 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Sell excess metal on the market while prices are`
-	rec := econadvisor.ParseRecommendation(raw)
+	rec := econadvisor.ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
@@ -111,7 +111,7 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Focus on storage.", "top_roi_actions": []}` +
 		"\n\nHappy to dig into any of these further."
-	rec := econadvisor.ParseRecommendation(raw)
+	rec := econadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
 	}
@@ -122,7 +122,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Economy is advanced\nbut severely unbalanced.\", \"top_roi_actions\": []}"
-	rec := econadvisor.ParseRecommendation(raw)
+	rec := econadvisor.ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
 	}
@@ -132,7 +132,7 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 }
 
 func TestFormatForTelegram_StructuredPath(t *testing.T) {
-	rec := econadvisor.ParseRecommendation(`{"summary": "Focus on storage.", "top_roi_actions": [{"action": "upgrade", "target": "warehouse", "reason": "overflow risk", "expected_gain": "+30% capacity"}], "bottlenecks": "scrap overflow", "market_timing": "prices are high, sell", "trading_advice": "hold crystal"}`)
+	rec := econadvisor.ParseRecommendation(`{"summary": "Focus on storage.", "top_roi_actions": [{"action": "upgrade", "target": "warehouse", "reason": "overflow risk", "expected_gain": "+30% capacity"}], "bottlenecks": "scrap overflow", "market_timing": "prices are high, sell", "trading_advice": "hold crystal"}`, "")
 	out := econadvisor.FormatForTelegram(rec)
 	for _, want := range []string{"Focus on storage.", "+30% capacity", "scrap overflow", "prices are high, sell", "hold crystal", "recommendation only"} {
 		if !strings.Contains(out, want) {

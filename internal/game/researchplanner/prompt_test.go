@@ -152,7 +152,7 @@ func TestBuildUserPrompt_MaxedNodeNotedAsUnavailable(t *testing.T) {
 
 func TestParseRecommendation_ValidJSON(t *testing.T) {
 	raw := `{"summary": "Focus raiding.", "goal_used": "raiding", "recommended_order": [{"node": "speed", "target_level": 3, "reason": "faster raids", "core_cost": 16, "expected_gain": "-8% travel time"}], "cores_needed": 16, "cores_available": 120, "notes": ""}`
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected valid JSON to parse, got fallback")
 	}
@@ -166,7 +166,7 @@ func TestParseRecommendation_ValidJSON(t *testing.T) {
 
 func TestParseRecommendation_FencedJSON(t *testing.T) {
 	raw := "```json\n{\"summary\": \"ok\"}\n```"
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected fenced JSON to parse, got fallback")
 	}
@@ -174,7 +174,7 @@ func TestParseRecommendation_FencedJSON(t *testing.T) {
 
 func TestParseRecommendation_InvalidFallsBackToRawText(t *testing.T) {
 	raw := "not json at all"
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected invalid text to fall back")
 	}
@@ -192,7 +192,7 @@ func TestParseRecommendation_InvalidFallsBackToRawText(t *testing.T) {
 
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Prioritize integrity tech first, since your defenses`
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if !rec.FellBackToRawText {
 		t.Fatalf("expected fallback for truncated JSON")
 	}
@@ -222,7 +222,7 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Focus raiding.", "recommended_order": []}` +
 		"\n\nLet me know if you'd like a different focus."
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected trailing prose around valid JSON to still parse, got fallback. Raw: %s", raw)
 	}
@@ -233,7 +233,7 @@ func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 
 func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	raw := "{\"summary\": \"Base has fallen behind\non defense relative to its economy.\", \"recommended_order\": []}"
-	rec := ParseRecommendation(raw)
+	rec := ParseRecommendation(raw, "")
 	if rec.FellBackToRawText {
 		t.Fatalf("expected raw newline inside string value to be repaired, got fallback. Raw: %s", raw)
 	}
