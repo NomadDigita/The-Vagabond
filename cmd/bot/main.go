@@ -35,7 +35,31 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
 	"gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v3/middleware"
 )
+
+// handleRecoveredPanic is wired into middleware.Recover (see main()) to
+// stop a single panicking handler from crashing the entire bot process
+// for every connected player. A named function instead of an inline
+// closure specifically so it's unit-testable (see main_test.go) -
+// nothing here should ever itself be able to panic, since a panic inside
+// the panic recoverer has nothing left to catch it.
+func handleRecoveredPanic(err error, c telebot.Context) {
+	var senderID int64
+	if sender := c.Sender(); sender != nil {
+		senderID = sender.ID
+	}
+	callbackUnique := ""
+	if cb := c.Callback(); cb != nil {
+		callbackUnique = cb.Unique
+	}
+	log.Printf("PANIC RECOVERED: %v | sender=%d | callback=%q | text=%q", err, senderID, callbackUnique, c.Text())
+	if c.Callback() != nil {
+		_ = c.Respond(&telebot.CallbackResponse{Text: "⚠️ Something went wrong processing that. Please try again."})
+	} else {
+		_ = c.Send("⚠️ Something went wrong processing that command. Please try again.")
+	}
+}
 
 func executeStartupMigrations(db *sql.DB) {
 	log.Println("Executing database initialization check...")
@@ -308,6 +332,21 @@ func main() {
 		log.Fatalf("Fatal: Telegram API initialization failure: %v", err)
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
+
+	// Global panic recovery. Without this, any single unhandled panic in
+	// any handler - an index-out-of-range on c.Args() (many call sites
+	// across this codebase index into it without a preceding length
+	// check, relying on the button that triggers them always supplying
+	// enough args - true for normal play, but not a guarantee telebot's
+	// dispatch loop itself enforces), a nil pointer dereference, etc. -
+	// crashes the ENTIRE bot process, disconnecting every player, not
+	// just failing the one interaction that triggered it. telebot has no
+	// built-in recovery of its own; this wraps every handler invocation.
+	// The custom callback both logs with real context (not just the bare
+	// error middleware.Recover's default OnError would produce) and
+	// tries to leave the player with a clear response instead of a
+	// button that spins forever or a message that silently never arrives.
+	bot.Use(middleware.Recover(handleRecoveredPanic))
 
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
 	tickEngine.Start()
