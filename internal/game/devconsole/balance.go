@@ -63,6 +63,15 @@ type BalanceRecommendation struct {
 	RecommendedFocus string     `json:"recommended_focus"`
 	Notes            string     `json:"notes"`
 
+	// Snapshot is the real, deterministic usage/outcome data this
+	// pass was built from - not model output, so it's set by
+	// RecommendBalance after parsing rather than unmarshaled from
+	// JSON. FormatBalanceForTelegram uses it to render an actual
+	// numeric table (real percentages) with the model's UnitNotes
+	// shown as commentary alongside it, rather than asking the model
+	// to reproduce numbers it was only ever supposed to reason about.
+	Snapshot *BalanceSnapshot `json:"-"`
+
 	FellBackToRawText bool
 	Truncated         bool
 }
@@ -115,39 +124,71 @@ func ParseBalanceRecommendation(text string, stopReason string) *BalanceRecommen
 }
 
 // FormatBalanceForTelegram renders a BalanceRecommendation as a
-// plain-text Telegram reply.
+// Telegram HTML-mode message. This was plain, unformatted text until
+// the 2026-08-01 UI pass below - it's the one AI Developer Console
+// report the original HTML polish campaign (see
+// BUGS_AND_INCONSISTENCIES.md waves 1-11) never reached, which is why
+// it still looked like a flat wall of text next to every other panel
+// in the game. All model-generated fields are escaped via
+// ai.HTMLEscape before being wrapped in a tag.
+//
+// Design choice worth stating explicitly: the unit table below is
+// built from rec.Snapshot's real UnitUsageStat numbers, not from the
+// model's UnitNotes text. The model was only ever asked to comment on
+// the data, not to reproduce it - rendering the real percentages
+// ourselves and showing the model's commentary as clearly-labeled
+// prose alongside it keeps the ground-truth numbers and the AI's
+// interpretation of them visually distinct, rather than trusting an
+// LLM to transcribe a number correctly into a table cell.
 func FormatBalanceForTelegram(rec *BalanceRecommendation) string {
 	var b strings.Builder
-	b.WriteString("⚖️ AI DEVELOPER CONSOLE — BALANCE COMMENTARY\n\n")
+	b.WriteString("⚖️ " + ai.HTMLBold("AI DEVELOPER CONSOLE — BALANCE COMMENTARY") + "\n\n")
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ The AI's response got cut off before it finished — showing the partial reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ Couldn't parse the AI's structured response — showing its raw reply below:\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
 		}
-		fmt.Fprintf(&b, "```\n%s\n```", rec.Summary)
+		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "📋 %s\n\n", rec.Summary)
+	fmt.Fprintf(&b, "📋 %s\n\n", ai.HTMLEscape(rec.Summary))
+
+	if rec.Snapshot != nil && len(rec.Snapshot.Units) > 0 {
+		headers := []string{"Unit", "Used%", "Win%"}
+		rows := make([][]string, 0, len(rec.Snapshot.Units))
+		for _, u := range rec.Snapshot.Units {
+			winCell := fmt.Sprintf("%.0f", u.ApparentWinRateWhenUsed)
+			if u.RaidsUsedIn == 0 {
+				winCell = "—" // no deployments this window - a real 0% win rate would be misleading here
+			}
+			rows = append(rows, []string{u.Unit, fmt.Sprintf("%.0f", u.UsageRatePercent), winCell})
+		}
+		b.WriteString("📊 " + ai.HTMLBold("UNIT USAGE (real data, this window)") + "\n")
+		b.WriteString(ai.HTMLTable(headers, rows) + "\n\n")
+	}
 
 	if len(rec.UnitNotes) > 0 {
-		b.WriteString("UNIT NOTES:\n")
+		b.WriteString("🔎 " + ai.HTMLBold("AI COMMENTARY") + "\n")
 		for _, n := range rec.UnitNotes {
-			fmt.Fprintf(&b, "  • %s: %s\n    ⚠️ %s\n", n.Unit, n.Observation, n.Caution)
+			fmt.Fprintf(&b, "  • %s: %s\n", ai.HTMLBold(ai.HTMLEscape(n.Unit)), ai.HTMLEscape(n.Observation))
+			if n.Caution != "" {
+				b.WriteString(ai.HTMLExpandableQuote("⚠️ "+ai.HTMLEscape(n.Caution)) + "\n")
+			}
 		}
 		b.WriteString("\n")
 	}
 
 	if rec.RecommendedFocus != "" {
-		fmt.Fprintf(&b, "🎯 Worth investigating: %s\n", rec.RecommendedFocus)
+		fmt.Fprintf(&b, "🎯 Worth investigating: %s\n", ai.HTMLEscape(rec.RecommendedFocus))
 	}
 	if rec.Notes != "" {
-		fmt.Fprintf(&b, "📝 %s\n", rec.Notes)
+		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))
 	}
 
-	b.WriteString("\n⚠️ Correlational data only — not a verdict on any unit's balance. Nothing has been changed automatically.")
+	b.WriteString("\n" + ai.HTMLItalic("Correlational data only — not a verdict on any unit's balance. Nothing has been changed automatically."))
 	return b.String()
 }
 
@@ -227,6 +268,7 @@ func (co *Console) RecommendBalance(ctx context.Context, callerUserID int64, win
 	}
 
 	rec := ParseBalanceRecommendation(resp.Text, resp.StopReason)
+	rec.Snapshot = snapshot
 
 	if co.AI.Memory != nil {
 		_ = co.AI.Memory.Append(ctx, callerUserID, balanceMemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

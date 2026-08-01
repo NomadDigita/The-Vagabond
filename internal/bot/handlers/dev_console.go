@@ -183,7 +183,7 @@ func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
 		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: " + err.Error())
 	}
 
-	return c.Send(devconsole.FormatBalanceForTelegram(rec), buildBalanceKeyboard(windowDays))
+	return c.Send(devconsole.FormatBalanceForTelegram(rec), telebot.ModeHTML, buildBalanceKeyboard(windowDays))
 }
 
 // ── callback: balance_report_refresh ─────────────────────────────────
@@ -210,5 +210,5 @@ func (h *DevConsoleHandler) HandleBalanceReportRefreshCallback(c telebot.Context
 	}
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🔄 Refreshed."})
-	return c.Send(devconsole.FormatBalanceForTelegram(rec), buildBalanceKeyboard(windowDays))
+	return c.Send(devconsole.FormatBalanceForTelegram(rec), telebot.ModeHTML, buildBalanceKeyboard(windowDays))
 }

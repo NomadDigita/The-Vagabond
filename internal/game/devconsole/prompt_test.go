@@ -183,3 +183,63 @@ func TestFormatForTelegram_StructuredPath(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatForTelegram_NarrativesUseExpandableQuote is the regression
+// test for the 2026-08-01 UI pass: the three free-text AI narrative
+// fields can legitimately run to several sentences each, so they now
+// render as collapsible blockquotes instead of sitting inline as one
+// dense wall of prose between the report's other sections.
+func TestFormatForTelegram_NarrativesUseExpandableQuote(t *testing.T) {
+	rec := &devconsole.Recommendation{
+		Summary:                  "test",
+		NewPlayerNarrative:       "narrative one",
+		TopPerformerNarrative:    "narrative two",
+		RecommendationsForAdmins: "narrative three",
+	}
+	out := devconsole.FormatForTelegram(rec)
+	if n := strings.Count(out, "<blockquote expandable>"); n != 3 {
+		t.Errorf("expected all 3 narrative fields wrapped in expandable blockquotes, found %d, got:\n%s", n, out)
+	}
+	for _, want := range []string{"narrative one", "narrative two", "narrative three"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected narrative text %q to still be present, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestFormatForTelegram_TopPlayersTableFromRealSnapshot guards the
+// same ground-truth-vs-AI-paraphrase property as the Balance Report's
+// unit table: the Top Players table must come from Snapshot's real
+// scores, not from anything the model wrote in TopPerformerNarrative.
+func TestFormatForTelegram_TopPlayersTableFromRealSnapshot(t *testing.T) {
+	rec := &devconsole.Recommendation{
+		Summary: "test",
+		Snapshot: &devconsole.Snapshot{
+			TopPlayers: []devconsole.TopPlayer{
+				{Name: "Asiaju", Score: 250897023, Level: 12},
+				{Name: "Frontier Collective", Score: 43000, Level: 15},
+			},
+		},
+	}
+	out := devconsole.FormatForTelegram(rec)
+	if !strings.Contains(out, "<pre>") {
+		t.Fatalf("expected a <pre>-wrapped Top Players table, got: %s", out)
+	}
+	for _, want := range []string{"Asiaju", "250897023", "43000", "15"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected table to contain %q from real Snapshot data, got: %s", want, out)
+		}
+	}
+}
+
+// TestFormatForTelegram_NilSnapshotOmitsTable makes sure the table
+// section is skipped cleanly (not a nil-pointer panic) when Snapshot
+// wasn't set - the exact case every existing hand-built test
+// Recommendation above exercises, since none of them set Snapshot.
+func TestFormatForTelegram_NilSnapshotOmitsTable(t *testing.T) {
+	rec := &devconsole.Recommendation{Summary: "test"}
+	out := devconsole.FormatForTelegram(rec)
+	if strings.Contains(out, "<pre>") {
+		t.Errorf("expected no table when Snapshot is nil, got: %s", out)
+	}
+}
