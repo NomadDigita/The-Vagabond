@@ -792,3 +792,133 @@ file.
    genuinely isn't arriving in practice, it's downstream of finding
    #1 above (no events are triggering at all right now to notify
    about) rather than a separate notification-path bug.
+
+## Follow-up bug-hunt session (2026-08-01, later still) — "pq: unnamed prepared statement does not exist (26000)" on Dev Console reports
+
+User confirmed truncation is fixed (see section above) but reported a
+new, intermittent error surfacing on Balance/Weekly reports:
+`devconsole: balance stats for destroyers_mobilized: pq: unnamed
+prepared statement does not exist (26000)` and `devconsole: count
+active users: pq: unnamed prepared statement does not exist (26000)`.
+Already handled non-fatally (the bot showed a "temporarily
+unavailable" message rather than crashing, via an existing error
+wrapper) but a graceful failure that could be avoided entirely is
+still a bug worth fixing rather than living with.
+
+1. **Real bug, root-caused rather than patched at the query level:
+   this is SQLSTATE 26000, a known Supabase PgBouncer (transaction
+   pooling mode) + lib/pq incompatibility, not anything wrong with the
+   specific queries that happened to hit it.** lib/pq runs every
+   parameterized query through the Postgres extended query protocol
+   with an unnamed prepared statement — a Parse followed by a later
+   Bind/Execute. PgBouncer's transaction pooling can route that second
+   half to a different backend server than the one that saw the
+   Parse, and that backend has genuinely never heard of the statement.
+   It's a connection-pooler artifact, not a real query problem, and
+   it's inherently intermittent — explaining why Dev Console reports
+   (which run several queries back-to-back) were where it got noticed
+   first, without anything being specifically wrong with `devconsole`
+   itself. Fixed with a new `internal/dbdriver` package wrapping
+   lib/pq's `postgres` driver: on SQLSTATE 26000 specifically, it
+   returns `driver.ErrBadConn`, which triggers database/sql's own
+   built-in retry-on-a-fresh-connection behavior. Registered once in
+   `cmd/bot/main.go` (`sql.Open("postgres-retry", dbURL)` instead of
+   `"postgres"`), so it covers every `*sql.DB` call site in the
+   codebase — not just devconsole — without touching any of them.
+   Verified the fix doesn't swallow real errors: a genuinely different
+   Postgres error code still passes straight through unchanged (new
+   test `TestQueryContext_PassesThroughUnrelatedPqErrors`), so a real
+   bug can't get masked behind a silent retry.
+
+Full rationale in ADR-026, PROJECT_MASTER_PLAN.md.
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass, including new unit tests in `internal/dbdriver` that exercise
+the retry-translation logic against a fake `driver.Conn` (no live
+Postgres/PgBouncer needed to prove the behavior). go.mod/go.sum
+reverted before commit — git diff go.mod go.sum is empty.
+
+## Telegram UI design pass (2026-08-01) — expandable blockquotes + real tables
+
+User asked for a research-first pass on Telegram bot UI design patterns
+beyond inline-button coloring (explicitly a parallel session's
+territory this round) — search first, note everything down, then
+implement where it actually helps. Full design rationale in ADR-027,
+PROJECT_MASTER_PLAN.md.
+
+**Researched, not assumed:** confirmed via search that the codebase
+already covers most of what Telegram supports (bold/italic/underline/
+code/pre/blockquote/spoiler all already had helpers). The two genuinely
+new, current features found: `<blockquote expandable>` (Bot API 7.3+,
+a real collapsible-quote entity, not a hack) and the fact that
+Telegram has no native table entity whatsoever — any aligned columns
+require hand-padded monospace text inside a `<pre>` block, with mobile
+clients wrapping around 34-40 characters, which is why a naive
+markdown-table dump looks broken on a phone (a documented, common
+complaint independent of this project).
+
+**Implemented:**
+- Added `HTMLExpandableQuote`, `HTMLTable`, `HTMLQuote`, `HTMLStrike`
+  to `internal/ai/render.go` — chosen over `bot/handlers/render.go`
+  specifically because every AI feature package already imports
+  `internal/ai` and none of them can import `bot/handlers` (standing
+  import-cycle rule), making this the one place reachable from all
+  nine AI packages at once.
+- Found a real, previously undocumented gap while looking for a good
+  first place to apply these: **the Balance Report
+  (`devconsole/balance.go`) was still being sent as fully plain text**
+  — confirmed by reading the actual `c.Send(...)` calls in
+  `dev_console.go`, neither of which passed `telebot.ModeHTML`. This
+  is the one AI Developer Console output the original HTML polish
+  campaign (waves 1-11) never reached. Rewrote it: real HTML
+  formatting, `telebot.ModeHTML` added to both call sites, and a unit
+  usage table built from `BalanceSnapshot`'s actual numbers (not the
+  model's `UnitNotes` prose) with the AI's per-unit caution shown in
+  an expandable blockquote alongside it.
+- The Weekly/Activity Report (`devconsole/prompt.go`) gained a Top
+  Players table from its own real `Snapshot.TopPlayers` data, and its
+  three narrative fields (new players, top performers, admin
+  recommendations) — each free text that can genuinely run several
+  sentences — now render as expandable blockquotes instead of dense
+  inline prose.
+- Both `BalanceRecommendation` and `Recommendation` gained a
+  `Snapshot *…Snapshot \`json:"-"\`` field, set by the caller
+  (`RecommendBalance`/`Recommend`) after parsing the model's response,
+  never unmarshaled from the model's own JSON — deliberately, so a
+  table showing real numbers can never accidentally be populated by
+  something the AI wrote instead of the game's own data.
+
+**Bug caught and fixed before it shipped, not after:** the first draft
+of the Top Players table escaped each player name (`ai.HTMLEscape`)
+and then let `HTMLTable`'s own length-clipping truncate the result.
+If a name contained `&`, the escaped `&amp;` could get sliced mid-
+entity (e.g. cut to `&am…`), which Telegram would reject the entire
+message for — a real, if rare, way this feature could have broken a
+live report. Fixed by clipping the raw name to a safe rune length
+first and escaping second; the hazard itself is now called out
+directly in `HTMLTable`'s doc comment so a future caller building
+another table doesn't repeat it.
+
+**Explicitly out of scope this round, by the user's own instruction:**
+inline-button coloring (a parallel session already shipped real
+colored buttons via Bot API 9.4 — see `a17eeab`). Also out of scope:
+extending these same helpers to player-facing panels (referral
+leaderboard, clan stats, warehouse stocks) — good candidates for a
+future pass, not touched here to keep this session's diff reviewable
+and focused on the two reports that most needed it.
+
+New tests: `internal/ai/render_test.go` (table column alignment,
+malformed-row handling, long-cell clipping, quote/strike wrapping) and
+targeted regression tests in `devconsole/balance_test.go` and
+`devconsole/prompt_test.go` covering the new table/expandable-quote
+wiring, including a nil-`Snapshot` safety case for both reports (since
+every existing hand-built test `*Recommendation` predates the field
+and doesn't set it).
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass, plus a manual render of a realistic Balance Report through a
+throwaway `cmd/renderpreview` binary (removed before commit) to
+visually confirm the table lines up and the expandable quote renders
+as expected — not just asserted via `strings.Contains`. go.mod/go.sum
+reverted before commit — checksums confirmed to match the pre-session
+values.

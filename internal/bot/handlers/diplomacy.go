@@ -73,6 +73,17 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
+	// Same pattern as combat.go's Road Contact prompts: a pact response
+	// is a real accept-vs-reject decision, so it gets pulled out of the
+	// shared panel keyboard and sent as its own colored message below
+	// (see keyboards/styled.go) instead of an unstyled button mixed into
+	// the panel.
+	type pactPrompt struct {
+		text   string
+		accept keyboards.StyledBtn
+		reject keyboards.StyledBtn
+	}
+	var pactPrompts []pactPrompt
 	hasActive := false
 	var activeText, pendingText string
 
@@ -91,9 +102,12 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 			isRecipient := (clanAID == clanID && proposedBy != sender.ID) || (clanBID == clanID && proposedBy != sender.ID)
 			pendingText += fmt.Sprintf("%s proposed by %s\n", pactLabel(pactType), safeOtherName)
 			if isRecipient && isLeader {
-				btnAccept := selector.Data(fmt.Sprintf("✅ Accept %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "accept")
-				btnReject := selector.Data(fmt.Sprintf("❌ Reject %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "reject")
-				buttons = append(buttons, selector.Row(btnAccept), selector.Row(btnReject))
+				pactPrompts = append(pactPrompts, pactPrompt{
+					text: "🕊️ " + htmlBold("DIPLOMATIC PROPOSAL") + "\n" + divider + "\n" +
+						fmt.Sprintf("%s proposed by %s.", pactLabel(pactType), htmlBold(safeOtherName)) + "\n" + divider,
+					accept: keyboards.Styled(selector.Data(fmt.Sprintf("✅ Accept %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "accept"), keyboards.StyleSuccess),
+					reject: keyboards.Styled(selector.Data(fmt.Sprintf("❌ Reject %s (%s)", pactLabel(pactType), otherName), "diplo_respond", id, "reject"), keyboards.StyleDanger),
+				})
 			}
 		}
 	}
@@ -114,7 +128,16 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 		divider
 
 	selector.Inline(buttons...)
-	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	if err := sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector); err != nil {
+		return err
+	}
+
+	for _, p := range pactPrompts {
+		if err := keyboards.SendStyled(c, p.text, [][]keyboards.StyledBtn{{p.accept, p.reject}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // proposePact handles both /ally and /nap - they differ only in

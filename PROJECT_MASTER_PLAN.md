@@ -809,6 +809,93 @@ for exactly that case when no stop reason is available). Both
 `MaxTokens` and cache-on-truncation apply repo-wide, not per-package,
 so no future advisor needs to remember to opt in.
 
+**ADR-026: "pq: unnamed prepared statement does not exist (26000)"
+errors surfaced intermittently on Dev Console reports (e.g. "devconsole:
+balance stats for destroyers_mobilized: pq: unnamed prepared statement
+does not exist (26000)") — root-caused to a Supabase PgBouncer/lib-pq
+incompatibility, not fixed with a per-query patch.** lib/pq runs every
+parameterized query through the Postgres extended query protocol using
+an unnamed prepared statement (Parse, then a later Bind/Execute).
+Supabase's connection pooler runs PgBouncer in transaction pooling
+mode, which can hand the Bind/Execute half of that exchange to a
+different backend server than the one that saw the Parse — the second
+backend genuinely has never heard of the statement, hence 26000. It's
+a pooler artifact, not a real query error, which is why it was
+intermittent and why Dev Console reports (which fire several queries
+back-to-back) were where a player was statistically most likely to
+notice one land wrong — nothing about those queries themselves is
+special. Already handled gracefully (the "temporarily unavailable"
+message players saw came from an existing error wrapper, not a crash)
+but a graceful failure that a retry could have silently avoided is
+still a bug. Fixed with a new `internal/dbdriver` package: a
+database/sql driver named `postgres-retry` that wraps lib/pq's own
+`postgres` driver and translates a 26000 error at the QueryContext/
+ExecContext layer into `driver.ErrBadConn`. database/sql already has a
+built-in mechanism for exactly that signal — on `driver.ErrBadConn`
+from a query that hasn't started returning rows yet, it discards the
+connection and transparently retries once on a fresh one — so this
+fixes every call site in the codebase (`co.DB.QueryRowContext`,
+`QueryContext`, `ExecContext`, wherever they're called, for every
+package, not just devconsole) from one registration point
+(`cmd/bot/main.go`'s single `sql.Open` call), without touching any of
+them. A genuinely different Postgres error (bad SQL, a constraint
+violation, etc.) still passes straight through unchanged — only
+SQLSTATE 26000 specifically is treated as retryable, so this can't
+mask a real bug behind a silent retry.
+
+**ADR-027: three new Telegram UI primitives (expandable blockquote,
+monospace table, strikethrough) live as shared helpers in
+`internal/ai/render.go`, and any table built from data the AI also
+commented on renders from the real snapshot, never from the model's
+own transcription of it.** Researched (not assumed) which Telegram Bot
+API formatting features exist beyond what the codebase already used
+(bold/italic/underline/code/pre/blockquote/spoiler, all already
+present) and beyond inline-button coloring (already covered by a
+parallel session, out of scope here): `<blockquote expandable>`
+(Bot API 7.3+, a genuinely current feature — collapsed by default,
+tap to expand) and the fact that Telegram has no native table entity
+at all, so any aligned columns have to be a monospace `<pre>` block
+with manually-padded cells. Added `HTMLExpandableQuote`, `HTMLTable`,
+`HTMLQuote` (promoted from `bot/handlers/render.go`'s pattern into the
+AI-shared file), and `HTMLStrike` to `internal/ai/render.go` rather
+than to `bot/handlers/render.go`, since every AI feature package
+already imports `internal/ai` and none of them can import
+`bot/handlers` (the standing import-cycle rule — see the
+"Import cycle discipline" principle above), so this is the one shared
+home reachable from all nine AI packages.
+
+`HTMLTable` clips any cell over 18 runes with an ellipsis, since
+Telegram's mobile client wraps monospace text at roughly 34-40
+characters and a table that wraps mid-row looks worse than no table —
+column widths are computed from actual content, not a fixed padding
+scheme. A genuinely easy mistake was caught and fixed during this
+work, not shipped: escaping a cell (`ai.HTMLEscape`) and then letting
+`HTMLTable`'s own clipping cut the already-escaped string can slice
+through the middle of an entity like `&amp;`, producing invalid HTML
+that Telegram rejects the whole message for — the fix is to clip the
+raw value first and escape second, and this exact hazard is called
+out directly in `HTMLTable`'s doc comment so a future caller doesn't
+reintroduce it.
+
+Applied so far: the **Balance Report** (`devconsole/balance.go`) was
+the one AI Developer Console output the original HTML polish campaign
+(waves 1-11) never reached — it was still being sent as fully plain
+text (no `telebot.ModeHTML` at either of its two call sites in
+`dev_console.go`, confirmed by reading the actual `c.Send(...)` calls,
+not assumed from the file's age). Converted to real HTML, with a unit
+usage table built from `BalanceSnapshot`'s real numbers (not the
+model's `UnitNotes` prose) and the AI's per-unit commentary shown in
+an expandable blockquote. The **Weekly/Activity Report**
+(`devconsole/prompt.go`) gained a Top Players table from the same real
+Snapshot data it already collects, and its three narrative fields
+(new players, top performers, admin recommendations) — each free text
+that can run several sentences — now render as expandable blockquotes
+instead of dense inline prose. Both `BalanceRecommendation` and
+`Recommendation` gained a `Snapshot *…Snapshot \`json:"-"\`` field, set
+by the caller after parsing (never unmarshaled from the model's own
+JSON), specifically so the real numbers and the AI's interpretation of
+them stay visually and structurally distinct.
+
 **ADR-017: Battle Analyst (Phase F) covers raids and arena battles
 only, not World Bosses — confirmed by re-auditing the schema, not
 inherited from an earlier session's claim.** A schema audit done
@@ -2324,6 +2411,41 @@ which cost real time re-deriving them twice.
   `callback_data_length_test.go`. Verified with a full `go build
   ./... && go vet ./... && go test ./...` pass and a checksum-confirmed
   `go.mod`/`go.sum` restore.
+
+- **New Telegram UI helpers (2026-08-01): expandable blockquote and
+  monospace table rendering, applied to the two AI Developer Console
+  reports that needed them most.** Full detail in ADR-027. Researched
+  which Telegram Bot API formatting features exist beyond what the
+  codebase already used and beyond inline-button coloring (a parallel
+  session's territory, explicitly out of scope here): confirmed
+  `<blockquote expandable>` is a real, current feature, and that
+  Telegram has no native table entity at all — any aligned columns
+  require a manually-padded monospace `<pre>` block. Added
+  `HTMLExpandableQuote`, `HTMLTable`, `HTMLQuote`, and `HTMLStrike` to
+  `internal/ai/render.go` (the one file already shared by all nine AI
+  feature packages). Found and fixed a real, previously-unnoticed gap
+  along the way: the Balance Report was still being sent as fully
+  plain text — the one Dev Console output the original HTML polish
+  campaign never reached. Converted it to real HTML with a unit-usage
+  table built from the actual `BalanceSnapshot` numbers (not the
+  model's prose), and the AI's per-unit commentary now renders in an
+  expandable blockquote. The Weekly/Activity Report gained a Top
+  Players table from its own real Snapshot data and switched its three
+  narrative fields to expandable blockquotes. `BalanceRecommendation`
+  and `Recommendation` both gained a `Snapshot` field set by the
+  caller after parsing, never by the model — the real numbers and the
+  AI's interpretation of them stay visually and structurally distinct.
+  A subtle bug in the new `HTMLTable` helper itself was caught before
+  shipping: escaping a cell before letting the table's own clipping
+  logic truncate it could slice through an HTML entity like `&amp;`
+  and produce invalid markup Telegram would reject outright — fixed by
+  clipping raw content first, escaping second, and documented directly
+  in the function's doc comment. New tests: `render_test.go` (table
+  alignment, malformed-row handling, clipping) plus dedicated
+  regression tests in `balance_test.go`/`prompt_test.go` for the new
+  table/expandable-quote wiring, including nil-Snapshot safety.
+  Verified with a full `go build ./... && go vet ./... && go test
+  ./...` pass and a checksum-confirmed `go.mod`/`go.sum` restore.
 
 ## 7. Future Ideas (unscoped, not committed to any phase)
 

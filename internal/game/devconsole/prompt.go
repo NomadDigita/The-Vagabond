@@ -80,6 +80,14 @@ type Recommendation struct {
 	RecommendationsForAdmins string   `json:"recommendations_for_admins"`
 	Notes                    string   `json:"notes"`
 
+	// Snapshot is the real, deterministic window data (see
+	// BalanceRecommendation.Snapshot for the same rationale) - set by
+	// the caller after parsing, not unmarshaled from the model's JSON.
+	// FormatForTelegram uses it to render an actual Top Players table
+	// from real scores rather than trusting the model to transcribe
+	// them into TopPerformerNarrative's prose correctly.
+	Snapshot *Snapshot `json:"-"`
+
 	// FellBackToRawText is true when JSON parsing failed and Summary
 	// holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
@@ -205,14 +213,36 @@ func FormatForTelegram(rec *Recommendation) string {
 		b.WriteString("\n")
 	}
 
+	if rec.Snapshot != nil && len(rec.Snapshot.TopPlayers) > 0 {
+		headers := []string{"#", "Player", "Lvl", "Score"}
+		rows := make([][]string, 0, len(rec.Snapshot.TopPlayers))
+		for i, tp := range rec.Snapshot.TopPlayers {
+			name := tp.Name
+			if r := []rune(name); len(r) > 18 {
+				name = string(r[:17]) + "…"
+			}
+			rows = append(rows, []string{
+				fmt.Sprintf("%d", i+1),
+				ai.HTMLEscape(name),
+				fmt.Sprintf("%d", tp.Level),
+				fmt.Sprintf("%.0f", tp.Score),
+			})
+		}
+		b.WriteString("🏆 " + ai.HTMLBold("TOP PLAYERS") + "\n")
+		b.WriteString(ai.HTMLTable(headers, rows) + "\n\n")
+	}
+
 	if rec.NewPlayerNarrative != "" {
-		fmt.Fprintf(&b, "🆕 New players: %s\n\n", ai.HTMLEscape(rec.NewPlayerNarrative))
+		b.WriteString("🆕 " + ai.HTMLBold("New players") + "\n")
+		b.WriteString(ai.HTMLExpandableQuote(ai.HTMLEscape(rec.NewPlayerNarrative)) + "\n\n")
 	}
 	if rec.TopPerformerNarrative != "" {
-		fmt.Fprintf(&b, "👑 Top performers: %s\n\n", ai.HTMLEscape(rec.TopPerformerNarrative))
+		b.WriteString("👑 " + ai.HTMLBold("Top performers") + "\n")
+		b.WriteString(ai.HTMLExpandableQuote(ai.HTMLEscape(rec.TopPerformerNarrative)) + "\n\n")
 	}
 	if rec.RecommendationsForAdmins != "" {
-		fmt.Fprintf(&b, "🛠️ For admins: %s\n\n", ai.HTMLEscape(rec.RecommendationsForAdmins))
+		b.WriteString("🛠️ " + ai.HTMLBold("For admins") + "\n")
+		b.WriteString(ai.HTMLExpandableQuote(ai.HTMLEscape(rec.RecommendationsForAdmins)) + "\n\n")
 	}
 	if rec.Notes != "" {
 		fmt.Fprintf(&b, "📝 %s\n", ai.HTMLEscape(rec.Notes))

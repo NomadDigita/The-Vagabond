@@ -217,6 +217,7 @@ func (co *Console) Recommend(ctx context.Context, callerUserID int64, windowDays
 	}
 
 	rec := ParseRecommendation(resp.Text, resp.StopReason)
+	rec.Snapshot = snapshot
 
 	if co.AI.Memory != nil {
 		_ = co.AI.Memory.Append(ctx, callerUserID, MemoryScope, ai.Message{Role: ai.RoleAssistant, Content: resp.Text})

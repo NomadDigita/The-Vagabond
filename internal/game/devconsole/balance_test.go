@@ -148,3 +148,68 @@ func TestBuildBalanceUserPrompt_NoRaidsPath(t *testing.T) {
 		t.Errorf("expected no-raids message, got:\n%s", p)
 	}
 }
+
+// TestFormatBalanceForTelegram_RendersRealDataTable is the regression
+// test for the 2026-08-01 UI pass: the unit-usage table must be built
+// from Snapshot's real numbers, not from anything the model wrote, so
+// a made-up or mistranscribed AI figure can never end up looking like
+// ground truth. It also checks the zero-usage case renders as "—"
+// rather than a misleading literal 0% win rate (there's no rate to
+// speak of if the unit was never deployed).
+func TestFormatBalanceForTelegram_RendersRealDataTable(t *testing.T) {
+	snap := sampleBalanceSnapshot()
+	rec := &devconsole.BalanceRecommendation{
+		Summary:  "Soldiers dominate; bombers rarely used.",
+		Snapshot: &snap,
+	}
+	out := devconsole.FormatBalanceForTelegram(rec)
+
+	if !strings.Contains(out, "<pre>") || !strings.Contains(out, "</pre>") {
+		t.Fatalf("expected a <pre>-wrapped table, got: %s", out)
+	}
+	for _, want := range []string{"soldiers", "95", "60", "bombers", "wraiths"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected table to contain %q (from real Snapshot data), got: %s", want, out)
+		}
+	}
+	// wraiths was never deployed (RaidsUsedIn: 0) - must show "—", not "0",
+	// for its win rate, since a real 0% would misleadingly imply it lost
+	// every time it was used.
+	if !strings.Contains(out, "—") {
+		t.Errorf("expected a \"—\" placeholder for the never-deployed unit's win rate, got: %s", out)
+	}
+}
+
+// TestFormatBalanceForTelegram_CautionUsesExpandableQuote guards the
+// other half of the same UI pass: per-unit AI cautions render as a
+// collapsible blockquote rather than dumped inline, since they can run
+// long and this was previously a flat, unformatted wall of text (the
+// one AI Developer Console report the original HTML polish campaign
+// never reached).
+func TestFormatBalanceForTelegram_CautionUsesExpandableQuote(t *testing.T) {
+	rec := &devconsole.BalanceRecommendation{
+		Summary: "test",
+		UnitNotes: []devconsole.UnitNote{
+			{Unit: "bombers", Observation: "rarely used", Caution: "sample size too small"},
+		},
+	}
+	out := devconsole.FormatBalanceForTelegram(rec)
+	if !strings.Contains(out, "<blockquote expandable>") {
+		t.Errorf("expected unit caution to be wrapped in an expandable blockquote, got: %s", out)
+	}
+	if !strings.Contains(out, "sample size too small") {
+		t.Errorf("expected caution text to still be present, got: %s", out)
+	}
+}
+
+// TestFormatBalanceForTelegram_NilSnapshotOmitsTable makes sure the
+// table section is skipped cleanly (not a nil-pointer panic) when
+// Snapshot wasn't set - the case every hand-built test
+// BalanceRecommendation above exercises, since none of them set it.
+func TestFormatBalanceForTelegram_NilSnapshotOmitsTable(t *testing.T) {
+	rec := &devconsole.BalanceRecommendation{Summary: "test"}
+	out := devconsole.FormatBalanceForTelegram(rec)
+	if strings.Contains(out, "<pre>") {
+		t.Errorf("expected no table when Snapshot is nil, got: %s", out)
+	}
+}

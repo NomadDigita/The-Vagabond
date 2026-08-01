@@ -277,15 +277,25 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	var buttons []telebot.Row
 	any := false
 
+	type applicationPrompt struct {
+		text   string
+		accept keyboards.StyledBtn
+		reject keyboards.StyledBtn
+	}
+	var prompts []applicationPrompt
+
 	for rows.Next() {
 		var userID int64
 		var fName, username string
 		if scanErr := rows.Scan(&userID, &fName, &username); scanErr == nil {
 			any = true
 			panelText += fmt.Sprintf("👤 %s (@%s)\n", htmlEscape(fName), htmlEscape(username))
-			btnAccept := selector.Data("✅ Accept", "cl_acc", strconv.FormatInt(userID, 10), clanID)
-			btnReject := selector.Data("❌ Reject", "cl_rej", strconv.FormatInt(userID, 10), clanID)
-			buttons = append(buttons, selector.Row(btnAccept, btnReject))
+			prompts = append(prompts, applicationPrompt{
+				text: "📬 " + htmlBold("CLAN APPLICATION") + "\n" + divider + "\n" +
+					fmt.Sprintf("%s (@%s) wants to join.", htmlBold(htmlEscape(fName)), htmlEscape(username)) + "\n" + divider,
+				accept: keyboards.Styled(selector.Data("✅ Accept", "cl_acc", strconv.FormatInt(userID, 10), clanID), keyboards.StyleSuccess),
+				reject: keyboards.Styled(selector.Data("❌ Reject", "cl_rej", strconv.FormatInt(userID, 10), clanID), keyboards.StyleDanger),
+			})
 		}
 	}
 
@@ -294,7 +304,15 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	}
 	panelText += divider
 	selector.Inline(buttons...)
-	return c.Send(panelText, telebot.ModeHTML, selector)
+	if err := c.Send(panelText, telebot.ModeHTML, selector); err != nil {
+		return err
+	}
+	for _, p := range prompts {
+		if err := keyboards.SendStyled(c, p.text, [][]keyboards.StyledBtn{{p.accept, p.reject}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // HandleApplicationDecisionCallback processes Accept/Reject on an application.
@@ -376,7 +394,7 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 		htmlItalic("Manage your allied commanders below:") + "\n\n"
 
 	selector := &telebot.ReplyMarkup{}
-	var buttons []telebot.Row
+	var styledRows [][]keyboards.StyledBtn
 
 	index := 1
 	for rows.Next() {
@@ -386,23 +404,22 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 			rosterText += fmt.Sprintf("🎖️ [%d] %s (@%s)\n    Rank: %s\n\n", index, htmlBold(htmlEscape(fName)), htmlEscape(username), htmlCode(role))
 
 			if senderRole == "Leader" && memberID != sender.ID {
-				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
-				btnPromote := selector.Data(fmt.Sprintf("🛡️ Promote [%d]", index), "clan_promote", strconv.FormatInt(memberID, 10))
-				buttons = append(buttons, selector.Row(btnPromote, btnKick))
+				btnKick := keyboards.Styled(selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10)), keyboards.StyleDanger)
+				btnPromote := keyboards.Styled(selector.Data(fmt.Sprintf("🛡️ Promote [%d]", index), "clan_promote", strconv.FormatInt(memberID, 10)), keyboards.StyleSuccess)
+				styledRows = append(styledRows, []keyboards.StyledBtn{btnPromote, btnKick})
 			} else if senderRole == "Co-Leader" && memberID != sender.ID && role == "Soldier" {
 				// Co-Leaders can manage rank-and-file Soldiers but not
 				// the Leader or fellow Co-Leaders, and can't promote -
 				// only the Leader hands out the Co-Leader rank.
-				btnKick := selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10))
-				buttons = append(buttons, selector.Row(btnKick))
+				btnKick := keyboards.Styled(selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10)), keyboards.StyleDanger)
+				styledRows = append(styledRows, []keyboards.StyledBtn{btnKick})
 			}
 			index++
 		}
 	}
 
 	rosterText += divider
-	selector.Inline(buttons...)
-	return c.Send(rosterText, telebot.ModeHTML, selector)
+	return keyboards.SendStyled(c, rosterText, styledRows)
 }
 
 // HandleKickMemberCallback processes kicking members from the alliance
