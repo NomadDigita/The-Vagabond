@@ -20,6 +20,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai/providers/openaicompat"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
 	"github.com/NomadDigita/The-Vagabond/internal/db/schema"
+	"github.com/NomadDigita/The-Vagabond/internal/dbdriver"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
@@ -33,7 +34,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/npcintel"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 	"gopkg.in/telebot.v3"
 )
 
@@ -270,7 +270,16 @@ func main() {
 	}
 
 	log.Println("Connecting to Supabase Database...")
-	db, err := sql.Open("postgres", dbURL)
+	// Registered once at startup rather than via lib/pq's package-level
+	// init(), because it wraps lib/pq's own "postgres" driver — see
+	// internal/dbdriver for why (Supabase's PgBouncer transaction-mode
+	// pooler occasionally hands the second half of a parameterized
+	// query to a different backend than the one that parsed it; this
+	// driver retries transparently instead of surfacing that as a
+	// player-facing "temporarily unavailable" error).
+	const dbDriverName = "postgres-retry"
+	dbdriver.Register(dbDriverName)
+	db, err := sql.Open(dbDriverName, dbURL)
 	if err != nil {
 		log.Fatalf("Fatal: Database driver initialization failure: %v", err)
 	}

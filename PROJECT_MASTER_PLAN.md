@@ -809,6 +809,40 @@ for exactly that case when no stop reason is available). Both
 `MaxTokens` and cache-on-truncation apply repo-wide, not per-package,
 so no future advisor needs to remember to opt in.
 
+**ADR-026: "pq: unnamed prepared statement does not exist (26000)"
+errors surfaced intermittently on Dev Console reports (e.g. "devconsole:
+balance stats for destroyers_mobilized: pq: unnamed prepared statement
+does not exist (26000)") — root-caused to a Supabase PgBouncer/lib-pq
+incompatibility, not fixed with a per-query patch.** lib/pq runs every
+parameterized query through the Postgres extended query protocol using
+an unnamed prepared statement (Parse, then a later Bind/Execute).
+Supabase's connection pooler runs PgBouncer in transaction pooling
+mode, which can hand the Bind/Execute half of that exchange to a
+different backend server than the one that saw the Parse — the second
+backend genuinely has never heard of the statement, hence 26000. It's
+a pooler artifact, not a real query error, which is why it was
+intermittent and why Dev Console reports (which fire several queries
+back-to-back) were where a player was statistically most likely to
+notice one land wrong — nothing about those queries themselves is
+special. Already handled gracefully (the "temporarily unavailable"
+message players saw came from an existing error wrapper, not a crash)
+but a graceful failure that a retry could have silently avoided is
+still a bug. Fixed with a new `internal/dbdriver` package: a
+database/sql driver named `postgres-retry` that wraps lib/pq's own
+`postgres` driver and translates a 26000 error at the QueryContext/
+ExecContext layer into `driver.ErrBadConn`. database/sql already has a
+built-in mechanism for exactly that signal — on `driver.ErrBadConn`
+from a query that hasn't started returning rows yet, it discards the
+connection and transparently retries once on a fresh one — so this
+fixes every call site in the codebase (`co.DB.QueryRowContext`,
+`QueryContext`, `ExecContext`, wherever they're called, for every
+package, not just devconsole) from one registration point
+(`cmd/bot/main.go`'s single `sql.Open` call), without touching any of
+them. A genuinely different Postgres error (bad SQL, a constraint
+violation, etc.) still passes straight through unchanged — only
+SQLSTATE 26000 specifically is treated as retryable, so this can't
+mask a real bug behind a silent retry.
+
 **ADR-017: Battle Analyst (Phase F) covers raids and arena battles
 only, not World Bosses — confirmed by re-auditing the schema, not
 inherited from an earlier session's claim.** A schema audit done

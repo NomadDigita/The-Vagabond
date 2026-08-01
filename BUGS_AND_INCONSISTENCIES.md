@@ -792,3 +792,48 @@ file.
    genuinely isn't arriving in practice, it's downstream of finding
    #1 above (no events are triggering at all right now to notify
    about) rather than a separate notification-path bug.
+
+## Follow-up bug-hunt session (2026-08-01, later still) — "pq: unnamed prepared statement does not exist (26000)" on Dev Console reports
+
+User confirmed truncation is fixed (see section above) but reported a
+new, intermittent error surfacing on Balance/Weekly reports:
+`devconsole: balance stats for destroyers_mobilized: pq: unnamed
+prepared statement does not exist (26000)` and `devconsole: count
+active users: pq: unnamed prepared statement does not exist (26000)`.
+Already handled non-fatally (the bot showed a "temporarily
+unavailable" message rather than crashing, via an existing error
+wrapper) but a graceful failure that could be avoided entirely is
+still a bug worth fixing rather than living with.
+
+1. **Real bug, root-caused rather than patched at the query level:
+   this is SQLSTATE 26000, a known Supabase PgBouncer (transaction
+   pooling mode) + lib/pq incompatibility, not anything wrong with the
+   specific queries that happened to hit it.** lib/pq runs every
+   parameterized query through the Postgres extended query protocol
+   with an unnamed prepared statement — a Parse followed by a later
+   Bind/Execute. PgBouncer's transaction pooling can route that second
+   half to a different backend server than the one that saw the
+   Parse, and that backend has genuinely never heard of the statement.
+   It's a connection-pooler artifact, not a real query problem, and
+   it's inherently intermittent — explaining why Dev Console reports
+   (which run several queries back-to-back) were where it got noticed
+   first, without anything being specifically wrong with `devconsole`
+   itself. Fixed with a new `internal/dbdriver` package wrapping
+   lib/pq's `postgres` driver: on SQLSTATE 26000 specifically, it
+   returns `driver.ErrBadConn`, which triggers database/sql's own
+   built-in retry-on-a-fresh-connection behavior. Registered once in
+   `cmd/bot/main.go` (`sql.Open("postgres-retry", dbURL)` instead of
+   `"postgres"`), so it covers every `*sql.DB` call site in the
+   codebase — not just devconsole — without touching any of them.
+   Verified the fix doesn't swallow real errors: a genuinely different
+   Postgres error code still passes straight through unchanged (new
+   test `TestQueryContext_PassesThroughUnrelatedPqErrors`), so a real
+   bug can't get masked behind a silent retry.
+
+Full rationale in ADR-026, PROJECT_MASTER_PLAN.md.
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass, including new unit tests in `internal/dbdriver` that exercise
+the retry-translation logic against a fake `driver.Conn` (no live
+Postgres/PgBouncer needed to prove the behavior). go.mod/go.sum
+reverted before commit — git diff go.mod go.sum is empty.
