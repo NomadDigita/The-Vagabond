@@ -64,6 +64,7 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	btnScan := menu.Text("🛰️ Scan Targets")
 	btnRadar := menu.Text("🛸 Expedition Radar")
+	btnAutoScan := menu.Text("🔄 Toggle Auto-Scan")
 	btnNews := menu.Text("📻 Wasteland Radio")
 	btnArena := menu.Text("🏟️ Combat Arena")
 	btnExplore := menu.Text("🧭 World Exploration")
@@ -73,9 +74,9 @@ func CombatNavigation() *telebot.ReplyMarkup {
 
 	menu.Reply(
 		menu.Row(btnScan, btnRadar),
-		menu.Row(btnNews, btnArena),
-		menu.Row(btnExplore, btnScout),
-		menu.Row(btnMap),
+		menu.Row(btnAutoScan, btnNews),
+		menu.Row(btnArena, btnExplore),
+		menu.Row(btnScout, btnMap),
 		menu.Row(btnBack),
 	)
 
@@ -88,13 +89,15 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 
 	btnVault := menu.Text("🪙 Financial Vault")
 	btnClan := menu.Text("🛡️ Clan Alliances")
+	btnBoard := menu.Text("📋 Clan Board")
 	btnExchange := menu.Text("💱 Market Exchange")
 	btnEther := menu.Text("🛒 Ether Shop")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
-		menu.Row(btnExchange, btnEther),
+		menu.Row(btnBoard, btnExchange),
+		menu.Row(btnEther),
 		menu.Row(btnBack),
 	)
 
@@ -203,6 +206,8 @@ func ProfileNavigation() *telebot.ReplyMarkup {
 	btnDestinations := menu.Text("🗺️ My Destinations")
 	btnLog := menu.Text("📰 Event Log")
 	btnSettings := menu.Text("⚙️ Settings")
+	btnAISettings := menu.Text("🤖 AI Settings")
+	btnMutes := menu.Text("🔇 Muted Players")
 	btnGuide := menu.Text("📖 Player Guide")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
@@ -210,6 +215,7 @@ func ProfileNavigation() *telebot.ReplyMarkup {
 		menu.Row(btnStats, btnUnits),
 		menu.Row(btnMissions, btnDestinations),
 		menu.Row(btnLog, btnSettings),
+		menu.Row(btnAISettings, btnMutes),
 		menu.Row(btnGuide),
 		menu.Row(btnBack),
 	)
@@ -226,12 +232,14 @@ func AdminNavigation() *telebot.ReplyMarkup {
 	btnMetrics := menu.Text("🛰️ Server Metrics")
 	btnBalance := menu.Text("⚖️ Balance Report")
 	btnWeekly := menu.Text("📅 Weekly Report")
+	btnAIStatus := menu.Text("🤖 AI Status")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnTick, btnResources),
 		menu.Row(btnMetrics, btnBalance),
-		menu.Row(btnWeekly, btnBack),
+		menu.Row(btnWeekly, btnAIStatus),
+		menu.Row(btnBack),
 	)
 
 	return menu

@@ -95,7 +95,7 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
-	clanID, _, err := h.getMyClan(ctx, sender.ID)
+	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
 		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
 	}
@@ -131,6 +131,12 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 
 	panelText += divider
 
+	if isLeader {
+		selector := &telebot.ReplyMarkup{}
+		btnLeaveFed := selector.Data("🚪 Leave Federation", "leave_federation", "0")
+		selector.Inline(selector.Row(btnLeaveFed))
+		return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	}
 	return c.Send(panelText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
