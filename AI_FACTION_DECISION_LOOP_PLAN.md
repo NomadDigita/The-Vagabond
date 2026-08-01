@@ -1,10 +1,32 @@
 # AI Faction Decision Loop Plan
 
-Status: not started - this document is the design, written before any of it
-exists, specifically so a different session (human or AI) can pick this up
-mid-build without re-deriving anything. If you're reading this to resume
-work, read this whole file before writing code - it explains WHY each piece
-is shaped the way it is, not just what to type.
+Status: **implemented and merged to `main`** - despite this header having
+said "not started" until 2026-08-01, `decideAIFactionActions` (and its
+helpers `decideOneAIFaction`, `pickFairAIRaidTarget`, `aiScout`,
+`launchAIRaid`, `maybeAIFlee`) exist in full at
+`internal/engine/tick/aidecisions.go`, are registered in the tick phase
+list as `"ai_civilization_decisions"`, and are covered by
+`aidecisions_test.go`. This status line was stale - confirmed by reading
+the actual code, not assumed - and left a false "not started" trail for
+anyone picking this repo up cold. See the new
+`BUGS_AND_INCONSISTENCIES.md` entry for 2026-08-01 ("AI raid frequency
+investigation") for why this system, though real, produces raids rarely
+enough that a small/low-level player base can go days without ever being
+hit - it's a tuning/fairness-gate issue, not a "never runs" issue.
+
+The rest of this document remains useful as the as-built design reference
+(it matches the shipped code closely) even though the "not started"
+framing above no longer applies - read it for the WHY, just don't trust
+the status header anywhere else in this section.
+
+---
+
+**Original status note (now superseded, kept for history):** not started -
+this document is the design, written before any of it exists, specifically
+so a different session (human or AI) can pick this up mid-build without
+re-deriving anything. If you're reading this to resume work, read this
+whole file before writing code - it explains WHY each piece is shaped the
+way it is, not just what to type.
 
 This is the second half of MMO_WORLD_EVOLUTION_PLAN.md's Phase 6. See that
 file's "Completed implementation detail: persistent AI civilizations

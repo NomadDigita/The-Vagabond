@@ -664,3 +664,131 @@ as a test failure well before it would actually break in production.
 Verified with the same build/vet/test/`go.mod`-restore process, then
 pushed to `main` (this was after the rebase onto `a17eeab`'s colored
 buttons had already landed, so no further conflict here).
+
+## Investigation session (2026-08-01, later) — user-reported "climate always nominal" and "AI never raids"
+
+Player reported (Telegram screenshot, Wasteland Radio panel): climate has
+shown "Nominal - no active debuffs" on all four continents every single
+time they've checked, and no AI faction has raided them or anyone else for
+1-3 days, despite the README/plan docs describing both as active,
+constantly-running systems. Investigated by reading the actual engine
+code end to end (not assumed), same standard as every other entry in this
+file.
+
+1. **Weather/climate: code is correct and wired into the tick loop -
+   root cause is NOT in this repo's game logic and needs a production/
+   deployment check, not a code fix.** `RunWeatherPass`
+   (`internal/engine/world/weather.go`) rolls a 10% chance *per
+   continent, per tick* to start one of 7 event types, is registered as
+   the very first phase in `ProcessTick`'s phase list
+   (`internal/engine/tick/engine.go`), and correctly persists an event
+   for 2 hours once rolled. `GAME_TICK_SECONDS` defaults to 60s
+   (`cmd/bot/main.go`). At that cadence the probability of *all four*
+   continents staying clear for even one hour is under 1%, so "nominal
+   everywhere for 1-3 days straight" is not explainable by the roll
+   itself being unlucky - something is preventing `ProcessTick` (or at
+   least this phase of it) from actually running against the live
+   database. Candidates that need checking against the **running
+   process**, which this sandbox has no access to: (a) the deployed
+   bot process might not be built from current `main` / might be
+   stale; (b) `GAME_TICK_SECONDS` might be misconfigured to something
+   huge in the live `.env`; (c) the tick loop might be crashing or
+   silently stuck on a phase that panics without recovery before
+   reaching a later tick (the phase list runs sequentially inside one
+   pass, but a hang/crash on *any* prior tick's phase would stop
+   `weather` from ever re-running on schedule); (d) the live DB's
+   `world_events`/`world_news` tables might not match
+   migration 025 (`spacehunt_phase7_regional_world_events.sql`) if a
+   migration didn't fully apply. **Action needed from whoever has
+   production log/console access**: check the bot process's recent
+   logs for `"World Event Pass:"` lines (weather.go's own success log)
+   or a `ProcessTick` panic/error - that will say definitively whether
+   this phase is executing at all. Filed here rather than "fixed"
+   because there's nothing to fix in the code as written; don't let a
+   future session re-derive this same conclusion from scratch.
+
+2. **AI raids: real, confirmed root cause - not a "never runs" bug, but
+   a tuning/gating combination that can leave a raid genuinely rare for
+   a small player base.** `decideAIFactionActions`
+   (`internal/engine/tick/aidecisions.go`) *is* fully implemented,
+   wired into the tick phase list as `"ai_civilization_decisions"`, and
+   tested - `AI_FACTION_DECISION_LOOP_PLAN.md` had been left saying
+   "Status: not started" this whole time, which was simply stale and
+   has been corrected in that file. The actual behavior, read directly
+   from the constants at the top of `aidecisions.go`:
+   - Exactly **8 AI factions total, fixed at boot, never grows**
+     (`seedAICivilizations` in `cmd/bot/main.go`: 2 per continent,
+     hardcoded `ai_faction_key`s, idempotent seed so it can never
+     insert more than these 8). There is no code path anywhere that
+     spawns a new AI faction after server start.
+   - Each of those 8 factions only gets to make **one decision every
+     20 minutes** (`aiDecisionCadence`), and a "decision" is scout-or-
+     raid-or-idle, not "raid".
+   - A faction can only raid a target it has *already discovered*
+     through its own `aiScout` passes (one new discovery per faction
+     per 20-minute cycle, mirroring the no-omniscience rule human
+     exploration follows) - so on a fresh or sparsely-populated world,
+     several 20-minute cycles pass before a faction even has a
+     candidate target, before probability enters into it at all.
+   - Even with a discovered target, the target must be within
+     `aiMaxLevelsBelowSelfForFairTarget` (2 levels) of the faction's
+     own level - fine for a populated server with a level spread, but
+     on a server with very few real players (the screenshot's own "20
+     monthly users") it's easy for zero currently-discovered targets to
+     fall in-band for any given faction at any given moment.
+   - Then, only a **40%** roll (12% if the fair target happens to be
+     another AI faction, since AI-vs-AI is deliberately kept as rare
+     background texture per `AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md`
+     section 2) actually launches the raid that cycle even once a fair
+     target exists.
+   Net effect worldwide: 8 factions × one gated decision per 20 minutes
+   is already a low ceiling, and most of that ceiling is consumed by
+   slow scouting and the fairness band before the 40% roll is even
+   reached - which fully explains a real player going multiple days
+   without ever being raided, especially at low level / low population.
+   This is a **design/balance question, not an engineering bug** - the
+   system does exactly what `AI_FACTION_DECISION_LOOP_PLAN.md`
+   specified, deliberately conservative "start low, loosen only after
+   observing AI factions are too passive in practice" per that doc's
+   own notes on `aiMaxLevelsBelowSelfForFairTarget`. Recommended
+   tuning changes (raid cadence, fairness band width, probability, and
+   the request for continuous new-AI-faction spawning + AI-vs-AI
+   raiding twice daily + constant AI scouting) are written up as a new
+   plan doc rather than changed silently here - see
+   `AI_AND_SCOUTING_EXPANSION_PLAN.md` (new file, this session).
+
+3. **Scouting: confirmed by design, not a bug - only one concurrent
+   scout mission per encampment is allowed today.**
+   `doDispatchScoutMission`
+   (`internal/bot/handlers/scoutmissions.go`) explicitly blocks a new
+   dispatch with *"You already have a scout party out"* whenever a
+   `scout_missions` row exists in `phase IN ('searching', 'returning')`
+   for that encampment - by design, one mission at a time, one
+   destination at a time. (What already *does* work today: a single
+   mission can commit any number of available Scout Walkers together -
+   the quick-dispatch buttons offer 1/5/10/25 and there's no upper cap
+   in the handler itself - so "up to 3 scouts on the same mission" is
+   already possible; what's missing is 3 *independent, simultaneously-
+   running* missions to different destinations with independent return
+   times, which the current one-row-per-encampment gate above
+   prevents.) Requested expansion (raise the concurrent-mission cap to
+   3, independent destinations/ETAs per mission) written up alongside
+   the AI expansion items in `AI_AND_SCOUTING_EXPANSION_PLAN.md` rather
+   than implemented ad hoc in this session, since it touches the same
+   `scout_missions` schema `AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md`
+   section 3 already extended for long-range scouting, and needs to be
+   built as one coherent change, not two colliding ones from different
+   sessions.
+
+4. **Not a bug, already correctly implemented: world-event push
+   notifications.** The player also asked for climate/big-event
+   notifications to reach every player in the affected continent ASAP.
+   This is already live: `RunWeatherPass` calls
+   `notifications.QueueToRegion` on both the event-start and event-
+   clear branches (see `AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md`
+   section 5, marked complete and merged), which queues a direct,
+   non-mutable notification to every real player in that continent
+   through the existing 3-second-poll notification engine. If this
+   genuinely isn't arriving in practice, it's downstream of finding
+   #1 above (no events are triggering at all right now to notify
+   about) rather than a separate notification-path bug.
