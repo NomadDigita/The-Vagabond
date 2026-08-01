@@ -28,6 +28,17 @@ func NewScoutMissionsHandler(db *sql.DB) *ScoutMissionsHandler {
 // batch-production buttons).
 var scoutQuickDispatchCounts = []int{1, 5, 10, 25}
 
+// maxConcurrentScoutMissions caps how many independent scout_missions rows
+// an encampment can have active (phase 'searching' or 'returning') at
+// once. Originally 1 (a hard EXISTS gate); raised to 3 per player request
+// and AI_AND_SCOUTING_EXPANSION_PLAN.md item 3 - each mission still finds
+// its own target and returns on its own timeline independently, since the
+// tick-side processing in internal/engine/tick/scoutmissions.go already
+// operates per-row (queries every mission in a phase, not "the"
+// encampment's mission), so raising this cap needed no tick-engine
+// changes, only the dispatch gate and the status rendering below.
+const maxConcurrentScoutMissions = 3
+
 // doDispatchScoutMission is the testable core of HandleDispatchScoutMission
 // and HandleScoutDispatchCallback - no telebot.Context dependency, so both
 // the slash command and the inline quantity buttons share one code path
@@ -47,10 +58,12 @@ func (h *ScoutMissionsHandler) doDispatchScoutMission(ctx context.Context, campI
 		return fmt.Sprintf("❌ You only have %s available Scout Walkers (some may already be committed elsewhere).", htmlCode(fmt.Sprintf("%d", availableScouts))), errors.New("insufficient scouts")
 	}
 
-	var existingMission bool
-	_ = h.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM scout_missions WHERE encampment_id = $1 AND phase IN ('searching', 'returning'))", campID).Scan(&existingMission)
-	if existingMission {
-		return "❌ You already have a scout party out. Check status below and wait for them to return first.", errors.New("mission already in progress")
+	var activeMissions int
+	if err := h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scout_missions WHERE encampment_id = $1 AND phase IN ('searching', 'returning')", campID).Scan(&activeMissions); err != nil {
+		return "⚠️ Error checking your active scout parties.", err
+	}
+	if activeMissions >= maxConcurrentScoutMissions {
+		return fmt.Sprintf("❌ You already have %s scout parties out - that's the maximum at once. Check status below and wait for one to return first.", htmlCode(fmt.Sprintf("%d", maxConcurrentScoutMissions))), errors.New("max concurrent scout missions reached")
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
@@ -168,15 +181,15 @@ func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	statusText, active, err := h.renderScoutStatus(ctx, campID)
+	statusText, activeCount, err := h.renderScoutStatus(ctx, campID)
 	if err != nil {
 		return c.Send("⚠️ Error checking scout status.", keyboards.CombatNavigation())
 	}
-	if active {
+	if activeCount >= maxConcurrentScoutMissions {
 		return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), statusText, nil)
 	}
 
-	panelText := "🔭 " + htmlBold("LONG-RANGE SCOUTING") + "\n" + divider + "\n" +
+	panelText := statusText + "\n\n" +
 		htmlItalic("Commit Scout Walkers to search the entire wasteland - no fixed destination, no fixed ETA. They search until they find another outpost, then report back and come home.") + "\n\n" +
 		fmt.Sprintf("🪖 Available Scout Walkers: %s\n", htmlCode(fmt.Sprintf("%d", availableScouts))) +
 		divider
@@ -205,47 +218,66 @@ func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 }
 
 // renderScoutStatus builds the beautified status block shared by
-// HandleScoutStatus and HandleScoutPanel, and reports whether a mission
-// is currently active (searching or returning).
-func (h *ScoutMissionsHandler) renderScoutStatus(ctx context.Context, campID string) (string, bool, error) {
-	var phase string
-	var scoutsCommitted int
-	var foundName sql.NullString
-	var returnETA sql.NullTime
-	err := h.DB.QueryRowContext(ctx, `
+// HandleScoutStatus and HandleScoutPanel, listing every one of this
+// encampment's currently active missions (up to maxConcurrentScoutMissions)
+// rather than just the most recent one, and reports how many are active so
+// callers can decide whether there's still a free dispatch slot.
+func (h *ScoutMissionsHandler) renderScoutStatus(ctx context.Context, campID string) (string, int, error) {
+	rows, err := h.DB.QueryContext(ctx, `
 		SELECT sm.phase, sm.scouts_committed, te.name, sm.return_eta
 		FROM scout_missions sm
 		LEFT JOIN encampments te ON te.id = sm.found_target_encampment_id
 		WHERE sm.encampment_id = $1 AND sm.phase IN ('searching', 'returning')
-		ORDER BY sm.started_at DESC LIMIT 1`, campID).Scan(&phase, &scoutsCommitted, &foundName, &returnETA)
-	if err == sql.ErrNoRows {
-		return "🔭 " + htmlBold("LONG-RANGE SCOUTING") + "\n" + divider + "\n" +
-			htmlItalic("No scout party is currently out.") + "\n" + divider, false, nil
-	}
+		ORDER BY sm.started_at ASC`, campID)
 	if err != nil {
-		return "", false, err
+		return "", 0, err
+	}
+	defer rows.Close()
+
+	type activeMission struct {
+		phase           string
+		scoutsCommitted int
+		foundName       sql.NullString
+		returnETA       sql.NullTime
+	}
+	var missions []activeMission
+	for rows.Next() {
+		var m activeMission
+		if scanErr := rows.Scan(&m.phase, &m.scoutsCommitted, &m.foundName, &m.returnETA); scanErr == nil {
+			missions = append(missions, m)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, err
 	}
 
 	header := "🔭 " + htmlBold("LONG-RANGE SCOUTING") + "\n" + divider + "\n"
-	switch phase {
-	case "searching":
-		return header +
-			fmt.Sprintf("🪖 %s Scout Walkers still searching the wasteland\n", htmlCode(fmt.Sprintf("%d", scoutsCommitted))) +
-			htmlItalic("No contact yet - no fixed ETA, but you'll be pinged periodically.") + "\n" + divider, true, nil
-	case "returning":
-		body := header + fmt.Sprintf("🚶 %s Scout Walkers returning home", htmlCode(fmt.Sprintf("%d", scoutsCommitted)))
-		if foundName.Valid {
-			body += fmt.Sprintf(" after locating Outpost %s", htmlBold(htmlEscape(foundName.String)))
-		}
-		body += "\n"
-		if returnETA.Valid {
-			remaining := time.Until(returnETA.Time.UTC())
-			body += fmt.Sprintf("⏱️ ETA: %s (%s remaining)\n", htmlCode(returnETA.Time.UTC().Format("15:04 MST")), htmlCode(formatDuration(remaining)))
-		}
-		return body + divider, true, nil
-	default:
-		return header + htmlItalic("No scout party is currently out.") + "\n" + divider, false, nil
+	if len(missions) == 0 {
+		return header + htmlItalic("No scout party is currently out.") + "\n" + divider, 0, nil
 	}
+
+	var body string
+	for i, m := range missions {
+		label := htmlBold(fmt.Sprintf("Party %d/%d", i+1, maxConcurrentScoutMissions))
+		switch m.phase {
+		case "searching":
+			body += fmt.Sprintf("%s: 🪖 %s Scout Walkers still searching the wasteland\n", label, htmlCode(fmt.Sprintf("%d", m.scoutsCommitted)))
+		case "returning":
+			body += fmt.Sprintf("%s: 🚶 %s Scout Walkers returning home", label, htmlCode(fmt.Sprintf("%d", m.scoutsCommitted)))
+			if m.foundName.Valid {
+				body += fmt.Sprintf(" after locating Outpost %s", htmlBold(htmlEscape(m.foundName.String)))
+			}
+			body += "\n"
+			if m.returnETA.Valid {
+				remaining := time.Until(m.returnETA.Time.UTC())
+				body += fmt.Sprintf("   ⏱️ ETA: %s (%s remaining)\n", htmlCode(m.returnETA.Time.UTC().Format("15:04 MST")), htmlCode(formatDuration(remaining)))
+			}
+		}
+	}
+	if len(missions) < maxConcurrentScoutMissions {
+		body += "\n" + htmlItalic(fmt.Sprintf("%d of %d scouting slots free - dispatch another below.", maxConcurrentScoutMissions-len(missions), maxConcurrentScoutMissions))
+	}
+	return header + body + divider, len(missions), nil
 }
 
 // HandleScoutStatus (/scoutstatus) is the slash-command equivalent of the

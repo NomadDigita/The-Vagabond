@@ -112,6 +112,44 @@ is the observation that justifies loosening it now:
 
 ## Item 3: Up to 3 concurrent scout missions per encampment, independent destinations/ETAs
 
+**Status: built and merged to `main` (2026-08-01).** The mechanical core
+described below shipped essentially as scoped: the tick-side processing
+in `internal/engine/tick/scoutmissions.go` was already per-row (it never
+assumed "the" encampment's mission - it queries every row in a phase
+regardless of which encampment owns it), so no tick-engine changes were
+needed at all, only the dispatch-side gate and status rendering in
+`internal/bot/handlers/scoutmissions.go`:
+
+- `doDispatchScoutMission`'s gate changed from `EXISTS(...)` (block if
+  any mission is active) to `COUNT(*) >= maxConcurrentScoutMissions`
+  (block only once 3 are active) - one query shape change, same
+  transaction-safety characteristics as before.
+- `renderScoutStatus` changed from `ORDER BY started_at DESC LIMIT 1`
+  (silently showing only the newest mission and hiding the others) to
+  listing every active mission with a `Party N/3` label, phase, and (for
+  `returning`) its own ETA - each mission genuinely does track its own
+  destination (whatever it found) and its own return time independently,
+  since they were always separate rows.
+- `HandleScoutPanel` now shows existing mission status *and* still offers
+  dispatch buttons as long as at least one slot is free, only fully
+  locking out dispatch once all 3 slots are committed - previously any
+  single active mission hid the dispatch UI entirely.
+- No migration needed - `scout_missions` was already one-row-per-mission
+  (see schema.go), never a per-encampment singleton table; the cap was
+  purely an application-level gate.
+- Added `TestDoDispatchScoutMission_AllowsUpToCapThenRejects`,
+  `TestRenderScoutStatus_ListsMultipleConcurrentMissionsIndependently`,
+  and `TestScoutMissionSchema_CountBasedCapRecognizesMultipleActiveMissions`;
+  updated the two tests that encoded the old one-mission assumption.
+  Verified with `go build ./... && go vet ./... && go test ./...`
+  against real Postgres (temporary `telebot.v3` replace directive used
+  locally to resolve the module against the sandbox's network allowlist,
+  then reverted before commit - same process as documented in
+  `BUGS_AND_INCONSISTENCIES.md`).
+
+Original design notes below, kept for context on what was intentionally
+scoped out (see the last two bullets, still open):
+
 Today `scout_missions` is gated to one active row per `encampment_id`
 (`doDispatchScoutMission`'s `EXISTS(... WHERE encampment_id = $1 AND
 phase IN ('searching','returning'))` check in
@@ -137,24 +175,27 @@ several Scout Walkers riding together on any one of those three.
   own data model additions (section 3.2) - re-read that section's schema
   before touching this table again, since this plan's change needs to
   layer on top of that shape, not conflict with it.
-- UI: `/scoutstatus` (or wherever the single-mission status panel lives)
-  needs to become a list of up to 3, not a single panel - straightforward
-  once the data model handles multiplicity, but don't forget it, since a
-  player with 3 missions out and a status view that only shows one is a
-  regression, not a feature.
-- Migration: add whatever's needed for the per-mission destination field
-  if section 3.2's schema doesn't already carry one per row (it should,
-  given it's already a per-row table - check before assuming a new
-  column is needed).
+- **Still open, not built in this pass**: `/scoutstatus`'s slash-command
+  text output already benefits for free (it shares `renderScoutStatus`
+  with the panel), but if there's a separate persistent-keyboard entry
+  point elsewhere that assumed one mission, it wasn't found in this
+  pass - worth a second grep sweep before considering this fully done.
+- **Still open, not built in this pass**: no migration was needed for
+  basic multiplicity, but there's still only one shared
+  `last_status_notified_at`-style ping cadence per mission row, not
+  per-encampment coordination - if a player has 3 missions all pinging
+  independently every ~30 minutes, that could mean up to 3 status
+  notifications in quick succession rather than one combined message.
+  Worth revisiting if that turns out to feel spammy in practice.
 
 ## Suggested build order
 
-1. Item 3 (multi-scouting) first - smallest, most self-contained, no
-   balance risk, and the audit work (finding every singular-mission
-   assumption) is valuable groundwork regardless of what happens with
-   Items 1-2.
-2. Item 2 (cadence/probability tuning) second, once the project owner has
-   answered the open questions above - cheap to change, but changing it
+1. ~~Item 3 (multi-scouting) first~~ - **done, merged 2026-08-01.** Smallest,
+   most self-contained, no balance risk; the audit work (confirming the
+   tick side had no singular-mission assumptions) turned out to already
+   be satisfied by the existing per-row design.
+2. Item 2 (cadence/probability tuning) next, once the project owner has
+   answered the open questions below - cheap to change, but changing it
    twice because the first guess was wrong is wasted test-writing effort.
 3. Item 1 (continuous spawning) last - the largest new subsystem, and the
    one most likely to interact badly with Item 2's tuning if built first
