@@ -148,3 +148,41 @@ func TestButtonStyleConstants_MatchTelegramBotAPI94Values(t *testing.T) {
 		t.Errorf("StylePrimary = %q, want \"primary\"", StylePrimary)
 	}
 }
+
+// TestToRawButton_CallbackDataStaysWithinTelegramsLimit is a general
+// regression guard for the same class of bug found and fixed elsewhere
+// in this codebase for road_encounter/rbe
+// (callback_data_length_test.go): a callback_data over Telegram's
+// 64-byte cap doesn't error, it just makes that button silently never
+// respond to a tap. Any future styled button built with too much data
+// crammed into Unique+Data would hit this exact failure mode - verify
+// toRawButton's output length directly, independent of any particular
+// call site remembering to test it themselves.
+func TestToRawButton_CallbackDataStaysWithinTelegramsLimit(t *testing.T) {
+	uuid := "550e8400-e29b-41d4-a716-446655440000" // 36 bytes, representative of a real Postgres UUID
+	btn := Styled(telebot.Btn{Unique: "road_encounter", Data: "attack|" + uuid}, StyleDanger)
+
+	raw := toRawButton(btn)
+	if n := len(raw.CallbackData); n > telegramCallbackDataLimit {
+		t.Errorf("callback_data is %d bytes, exceeds Telegram's %d-byte limit: %q", n, telegramCallbackDataLimit, raw.CallbackData)
+	}
+}
+
+// TestToRawButton_DetectsOversizedCallbackData confirms the specific
+// shape that broke road_encounter before its fix (two UUIDs plus a
+// unique/action prefix) is exactly what SendStyled's length guard is
+// designed to catch. SendStyled's own guard can't be exercised without
+// a live *telebot.Bot (its unexported HTTP client can't be swapped for
+// a test server from outside the telebot package), but the guard is a
+// direct length check on this same value, so this pins the boundary
+// condition it depends on.
+func TestToRawButton_DetectsOversizedCallbackData(t *testing.T) {
+	uuidA := "550e8400-e29b-41d4-a716-446655440000"
+	uuidB := "660e8400-e29b-41d4-a716-446655440111"
+	oversized := Styled(telebot.Btn{Unique: "road_encounter", Data: "attack|" + uuidA + "|" + uuidB}, StyleDanger)
+
+	raw := toRawButton(oversized)
+	if len(raw.CallbackData) <= telegramCallbackDataLimit {
+		t.Errorf("expected this two-UUID shape to exceed the %d-byte limit, got %d bytes: %q", telegramCallbackDataLimit, len(raw.CallbackData), raw.CallbackData)
+	}
+}

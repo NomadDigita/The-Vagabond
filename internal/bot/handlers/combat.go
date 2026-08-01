@@ -240,6 +240,16 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
 
+	// Speedup/Abort per active expedition gets pulled into its own small
+	// colored message instead of unstyled buttons mixed into the shared
+	// HUD - see keyboards/styled.go.
+	type expeditionActionPrompt struct {
+		label string
+		speed keyboards.StyledBtn
+		abort keyboards.StyledBtn
+	}
+	var expeditionActions []expeditionActionPrompt
+
 	if err == nil {
 		defer rowsOut.Close()
 		index := 1
@@ -292,9 +302,13 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 				case "encounter_pending":
 					outboundText += "   🚧 HALTED: Road contact - decide below.\n\n"
 				}
-				btnSpeed := selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID)
-				btnAbort := selector.Data(fmt.Sprintf("↩️ Abort [%d]", index), "exp_action", "abort", rID)
-				buttons = append(buttons, selector.Row(btnSpeed, btnAbort))
+				btnSpeed := keyboards.Styled(selector.Data(fmt.Sprintf("⚡ Speedup [%d]", index), "exp_action", "speed", rID), keyboards.StylePrimary)
+				btnAbort := keyboards.Styled(selector.Data(fmt.Sprintf("↩️ Abort [%d]", index), "exp_action", "abort", rID), keyboards.StyleDanger)
+				expeditionActions = append(expeditionActions, expeditionActionPrompt{
+					label: fmt.Sprintf("🛰️ %s\n%s\nExpedition targeting %s.", htmlBold("EXPEDITION CONTROL"), divider, htmlBold(htmlEscape(dName))),
+					speed: btnSpeed,
+					abort: btnAbort,
+				})
 				index++
 			}
 		}
@@ -541,6 +555,11 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	// telebot.ReplyMarkup.Inline() call as the HUD's other buttons.
 	for _, rc := range roadContacts {
 		if err := keyboards.SendStyled(c, rc.text, [][]keyboards.StyledBtn{{rc.attack, rc.proceed}}); err != nil {
+			return err
+		}
+	}
+	for _, ea := range expeditionActions {
+		if err := keyboards.SendStyled(c, ea.label, [][]keyboards.StyledBtn{{ea.speed, ea.abort}}); err != nil {
 			return err
 		}
 	}
@@ -2085,9 +2104,8 @@ func (h *CombatHandler) renderExpeditionPanel(c telebot.Context, raidID, attacke
 	)
 
 	selector := &telebot.ReplyMarkup{}
-	btnSpeed := selector.Data("⚡ Speed Up", "exp_action", "speed", raidID)
-	btnAbort := selector.Data("↩️ Abort", "exp_action", "abort", raidID)
-	selector.Inline(selector.Row(btnSpeed, btnAbort))
+	btnSpeed := keyboards.Styled(selector.Data("⚡ Speed Up", "exp_action", "speed", raidID), keyboards.StylePrimary)
+	btnAbort := keyboards.Styled(selector.Data("↩️ Abort", "exp_action", "abort", raidID), keyboards.StyleDanger)
 
-	return c.Send(panelText, telebot.ModeHTML, selector)
+	return keyboards.SendStyled(c, panelText, [][]keyboards.StyledBtn{{btnSpeed, btnAbort}})
 }

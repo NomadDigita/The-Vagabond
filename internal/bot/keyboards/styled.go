@@ -90,6 +90,18 @@ func styledCallbackData(b telebot.Btn) string {
 	return "\f" + b.Unique + "|" + b.Data
 }
 
+// telegramCallbackDataLimit is Telegram's hard cap on callback_data
+// (see https://core.telegram.org/bots/api#inlinekeyboardbutton). Exceed
+// it and Telegram doesn't reject the message or the button - it just
+// silently drops that one button's tap forever, no error surfaced
+// anywhere. This exact bug was found and fixed elsewhere in this
+// codebase for road_encounter/rbe (see callback_data_length_test.go);
+// guarded here at the point where styled buttons are actually sent, not
+// just in per-call-site tests, since a future call site could easily
+// reintroduce it without anyone noticing until a player reports a dead
+// button.
+const telegramCallbackDataLimit = 64
+
 func toRawButton(b StyledBtn) rawInlineButton {
 	return rawInlineButton{
 		Text:         b.Text,
@@ -144,6 +156,14 @@ func SendStyled(c telebot.Context, text string, rows [][]StyledBtn) error {
 	payload.Text = text
 	payload.ParseMode = "HTML"
 	payload.ReplyMarkup.InlineKeyboard = toRawRows(rows)
+
+	for _, row := range payload.ReplyMarkup.InlineKeyboard {
+		for _, btn := range row {
+			if n := len(btn.CallbackData); n > telegramCallbackDataLimit {
+				return fmt.Errorf("styled keyboard: button %q has a %d-byte callback_data (Telegram's limit is %d) - this button would silently never respond", btn.Text, n, telegramCallbackDataLimit)
+			}
+		}
+	}
 
 	_, err := bot.Raw("sendMessage", payload)
 	return err

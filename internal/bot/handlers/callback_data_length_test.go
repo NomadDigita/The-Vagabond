@@ -37,6 +37,10 @@ func TestRoadEncounterCallbackData_FitsTelegramLimit(t *testing.T) {
 		{"road_encounter continue", "road_encounter", "continue"},
 		{"rbe attack", "rbe", "attack"},
 		{"rbe continue", "rbe", "continue"},
+		{"diplo_respond accept", "diplo_respond", "accept"},
+		{"diplo_respond reject", "diplo_respond", "reject"},
+		{"exp_action speed", "exp_action", "speed"},
+		{"exp_action abort", "exp_action", "abort"},
 	}
 
 	for _, tc := range cases {
@@ -59,7 +63,26 @@ func TestRoadEncounterCallbackData_FitsTelegramLimit(t *testing.T) {
 	}
 }
 
-// TestClanApplicationCallbackData_HasMargin covers cl_acc/cl_rej
+// TestClanKickPromoteCallbackData_FitsTelegramLimit covers clan_kick and
+// clan_promote, added to the styled (colored) button rollout - a single
+// Telegram user ID, well within the limit, but included so this test
+// file stays the single place documenting every button family's
+// callback_data budget rather than leaving future additions unverified.
+func TestClanKickPromoteCallbackData_FitsTelegramLimit(t *testing.T) {
+	selector := &telebot.ReplyMarkup{}
+	userID := "123456789012" // 12 digits, margin over a typical current Telegram user ID
+
+	for _, unique := range []string{"clan_kick", "clan_promote"} {
+		t.Run(unique, func(t *testing.T) {
+			btn := selector.Data("label", unique, userID)
+			full := "\f" + btn.Unique + "|" + btn.Data
+			if n := len(full); n > 64 {
+				t.Errorf("%s: callback_data is %d bytes (max 64) - Telegram will silently drop this button: %q", unique, n, full)
+			}
+		})
+	}
+}
+
 // (formerly clan_app_accept/clan_app_reject), which packs a Telegram
 // user ID and a clan UUID into callback_data. Telegram user IDs are
 // currently up to 10 digits but have grown over the platform's history
