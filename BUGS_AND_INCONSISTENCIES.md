@@ -649,3 +649,18 @@ Verified with a full `go build ./... && go vet ./... && go test ./...`
 pass (temporary `telebot.v3` replace directive used locally to resolve
 the module against the sandbox's network allowlist, then reverted —
 `git diff go.mod go.sum` empty before commit).
+
+### Follow-up: closed out the `clan_app_accept`/`clan_app_reject` margin item
+
+Item 3's flagged-but-not-fixed case (63-64 bytes, 1 byte of margin) is
+now fixed too. Renamed the prefixes to `cl_acc`/`cl_rej` (registration
+in `cmd/bot/main.go`, button construction in `clan.go`) — new length
+is 55-56 bytes with a 10-digit Telegram user ID, comfortable margin
+even if user IDs grow a couple of digits over time. Added
+`TestClanApplicationCallbackData_HasMargin`, which asserts real
+headroom (budget of 60 bytes, not just "under the 64-byte cap") using
+a 12-digit test user ID specifically so a future regression shows up
+as a test failure well before it would actually break in production.
+Verified with the same build/vet/test/`go.mod`-restore process, then
+pushed to `main` (this was after the rebase onto `a17eeab`'s colored
+buttons had already landed, so no further conflict here).

@@ -283,8 +283,8 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 		if scanErr := rows.Scan(&userID, &fName, &username); scanErr == nil {
 			any = true
 			panelText += fmt.Sprintf("👤 %s (@%s)\n", htmlEscape(fName), htmlEscape(username))
-			btnAccept := selector.Data("✅ Accept", "clan_app_accept", strconv.FormatInt(userID, 10), clanID)
-			btnReject := selector.Data("❌ Reject", "clan_app_reject", strconv.FormatInt(userID, 10), clanID)
+			btnAccept := selector.Data("✅ Accept", "cl_acc", strconv.FormatInt(userID, 10), clanID)
+			btnReject := selector.Data("❌ Reject", "cl_rej", strconv.FormatInt(userID, 10), clanID)
 			buttons = append(buttons, selector.Row(btnAccept, btnReject))
 		}
 	}

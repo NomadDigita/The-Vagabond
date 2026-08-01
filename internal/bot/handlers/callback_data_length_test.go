@@ -17,6 +17,13 @@ import (
 // prefix and separators), and rbe (formerly the much longer
 // "road_base_encounter") was right at the edge for its "continue" action.
 // Both now carry only a single UUID.
+//
+// clan_app_accept/clan_app_reject (now cl_acc/cl_rej) is included too:
+// it combines a Telegram user ID with a clan UUID, and was found during
+// the same audit sitting at 63-64 bytes with a 10-digit user ID - not
+// broken yet, but one digit of ID growth away from silently breaking the
+// same way. Shortened its prefix to leave real margin rather than
+// leaving it fragile.
 func TestRoadEncounterCallbackData_FitsTelegramLimit(t *testing.T) {
 	selector := &telebot.ReplyMarkup{}
 	uuid := "550e8400-e29b-41d4-a716-446655440000" // 36 bytes, representative of a real Postgres UUID
@@ -49,5 +56,34 @@ func TestRoadEncounterCallbackData_FitsTelegramLimit(t *testing.T) {
 	btn := selector.Data("label", "road_encounter", "attack", uuid)
 	if strings.Count(btn.Data, uuid) > 1 {
 		t.Errorf("road_encounter callback_data should carry exactly one UUID, got: %q", btn.Data)
+	}
+}
+
+// TestClanApplicationCallbackData_HasMargin covers cl_acc/cl_rej
+// (formerly clan_app_accept/clan_app_reject), which packs a Telegram
+// user ID and a clan UUID into callback_data. Telegram user IDs are
+// currently up to 10 digits but have grown over the platform's history
+// and aren't guaranteed to stay that length, so this asserts real
+// margin under the 64-byte cap rather than just scraping under it -
+// a regression here should be visible well before it actually breaks.
+func TestClanApplicationCallbackData_HasMargin(t *testing.T) {
+	selector := &telebot.ReplyMarkup{}
+	uuid := "550e8400-e29b-41d4-a716-446655440000" // 36 bytes
+	// 12 digits: two more than a typical current Telegram user ID, to
+	// verify margin rather than just today's exact case.
+	userID := "123456789012"
+
+	const marginBudget = 60 // leave at least 4 bytes of headroom under Telegram's 64-byte cap
+
+	for _, unique := range []string{"cl_acc", "cl_rej"} {
+		t.Run(unique, func(t *testing.T) {
+			btn := selector.Data("label", unique, userID, uuid)
+			full := "\f" + btn.Unique + "|" + btn.Data
+			if n := len(full); n > 64 {
+				t.Fatalf("%s: callback_data is %d bytes (max 64) - Telegram will silently drop this button: %q", unique, n, full)
+			} else if n > marginBudget {
+				t.Errorf("%s: callback_data is %d bytes - within Telegram's 64-byte cap but with less than the desired margin (budget %d); consider a shorter prefix", unique, n, marginBudget)
+			}
+		})
 	}
 }
