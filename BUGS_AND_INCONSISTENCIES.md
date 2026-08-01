@@ -922,3 +922,35 @@ visually confirm the table lines up and the expandable quote renders
 as expected — not just asserted via `strings.Contains`. go.mod/go.sum
 reverted before commit — checksums confirmed to match the pre-session
 values.
+
+### Follow-up: extended to the `/refer` panel — another confirmed plain-text gap
+
+Picked up one of the "future pass" candidates flagged above. Reading
+`HandleRefer` (`profile.go`) found it was the same situation as the
+Balance Report: `return c.Send(panelText)` with no `telebot.ModeHTML`
+at all, hand-built with `+=` string concatenation, and — worse than
+the Balance Report — **rendering real Telegram first names
+(`ref.first_name`) completely unescaped** into a plain-text message.
+Plain-text mode means literal `<`/`>`/`&` in a name just show up as
+themselves (no HTML injection risk there), but it's still the kind of
+raw-user-input handling this codebase generally does carefully
+everywhere else it touches HTML mode.
+
+Rewrote with `internal/ai`'s shared helpers directly (this package
+already imports `internal/ai` elsewhere, in `ai_status.go`, so no new
+dependency and no need to duplicate `HTMLTable`/`HTMLExpandableQuote`
+locally the way `bot/handlers/render.go`'s older helpers do — that
+duplication predates `internal/ai/render.go` existing at all).
+Milestone bonuses and the Top Referrers leaderboard are both now real
+`ai.HTMLTable`s instead of one-line-per-entry prose, `telebot.ModeHTML`
+added to the `Send` call, and referral names go through the same
+"clip the raw rune length first, escape second" order established in
+ADR-027 — reusing that exact fix rather than risking the same
+entity-slicing bug a second time in a different file. Verified with a
+manual render through a throwaway `cmd/renderpreview2` binary (removed
+before commit), plus the same full build/vet/test/`go.mod`-restore
+process. No dedicated unit test added for `HandleRefer` itself, since
+no handler in this package currently has one (it needs a live `*sql.DB`
+and this codebase doesn't use a SQL-mocking library) — the table logic
+this change actually depends on (`ai.HTMLTable`) already has full unit
+coverage from the change above.
