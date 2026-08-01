@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 	"gopkg.in/telebot.v3"
@@ -528,19 +529,15 @@ func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 
 	alliancePower := (totalSoldiers * 10) + (totalMechs * 150)
 
-	report := fmt.Sprintf(
-		"📊 %s\n"+divider+"\n\n"+
-			"🏆 Collective Outpost Level: %s\n"+
-			"⚔️ Accumulated Military Power: %s\n\n"+
-			"%s\n"+
-			"🪖 Combined Infantry: %s\n"+
-			"🤖 Combined Armored Core: %s\n"+
-			divider,
-		htmlBold("ALLIANCE STRENGTH SUMMARY"),
-		htmlCode(fmt.Sprintf("Level %d", totalLevel)), htmlCode(fmt.Sprintf("%d Power Rating", alliancePower)),
-		htmlBold("MILITARY ASSET STOCKPILES"),
-		htmlCode(fmt.Sprintf("%d Soldiers", totalSoldiers)), htmlCode(fmt.Sprintf("%d Mechs", totalMechs)),
-	)
+	rows := [][]string{
+		{"🏆 Level", fmt.Sprintf("%d", totalLevel)},
+		{"⚔️ Power", fmt.Sprintf("%d", alliancePower)},
+		{"🪖 Infantry", fmt.Sprintf("%d", totalSoldiers)},
+		{"🤖 Armored Core", fmt.Sprintf("%d", totalMechs)},
+	}
+	report := "📊 " + htmlBold("ALLIANCE STRENGTH SUMMARY") + "\n" + divider + "\n\n" +
+		ai.HTMLTable([]string{"Stat", "Value"}, rows) + "\n" +
+		divider
 
 	return c.Send(report, telebot.ModeHTML, keyboards.EconomyNavigation())
 }

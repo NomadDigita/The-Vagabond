@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
@@ -183,28 +184,26 @@ func (h *EconomyHandler) HandleWarehouseReserves(c telebot.Context) error {
 
 	_ = h.DB.QueryRowContext(ctx, query, campID).Scan(&scrap, &rations, &electricity, &metal, &crystal, &hydrogen, &dollars, &neuroCores, &ether)
 
-	inventoryText := fmt.Sprintf(
-		"📦━━━━━━━━━━━━━━━━━━━━━━📦\n"+
-			"📦 WAREHOUSE RESERVES GRID 📦\n"+
-			"📦━━━━━━━━━━━━━━━━━━━━━━📦\n\n"+
-			"💰 FINANCIAL STOCK:\n"+
-			"💵 Available Cash: $%.1f\n\n"+
-			"🥫 SURVIVAL MATERIALS:\n"+
-			"⚙️ Scrap: %.1f\n"+
-			"🥫 Food Rations: %.1f\n"+
-			"⚡ Electricity: %.1f cells\n\n"+
-			"🏗️ CORE SPACEHUNT RESOURCES:\n"+
-			"🔩 Metal: %.1f tons\n"+
-			"🔮 Crystal: %.1f kg\n"+
-			"🎈 Hydrogen: %.1f L\n\n"+
-			"✨ RARE RESOURCES:\n"+
-			"🧠 Neuro Cores: %.1f\n"+
-			"✨ Ether: %.2f\n"+
-			"📦━━━━━━━━━━━━━━━━━━━━━━📦",
-		dollars, scrap, rations, electricity, metal, crystal, hydrogen, neuroCores, ether,
-	)
+	headers := []string{"Resource", "Amount"}
+	rows := [][]string{
+		{"💵 Cash", fmt.Sprintf("$%.1f", dollars)},
+		{"⚙️ Scrap", fmt.Sprintf("%.1f", scrap)},
+		{"🥫 Rations", fmt.Sprintf("%.1f", rations)},
+		{"⚡ Electricity", fmt.Sprintf("%.1f", electricity)},
+		{"🔩 Metal", fmt.Sprintf("%.1f", metal)},
+		{"🔮 Crystal", fmt.Sprintf("%.1f", crystal)},
+		{"🎈 Hydrogen", fmt.Sprintf("%.1f", hydrogen)},
+		{"🧠 Neuro Cores", fmt.Sprintf("%.1f", neuroCores)},
+		{"✨ Ether", fmt.Sprintf("%.2f", ether)},
+	}
 
-	return c.Send(inventoryText, keyboards.EconomyNavigation())
+	inventoryText := "📦━━━━━━━━━━━━━━━━━━━━━━📦\n" +
+		"📦 " + ai.HTMLBold("WAREHOUSE RESERVES GRID") + " 📦\n" +
+		"📦━━━━━━━━━━━━━━━━━━━━━━📦\n\n" +
+		ai.HTMLTable(headers, rows) + "\n\n" +
+		"📦━━━━━━━━━━━━━━━━━━━━━━📦"
+
+	return c.Send(inventoryText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {

@@ -954,3 +954,50 @@ no handler in this package currently has one (it needs a live `*sql.DB`
 and this codebase doesn't use a SQL-mocking library) — the table logic
 this change actually depends on (`ai.HTMLTable`) already has full unit
 coverage from the change above.
+
+### Follow-up: Warehouse Reserves, Admin Metrics, and Alliance/Clan Stats
+
+Finished the sweep the user asked for ("do the rest too, the clan
+stats and others"). Went through every stat-dump-style panel in
+`internal/bot/handlers` (grepped for files with a high density of
+`%d`/`%.Nf` format placeholders, then read each candidate rather than
+converting on pattern-match alone) and converted the three that were
+genuinely a good fit for a table:
+
+- **Warehouse Reserves** (`HandleWarehouseReserves`, `economy.go`) —
+  confirmed via reading the code, not assumed: this was **fully plain
+  text**, no `telebot.ModeHTML` at all, nine resources each on their
+  own hand-written line grouped under four category headers. This is
+  the closest match in the whole game to the numeric-stats-table style
+  originally referenced. Now a single real `ai.HTMLTable` (Resource |
+  Amount), `telebot.ModeHTML` added to the `Send` call.
+- **Admin Metrics** (`HandleAdminMetrics`, `admin.go`) — already HTML
+  mode, but line-by-line prose under two headers. This is the single
+  closest match to the original screenshot's design (a database-
+  telemetry dashboard: user counts, goroutines, memory, GC cycles).
+  Converted to one `ai.HTMLTable` (Metric | Value).
+- **Alliance Stats** (`HandleAllianceStatsCallback`, `clan.go`) — the
+  "clan stats" the user asked for by name. Already HTML mode, four
+  numbers spread across two labeled lines. Converted to an
+  `ai.HTMLTable` (Stat | Value) for consistency with the other two,
+  even though four rows is a modest table - the value here is mostly
+  matching the house style now that it exists elsewhere.
+
+**Deliberately left as prose, and why (checked each, not skipped by
+default):**
+- `HandleGuildMissions` (clan raid/transfer history, `clan.go`) — rows
+  contain two free-form outpost/commander names of unbounded length
+  plus a combined multi-resource loot string; forcing that into fixed
+  columns would either clip real player-chosen names constantly or
+  blow out the mobile-safe width every time. Prose reads better here.
+- `HandleManageMembersCallback` (clan roster, `clan.go`) and the Silo
+  panel's target list (`silo.go`) — both pair each row with its own
+  inline buttons (Kick/Promote, Detonate/Pierce). A `<pre>` table is
+  plain text with no buttons inside it, so putting the row data in a
+  table would visually separate it from the button that acts on it -
+  worse, not better, despite being numeric-adjacent.
+
+Verified with the same full `go build ./... && go vet ./... && go test
+./...` pass, a manual visual render of all three new tables through a
+throwaway preview binary (removed before commit), and a checksum-
+confirmed `go.mod`/`go.sum` restore.
