@@ -151,6 +151,6 @@ func (h *BossHandler) HandleAttackBossCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error recording strike."})
 	}
 
-	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.", soldiers, mechs, bossName, marchMinutes)})
+	_ = c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("🚀 STRIKE FORCE DEPLOYED: 🪖 %d Soldiers, 🤖 %d Mechs marching to engage %s! ETA: %.0f minutes.", soldiers, mechs, bossName, marchMinutes)})
 	return h.HandleBossPanel(c)
 }

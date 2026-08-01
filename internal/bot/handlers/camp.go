@@ -396,7 +396,7 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		}
 
 		if ownedMiners >= maxMiners {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Miner Cap Reached: Core level %d limits you to %d miners.", campLvl, maxMiners)})
+			return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Miner Cap Reached: Core level %d limits you to %d miners.", campLvl, maxMiners)})
 		}
 
 		cost := ownedMiners * 500
@@ -677,7 +677,7 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Admin Override write failure."})
 		}
 		_ = tx.Commit()
-		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚡ ADMIN OVERRIDE: %s instantly upgraded to Level %d for free!", moduleType, currentLvl+1)})
+		_ = c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("⚡ ADMIN OVERRIDE: %s instantly upgraded to Level %d for free!", moduleType, currentLvl+1)})
 		return h.HandleStructuralUpgrades(c)
 	}
 

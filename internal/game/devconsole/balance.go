@@ -218,7 +218,7 @@ func (co *Console) RecommendBalance(ctx context.Context, callerUserID int64, win
 		UserID:      callerUserID,
 		System:      BalanceSystemPrompt,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: userPrompt}},
-		MaxTokens:   2048,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 		JSONMode:    true,
 	})

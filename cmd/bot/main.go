@@ -665,7 +665,7 @@ func main() {
 	bot.Handle("\fdeclare_clan_war", clan.HandleDeclareClanWarCallback)
 	bot.Handle("\fexp_action", combat.HandleExpeditionActions)
 	bot.Handle("\froad_encounter", combat.HandleRoadEncounterCallback)
-	bot.Handle("\froad_base_encounter", combat.HandleRoadBaseEncounterCallback)
+	bot.Handle("\frbe", combat.HandleRoadBaseEncounterCallback)
 	bot.Handle("\fdispatch_convoy", combat.HandleDispatchConvoy)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fcraft_qty", factory.HandleCraftQuantityCallback)

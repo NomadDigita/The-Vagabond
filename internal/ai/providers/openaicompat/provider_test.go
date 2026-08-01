@@ -115,6 +115,60 @@ func TestProvider_Complete_JSONModeWithoutSystemPrompt(t *testing.T) {
 	}
 }
 
+// TestProvider_Complete_QwenDisablesThinking guards against the bug
+// where DashScope/Qwen3's default enable_thinking=true silently ate
+// into MaxTokens with hidden reasoning tokens, truncating visible
+// JSON-mode output (e.g. Dev Console balance/weekly reports) well
+// before MaxTokens should have been exhausted. Qwen must always send
+// enable_thinking:false; every other OpenAI-compatible provider must
+// never send the field at all, since they don't recognize it.
+func TestProvider_Complete_QwenDisablesThinking(t *testing.T) {
+	var capturedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	p := openaicompat.New("qwen", server.URL, "sk-test", "qwen-max", true)
+	_, err := p.Complete(context.Background(), ai.CompletionRequest{
+		Feature:   "dev_console",
+		Messages:  []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+		MaxTokens: 4096,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	thinking, ok := capturedBody["enable_thinking"]
+	if !ok {
+		t.Fatalf("expected qwen request to include enable_thinking, got body: %+v", capturedBody)
+	}
+	if thinking != false {
+		t.Errorf("expected enable_thinking=false for qwen, got %v", thinking)
+	}
+}
+
+func TestProvider_Complete_NonQwenOmitsThinkingField(t *testing.T) {
+	var capturedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	p := openaicompat.New("openai", server.URL, "sk-test", "gpt-4o-mini", true)
+	_, err := p.Complete(context.Background(), ai.CompletionRequest{
+		Feature:  "ai_fleet_commander",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := capturedBody["enable_thinking"]; ok {
+		t.Errorf("expected non-qwen providers to omit enable_thinking entirely, got body: %+v", capturedBody)
+	}
+}
+
 func TestProvider_Complete_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

@@ -208,7 +208,7 @@ func (co *Console) Recommend(ctx context.Context, callerUserID int64, windowDays
 		UserID:      callerUserID,
 		System:      SystemPrompt,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: userPrompt}},
-		MaxTokens:   2048,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 		JSONMode:    true,
 	})

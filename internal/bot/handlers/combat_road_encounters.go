@@ -128,12 +128,11 @@ func (h *CombatHandler) captureCargo(ctx context.Context, tx *sql.Tx, winnerRaid
 func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
-	if sender == nil || len(c.Args()) < 3 {
+	if sender == nil || len(c.Args()) < 2 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid road encounter action."})
 	}
 	action := c.Args()[0]
 	encounterID := c.Args()[1]
-	myRaidID := c.Args()[2]
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -152,15 +151,35 @@ func (h *CombatHandler) HandleRoadEncounterCallback(c telebot.Context) error {
 	if status != "pending" {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ This road encounter has already been resolved."})
 	}
-	if myRaidID != raidAID && myRaidID != raidBID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ That expedition is not party to this encounter."})
-	}
 
+	// myRaidID used to travel in callback_data, but combined with
+	// encounterID that pushed the button's callback_data past
+	// Telegram's 64-byte cap, so Telegram silently refused to attach
+	// the button at all - the exact "the button won't respond" bug
+	// report this fix addresses. Deriving it server-side from the
+	// caller's own encampment is both shorter and safer (no longer
+	// trusting a client-supplied raid ID for something security-
+	// relevant).
 	var callerCampID string
-	var myAttackerID string
-	_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", myRaidID).Scan(&myAttackerID)
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&callerCampID); err != nil || callerCampID != myAttackerID {
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&callerCampID); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can issue this order."})
+	}
+	var myRaidID string
+	switch callerCampID {
+	case "":
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can issue this order."})
+	default:
+		var raidAAttacker, raidBAttacker string
+		_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidAID).Scan(&raidAAttacker)
+		_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidBID).Scan(&raidBAttacker)
+		switch callerCampID {
+		case raidAAttacker:
+			myRaidID = raidAID
+		case raidBAttacker:
+			myRaidID = raidBID
+		default:
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can issue this order."})
+		}
 	}
 
 	otherRaidID := raidBID
@@ -718,7 +737,7 @@ func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 	var homeScrap, homeMetal float64
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(scrap,0), COALESCE(metal,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&homeScrap, &homeMetal)
 	if homeScrap < scrapCost || homeMetal < convoyMetalCost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materiel: Dispatching this convoy costs %.0f Scrap and %.0f Metal.", scrapCost, convoyMetalCost)})
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Insufficient Materiel: Dispatching this convoy costs %.0f Scrap and %.0f Metal.", scrapCost, convoyMetalCost)})
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2 WHERE encampment_id = $3", scrapCost, convoyMetalCost, attackerID)
@@ -792,7 +811,7 @@ func (h *CombatHandler) handleBreakCampEarly(ctx context.Context, tx *sql.Tx, c 
 	_ = tx.QueryRowContext(ctx, "SELECT attacker_id FROM raids WHERE id = $1", raidID).Scan(&attackerID)
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&crystal)
 	if crystal < crystalCost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Crystal: breaking camp early here costs 🔮 %.1f, you have %.1f.", crystalCost, crystal)})
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Insufficient Crystal: breaking camp early here costs 🔮 %.1f, you have %.1f.", crystalCost, crystal)})
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", crystalCost, attackerID)

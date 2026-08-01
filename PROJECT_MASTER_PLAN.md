@@ -739,6 +739,46 @@ to reason about and leaves every existing call site untouched. The
 trade-off: if a future caller needed truncation info on the *success*
 path too, this would need revisiting — not a real need today.
 
+**ADR-023: `enable_thinking:false` for Qwen lives on the wire-request
+struct in `openaicompat/provider.go`, guarded by `ProviderName ==
+"qwen"`, not as a generic `ExtraFields map[string]any` bolted onto
+`ai.CompletionRequest`.** A prior session's notes claimed this fix
+already existed via an `ExtraFields` mechanism; a repo-wide grep found
+neither the field nor the flag anywhere in the code, so whatever
+landed it either never actually shipped or was lost in a rebase from
+the parallel dev session. Rebuilt it as a typed, provider-specific
+field (`EnableThinking *bool`, pointer so `omitempty` drops it
+entirely for OpenAI/DeepSeek/Grok) rather than a generic escape hatch,
+since a loosely-typed `map[string]any` threaded through every provider
+would let a future caller silently send provider-specific fields to
+the wrong provider with no compile-time signal. The trade-off: a
+second Qwen-only quirk in the future means another `if
+p.ProviderName == "qwen"` branch rather than a config value — judged
+worth it for the type safety given this is the second time an
+un-typed "just pass extra stuff through" design has apparently gone
+missing/undocumented across a rebase.
+
+**ADR-024: inline-button `callback_data` must stay under 64 bytes
+(`\f` + unique + `|` + joined args), and IDs that are already
+recoverable server-side should never be threaded through it just for
+convenience.** Telegram silently drops any button whose `callback_data`
+exceeds the limit — no error at send time, no error at tap time, the
+button just does nothing — which makes this exact class of bug
+invisible without doing the byte math by hand. `road_encounter` was
+carrying an encounter UUID *and* a raid UUID (~95 bytes) when the raid
+UUID was fully derivable from the encounter row plus the caller's own
+encampment; `road_base_encounter`'s name alone (20 characters) was
+enough to push a single UUID over the limit for its "continue" action
+at 66 bytes. Fix pattern going forward: (1) prefer deriving IDs
+server-side over passing them if they're a function of something
+already in the callback, and (2) keep `unique` prefixes short for any
+button whose data includes a UUID — `callback_data_length_test.go`
+now asserts both current call sites stay under the cap using a
+representative 36-byte UUID, but nothing currently enforces this for
+new call sites, so a manual gut-check ("prefix + `|` + args, does a
+UUID make this too long?") is still needed when adding a new
+UUID-bearing button.
+
 **ADR-017: Battle Analyst (Phase F) covers raids and arena battles
 only, not World Bosses — confirmed by re-auditing the schema, not
 inherited from an earlier session's claim.** A schema audit done
@@ -2223,6 +2263,35 @@ which cost real time re-deriving them twice.
   starting bonus was 10x wrong (showed +50/+150, code has always granted
   +500/+1,500) - fixed to match reality. Added
   `spawnlocation_test.go` (7 tests). Verified with a full `go build
+  ./... && go vet ./... && go test ./...` pass and a checksum-confirmed
+  `go.mod`/`go.sum` restore.
+
+- **Bug-hunt session (2026-08-01): four user-reported issues, all
+  confirmed against actual code before fixing, plus a swept check for
+  the same bug classes elsewhere.** Full detail in
+  `BUGS_AND_INCONSISTENCIES.md`; summary: (1) AI Developer Console
+  Balance/Weekly Reports were getting cut off mid-JSON — root cause was
+  Qwen3's `enable_thinking` defaulting to `true` and consuming the
+  visible-completion token budget with hidden reasoning tokens; a
+  prior session's claim that this was already fixed via `ExtraFields`
+  didn't match what's actually in the code, so it was rebuilt (see
+  ADR-023) and `MaxTokens` doubled to 4096 for the two report types
+  that hit it; (2) long dynamic toast notifications (e.g. "Hangar
+  Full: 2445/210...") were silently clipped by Telegram's client —
+  10 call sites switched to `ShowAlert: true` so they render as a full
+  modal; (3) the Attack/Continue buttons on a road encounter (raid
+  passing another raid or a base) didn't respond to taps — confirmed
+  root cause was `callback_data` exceeding Telegram's 64-byte cap
+  (~95 bytes for `road_encounter`, 66 for `road_base_encounter`'s
+  "continue"), which Telegram silently drops rather than erroring on
+  (see ADR-024); fixed by deriving the caller's raid ID server-side
+  instead of passing it, and shortening `road_base_encounter`'s prefix
+  to `rbe`; (4) a screenshot of a phishing message impersonating
+  Telegram's account-suspension flow was declined as a UI reference,
+  not treated as a legitimate design request. Added
+  `TestProvider_Complete_QwenDisablesThinking`,
+  `TestProvider_Complete_NonQwenOmitsThinkingField`, and
+  `callback_data_length_test.go`. Verified with a full `go build
   ./... && go vet ./... && go test ./...` pass and a checksum-confirmed
   `go.mod`/`go.sum` restore.
 

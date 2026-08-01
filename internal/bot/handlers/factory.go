@@ -541,7 +541,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 		if room < 0 {
 			room = 0
 		}
-		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used, only room for %d more. Upgrade your Hangar or /deconstruct unused units.", totalUnits, maxCapacity, room)})
+		return c.Respond(&gopkg.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used, only room for %d more. Upgrade your Hangar or /deconstruct unused units.", totalUnits, maxCapacity, room)})
 	}
 
 	// Doomsday Rig's total-fleet cap (tied to Outpost level, not
@@ -553,7 +553,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1) FROM encampments WHERE id = $1", campID).Scan(&campLvl)
 		maxDS := content.MaxDoomsdayRigs(campLvl)
 		if currentDS+quantity > maxDS {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s) total (you have %d). Level up to raise the cap.", campLvl, maxDS, currentDS)})
+			return c.Respond(&gopkg.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s) total (you have %d). Level up to raise the cap.", campLvl, maxDS, currentDS)})
 		}
 	}
 

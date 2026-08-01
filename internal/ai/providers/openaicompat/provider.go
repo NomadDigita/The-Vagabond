@@ -110,6 +110,16 @@ type wireRequest struct {
 	MaxTokens      int                 `json:"max_tokens,omitempty"`
 	Temperature    float64             `json:"temperature,omitempty"`
 	ResponseFormat *wireResponseFormat `json:"response_format,omitempty"`
+	// EnableThinking is DashScope/Qwen-specific. Left as a pointer so
+	// it's omitted entirely for OpenAI/DeepSeek/Grok, which don't
+	// recognize the field. Qwen3 models default this to true, and
+	// the resulting reasoning tokens are drawn from the same
+	// max_tokens budget as the visible completion — this silently
+	// starves JSON-mode callers (Dev Console balance/weekly reports,
+	// advisors) of their MaxTokens before any visible text is
+	// written, producing output that looks truncated even though
+	// nothing is wrong with MaxTokens itself. See ADR-016/017.
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
 type wireChoice struct {
@@ -146,6 +156,15 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 		Model:       model,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
+	}
+
+	if p.ProviderName == "qwen" {
+		// DashScope's compatible-mode endpoint defaults enable_thinking
+		// to true for Qwen3 models. Force it off so reasoning tokens
+		// don't eat into MaxTokens before the visible JSON/text is
+		// written (see wireRequest.EnableThinking doc comment above).
+		noThinking := false
+		wr.EnableThinking = &noThinking
 	}
 
 	system := req.System

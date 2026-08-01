@@ -476,3 +476,110 @@ No existing test asserted the old resource amounts, camp-name scheme, or
 behavior itself - `onboarding_referral_test.go`'s existing coverage
 (referral code generation, milestone ordering) was untouched by any of
 this and still passes.
+
+## Bug-hunt session (2026-08-01) — user-reported issues, confirmed and fixed
+
+Four issues reported by the user, all confirmed against the actual code
+(not assumed) before fixing.
+
+1. **Real bug fixed: AI Developer Console responses (Balance Report,
+   Weekly Report) were getting cut off mid-JSON.** Root cause: the
+   `openaicompat` provider (used for Qwen/DashScope) never set
+   `enable_thinking`, and Qwen3 models default that to `true`. The
+   resulting reasoning tokens draw from the *same* `max_tokens` budget
+   as the visible completion, so the model could burn its whole budget
+   on hidden reasoning before writing any of the actual JSON — this is
+   why the cutoff looked arbitrary and mid-string rather than at a
+   suspiciously round token count. (Project memory claimed this was
+   already fixed via `enable_thinking:false` in `ExtraFields`; a repo-
+   wide grep found no trace of either — the field didn't exist on
+   `CompletionRequest` at all. Whatever session made that claim either
+   never actually landed it, or it was lost in a rebase from the
+   parallel dev session. Either way, the code as of today's `main` did
+   not have it.) Fixed in
+   `internal/ai/providers/openaicompat/provider.go`: added an
+   `EnableThinking *bool` field to the wire request struct (a pointer
+   so it's omitted via `omitempty` for OpenAI/DeepSeek/Grok, which
+   don't recognize it), and the provider now force-sets it to `false`
+   whenever `ProviderName == "qwen"`. Also doubled `MaxTokens` (2048 →
+   4096) specifically for `devconsole/balance.go` and
+   `devconsole/console.go` (the balance and weekly/activity reports),
+   since those two produce the most narrative-heavy JSON (multiple
+   free-text fields) of any AI feature and were the two the user hit.
+   The other seven AI-advisor packages stay at 2048 — no evidence they
+   need more, and inflating budgets that aren't broken just costs money
+   per ADR guidance. Added `TestProvider_Complete_QwenDisablesThinking`
+   and `TestProvider_Complete_NonQwenOmitsThinkingField` to
+   `provider_test.go` to lock this in both directions.
+
+2. **Real bug fixed: long inline "toast" notifications (e.g. "Hangar
+   Full: 2445/210 capacity used, only room for 0 mor...") were silently
+   truncated by the Telegram client.** `c.Respond(&CallbackResponse{Text:
+   ...})` without `ShowAlert: true` renders as a single-line banner at
+   the top of the chat, which Telegram's client clips hard for anything
+   longer than a short phrase — there is no wrapping or "read more."
+   Grepped every `CallbackResponse{Text: fmt.Sprintf(...)}` call site
+   (44 total) for ones whose format string is long enough to be at real
+   risk, and set `ShowAlert: true` on the 10 that were: hangar-full and
+   Doomsday-Rig-cap in `factory.go`, drone-intercept success/failure and
+   insufficient-campaign-supplies in `combat.go`, insufficient-materiel
+   and insufficient-crystal in `combat_road_encounters.go`, miner-cap
+   and admin-override in `camp.go`, and the boss strike-force dispatch
+   confirmation in `boss.go`. `ShowAlert: true` makes Telegram show
+   these as a full modal dialog instead, which the player has to
+   dismiss but which shows the complete message.
+
+3. **Real bug fixed: the Attack/Continue buttons on a road encounter
+   (raid passing another raid, or passing a base) didn't respond to
+   taps.** Confirmed root cause, not guessed: Telegram caps inline
+   button `callback_data` at 64 bytes, and exceeding it makes Telegram
+   silently refuse to attach that button — the message still sends, the
+   button is visibly there, but tapping it does nothing (no error, no
+   spinner, nothing), which matches the report exactly. Two separate
+   overflows found:
+   - `road_encounter` (raid-vs-raid) packed `\f` + `"road_encounter"` +
+     `|attack|` (or `|continue|`) + a 36-byte encounter UUID + `|` + a
+     36-byte raid UUID = **~95 bytes**, way over. The raid ID was only
+     ever used to know which of the two raids in the encounter belonged
+     to the tapping player — information already derivable server-side
+     from the encounter row's `raid_a_id`/`raid_b_id` plus the caller's
+     own encampment, so it never needed to travel over the wire at all.
+     `HandleRoadEncounterCallback` in `combat_road_encounters.go` now
+     derives it that way instead of trusting a client-supplied ID (a
+     minor security improvement as a side effect), and the button-
+     building code in `combat.go` no longer passes it. New length:
+     59-61 bytes.
+   - `road_base_encounter` (raid vs. a passive base) was `\f` +
+     `"road_base_encounter"` + `|attack|` + a 36-byte UUID = exactly
+     **64 bytes** for "attack" (right at the edge — fragile, one
+     character away from breaking) and **66 bytes** for "continue"
+     (already broken). Shortened the callback prefix to `"rbe"`
+     everywhere (registration in `cmd/bot/main.go`, button construction
+     in `combat.go`) — new length: 48-50 bytes, comfortable margin.
+   Added `callback_data_length_test.go` which builds the actual buttons
+   via `telebot.ReplyMarkup.Data()` and asserts the resulting
+   `callback_data` (prefix + separators + a representative 36-byte
+   UUID) stays under 64 bytes for both encounter types and both
+   actions, plus a guard that `road_encounter` never regresses back to
+   carrying two UUIDs.
+   - Swept the rest of `internal/bot/handlers` for the same pattern
+     (any button passing two ID-shaped arguments). Found one other
+     borderline case, `clan_app_accept`/`clan_app_reject` in `clan.go`
+     (Telegram user ID + clan UUID), which computes to 63 bytes with a
+     10-digit user ID — currently safe but with only 1 byte of margin.
+     Left as-is since it isn't broken today and touching it wasn't
+     requested, but flagging here since Telegram user IDs are trending
+     longer over time and this is worth revisiting before it silently
+     breaks the same way.
+
+4. **Not a bug: a screenshot of a Chinese-language "your account has
+   been flagged, recover within 12 hours or be banned" message with
+   red/green action buttons was shared as a UI style reference.**
+   Confirmed this is a phishing message impersonating Telegram's
+   account-suspension flow (a known scam pattern), not a real Telegram
+   bot design — declined to replicate it and flagged it as such to the
+   user rather than treating it as a legitimate design request.
+
+Verified with a full `go build ./... && go vet ./... && go test ./...`
+pass and a checksum-confirmed `go.mod`/`go.sum` restore after using the
+`telebot.v3` replace directive locally to resolve the module.

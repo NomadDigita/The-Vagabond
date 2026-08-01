@@ -342,12 +342,10 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var deadline time.Time
 			if err := rowsRoad.Scan(&encID, &raidAID, &raidBID, &deadline, &nameA, &nameB); err == nil {
 				enemyName := nameB
-				myRaidID := raidAID
 				var iAmSideA bool
 				_ = h.DB.QueryRowContext(ctx, "SELECT attacker_id = $1 FROM raids WHERE id = $2", campID, raidAID).Scan(&iAmSideA)
 				if !iAmSideA {
 					enemyName = nameA
-					myRaidID = raidBID
 				}
 				timeLeft := time.Until(deadline.UTC())
 				if timeLeft < 0 {
@@ -358,8 +356,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					fmt.Sprintf("Forces of %s are on your route.\n⏳ Decide within %s or your column continues past them peacefully.", htmlBold(htmlEscape(enemyName)), htmlCode(formatDuration(timeLeft))) + "\n" + divider
 				roadContacts = append(roadContacts, roadContactPrompt{
 					text:    contactText,
-					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID, myRaidID), keyboards.StyleDanger),
-					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID, myRaidID), keyboards.StyleSuccess),
+					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", enemyName), "road_encounter", "attack", encID), keyboards.StyleDanger),
+					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", enemyName), "road_encounter", "continue", encID), keyboards.StyleSuccess),
 				})
 			}
 		}
@@ -386,8 +384,8 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					fmt.Sprintf("Outpost %s sits on your route.\nAttack its home garrison, or continue past it peacefully.", htmlBold(htmlEscape(baseName))) + "\n" + divider
 				roadContacts = append(roadContacts, roadContactPrompt{
 					text:    contactText,
-					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", baseName), "road_base_encounter", "attack", encID), keyboards.StyleDanger),
-					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", baseName), "road_base_encounter", "continue", encID), keyboards.StyleSuccess),
+					attack:  keyboards.Styled(selector.Data(fmt.Sprintf("⚔️ Attack [%s]", baseName), "rbe", "attack", encID), keyboards.StyleDanger),
+					proceed: keyboards.Styled(selector.Data(fmt.Sprintf("➡️ Continue [%s]", baseName), "rbe", "continue", encID), keyboards.StyleSuccess),
 				})
 			}
 		}
@@ -936,12 +934,12 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 		attackerUser := &telebot.User{ID: attackerUserID}
 		_, _ = c.Bot().Send(attackerUser, "💥 SPY INTERCEPTED: Your spy satellite was intercepted and destroyed by defender air defense interceptor systems! Telemetry lost.")
 
-		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🛡️ SUCCESS: Drone intercepted hostile satellite! (%d%% Success Probability)", int(interceptChance*100))})
+		_ = c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("🛡️ SUCCESS: Drone intercepted hostile satellite! (%d%% Success Probability)", int(interceptChance*100))})
 		return c.Send(fmt.Sprintf("🛡️ SUCCESS: Your Interceptor Drone destroyed the spy satellite! (%d%% probability hit). Telemetry was vaporized.", int(interceptChance*100)))
 	}
 
 	_ = tx.Commit()
-	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ FAILED: The satellite evaded your defense systems! (%d%% Success Probability)", int(interceptChance*100))})
+	_ = c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ FAILED: The satellite evaded your defense systems! (%d%% Success Probability)", int(interceptChance*100))})
 	return c.Send("❌ CHASE FAILED: The spy satellite evaded your defense systems and continued its route. Interceptor drone was lost.")
 }
 
@@ -1764,7 +1762,7 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 	fuelCost *= (1.0 - fuelDiscount)
 
 	if electricity < fuelCost || rations < rationCost || metal < logisticsMetalCost || hydrogen < hydrogenCost {
-		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Campaign Supplies: Need ⚡ %.1f Electricity, 🍖 %.1f Rations, 🔩 %.1f Metal logistics, and 💧 %.1f Hydrogen.", fuelCost, rationCost, logisticsMetalCost, hydrogenCost)})
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Insufficient Campaign Supplies: Need ⚡ %.1f Electricity, 🍖 %.1f Rations, 🔩 %.1f Metal logistics, and 💧 %.1f Hydrogen.", fuelCost, rationCost, logisticsMetalCost, hydrogenCost)})
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1, rations = rations - $3, metal = metal - $4, hydrogen = hydrogen - $5 WHERE encampment_id = $2", fuelCost, myCampID, rationCost, logisticsMetalCost, hydrogenCost)
