@@ -595,15 +595,33 @@ func Statements() []string {
 		`ALTER TABLE raids ALTER COLUMN route_progress SET NOT NULL;`,
 		`DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid') THEN
-				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid
-					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused'));
-			END IF;
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_route_progress_range') THEN
 				ALTER TABLE raids ADD CONSTRAINT raids_route_progress_range
 					CHECK (route_progress >= 0.0 AND route_progress <= 1.0);
 			END IF;
 		END $$;`,
+
+		// PRODUCTION OUTAGE, self-inflicted and fixed same day (2026-08-02):
+		// this DO block used to also (IF NOT EXISTS) create
+		// raids_movement_state_valid with the narrow, pre-'awaiting_
+		// reinforcement' CHECK list. That combined with the DROP+v2 pair
+		// below it into an infinite crash loop: every boot dropped the
+		// old constraint (DROP CONSTRAINT IF EXISTS, a few statements
+		// down), which meant IF NOT EXISTS here was true again on the
+		// *next* boot, which recreated the old (narrow) constraint, which
+		// then immediately failed Postgres's mandatory validate-existing-
+		// rows check against real 'awaiting_reinforcement' rows already
+		// in the table - a fatal error (schema init treats failures as
+		// fatal and refuses to start), confirmed via Render's deploy logs
+		// ("Fatal: Failed to execute startup database initialization
+		// script: pq: check constraint "raids_movement_state_valid" of
+		// relation "raids" is violated by some row (23514)"), crash-
+		// looping the whole server on every single restart. The old
+		// constraint's creation is deleted outright (not just left
+		// unreferenced) so there is nothing left in this file that can
+		// ever recreate it. See the comment further below, on the
+		// DROP + raids_movement_state_valid_v2 pair, for the actual
+		// content fix this was meant to ship alongside.
 
 		// Confirmed live via Render logs (2026-08-02): applyActiveLogisticsConsumption
 		// in internal/engine/tick/engine.go sets movement_state =
@@ -623,12 +641,32 @@ func Statements() []string {
 		// `IF NOT EXISTS (SELECT ... conname = 'raids_movement_state_valid')`
 		// - once that first ran on a given database, editing this list in
 		// place would never actually reach it again.
+		// PRODUCTION OUTAGE #2, same day (2026-08-02): the first fix
+		// above (raids_movement_state_valid_v2) still validated every
+		// existing row against its new CHECK list at creation time -
+		// standard Postgres behavior for ADD CONSTRAINT, but risky here
+		// because it means missing even one real, in-use value crashes
+		// the boot exactly like outage #1 did. That's exactly what
+		// happened: this list didn't include 'camped'
+		// (internal/engine/tick/engine.go's handleRoadIncident-style
+		// pause flow), confirmed via `grep -rnE
+		// "movement_state[[:space:]]*[=:][[:space:]]*['\"][a-z_]+['\"]"`
+		// across the whole repo - the only reliable way to enumerate
+		// every value actually in use, since eyeballing the CHECK list
+		// against memory had already missed it once. Added 'camped'
+		// AND switched to NOT VALID, which skips validating existing
+		// rows at creation time entirely (still enforced for every new
+		// INSERT/UPDATE going forward) - this is the standard safe
+		// pattern for adding a CHECK constraint to a table that already
+		// has live data, and means a future un-enumerated legacy value
+		// can no longer take the whole server down at boot the way both
+		// outages today did.
 		`ALTER TABLE raids DROP CONSTRAINT IF EXISTS raids_movement_state_valid;`,
 		`DO $$
 		BEGIN
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid_v2') THEN
 				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid_v2
-					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused', 'awaiting_reinforcement'));
+					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused', 'awaiting_reinforcement', 'camped')) NOT VALID;
 			END IF;
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending

@@ -1243,3 +1243,72 @@ flip.
 Verified: `go build ./...`, `go vet ./...`, and `go test ./...` (whole
 repo) all pass, including two new tests in
 `internal/ai/providers/gemini/provider_test.go`.
+
+---
+
+## 2026-08-02 (cont. 3) — HOTFIX: self-inflicted production outage from the earlier constraint fix
+
+The `raids_movement_state_valid_v2` fix shipped earlier today
+(commit 72b42ed) took the whole server down. Render's deploy logs for
+the very next deploy (unrelated Gemini commit 6f1b71b, which just
+happened to trigger the next restart) showed:
+
+```
+Fatal: Failed to execute startup database initialization script:
+pq: check constraint "raids_movement_state_valid" of relation "raids"
+is violated by some row (23514)
+```
+
+**Root cause of the outage:** the original guarded block (`IF NOT
+EXISTS (SELECT ... conname = 'raids_movement_state_valid') THEN
+CREATE ...`) was left in schema.go unchanged, sitting right next to
+the new `DROP CONSTRAINT IF EXISTS raids_movement_state_valid` +
+`raids_movement_state_valid_v2` pair added after it. Since
+`Statements()` runs on every boot: boot 1 - old constraint already
+existed (from long ago) so the guard skipped it, the DROP removed it,
+v2 was created successfully. Boot 2 (any restart after) - the guard's
+`IF NOT EXISTS` was now true again (because boot 1's DROP had removed
+it), so it tried to recreate the *old*, narrower constraint - which
+immediately failed Postgres's mandatory validate-existing-rows check
+against real `'awaiting_reinforcement'` rows already sitting in the
+table. Every single restart repeated this, so the server could never
+successfully boot again after that first deploy. **Fixed** by deleting
+the old constraint's creation entirely (nothing left in the file that
+can recreate it) instead of leaving it dangling next to the DROP.
+
+**A second, related bug caught in the same pass:** the
+`raids_movement_state_valid_v2` list was missing `'camped'`
+(`internal/engine/tick/engine.go` line ~2108), a real, in-use value -
+confirmed via `grep -rnE
+"movement_state[[:space:]]*[=:][[:space:]]*['\"][a-z_]+['\"]"` across
+the whole repo, the only reliable way to enumerate every literal value
+actually written, after eyeballing the list against memory had already
+missed one value once already that same day. Rather than trust another
+manual enumeration, the `ADD CONSTRAINT` was also switched to
+**`NOT VALID`** - the standard safe pattern for adding a CHECK
+constraint to a table with existing live data: it skips validating
+pre-existing rows at creation time entirely, while still being fully
+enforced for every INSERT/UPDATE from that point forward. This means a
+future un-enumerated legacy value can no longer take the whole server
+down at boot the way both of today's outages did.
+
+**Verification, not just "should work":** since this class of bug had
+already bitten twice in one session, installed a real local Postgres
+16 and replicated production's *exact* broken state by hand - created
+`raids` with the old narrow constraint, dropped it (simulating fix
+#1's own DROP having already run once), inserted rows with
+`'awaiting_reinforcement'` and `'camped'` (values only writable in that
+post-DROP window), then ran the actual fixed DROP+`NOT VALID` statement
+pair verbatim against it. Confirmed: constraint attaches successfully
+despite the dirty rows already present (`convalidated = f`), remains
+fully enforced going forward (a bogus value was rejected immediately
+on INSERT), and legitimate values (`'camped'`) insert fine. Also ran
+`go build ./...`, `go vet ./...`, and the full
+`internal/engine/... internal/db/...` test suites, all passing.
+
+**Lesson for next time, added here rather than just fixed in code:**
+when a CHECK constraint needs to change on a table that already has
+live production data, default to `NOT VALID` and a full repo-wide grep
+for every literal value in use, rather than trusting a guarded
+`IF NOT EXISTS` block plus manual enumeration - both failure modes
+here came from skipping one of those two things.
