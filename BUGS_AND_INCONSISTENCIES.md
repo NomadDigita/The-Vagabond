@@ -1049,3 +1049,38 @@ missions (blocked on the drones prerequisite), and exploration — exploration
 is the suggested next pick since it follows the same single-faction-action
 pattern as research/upgrades above, not the clan-Leader-gated pattern
 diplomacy/wars/federations use.
+
+## AI faction session (2026-08-02, later same day) — exploration expeditions
+
+Continued the same session's Item 4 sweep, picking exploration
+(`exploration_sites`/`exploration_dispatches`) as the next self-contained
+item per the plan doc's own suggestion, deliberately not diplomacy (handled
+in a concurrent session).
+
+Read the real handler first (`internal/bot/handlers/exploration.go`) and
+confirmed `resolveExplorationDispatches` in `engine.go` already resolves any
+dispatch generically regardless of which encampment sent it — so the only
+code needed was the dispatch side. Added to `growAICivilizations` (4%
+chance/tick): one exploration expedition in flight at a time per Outpost,
+30 Rations + 15 Metal cost, and the same weighted reward-site roll a human
+gets (duplicated as `aiExplorationTemplates` literals, same reasoning as
+every other duplicated literal in this function). An AI faction's
+expedition resolves through the exact same tick-engine code path as a
+human's, including the first-contact discovery roll off Scout Walker count.
+
+Full mechanics and reasoning are in `AI_AND_SCOUTING_EXPANSION_PLAN.md`'s
+Item 4 section (updated in the same commit). Three new tests in a new
+`internal/engine/tick/aiexploration_test.go`:
+`TestGrowAICivilizationsCanDispatchExploration`,
+`TestGrowAICivilizationsWontDispatchExplorationConcurrently`,
+`TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies`.
+
+Verified with a real-Postgres `go build ./... && go vet ./... && go test
+./...` pass, two `-shuffle=on` reruns of `internal/engine/tick`, and a
+checksum-confirmed `go.mod`/`go.sum` restore. Checked for concurrent pushes
+to `main` before committing — none found this round.
+
+Still open in Item 4: hero recruitment/equipping, job assignments, and spy
+missions (blocked on the drones prerequisite). Job assignments suggested
+next, since it's a single-faction action like this one rather than
+clan-gated.

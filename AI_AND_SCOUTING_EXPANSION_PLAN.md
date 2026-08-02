@@ -333,27 +333,46 @@ before.
   (entry fee debited, an `arena_queue` row inserted) using the cheapest
   `'solo'` bracket. New test:
   `TestGrowAICivilizationsCanQueueForArena`.
+- **Exploration: done, 2026-08-02.** Also in `growAICivilizations` (4%
+  chance/tick), mirrors `HandleDispatchExpeditionCallback`'s exact
+  mechanics: one dispatch in flight at a time per Outpost, a cost of 30
+  Rations + 15 Metal, and a weighted reward-site roll (duplicated as
+  `aiExplorationTemplates` literals rather than imported from
+  `internal/bot/handlers/exploration.go`, same reasoning as every other
+  duplicated literal in this function) inserted as a real
+  `exploration_sites`/`exploration_dispatches` row pair. Distinct from
+  the `scout_missions` Item 3 already covers - scouting finds raid
+  targets, exploration finds resource hauls and first contacts.
+  `resolveExplorationDispatches` further down `engine.go` needed zero
+  changes to pick this up - it already credits whichever
+  `encampment_id` dispatched and rolls the same first-contact discovery
+  chance regardless of owner, so an AI faction's expedition can surface
+  a real player Outpost the same way a human's can. New tests:
+  `TestGrowAICivilizationsCanDispatchExploration`,
+  `TestGrowAICivilizationsWontDispatchExplorationConcurrently`,
+  `TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies`.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
   as before. Updated inventory of what's still missing, now that buying,
-  clans, clan wars, federations, arena queueing, research, and facility
-  upgrades are done: hero recruitment and equipping, job assignments,
-  diplomacy actions (`internal/bot/handlers/diplomacy.go` - alliance/NAP
-  pacts between clans, distinct from clan wars, being picked up in a
-  concurrent session), spy missions (`HandleSpyCallback` - blocked on AI
+  clans, clan wars, federations, arena queueing, research, facility
+  upgrades, and exploration are done: hero recruitment and equipping,
+  job assignments, and diplomacy actions
+  (`internal/bot/handlers/diplomacy.go` - alliance/NAP pacts between
+  clans, distinct from clan wars, being picked up in a concurrent
+  session). Spy missions (`HandleSpyCallback`) remain blocked on AI
   factions not currently building the "Spy Device" drones a spy mission
   requires; would need `growAICivilizations` to also build drones first,
-  or a different resourcing path), and exploration (`exploration_sites`
-  - distinct from the `scout_missions` Item 3 covers). Each remains its
-  own subsystem needing its own read-the-handler-first pass, exactly
-  like every item above got.
+  or a different resourcing path. Each remaining item is its own
+  subsystem needing its own read-the-handler-first pass, exactly like
+  every item above got.
 - **Suggested next subsystem**: with diplomacy handled concurrently and
-  research/facility upgrades done, exploration (`exploration_sites`) is
-  probably next-most self-contained - a single-faction action like
-  research/upgrades above, not a clan-Leader-gated one. Hero recruitment
-  and job assignments haven't had their handlers read yet this round.
-  Spy missions still need the drones prerequisite solved first. Confirm
-  before starting, same as always.
+  research/upgrades/exploration all done, job assignments is probably
+  next-most self-contained, since like exploration it's a single-faction
+  action rather than a clan-Leader-gated one. Hero recruitment hasn't
+  had its handler read yet this round, and may turn out to be a bigger
+  lift (equipping likely touches inventory/items tables not explored
+  yet). Spy missions still need the drones prerequisite solved first.
+  Confirm before starting, same as always.
 
 
 
@@ -373,15 +392,16 @@ before.
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
    market buying, clan creation/application, clan wars, federations,
-   arena queueing, research tech-tree upgrades, and facility upgrades
-   done** (listing merged with Item 1; the rest added across three
-   follow-up rounds - two after direct project owner instruction, the
-   third resolving the "unit upgrades" open question below); everything
-   else in Item 4 (hero recruitment, jobs, diplomacy, spy missions,
-   exploration) remains open and is realistically its own multi-session
-   project - see Item 4's own section for the reasoning and a suggested
-   starting point (exploration, now that research/upgrades established
-   the single-faction-action pattern; diplomacy is being handled in a
+   arena queueing, research tech-tree upgrades, facility upgrades, and
+   exploration done** (listing merged with Item 1; the rest added across
+   four follow-up rounds - two after direct project owner instruction,
+   the third resolving the "unit upgrades" open question, the fourth
+   picking exploration as the next self-contained item); everything else
+   in Item 4 (hero recruitment, jobs, diplomacy, spy missions) remains
+   open and is realistically its own multi-session project - see Item
+   4's own section for the reasoning and a suggested starting point (job
+   assignments, now that research/upgrades/exploration established the
+   single-faction-action pattern; diplomacy is being handled in a
    concurrent session).
 
 ## Testing strategy

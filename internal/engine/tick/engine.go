@@ -2387,6 +2387,57 @@ var aiUpgradeableModules = []string{
 // (currentLvl*150) in internal/bot/handlers/camp.go.
 const aiModuleUpgradeCostPerLevel = 150
 
+// aiExplorationDispatchRationsCost/aiExplorationDispatchMetalCost and
+// aiExplorationMinTravelMinutes/aiExplorationMaxTravelMinutes duplicate the
+// same-named constants in internal/bot/handlers/exploration.go.
+const aiExplorationDispatchRationsCost = 30.0
+const aiExplorationDispatchMetalCost = 15.0
+const aiExplorationMinTravelMinutes = 20
+const aiExplorationMaxTravelMinutes = 45
+
+// aiExplorationSiteTemplate and aiExplorationTemplates duplicate
+// explorationSiteTemplate/explorationTemplates from
+// internal/bot/handlers/exploration.go - same weighted reward pool a
+// human's personal expedition rolls from, so an AI faction's exploration
+// haul feels like the same game, not a simplified AI-only version.
+type aiExplorationSiteTemplate struct {
+	siteType   string
+	namePrefix string
+	rewardType string
+	minAmount  float64
+	maxAmount  float64
+	weight     int
+}
+
+var aiExplorationTemplates = []aiExplorationSiteTemplate{
+	{"Scrapyard", "Scrap Yard", "scrap", 150, 400, 20},
+	{"Cache", "Supply Cache", "metal", 100, 300, 18},
+	{"Depot", "Ration Depot", "rations", 80, 200, 16},
+	{"Generator", "Power Cell Cluster", "electricity", 60, 150, 14},
+	{"Reserve", "Fuel Reserve", "hydrogen", 40, 100, 10},
+	{"Beacon", "Signal Beacon", "dollars", 300, 800, 10},
+	{"Artifact", "Tech Artifact", "neuro_cores", 10, 30, 6},
+	{"Ruins", "Ancient Ruins", "ether", 15, 40, 4},
+	{"Vein", "Crystal Vein", "crystal", 5, 15, 2},
+}
+
+// aiRollExplorationTemplate duplicates rollExplorationTemplate's exact
+// weighted-pick logic from internal/bot/handlers/exploration.go.
+func aiRollExplorationTemplate() aiExplorationSiteTemplate {
+	total := 0
+	for _, t := range aiExplorationTemplates {
+		total += t.weight
+	}
+	roll := rand.Intn(total)
+	for _, t := range aiExplorationTemplates {
+		if roll < t.weight {
+			return t
+		}
+		roll -= t.weight
+	}
+	return aiExplorationTemplates[0]
+}
+
 // economicCollapseWarningThreshold gates the "ECONOMIC COLLAPSE" warning
 // added per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5 - a
 // combined post-raid resource total (Scrap+Metal+Crystal+Rations+
@@ -2807,6 +2858,56 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 						_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, f.id)
 						readyAt := time.Now().UTC().Add(20 * time.Second)
 						_, _ = tx.ExecContext(ctx, "UPDATE modules SET is_upgrading = TRUE, upgrade_ready_at = $1 WHERE encampment_id = $2 AND type = $3", readyAt, f.id, modType)
+					}
+				}
+			}
+		}
+
+		// Occasionally dispatch a personal exploration expedition, exactly
+		// like a human would via /explore's "Launch Expedition" button -
+		// the last self-contained, single-faction item from Item 4's
+		// inventory (`exploration_sites`/`exploration_dispatches`,
+		// distinct from the `scout_missions` Item 3 already covers -
+		// scouting finds raid targets, exploration finds resource hauls
+		// and first contacts). Mirrors HandleDispatchExpeditionCallback's
+		// exact mechanics: one dispatch in flight at a time per Outpost,
+		// cost of 30 Rations + 15 Metal, a weighted reward-site roll
+		// (duplicated as aiExplorationTemplates literals rather than
+		// imported from internal/bot/handlers/exploration.go, same
+		// reasoning as every other duplicated literal in this function),
+		// and a 20-45 minute travel window. resolveExplorationDispatches
+		// further down engine.go needed zero changes to pick this up and
+		// resolve it later - it already credits whichever encampment_id
+		// dispatched, AI or human, and even rolls the same first-contact
+		// discovery chance off that Outpost's Scout Walker count.
+		if rand.Float64() < 0.04 {
+			var alreadyDispatched bool
+			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM exploration_dispatches WHERE encampment_id = $1)", f.id).Scan(&alreadyDispatched)
+			if !alreadyDispatched {
+				var rations, metal float64
+				_ = tx.QueryRowContext(ctx, "SELECT COALESCE(rations,0), COALESCE(metal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&rations, &metal)
+				if rations >= aiExplorationDispatchRationsCost && metal >= aiExplorationDispatchMetalCost {
+					var region string
+					_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", f.id).Scan(&region)
+
+					tmpl := aiRollExplorationTemplate()
+					sector := rand.Intn(99) + 1
+					siteName := fmt.Sprintf("%s (Sector %d)", tmpl.namePrefix, sector)
+					rewardAmount := tmpl.minAmount + rand.Float64()*(tmpl.maxAmount-tmpl.minAmount)
+					expiresAt := time.Now().UTC().Add(24 * time.Hour)
+
+					var siteID string
+					err := tx.QueryRowContext(ctx, `
+						INSERT INTO exploration_sites (continent, site_name, site_type, reward_type, reward_amount, expires_at)
+						VALUES ($1, $2, $3, $4, $5, $6)
+						RETURNING id`, region, siteName, tmpl.siteType, tmpl.rewardType, rewardAmount, expiresAt).Scan(&siteID)
+					if err == nil {
+						travelMinutes := aiExplorationMinTravelMinutes + rand.Intn(aiExplorationMaxTravelMinutes-aiExplorationMinTravelMinutes+1)
+						resolveTime := time.Now().UTC().Add(time.Duration(travelMinutes) * time.Minute)
+						_, _ = tx.ExecContext(ctx, "INSERT INTO exploration_dispatches (site_id, encampment_id, user_id, resolve_time) VALUES ($1, $2, $3, $4)",
+							siteID, f.id, f.userID, resolveTime)
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - $1, metal = metal - $2 WHERE encampment_id = $3",
+							aiExplorationDispatchRationsCost, aiExplorationDispatchMetalCost, f.id)
 					}
 				}
 			}
