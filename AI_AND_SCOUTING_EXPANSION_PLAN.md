@@ -25,48 +25,67 @@ logic.
 
 ## Item 1: Continuous AI faction spawning (new, not covered elsewhere)
 
-Today `seedAICivilizations` (`cmd/bot/main.go`) inserts exactly 8 AI
-factions once, idempotently, at boot, and nothing ever adds a 9th. The
-request is for **new AI factions to keep appearing over time** (the
-player suggested "at least 3 new AI spawn on the planet daily"), each one
-then growing/leveling/building a fleet the same way the original 8 do via
-`growAICivilizations`, and eventually acting via `decideAIFactionActions`
-- i.e. a new spawn should need zero special-casing in either of those two
-functions, it's just another `is_ai_faction = TRUE` encampment row.
+**Status: built and merged to `main` (2026-08-01).** The project owner's
+answer, quoted for precision:
 
-Suggested shape:
-- New tick phase, e.g. `spawnNewAIFactions(ctx, tx)`, registered in
-  `internal/engine/tick/engine.go`'s phase list near
-  `"ai_civilization_growth"`/`"ai_civilization_decisions"`.
-- Needs a real cadence gate the same shape as
-  `aiDecisionCadence`/`ai_last_decision_at` uses for individual factions,
-  but world-scoped this time (e.g. a `world_state` or
-  `last_ai_spawn_at` singleton row, or reuse the existing
-  `world_events`-style table if one already fits - check before adding a
-  new table) so this doesn't need to re-derive "how many spawned today"
-  from a COUNT query with fuzzy day boundaries every tick.
-- Needs a procedural name/key generator (the current 8 are hand-authored
-  flavor names like "Ironclad Directive" - either extend that authored
-  list well past 8 upfront and spawn from the tail of it, or build a
-  simple word-bank combiner; either is fine, but keep `ai_faction_key`
-  genuinely unique, since `seedAICivilizations`'s idempotency check
-  depends on it).
-- Needs a spawn coordinate strategy that doesn't collide with an existing
-  encampment and roughly balances the 4 continents (mirror whatever
-  `seedAICivilizations` or the human onboarding flow already does for
-  fresh coordinates - don't invent a third way to pick a starting tile).
-- Starting level: keep new spawns intentionally weak (the original 8
-  start at level 3 or 6) so a growing AI population doesn't front-load
-  the world with instantly-dangerous new threats - let
-  `growAICivilizations`'s existing passive leveling do the ramp-up over
-  time, exactly like it already does for the original 8.
-- **Open product question, don't guess**: is there any cap on total AI
-  faction count, or does this run forever? "New one keeps spawning...
-  every minutes and secs too" plus "3 new AI daily" read as somewhat
-  contradictory (sub-minute spawns would be *far* more than 3/day) - get
-  a real target rate from the project owner before picking a cadence
-  constant, the same way `aiDecisionCadence`'s "20 minutes" was a
-  deliberate, stated guess in the original plan, not an accident.
+> 3/day. Every minutes and secs means, they should always actively
+> upgrades their units, they can also list items in market, like, they
+> can literally do every single thing in the game - just like real
+> human, they must be very active and always building up and competing,
+> this will make the game very active and very interactive too.
+
+This resolved the "3/day vs every minutes and secs" contradiction this
+section originally flagged: 3/day is the literal spawn rate; "every
+minutes and secs" wasn't a second, faster spawn rate at all - it was
+describing how *active* each already-existing faction should be
+(constant building, market participation, etc.), which is a different
+axis entirely from how often *new* factions appear. Split into two
+pieces as a result - spawning (this item, done) and general activity
+level (moved to the new Item 4 below, mostly not done, see there for
+why).
+
+What shipped, in `internal/engine/tick/aispawning.go`:
+
+- `spawnNewAIFactions(ctx, tx)`, registered in the tick phase list as
+  `"ai_civilization_spawn"`, running immediately before
+  `"ai_civilization_growth"` so a faction spawned this tick is visible to
+  growth/decisions within the same transaction (same read-your-writes
+  reasoning `decideOneAIFaction`'s overdue-guarantee check relies on).
+- Cadence gate: `world_state` (the existing weather singleton row, id=1)
+  gained two additive columns, `last_ai_spawn_at` and
+  `ai_factions_spawned_count`, read/written under the same `FOR UPDATE`
+  lock used for the check - a fixed `24h/3` interval produces exactly
+  3/day without any calendar-day-boundary logic.
+- Procedural name generator: a 20x20 adjective/noun combiner
+  (`aiFactionSpawnPrefixes`/`aiFactionSpawnSuffixes`) in the same
+  two-word shape as the 8 hand-authored names - `ai_faction_key`
+  (derived from `ai_factions_spawned_count`, not the display name) is
+  what guarantees real uniqueness, so name collisions across spawns are
+  harmless flavor overlap.
+- Spawn coordinates: exact same per-continent quadrant math
+  `seedAICivilizations` uses, cycling continents round-robin by spawn
+  count so growth stays balanced.
+- Starting level: 1 - intentionally weaker than either of the original
+  8's starting tiers (3 or 6), so a growing population doesn't front-load
+  new threats; `growAICivilizations`'s existing passive leveling ramps it
+  up over time with zero spawn-specific logic needed.
+- No cap on total AI faction count was specified in the answer above (the
+  framing - "always building up and competing," "very active" - reads as
+  wanting continuous growth, not a ceiling) - **this is an assumption,
+  not confirmed**, so it's flagged here rather than silently baked in.
+  If unbounded growth turns out to be wrong, the fix is a simple ceiling
+  check in `spawnNewAIFactions` before it acts, not a redesign.
+- New tests: `TestSpawnNewAIFactionsCreatesAFullyFunctionalEncampment`,
+  `TestSpawnNewAIFactionsRespectsCadence`. Also fixed a real test-isolation
+  bug this surfaced: `testDB` (the shared tick-package test helper) never
+  reset `world_state`/`world_news` between tests, since neither has an FK
+  the existing `TRUNCATE ... CASCADE` would catch - every test in the
+  package was silently sharing one `world_state` row's spawn-cadence
+  state depending on run order. Fixed in the same commit as this item
+  (see `internal/engine/tick/roadencounter_test.go`'s `testDB`), not
+  spun off separately, since it would have made this item's own tests
+  order-dependently flaky otherwise.
+
 
 ## Item 2: AI raid/scout cadence and gating - tuning, not new mechanism
 
@@ -210,6 +229,70 @@ several Scout Walkers riding together on any one of those three.
   notifications in quick succession rather than one combined message.
   Worth revisiting if that turns out to feel spammy in practice.
 
+## Item 4: AI factions actively using the rest of the game (market listing done; the rest is a much larger, separate effort)
+
+**Status: partially built (2026-08-01) - market listing only. Everything
+else below is intentionally not attempted this round**, and this section
+exists to say clearly why, rather than silently leaving it undocumented.
+
+The project owner's answer to Item 1 (quoted there in full) asked for AI
+factions to "literally do every single thing in the game" - explicitly
+naming unit upgrades and market listings as examples, "just like real
+human." What actually shipped:
+
+- **Market listings: done.** `growAICivilizations` now occasionally
+  (3% chance/tick, same shape as its existing 5%-chance garrison-building
+  roll) lists surplus metal or crystal on `market_exchange`, using the
+  *exact* fixed lot size and price a human posting via `/exchange`
+  uses (`HandlePostListingCallback` in
+  `internal/bot/handlers/exchange.go`: 50 metal/150 dollars, 20
+  crystal/300 dollars) - not AI-specific pricing, so a listing on the
+  shared exchange looks identical regardless of who posted it, same
+  principle `launchAIRaid` already follows for raids. Only lists when a
+  real buffer remains afterward. New test:
+  `TestGrowAICivilizationsCanListSurplusOnExchange`.
+- **"Unit upgrades": not built, and this needs a real answer before
+  anyone builds it, not a guess.** This codebase has a genuine
+  research/building-upgrade system for human players (see
+  `internal/game/researchplanner`, `internal/bot/handlers/advisors_panel.go`
+  and related handlers) that this implementing session did not read in
+  depth - wiring AI factions into it means understanding its full data
+  model, choice logic, and cost/time balance first, which is real
+  scoping work in its own right, not a same-day add-on next to spawning
+  and market listings. `growAICivilizations`'s existing garrison-building
+  roll already produces *more units*; "upgrades" as the project owner
+  used the word may mean that existing system is already close enough,
+  or may specifically mean the research tree - worth a direct follow-up
+  question rather than assuming either way.
+- **"Literally everything a human can do" more broadly: not built,
+  deliberately.** A non-exhaustive inventory of what a human player can
+  do that no AI faction does today: research/building upgrades (above),
+  hero recruitment and equipping, job assignments, clan membership and
+  clan wars, diplomacy actions, arena queueing, spy missions, buying (not
+  just selling) on the exchange, exploration (`exploration_sites` -
+  distinct from the `scout_missions` this plan's Item 3 covers), and
+  probably more not listed here. Each of those is its own subsystem with
+  its own rules a faithful "AI does it too" implementation would need to
+  respect - attempting all of them in one uncoordinated pass, without
+  reading each subsystem first the way this session read `exchange.go`
+  before writing the market-listing code above, risks producing
+  something that compiles and passes a shallow test but doesn't actually
+  behave like the real system (e.g. an AI "hero" that doesn't interact
+  with combat the way a human's hero does). This is realistically its
+  own multi-session project, best tackled one subsystem at a time using
+  the same pattern established here each time: read the human-facing
+  handler for that subsystem first, then mirror its exact mechanics for
+  an AI faction, one subsystem, one commit, one set of tests - not a
+  single sweeping change.
+- **Suggested next subsystem, if this is picked up**: job assignments or
+  hero recruitment are probably the next-highest-value, most
+  self-contained additions (bounded scope, don't touch combat balance
+  the way research upgrades would) - but that's this session's guess,
+  not a project-owner decision, so confirm before starting rather than
+  assuming.
+
+
+
 ## Suggested build order
 
 1. ~~Item 3 (multi-scouting) first~~ - **done, merged 2026-08-01.** Smallest,
@@ -220,12 +303,16 @@ several Scout Walkers riding together on any one of those three.
    AI-vs-AI probability done, merged 2026-08-01** per the project owner's
    direct answers (quoted above); `aiDecisionCadence` deliberately left
    unchanged this round, see the note at the end of Item 2.
-3. Item 1 (continuous spawning) next - the largest new subsystem, and the
-   one most likely to interact badly with Item 2's tuning if built before
-   Item 2's changes have been observed in practice (more factions on top
-   of an already-loosened fairness band and raised AI-vs-AI probability
-   compounds fast - build this against the fixed 8 first, watch how the
-   2026-08-01 tuning actually plays out, then reconsider).
+3. ~~Item 1 (continuous spawning) next~~ - **done, merged 2026-08-01.**
+   Built against the fixed-8-plus-2026-08-01-tuning baseline as planned,
+   so its effects can be observed cleanly before anything else compounds
+   on top.
+4. Item 4 (AI factions using the rest of the game) - **market listing
+   done, merged alongside Item 1** (small enough to build in the same
+   pass); everything else in Item 4 (research/building upgrades, hero
+   recruitment, jobs, clans, and the rest of the inventory listed there)
+   remains open and is realistically its own multi-session project - see
+   Item 4's own section for the reasoning and a suggested starting point.
 
 ## Testing strategy
 
@@ -241,11 +328,20 @@ mechanism from Item 2 gets built).
 
 ## Open questions for the project owner (don't guess these, ask)
 
-**Items 3 and 4 (both about Item 2) were answered 2026-08-01 - see
-Item 2's section above for the exact quote and what was built.** Item 1's
-two questions are still open and block starting that item:
+All of this section's original questions (Item 1's spawn rate and Item
+2's fairness/probability direction) were answered directly by the
+project owner on 2026-08-01 - see each item's own section above for the
+exact quotes and what was built from them. What's still open, from what
+surfaced while building those answers:
 
-1. Item 1's actual target spawn rate - "3/day" and "every minutes and
-   secs" aren't the same number; which one (or something else entirely)?
-2. Is there a ceiling on total AI faction count ever, or does the world
-   just keep accumulating factions indefinitely?
+1. **Item 1**: is there ever a ceiling on total AI faction count, or does
+   the world keep accumulating factions indefinitely? Assumed "no cap"
+   for now based on the "always building up and competing" framing, but
+   that's this session's inference, not a confirmed answer - flagged in
+   Item 1's own section too.
+2. **Item 4**: does "unit upgrades" mean the existing
+   garrison-building system already counts (arguably close enough today),
+   or specifically the human research/building-upgrade tree
+   (`internal/game/researchplanner` and related) that AI factions don't
+   touch at all yet? Which subsystem from Item 4's inventory (research,
+   heroes, jobs, clans, ...) matters most to build next, if any?

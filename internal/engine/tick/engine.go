@@ -740,6 +740,7 @@ func (e *Engine) ProcessTick() {
 		{"road_base_encounters", e.evaluateRoadBaseEncounters},
 		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
 		{"supply_convoys", e.processSupplyConvoys},
+		{"ai_civilization_spawn", e.spawnNewAIFactions},
 		{"ai_civilization_growth", e.growAICivilizations},
 		{"ai_civilization_decisions", e.decideAIFactionActions},
 		{"arena_matchmaking", e.processArenaMatchmaking},
@@ -2450,6 +2451,33 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentCrystal)
 		newCrystal, _ := storagecap.Clamp(currentCrystal, float64(f.level)*0.02, storageCapacity)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = $1 WHERE encampment_id = $2", newCrystal, f.id)
+
+		// Occasionally list surplus resources on the exchange, exactly
+		// like a human would via /exchange - project owner direction
+		// 2026-08-01: AI factions should "literally do every single
+		// thing in the game," with market listings given as the
+		// explicit example. Reuses the exact fixed lot sizes/prices
+		// HandlePostListingCallback uses (50 metal for 150 dollars, 20
+		// crystal for 300 dollars) rather than inventing AI-specific
+		// pricing, so a listing on the shared exchange looks and
+		// behaves identically regardless of who posted it - a buyer
+		// can't tell the difference, the same principle launchAIRaid
+		// already follows for raids. Only lists once there's a real
+		// buffer left over afterward (not down to the last unit), and
+		// crystal is preferred when available since it's the rarer,
+		// more valuable resource.
+		if rand.Float64() < 0.03 {
+			var metal, crystal float64
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(metal,0), COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&metal, &crystal)
+			switch {
+			case crystal >= 40.0:
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 20.0 WHERE encampment_id = $1", f.id)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO market_exchange (seller_id, item_type, quantity, price_dollars, is_sold) VALUES ($1, 'crystal', 20, 300.0, FALSE)", f.id)
+			case metal >= 100.0:
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 50.0 WHERE encampment_id = $1", f.id)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO market_exchange (seller_id, item_type, quantity, price_dollars, is_sold) VALUES ($1, 'metal', 50, 150.0, FALSE)", f.id)
+			}
+		}
 
 		// Occasionally build garrison units, capped per level.
 		if rand.Float64() < 0.05 {

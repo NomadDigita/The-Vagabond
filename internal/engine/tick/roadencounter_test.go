@@ -44,6 +44,18 @@ func testDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("truncating tables: %v", err)
 	}
+	// world_state (a singleton row, id=1) and world_news (append-only,
+	// no FK to anything the truncate above cascades from) both survive
+	// the truncate untouched, so they'd otherwise leak state across
+	// every test in this shared-DB test binary - e.g. aispawning_test.go
+	// needs world_state.last_ai_spawn_at to start NULL every time, not
+	// carry over whatever the previous test in the run left behind.
+	if _, err := db.Exec("TRUNCATE world_news"); err != nil {
+		t.Fatalf("truncating world_news: %v", err)
+	}
+	if _, err := db.Exec("UPDATE world_state SET last_ai_spawn_at = NULL, ai_factions_spawned_count = 0 WHERE id = 1"); err != nil {
+		t.Fatalf("resetting world_state AI spawn cadence: %v", err)
+	}
 	return db
 }
 

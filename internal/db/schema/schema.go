@@ -988,5 +988,15 @@ func Statements() []string {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_scout_missions_searching ON scout_missions(encampment_id) WHERE phase = 'searching';`,
 		`CREATE INDEX IF NOT EXISTS idx_scout_missions_returning ON scout_missions(return_eta) WHERE phase = 'returning';`,
+
+		// AI_AND_SCOUTING_EXPANSION_PLAN.md item 1: continuous AI faction
+		// spawning needs a world-scoped (not per-faction) cadence tracker,
+		// so it lives on the existing world_state singleton row (id=1)
+		// rather than a new table. ai_factions_spawned_count doubles as
+		// both "how many have spawned" and the source of each new
+		// faction's unique ai_faction_key/telegram_id, so it must never
+		// be reset even if last_ai_spawn_at is somehow cleared.
+		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS last_ai_spawn_at TIMESTAMP WITH TIME ZONE;`,
+		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS ai_factions_spawned_count INT NOT NULL DEFAULT 0;`,
 	}
 }
