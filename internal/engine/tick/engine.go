@@ -2407,18 +2407,20 @@ func isRealPlayer(userID int64) bool {
 // player who raids it periodically can keep it suppressed, which is the
 // intended emergent dynamic rather than an ever-escalating unkillable base.
 func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id, level FROM encampments WHERE is_ai_faction = TRUE")
+	rows, err := tx.QueryContext(ctx, "SELECT id, level, user_id, name FROM encampments WHERE is_ai_faction = TRUE")
 	if err != nil {
 		return fmt.Errorf("querying AI civilizations: %w", err)
 	}
 	type faction struct {
-		id    string
-		level int
+		id     string
+		level  int
+		userID int64
+		name   string
 	}
 	var factions []faction
 	for rows.Next() {
 		var f faction
-		if err := rows.Scan(&f.id, &f.level); err == nil {
+		if err := rows.Scan(&f.id, &f.level, &f.userID, &f.name); err == nil {
 			factions = append(factions, f)
 		}
 	}
@@ -2451,6 +2453,121 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentCrystal)
 		newCrystal, _ := storagecap.Clamp(currentCrystal, float64(f.level)*0.02, storageCapacity)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = $1 WHERE encampment_id = $2", newCrystal, f.id)
+
+		// Occasionally buy an available listing that isn't its own,
+		// exactly like a human would via /exchange's Buy button -
+		// project owner follow-up direction 2026-08-01: selling alone
+		// wasn't the full ask, "buy and sell" both. Mirrors
+		// HandleBuyListingCallback's exact mechanics (dollar transfer,
+		// resource transfer with storage-cap clamp, is_sold flag, a
+		// seller notification for real human sellers) rather than a
+		// simplified AI-only path, so a purchase behaves identically
+		// regardless of who made it - same principle the listing code
+		// below and launchAIRaid already follow. Re-checks is_sold
+		// under a row lock immediately before committing the purchase,
+		// same race-safety HandleBuyListingCallback's own FOR UPDATE
+		// provides against a human buying the same listing at the same
+		// moment.
+		if rand.Float64() < 0.03 {
+			var listingID, itemType, sellerID string
+			var qty int
+			var price float64
+			err := tx.QueryRowContext(ctx, `
+				SELECT id, item_type, quantity, price_dollars, seller_id FROM market_exchange
+				WHERE is_sold = FALSE AND seller_id != $1
+				ORDER BY random() LIMIT 1`, f.id).Scan(&listingID, &itemType, &qty, &price, &sellerID)
+			if err == nil {
+				var buyerDollars float64
+				_ = tx.QueryRowContext(ctx, "SELECT COALESCE(dollars,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&buyerDollars)
+				if buyerDollars >= price {
+					var isSold bool
+					lockErr := tx.QueryRowContext(ctx, "SELECT is_sold FROM market_exchange WHERE id = $1 FOR UPDATE", listingID).Scan(&isSold)
+					if lockErr == nil && !isSold {
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", price, f.id)
+
+						var sellerDollars float64
+						_ = tx.QueryRowContext(ctx, "SELECT COALESCE(dollars,0) FROM resources WHERE encampment_id = $1", sellerID).Scan(&sellerDollars)
+						sellerCap := storagecap.CapFor(ctx, tx, sellerID)
+						newSellerDollars, _ := storagecap.Clamp(sellerDollars, price, sellerCap)
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newSellerDollars, sellerID)
+
+						columnName := "metal"
+						if itemType == "crystal" {
+							columnName = "crystal"
+						}
+						var buyerCurrent float64
+						_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0) FROM resources WHERE encampment_id = $1", columnName), f.id).Scan(&buyerCurrent)
+						buyerCap := storagecap.CapFor(ctx, tx, f.id)
+						newBuyerVal, _ := storagecap.Clamp(buyerCurrent, float64(qty), buyerCap)
+						_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", columnName), newBuyerVal, f.id)
+
+						_, _ = tx.ExecContext(ctx, "UPDATE market_exchange SET is_sold = TRUE WHERE id = $1", listingID)
+
+						var sellerUserID int64
+						_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", sellerID).Scan(&sellerUserID)
+						if sellerUserID > 0 { // only notify real human sellers - other AI factions have negative telegram_id and no one reads their notifications
+							alertMsg := fmt.Sprintf("💱 <b>MARKET SALE</b>: An AI faction has purchased your public listing for <code>%d</code> %s. +<code>$%.0f</code> transferred instantly to reserves.",
+								qty, htmlEscapeTick(itemType), price)
+							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sellerUserID, alertMsg)
+						}
+					}
+				}
+			}
+		}
+
+		// Occasionally create or apply to join a clan, exactly like a
+		// human would via /clan_create or the "Apply" button on
+		// /clans - project owner follow-up direction 2026-08-01:
+		// "create a clan and join one" was named explicitly alongside
+		// buying/selling. Mirrors HandleCreateClanCommand (free, just a
+		// clans row + a Leader row in user_clans) and
+		// HandleApplyToClanCallback (a pending clan_applications row
+		// plus a notification - does NOT auto-join; a human clan
+		// leader still has to accept it via the normal applications
+		// inbox, exactly as if a human had applied) rather than
+		// special-casing either path for AI. An AI faction's own
+		// user_id (from seedAICivilizations/spawnNewAIFactions, always
+		// negative) is what user_clans/clans key off, so no schema
+		// change was needed - it's just another user_id as far as the
+		// clan system is concerned.
+		if rand.Float64() < 0.02 {
+			var alreadyInClan bool
+			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", f.userID).Scan(&alreadyInClan)
+			if !alreadyInClan {
+				if rand.Float64() < 0.5 {
+					// Found a new clan, named after the faction itself
+					// so it reads naturally on /clans - ON CONFLICT
+					// DO NOTHING via the name UNIQUE constraint simply
+					// skips this cycle if that name's already taken,
+					// same as a human hitting "Name Taken" and trying
+					// again another time.
+					var clanID string
+					if err := tx.QueryRowContext(ctx, "INSERT INTO clans (name, leader_id) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING id", f.name+" Alliance", f.userID).Scan(&clanID); err == nil && clanID != "" {
+						_, _ = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Leader')", f.userID, clanID)
+					}
+				} else {
+					// Apply to an existing recruiting clan that isn't
+					// already led by another AI faction (an AI applying
+					// to another AI's clan is a strange edge case this
+					// pass deliberately avoids, not a fairness rule
+					// like Item 2's - just keeps clan applications
+					// meaningful for the human leaders reviewing them).
+					var clanID, clanName string
+					err := tx.QueryRowContext(ctx, `
+						SELECT c.id, c.name FROM clans c
+						WHERE c.recruiting = TRUE AND c.leader_id > 0
+						ORDER BY random() LIMIT 1`).Scan(&clanID, &clanName)
+					if err == nil {
+						if _, err := tx.ExecContext(ctx, "INSERT INTO clan_applications (clan_id, user_id, status) VALUES ($1, $2, 'pending') ON CONFLICT (clan_id, user_id) DO UPDATE SET status = 'pending'", clanID, f.userID); err == nil {
+							var leaderID int64
+							_ = tx.QueryRowContext(ctx, "SELECT leader_id FROM clans WHERE id = $1", clanID).Scan(&leaderID)
+							alertMsg := fmt.Sprintf("📬 <b>NEW CLAN APPLICATION</b>: <code>%s</code> wants to join <code>%s</code>! Review it via <code>/clan</code>.", htmlEscapeTick(f.name), htmlEscapeTick(clanName))
+							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", leaderID, alertMsg)
+						}
+					}
+				}
+			}
+		}
 
 		// Occasionally list surplus resources on the exchange, exactly
 		// like a human would via /exchange - project owner direction
