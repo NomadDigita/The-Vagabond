@@ -1201,3 +1201,45 @@ what's left standing. This is no longer a code question.
 
 Verified: `go build ./...`, `go vet ./...`, and
 `go test ./internal/engine/... ./internal/db/...` all pass.
+
+---
+
+## 2026-08-02 (cont. 2) — Gemini per-provider model fallback + AI_DEFAULT_PROVIDER/AI_FALLBACK_PROVIDERS config note
+
+No One asked for automatic model-level fallback within Gemini ("use
+gemini, then it picks any available model itself... before falling to
+mock at all") after hitting the real 20-request/day free-tier cap on
+gemini-3.5-flash.
+
+**Shipped:** `internal/ai/providers/gemini/provider.go`'s `Complete`
+now tries `GEMINI_MODEL` first, then walks `GEMINI_MODEL_FALLBACKS`
+(new env var, comma-separated, defaults to
+`gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash`) - but
+*only* retries the next model on a quota/overload-shaped error
+(`RESOURCE_EXHAUSTED`/`UNAVAILABLE` status, or HTTP 429/503). A non-
+retryable error (bad key, malformed request) fails immediately instead
+of burning a request against every fallback model too, so
+`internal/ai.Service`'s provider-level fallback (moving on to Qwen,
+then mock) still gets to happen promptly. Google's free-tier quota is
+tracked per model, not per account, so cycling models is a genuinely
+different quota bucket each time, not a retry of the same wall.
+`GEMINI_MODEL_FALLBACKS=none` opts out entirely. Two new tests cover
+both the retry-on-quota-error and don't-retry-on-real-error paths.
+
+**Also clarified (not a bug, but worth documenting):** the Render env
+screenspot showed `AI_DEFAULT_PROVIDER=GEMINI_API_KEY` and
+`AI_FALLBACK_PROVIDERS=QWEN_API_KEY,MOCK` - both are env var *names*
+pasted in by mistake where provider *names* (`gemini`, `qwen`, `mock`)
+belong. Confirmed via `Registry.Ordered()` (internal/ai/registry.go)
+that this doesn't actually break anything: unmatched names in
+`r.order` are silently skipped, and every registered-but-unmentioned
+provider is appended afterward regardless - so gemini/qwen still get
+tried, just in Go's randomized map-iteration order between them
+instead of a deterministic one. Fixing the values to `gemini` and
+`qwen,mock` respectively isn't required, but would make Gemini
+consistently tried before Qwen on every restart rather than a coin
+flip.
+
+Verified: `go build ./...`, `go vet ./...`, and `go test ./...` (whole
+repo) all pass, including two new tests in
+`internal/ai/providers/gemini/provider_test.go`.

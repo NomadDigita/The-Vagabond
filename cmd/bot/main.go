@@ -399,7 +399,7 @@ func main() {
 	aiRegistry.Register(openaicompat.New("deepseek", "https://api.deepseek.com/v1", aiConfig.DeepSeekAPIKey, aiConfig.DeepSeekModel, true))
 	aiRegistry.Register(openaicompat.New("qwen", aiConfig.QwenBaseURL, aiConfig.QwenAPIKey, aiConfig.QwenModel, true))
 	aiRegistry.Register(openaicompat.New("grok", "https://api.x.ai/v1", aiConfig.GrokAPIKey, aiConfig.GrokModel, true))
-	aiRegistry.Register(gemini.New(aiConfig.GeminiAPIKey, aiConfig.GeminiModel))
+	aiRegistry.Register(gemini.New(aiConfig.GeminiAPIKey, aiConfig.GeminiModel, aiConfig.GeminiModelFallbacks))
 	aiRegistry.Register(ollama.New(aiConfig.OllamaBaseURL, aiConfig.OllamaModel))
 	aiRegistry.Register(mock.New())
 	aiCostTracker := ai.NewPostgresCostTracker(db)
