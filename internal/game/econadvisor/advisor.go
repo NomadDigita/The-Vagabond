@@ -88,7 +88,7 @@ func (a *Advisor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, e
 
 	listingRows, err := a.DB.QueryContext(ctx, `
 		SELECT item_type, quantity, price_dollars
-		FROM market_exchange WHERE seller_id = $1 AND is_sold = FALSE`, s.EncampmentID)
+		FROM market_exchange WHERE seller_id = $1 AND is_sold = FALSE AND ask_type = 'dollars'`, s.EncampmentID)
 	if err != nil {
 		return nil, fmt.Errorf("econadvisor: load own listings: %w", err)
 	}
@@ -107,7 +107,7 @@ func (a *Advisor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, e
 	statsRows, err := a.DB.QueryContext(ctx, `
 		SELECT item_type, COUNT(*), AVG(price_dollars), MIN(price_dollars), MAX(price_dollars)
 		FROM market_exchange
-		WHERE is_sold = FALSE
+		WHERE is_sold = FALSE AND ask_type = 'dollars'
 		GROUP BY item_type`)
 	if err != nil {
 		return nil, fmt.Errorf("econadvisor: load market stats: %w", err)

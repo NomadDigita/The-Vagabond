@@ -149,6 +149,7 @@ Rules:
 - Only call a tool if the player's intent is reasonably clear. Do not guess wildly.
 - Never invent an action, field, or tool that isn't offered to you.
 - Quantity shorthand: "300k" means 300000, "1.5m" means 1500000, "2k" means 2000. Always resolve shorthand to a plain number in the tool's numeric arguments.
+- Market listings can ask for cash OR another resource in return (barter) - "list 300k scrap for sale" or "sell 50 metal for $200" means ask_type is 'dollars', while "list 200k scrap for 40k metal" or "trade 50 crystal for scrap" means ask_type is the named resource. Never assume a dollar price when the player named a resource instead.
 - If the message doesn't clearly match any available tool, do NOT call a tool. Instead reply with a short, friendly plain-text clarifying question (one sentence) asking what the player meant, OR a brief direct answer if the message is really just a greeting or small talk unrelated to any action.
 - Never fabricate game data (resource amounts, prices, mission outcomes) - you have no access to the player's actual state. Only the tool call itself carries information forward; any numbers in your plain-text replies must come only from what the player themselves said.`
 
@@ -159,7 +160,7 @@ func ToolDefinitions() []ai.ToolDefinition {
 	return []ai.ToolDefinition{
 		{
 			Name:        string(ActionListMarketItem),
-			Description: "List a quantity of a tradeable resource for sale on the player auction market exchange for an asking price in dollars. Only call this when the player clearly wants to post a new sale listing (e.g. 'list 300k scrap for sale', 'sell 50 metal for $200').",
+			Description: "List a quantity of a tradeable resource for sale on the player auction market exchange, asking for either a cash price OR another resource in return (barter). Only call this when the player clearly wants to post a new sale listing (e.g. 'list 300k scrap for sale', 'sell 50 metal for $200', 'list 200k scrap for 40k metal').",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -172,12 +173,17 @@ func ToolDefinitions() []ai.ToolDefinition {
 						"type":        "number",
 						"description": "How many units to list. Resolve shorthand like '300k' to 300000.",
 					},
-					"price": map[string]any{
+					"ask_type": map[string]any{
+						"type":        "string",
+						"enum":        []string{"dollars", "metal", "crystal", "scrap"},
+						"description": "What the player wants in return: 'dollars' for a cash asking price, or a resource name to barter for that resource instead. Must be different from 'resource' - a resource can't be bartered for itself. If the player didn't say what they want in return at all, do not call this tool yet - ask them.",
+					},
+					"ask_quantity": map[string]any{
 						"type":        "number",
-						"description": "Asking price in dollars for the whole listing. If the player didn't name a price, do not call this tool - ask them what price they want instead.",
+						"description": "How much of ask_type is being asked for - a dollar amount if ask_type is 'dollars', otherwise a quantity of that resource. Resolve shorthand like '40k' to 40000.",
 					},
 				},
-				"required": []string{"resource", "quantity", "price"},
+				"required": []string{"resource", "quantity", "ask_type", "ask_quantity"},
 			},
 		},
 		{

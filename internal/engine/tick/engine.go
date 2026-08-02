@@ -2561,9 +2561,16 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			var listingID, itemType, sellerID string
 			var qty int
 			var price float64
+			// Restricted to ask_type = 'dollars' - a barter listing
+			// (see FEEDBACK_CHANGELOG_NLP_PLAN.md's market exchange
+			// extension) needs a resource-balance check on this AI's
+			// own reserves before it can buy, same as a human would;
+			// out of scope for this pass, so AI factions simply don't
+			// participate in barter listings yet rather than risk
+			// mishandling one.
 			err := tx.QueryRowContext(ctx, `
 				SELECT id, item_type, quantity, price_dollars, seller_id FROM market_exchange
-				WHERE is_sold = FALSE AND seller_id != $1
+				WHERE is_sold = FALSE AND seller_id != $1 AND ask_type = 'dollars'
 				ORDER BY random() LIMIT 1`, f.id).Scan(&listingID, &itemType, &qty, &price, &sellerID)
 			if err == nil {
 				var buyerDollars float64
@@ -2580,9 +2587,16 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 						newSellerDollars, _ := storagecap.Clamp(sellerDollars, price, sellerCap)
 						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newSellerDollars, sellerID)
 
+						// Every column the exchange can ever list -
+						// see validMarketResources in exchange.go -
+						// falls back to "metal" only for legacy rows
+						// that predate an item_type this map doesn't
+						// recognize, which shouldn't happen going
+						// forward.
 						columnName := "metal"
-						if itemType == "crystal" {
-							columnName = "crystal"
+						switch itemType {
+						case "crystal", "scrap":
+							columnName = itemType
 						}
 						var buyerCurrent float64
 						_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0) FROM resources WHERE encampment_id = $1", columnName), f.id).Scan(&buyerCurrent)

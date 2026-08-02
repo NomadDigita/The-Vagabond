@@ -256,25 +256,41 @@ func (h *NLPHandler) dispatchParsedCommand(c telebot.Context, cmd nlpcommand.Par
 // list_market_item command. Nothing here touches the database - the
 // actual listing is only posted if the player taps Confirm, via
 // HandleNLPConfirmCallback calling the same doPostListing core the
-// button-driven Exchange panel uses.
+// button-driven Exchange panel uses. Supports both a cash asking
+// price (ask_type "dollars") and a barter ask (ask_type is another
+// resource) - see doPostListing's doc comment in exchange.go.
 func (h *NLPHandler) confirmListMarketItem(c telebot.Context, cmd nlpcommand.ParsedCommand) error {
 	resource := strings.ToLower(strings.TrimSpace(cmd.ArgString("resource")))
 	qty := cmd.ArgInt("quantity")
-	price := cmd.ArgFloat("price")
-
-	if qty <= 0 || price <= 0 {
-		return c.Send("🤖 I couldn't quite catch the listing details - try something like \"list 300k scrap for $500\".")
+	askType := strings.ToLower(strings.TrimSpace(cmd.ArgString("ask_type")))
+	askQty := cmd.ArgFloat("ask_quantity")
+	if askType == "" {
+		askType = "dollars"
 	}
-	if _, ok := marketResourceColumn(resource); !ok {
+
+	if qty <= 0 || askQty <= 0 {
+		return c.Send("🤖 I couldn't quite catch the listing details - try something like \"list 300k scrap for $500\" or \"list 200k scrap for 40k metal\".")
+	}
+	sellColumn, ok := marketResourceColumn(resource)
+	if !ok {
 		return c.Send(fmt.Sprintf("🤖 %s isn't tradeable on the exchange - try Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(resource))))
+	}
+	if askType != "dollars" {
+		askColumn, ok := marketResourceColumn(askType)
+		if !ok {
+			return c.Send(fmt.Sprintf("🤖 %s isn't something I can barter for - try Dollars, Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(askType))))
+		}
+		if askColumn == sellColumn {
+			return c.Send(fmt.Sprintf("🤖 Can't barter %s for itself - what would you like to ask for instead?", htmlEscape(capitalizeWord(sellColumn))))
+		}
 	}
 
 	cardText := "🤖 " + htmlBold("CONFIRM LISTING") + "\n" + divider + "\n" +
-		fmt.Sprintf("%s List %s %s for %s?\n", resourceEmoji(resource), htmlCode(fmt.Sprintf("%d", qty)), htmlEscape(resource), htmlCode(fmt.Sprintf("$%.0f", price))) +
+		fmt.Sprintf("%s List %s %s for %s?\n", resourceEmoji(resource), htmlCode(fmt.Sprintf("%d", qty)), htmlEscape(resource), htmlCode(formatAsk(askType, askQty))) +
 		divider
 
 	selector := &telebot.ReplyMarkup{}
-	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm", "nlp_c", "mkt", resource, fmt.Sprintf("%d", qty), fmt.Sprintf("%.0f", price)), keyboards.StyleSuccess)
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm", "nlp_c", "mkt", resource, fmt.Sprintf("%d", qty), askType, fmt.Sprintf("%.0f", askQty)), keyboards.StyleSuccess)
 	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "nlp_x", ""), keyboards.StyleDanger)
 	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
 }
@@ -314,13 +330,14 @@ func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 
 	switch c.Args()[0] {
 	case "mkt":
-		if h.Exchange == nil || len(c.Args()) < 4 {
+		if h.Exchange == nil || len(c.Args()) < 5 {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing."})
 		}
 		resource := c.Args()[1]
 		qty, qtyErr := strconv.Atoi(c.Args()[2])
-		price, priceErr := strconv.ParseFloat(c.Args()[3], 64)
-		if qtyErr != nil || priceErr != nil {
+		askType := c.Args()[3]
+		askQty, askQtyErr := strconv.ParseFloat(c.Args()[4], 64)
+		if qtyErr != nil || askQtyErr != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing details."})
 		}
 
@@ -329,7 +346,7 @@ func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
 		}
 
-		if _, err := h.Exchange.doPostListing(ctx, campID, resource, qty, price); err != nil {
+		if _, err := h.Exchange.doPostListing(ctx, campID, resource, qty, askType, askQty); err != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Could not list - see the panel for details."})
 		}
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💱 Listing posted!"})

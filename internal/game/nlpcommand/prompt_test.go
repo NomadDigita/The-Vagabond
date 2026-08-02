@@ -72,6 +72,59 @@ func TestParseResponse_MatchesKnownToolCall(t *testing.T) {
 	}
 }
 
+// TestParseResponse_BarterListing covers the market's extension beyond
+// cash-only listings: "list 200k scrap for 40k metal" should parse to
+// ask_type="metal", not force a dollar price.
+func TestParseResponse_BarterListing(t *testing.T) {
+	resp := &ai.CompletionResponse{
+		ToolCalls: []ai.ToolCall{
+			{Name: "list_market_item", Input: map[string]any{
+				"resource": "scrap", "quantity": 200000.0,
+				"ask_type": "metal", "ask_quantity": 40000.0,
+			}},
+		},
+	}
+	result := ParseResponse(resp)
+	if !result.Matched {
+		t.Fatal("expected Matched=true")
+	}
+	if got := result.Command.ArgString("ask_type"); got != "metal" {
+		t.Errorf("expected ask_type %q, got %q", "metal", got)
+	}
+	if got := result.Command.ArgFloat("ask_quantity"); got != 40000.0 {
+		t.Errorf("expected ask_quantity 40000, got %v", got)
+	}
+}
+
+func TestToolDefinitions_ListMarketItemRequiresAskTypeAndQuantity(t *testing.T) {
+	for _, d := range ToolDefinitions() {
+		if d.Name != string(ActionListMarketItem) {
+			continue
+		}
+		schema, ok := d.InputSchema["required"].([]string)
+		if !ok {
+			t.Fatalf("expected list_market_item's required field to be a []string")
+		}
+		want := map[string]bool{"resource": false, "quantity": false, "ask_type": false, "ask_quantity": false}
+		for _, r := range schema {
+			if _, ok := want[r]; ok {
+				want[r] = true
+			}
+		}
+		for field, found := range want {
+			if !found {
+				t.Errorf("expected list_market_item to require %q", field)
+			}
+		}
+		// The old dollars-only field name should be gone entirely -
+		// this tool now expresses cash via ask_type="dollars" instead
+		// of a dedicated price field.
+		if _, ok := d.InputSchema["properties"].(map[string]any)["price"]; ok {
+			t.Error("expected the old 'price' field to be removed in favor of ask_type/ask_quantity")
+		}
+	}
+}
+
 func TestParseResponse_IgnoresUnknownToolName(t *testing.T) {
 	resp := &ai.CompletionResponse{
 		ToolCalls: []ai.ToolCall{

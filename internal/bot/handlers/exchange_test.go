@@ -54,7 +54,7 @@ func TestDoPostListing_MetalCrystalScrapAllTradeable(t *testing.T) {
 		{"scrap", 300000, 500},
 	}
 	for _, tc := range cases {
-		msg, err := h.doPostListing(ctx, campID, tc.resource, tc.qty, tc.price)
+		msg, err := h.doPostListing(ctx, campID, tc.resource, tc.qty, "dollars", tc.price)
 		if err != nil {
 			t.Fatalf("doPostListing(%s): unexpected error: %v (msg=%s)", tc.resource, err, msg)
 		}
@@ -79,7 +79,7 @@ func TestDoPostListing_DeductsFromReserves(t *testing.T) {
 
 	campID := seedExchangeCamp(t, db, 40002, "Deduct Camp", 500, 0, 0)
 
-	if _, err := h.doPostListing(ctx, campID, "metal", 200, 400); err != nil {
+	if _, err := h.doPostListing(ctx, campID, "metal", 200, "dollars", 400); err != nil {
 		t.Fatalf("doPostListing: unexpected error: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestDoPostListing_InsufficientResourceRejected(t *testing.T) {
 
 	campID := seedExchangeCamp(t, db, 40003, "Poor Camp", 10, 0, 0)
 
-	if _, err := h.doPostListing(ctx, campID, "metal", 200, 400); err == nil {
+	if _, err := h.doPostListing(ctx, campID, "metal", 200, "dollars", 400); err == nil {
 		t.Fatal("expected an error when listing more metal than the camp has")
 	}
 
@@ -125,7 +125,7 @@ func TestDoPostListing_UnsupportedResourceRejected(t *testing.T) {
 
 	campID := seedExchangeCamp(t, db, 40004, "Rations Camp", 0, 0, 0)
 
-	if _, err := h.doPostListing(ctx, campID, "rations", 10, 5); err == nil {
+	if _, err := h.doPostListing(ctx, campID, "rations", 10, "dollars", 5); err == nil {
 		t.Fatal("expected an error for a resource that isn't on the exchange allow-list")
 	}
 }
@@ -137,14 +137,81 @@ func TestDoPostListing_NonPositiveQuantityOrPriceRejected(t *testing.T) {
 
 	campID := seedExchangeCamp(t, db, 40005, "Edge Camp", 1000, 1000, 1000)
 
-	if _, err := h.doPostListing(ctx, campID, "metal", 0, 100); err == nil {
+	if _, err := h.doPostListing(ctx, campID, "metal", 0, "dollars", 100); err == nil {
 		t.Error("expected an error for zero quantity")
 	}
-	if _, err := h.doPostListing(ctx, campID, "metal", 10, 0); err == nil {
+	if _, err := h.doPostListing(ctx, campID, "metal", 10, "dollars", 0); err == nil {
 		t.Error("expected an error for zero price")
 	}
-	if _, err := h.doPostListing(ctx, campID, "metal", -5, 100); err == nil {
+	if _, err := h.doPostListing(ctx, campID, "metal", -5, "dollars", 100); err == nil {
 		t.Error("expected an error for negative quantity")
+	}
+}
+
+// TestDoPostListing_BarterAskType covers the market's extension beyond
+// cash-only listings: a seller can ask for another resource instead
+// of dollars, and the row's ask_type/ask_quantity (not price_dollars,
+// which stays 0 for barter rows) is what a buyer must actually pay.
+func TestDoPostListing_BarterAskType(t *testing.T) {
+	db := rankingTestDB(t)
+	ctx := context.Background()
+	h := &ExchangeHandler{DB: db}
+
+	campID := seedExchangeCamp(t, db, 40006, "Barter Camp", 0, 0, 500000)
+
+	msg, err := h.doPostListing(ctx, campID, "scrap", 200000, "metal", 40000)
+	if err != nil {
+		t.Fatalf("doPostListing (barter): unexpected error: %v (msg=%s)", err, msg)
+	}
+
+	var askType string
+	var askQty, priceDollars float64
+	if err := db.QueryRow(`
+		SELECT ask_type, ask_quantity, price_dollars FROM market_exchange
+		WHERE seller_id = $1 AND item_type = 'scrap'`, campID).Scan(&askType, &askQty, &priceDollars); err != nil {
+		t.Fatalf("reading listing row: %v", err)
+	}
+	if askType != "metal" {
+		t.Errorf("expected ask_type 'metal', got %q", askType)
+	}
+	if askQty != 40000 {
+		t.Errorf("expected ask_quantity 40000, got %v", askQty)
+	}
+	if priceDollars != 0 {
+		t.Errorf("expected price_dollars=0 for a barter row, got %v", priceDollars)
+	}
+}
+
+func TestDoPostListing_BarterCannotAskForSameResource(t *testing.T) {
+	db := rankingTestDB(t)
+	ctx := context.Background()
+	h := &ExchangeHandler{DB: db}
+
+	campID := seedExchangeCamp(t, db, 40007, "Self Barter Camp", 1000, 0, 0)
+
+	if _, err := h.doPostListing(ctx, campID, "metal", 100, "metal", 50); err == nil {
+		t.Fatal("expected an error when asking for the same resource being listed")
+	}
+}
+
+func TestDoPostListing_BarterRejectsUnsupportedAskType(t *testing.T) {
+	db := rankingTestDB(t)
+	ctx := context.Background()
+	h := &ExchangeHandler{DB: db}
+
+	campID := seedExchangeCamp(t, db, 40008, "Bad Ask Camp", 1000, 0, 0)
+
+	if _, err := h.doPostListing(ctx, campID, "metal", 100, "rations", 50); err == nil {
+		t.Fatal("expected an error for an ask_type not on the tradeable allow-list")
+	}
+}
+
+func TestFormatAsk(t *testing.T) {
+	if got := formatAsk("dollars", 500); got != "$500" {
+		t.Errorf("expected \"$500\", got %q", got)
+	}
+	if got := formatAsk("metal", 40000); got != "40000 metal" {
+		t.Errorf("expected \"40000 metal\", got %q", got)
 	}
 }
 

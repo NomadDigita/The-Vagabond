@@ -413,6 +413,19 @@ func Statements() []string {
 			is_sold BOOLEAN DEFAULT FALSE
 		);`,
 
+		// ask_type/ask_quantity generalize market_exchange beyond
+		// cash-only listings: a seller can ask for another resource
+		// instead of dollars (barter). ask_type = 'dollars' keeps the
+		// original behavior (ask_quantity mirrors price_dollars for
+		// that row); any other ask_type is a tradeable resource name
+		// and ask_quantity is how much of it is wanted. price_dollars
+		// is kept as-is for backward compatibility with existing
+		// readers (econadvisor, the AI faction auto-buy tick) rather
+		// than migrated away - see doPostListing in exchange.go.
+		`ALTER TABLE market_exchange ADD COLUMN IF NOT EXISTS ask_type VARCHAR(50) NOT NULL DEFAULT 'dollars';`,
+		`ALTER TABLE market_exchange ADD COLUMN IF NOT EXISTS ask_quantity DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+		`UPDATE market_exchange SET ask_quantity = price_dollars WHERE ask_type = 'dollars' AND ask_quantity = 0 AND price_dollars > 0;`,
+
 		`CREATE TABLE IF NOT EXISTS spy_missions (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			spy_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
