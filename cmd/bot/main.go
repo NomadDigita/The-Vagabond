@@ -377,7 +377,7 @@ func main() {
 	boss := handlers.NewBossHandler(db)
 	rebellion := handlers.NewRebellionHandler(db)
 	federation := handlers.NewFederationHandler(db)
-	profile := handlers.NewProfileHandler(db)
+	profile := handlers.NewProfileHandler(db, admin.AdminIDs)
 	ether := handlers.NewEtherHandler(db)
 	jobs := handlers.NewJobsHandler(db)
 	exploration := handlers.NewExplorationHandler(db)
@@ -511,6 +511,8 @@ func main() {
 	bot.Handle("/settings", profile.HandleSettings)
 	bot.Handle("/refer", profile.HandleRefer)
 	bot.Handle("/feedback", profile.HandleFeedback)
+	bot.Handle("💬 Send Feedback", profile.HandleFeedbackButton)
+	bot.Handle("/feedback_inbox", profile.HandleFeedbackInbox)
 	bot.Handle("/msg", profile.HandleMsg)
 	bot.Handle("/mute", profile.HandleMute)
 	bot.Handle("/unmute", profile.HandleUnmute)
@@ -665,6 +667,9 @@ func main() {
 	// immediately for them.
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
 		if handled, err := onboarding.HandleOnboardingPendingInput(c); handled {
+			return err
+		}
+		if handled, err := profile.HandleFeedbackPendingInput(c); handled {
 			return err
 		}
 		if handled, err := admin.HandleAdminPendingInput(c); handled {

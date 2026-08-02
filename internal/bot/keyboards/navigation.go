@@ -209,6 +209,7 @@ func ProfileNavigation() *telebot.ReplyMarkup {
 	btnAISettings := menu.Text("🤖 AI Settings")
 	btnMutes := menu.Text("🔇 Muted Players")
 	btnGuide := menu.Text("📖 Player Guide")
+	btnFeedback := menu.Text("💬 Send Feedback")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
@@ -216,7 +217,7 @@ func ProfileNavigation() *telebot.ReplyMarkup {
 		menu.Row(btnMissions, btnDestinations),
 		menu.Row(btnLog, btnSettings),
 		menu.Row(btnAISettings, btnMutes),
-		menu.Row(btnGuide),
+		menu.Row(btnGuide, btnFeedback),
 		menu.Row(btnBack),
 	)
 

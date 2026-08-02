@@ -6,18 +6,42 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"gopkg.in/telebot.v3"
 )
 
 type ProfileHandler struct {
-	DB *sql.DB
+	DB       *sql.DB
+	AdminIDs []int64
+
+	// Mirrors admin.go's pendingMu/pending pattern (see its own doc
+	// comment for the full reasoning): tracks which player is mid-flow
+	// on the "💬 Send Feedback" button, so their next free-text message
+	// is captured as the feedback body instead of falling through to
+	// normal NLP parsing. In-memory rather than DB-backed like
+	// onboarding's naming flow - losing this on a restart just means
+	// the player taps the button again, low enough stakes not to need
+	// persistence.
+	feedbackPendingMu sync.Mutex
+	feedbackPending   map[int64]bool
 }
 
-func NewProfileHandler(db *sql.DB) *ProfileHandler {
-	return &ProfileHandler{DB: db}
+func NewProfileHandler(db *sql.DB, adminIDs []int64) *ProfileHandler {
+	return &ProfileHandler{DB: db, AdminIDs: adminIDs, feedbackPending: make(map[int64]bool)}
+}
+
+func (h *ProfileHandler) IsAdmin(senderID int64) bool {
+	for _, id := range h.AdminIDs {
+		if id == senderID {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleProfilePanel is the "📊 Player Profile" mother-keyboard entry
@@ -262,7 +286,39 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 	return c.Send(b.String(), telebot.ModeHTML)
 }
 
+// feedbackSenderLabel builds "First Name (@username)" for the admin
+// alert, matching clan.go's broadcast label convention. Named
+// distinctly from ranking.go's displayName (a different signature, same
+// package) to avoid any confusion between the two.
+func feedbackSenderLabel(sender *telebot.User) string {
+	if sender.Username == "" {
+		return sender.FirstName
+	}
+	return fmt.Sprintf("%s (@%s)", sender.FirstName, sender.Username)
+}
+
 // ── /feedback ─────────────────────────────────────────────────────────
+
+// doSubmitFeedback is the testable core shared by the slash command and
+// the button-driven pending-input flow below, matching this session's
+// established doX convention (doSetTaxRate, doGhostProtocol, etc.):
+// stores the submission, then - the actual gap this closes, per
+// FEEDBACK_CHANGELOG_NLP_PLAN.md milestone 1 - immediately notifies
+// every admin, rather than leaving feedback sitting in a table nobody
+// thinks to query. Category "general" (non-mutable): an admin muting
+// routine pings should never cost them real player feedback.
+func (h *ProfileHandler) doSubmitFeedback(ctx context.Context, userID int64, displayName, message string) error {
+	if _, err := h.DB.ExecContext(ctx, "INSERT INTO feedback_submissions (user_id, message) VALUES ($1, $2)", userID, message); err != nil {
+		return err
+	}
+
+	alert := "📨 " + htmlBold("NEW PLAYER FEEDBACK") + "\n" + divider + "\n" +
+		fmt.Sprintf("From: %s\n\n%s", htmlEscape(displayName), htmlEscape(message)) + "\n" + divider
+	for _, adminID := range h.AdminIDs {
+		_ = notifications.Queue(ctx, h.DB, adminID, alert, "general")
+	}
+	return nil
+}
 
 func (h *ProfileHandler) HandleFeedback(c telebot.Context) error {
 	ctx := context.Background()
@@ -273,15 +329,114 @@ func (h *ProfileHandler) HandleFeedback(c telebot.Context) error {
 
 	msg := strings.TrimSpace(c.Message().Payload)
 	if msg == "" {
-		return c.Send("⚠️ Usage: /feedback [your message]\n\nYour feedback goes straight to the development team.")
+		return c.Send("⚠️ Usage: /feedback [your message]\n\nYour feedback goes straight to the development team. Or tap 💬 Send Feedback to be prompted instead.")
 	}
 
-	_, err := h.DB.ExecContext(ctx, "INSERT INTO feedback_submissions (user_id, message) VALUES ($1, $2)", sender.ID, msg)
-	if err != nil {
+	if err := h.doSubmitFeedback(ctx, sender.ID, feedbackSenderLabel(sender), msg); err != nil {
 		return c.Send("⚠️ Error submitting feedback.")
 	}
-
 	return c.Send("📨 Feedback received - thank you for helping improve The Vagabond!")
+}
+
+// HandleFeedbackButton starts the pending-input flow: the player's next
+// text message is captured as their feedback instead of being routed
+// through nlp.HandleTextMessage - see HandleFeedbackPendingInput below,
+// wired ahead of nlp.HandleTextMessage in main.go exactly like admin.go
+// and onboarding.go's own pending-input flows.
+func (h *ProfileHandler) HandleFeedbackButton(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	h.feedbackPendingMu.Lock()
+	h.feedbackPending[sender.ID] = true
+	h.feedbackPendingMu.Unlock()
+
+	return c.Send("💬 "+htmlBold("SEND FEEDBACK")+"\n"+divider+"\n"+
+		htmlItalic("What's on your mind? Bug reports, feature ideas, anything - type your message and send it, it goes straight to the development team.")+"\n"+divider,
+		telebot.ModeHTML)
+}
+
+// HandleFeedbackPendingInput consumes a player's next free-text message
+// if (and only if) they're mid-flow from HandleFeedbackButton above.
+// Returns handled=false immediately for anyone with nothing pending, so
+// normal NLP text parsing continues completely unaffected - see
+// main.go's OnText registration for how this chains alongside admin.go
+// and onboarding.go's equivalents.
+func (h *ProfileHandler) HandleFeedbackPendingInput(c telebot.Context) (handled bool, err error) {
+	sender := c.Sender()
+	if sender == nil {
+		return false, nil
+	}
+
+	h.feedbackPendingMu.Lock()
+	pending := h.feedbackPending[sender.ID]
+	if pending {
+		delete(h.feedbackPending, sender.ID)
+	}
+	h.feedbackPendingMu.Unlock()
+
+	if !pending {
+		return false, nil
+	}
+
+	msg := strings.TrimSpace(c.Text())
+	if msg == "" {
+		return true, c.Send("⚠️ Empty message - feedback not submitted. Tap 💬 Send Feedback to try again.")
+	}
+
+	ctx := context.Background()
+	if err := h.doSubmitFeedback(ctx, sender.ID, feedbackSenderLabel(sender), msg); err != nil {
+		return true, c.Send("⚠️ Error submitting feedback.")
+	}
+	return true, c.Send("📨 Feedback received - thank you for helping improve The Vagabond!")
+}
+
+// feedbackInboxPageSize matches changelog's "at least 5" convention
+// from FEEDBACK_CHANGELOG_NLP_PLAN.md, applied here too for the same
+// reason: a short, skimmable page rather than a wall of history.
+const feedbackInboxPageSize = 5
+
+// HandleFeedbackInbox (/feedback_inbox, admin-only) lists the most
+// recent submissions - so a submission is never visible only in a chat
+// log if every admin happened to be offline when it was delivered.
+func (h *ProfileHandler) HandleFeedbackInbox(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil || !h.IsAdmin(sender.ID) {
+		return c.Send("⛔ Admin access required.")
+	}
+
+	ctx := context.Background()
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT COALESCE(u.first_name, ''), COALESCE(u.username, ''), f.message, f.created_at
+		FROM feedback_submissions f
+		JOIN users u ON u.telegram_id = f.user_id
+		ORDER BY f.created_at DESC
+		LIMIT $1`, feedbackInboxPageSize)
+	if err != nil {
+		return c.Send("⚠️ Error loading feedback inbox.")
+	}
+	defer rows.Close()
+
+	text := "📨 " + htmlBold("FEEDBACK INBOX") + "\n" + divider + "\n"
+	any := false
+	for rows.Next() {
+		var fName, username, message string
+		var createdAt time.Time
+		if scanErr := rows.Scan(&fName, &username, &message, &createdAt); scanErr == nil {
+			any = true
+			who := htmlEscape(fName)
+			if username != "" {
+				who += " (@" + htmlEscape(username) + ")"
+			}
+			text += fmt.Sprintf("\n👤 %s — %s\n%s\n", who, htmlCode(createdAt.UTC().Format("Jan 2 15:04")), htmlEscape(message))
+		}
+	}
+	if !any {
+		text += "\n" + htmlItalic("No feedback submitted yet.")
+	}
+	text += "\n" + divider
+	return c.Send(text, telebot.ModeHTML)
 }
 
 // ── /msg ──────────────────────────────────────────────────────────────
