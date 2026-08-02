@@ -266,10 +266,46 @@ before.
   unsupervised, which wasn't part of what was asked. New test:
   `TestGrowAICivilizationsCanFoundOrJoinAClan`, which explicitly asserts
   the no-auto-join guarantee holds.
-- **"Unit upgrades": still not built**, same reasoning as before - this
-  needs a direct answer on what "upgrades" means (the existing
-  garrison-building roll, or the human research/building-upgrade tree in
-  `internal/game/researchplanner`) before anyone builds it.
+- **"Unit upgrades": resolved and done, 2026-08-02.** The ambiguity
+  flagged below (does it mean the existing garrison-building roll, or the
+  human research/building-upgrade tree?) turned out to be both - they're
+  genuinely separate systems, so both got built in the same round, in a
+  session running concurrently with diplomacy work elsewhere:
+  - **Research tech tree: done.** `growAICivilizations` (4% chance/tick)
+    mirrors `HandleUpgradeTechCallback` exactly: picks one of the seven
+    `research_states` columns (duplicated as `aiResearchTechColumns`
+    literals rather than imported from
+    `internal/bot/handlers/research.go`, same reasoning as every other
+    duplicated literal in this function), row-locks it, and advances it
+    if under `aiResearchMaxLevel` (20) and Neuro Cores cover
+    `aiResearchCostPerLevel` (8) × current level. A small Neuro Core
+    trickle (`float64(f.level)*0.1`/tick, storage-cap clamped like every
+    other trickle) was added alongside it, since AI factions previously
+    earned Neuro Cores via no route at all (humans get them from Ether
+    conversion or exploration finds, neither built for AI yet) and would
+    otherwise never afford a single upgrade. New tests:
+    `TestGrowAICivilizationsCanAdvanceResearch`,
+    `TestGrowAICivilizationsWontAdvanceResearchPastMaxLevel`,
+    `TestGrowAICivilizationsNeuroCoreTrickleRespectsStorageCap`.
+  - **Facility/module upgrades: done.** Also in `growAICivilizations`
+    (4% chance/tick), mirrors `HandleUpgradeCallback`'s exact mechanics
+    for non-core modules: one upgrade in flight at a time
+    (`is_upgrading` gate), a module's level can't exceed the faction's
+    own level (same "Prerequisite Block" rule humans hit), cost of
+    `currentLvl*150` Scrap, 20-second build timer. The module type list
+    (`aiUpgradeableModules`) duplicates every non-core type from
+    `camp.go`'s structural/defense-grid/infrastructure panels.
+    Deliberately excludes `camp_core` - that already grows via the
+    existing garrison-maxing logic further down this same function, so
+    including it here would double-count the same growth two different
+    ways. `resolveCompletedUpgrades` in `engine.go` needed zero changes
+    - it already resolves any `modules` row with `is_upgrading = TRUE`
+    regardless of owner, so an AI-queued upgrade completes (and even
+    notifies, to the faction's own negative `user_id`, read by no one,
+    same as every other AI notification) automatically. New tests:
+    `TestGrowAICivilizationsCanUpgradeAModule`,
+    `TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently`,
+    `TestGrowAICivilizationsWontUpgradeModuleAboveFactionLevel`.
 - **Clan wars: done.** Also in `growAICivilizations` (2% chance/tick,
   only for a faction with `role = 'Leader'` in `user_clans` - a
   rank-and-file AI member can't declare war, matching the human
@@ -300,22 +336,23 @@ before.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
   as before. Updated inventory of what's still missing, now that buying,
-  clans, clan wars, federations, and arena queueing are done:
-  research/building upgrades, hero recruitment and equipping, job
-  assignments, diplomacy actions (`internal/bot/handlers/diplomacy.go` -
-  alliance/NAP pacts between clans, distinct from clan wars), spy
-  missions (`HandleSpyCallback` - blocked on AI factions not currently
-  building the "Spy Device" drones a spy mission requires; would need
-  `growAICivilizations` to also build drones first, or a different
-  resourcing path), and exploration (`exploration_sites` - distinct from
-  the `scout_missions` Item 3 covers). Each remains its own subsystem
-  needing its own read-the-handler-first pass, exactly like every item
-  above got.
-- **Suggested next subsystem**: diplomacy (alliance/NAP pacts) is
-  probably next-most self-contained, since it follows the same
-  clan-Leader-gated pattern as clan wars/federations above and this
-  session already read `diplomacy.go`'s function list while scoping this
-  round. Spy missions need the drones prerequisite solved first. Confirm
+  clans, clan wars, federations, arena queueing, research, and facility
+  upgrades are done: hero recruitment and equipping, job assignments,
+  diplomacy actions (`internal/bot/handlers/diplomacy.go` - alliance/NAP
+  pacts between clans, distinct from clan wars, being picked up in a
+  concurrent session), spy missions (`HandleSpyCallback` - blocked on AI
+  factions not currently building the "Spy Device" drones a spy mission
+  requires; would need `growAICivilizations` to also build drones first,
+  or a different resourcing path), and exploration (`exploration_sites`
+  - distinct from the `scout_missions` Item 3 covers). Each remains its
+  own subsystem needing its own read-the-handler-first pass, exactly
+  like every item above got.
+- **Suggested next subsystem**: with diplomacy handled concurrently and
+  research/facility upgrades done, exploration (`exploration_sites`) is
+  probably next-most self-contained - a single-faction action like
+  research/upgrades above, not a clan-Leader-gated one. Hero recruitment
+  and job assignments haven't had their handlers read yet this round.
+  Spy missions still need the drones prerequisite solved first. Confirm
   before starting, same as always.
 
 
@@ -335,14 +372,17 @@ before.
    so its effects can be observed cleanly before anything else compounds
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
-   market buying, clan creation/application, clan wars, federations, and
-   arena queueing done** (listing merged with Item 1; the rest added
-   across two follow-up rounds after direct project owner instruction);
-   everything else in Item 4 (research/building upgrades, hero
-   recruitment, jobs, diplomacy, spy missions, exploration) remains open
-   and is realistically its own multi-session project - see Item 4's own
-   section for the reasoning and a suggested starting point (diplomacy,
-   now that the clan-Leader-gated pattern is established).
+   market buying, clan creation/application, clan wars, federations,
+   arena queueing, research tech-tree upgrades, and facility upgrades
+   done** (listing merged with Item 1; the rest added across three
+   follow-up rounds - two after direct project owner instruction, the
+   third resolving the "unit upgrades" open question below); everything
+   else in Item 4 (hero recruitment, jobs, diplomacy, spy missions,
+   exploration) remains open and is realistically its own multi-session
+   project - see Item 4's own section for the reasoning and a suggested
+   starting point (exploration, now that research/upgrades established
+   the single-faction-action pattern; diplomacy is being handled in a
+   concurrent session).
 
 ## Testing strategy
 
@@ -369,9 +409,11 @@ surfaced while building those answers:
    for now based on the "always building up and competing" framing, but
    that's this session's inference, not a confirmed answer - flagged in
    Item 1's own section too.
-2. **Item 4**: does "unit upgrades" mean the existing
-   garrison-building system already counts (arguably close enough today),
-   or specifically the human research/building-upgrade tree
-   (`internal/game/researchplanner` and related) that AI factions don't
-   touch at all yet? Which subsystem from Item 4's inventory (research,
-   heroes, jobs, clans, ...) matters most to build next, if any?
+2. **Item 4** ~~does "unit upgrades" mean...~~ - **resolved 2026-08-02:
+   both the garrison-building roll and the human research/building-
+   upgrade tree are real, distinct systems, so both got built** (see
+   Item 4's own section above). New question this surfaced: is
+   `aiResearchCostPerLevel`/the 4%-per-tick roll frequency tuned right,
+   or should research/facility upgrades be rarer (or more frequent) than
+   the other Item 4 abilities? Left at a rate comparable to clan/market
+   actions for now, not a confirmed answer.

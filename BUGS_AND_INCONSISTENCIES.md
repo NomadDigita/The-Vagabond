@@ -1001,3 +1001,51 @@ Verified with the same full `go build ./... && go vet ./... && go test
 ./...` pass, a manual visual render of all three new tables through a
 throwaway preview binary (removed before commit), and a checksum-
 confirmed `go.mod`/`go.sum` restore.
+
+## AI faction session (2026-08-02) — research tech-tree and facility upgrades, running concurrently with a separate diplomacy session
+
+Picked up `AI_AND_SCOUTING_EXPANSION_PLAN.md`'s Item 4 inventory, deliberately
+choosing a different subsystem than diplomacy (being handled in a concurrent
+session per the project owner's direction) to avoid two sessions colliding on
+the same file. Resolved the plan doc's own flagged open question — "does
+'unit upgrades' mean the existing garrison-building roll, or the human
+research/building-upgrade tree?" — by reading both real handlers
+(`internal/bot/handlers/research.go`, `internal/bot/handlers/camp.go`) and
+finding they're genuinely separate systems, so both got built:
+
+- **Research tech tree**: `growAICivilizations` (4% chance/tick) mirrors
+  `HandleUpgradeTechCallback` exactly — row-locks a randomly-picked
+  `research_states` column, advances it if under level 20 and Neuro Cores
+  cover `currentLvl*8`. A small Neuro Core trickle was added alongside it
+  (AI factions previously had zero route to earn this resource, so research
+  would've been permanently unaffordable otherwise).
+- **Facility/module upgrades**: also in `growAICivilizations` (4%
+  chance/tick), mirrors `HandleUpgradeCallback` exactly for non-core modules
+  — one upgrade in flight at a time, module level capped at the faction's
+  own level, `currentLvl*150` Scrap cost, 20-second timer.
+  `resolveCompletedUpgrades` in `engine.go` needed zero changes since it
+  already resolves any `modules` row with `is_upgrading = TRUE` regardless
+  of owner.
+
+Full details, exact mechanics, and reasoning are in
+`AI_AND_SCOUTING_EXPANSION_PLAN.md`'s Item 4 section (updated in the same
+commit) rather than duplicated here. Six new tests added in a new
+`internal/engine/tick/aiupgrades_test.go`:
+`TestGrowAICivilizationsCanAdvanceResearch`,
+`TestGrowAICivilizationsWontAdvanceResearchPastMaxLevel`,
+`TestGrowAICivilizationsCanUpgradeAModule`,
+`TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently`,
+`TestGrowAICivilizationsWontUpgradeModuleAboveFactionLevel`,
+`TestGrowAICivilizationsNeuroCoreTrickleRespectsStorageCap`.
+
+Verified with a real-Postgres `go build ./... && go vet ./... && go test
+./...` pass, two `-shuffle=on` reruns of `internal/engine/tick` for
+state-leak safety, and a checksum-confirmed `go.mod`/`go.sum` restore.
+Checked for concurrent pushes to `main` immediately before committing —
+none found this round.
+
+Still open, not started: hero recruitment/equipping, job assignments, spy
+missions (blocked on the drones prerequisite), and exploration — exploration
+is the suggested next pick since it follows the same single-faction-action
+pattern as research/upgrades above, not the clan-Leader-gated pattern
+diplomacy/wars/federations use.

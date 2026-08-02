@@ -2355,6 +2355,38 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 const aiCivilizationMaxSoldiersPerLevel = 25
 const aiCivilizationMaxMechsPerLevel = 4
 
+// aiResearchTechColumns duplicates the seven research_states column names
+// from researchTree in internal/bot/handlers/research.go (key/emoji/title
+// text isn't needed here, just the columns an AI faction can advance) -
+// the tick engine deliberately doesn't import bot/handlers, same reasoning
+// as every other duplicated literal in growAICivilizations.
+var aiResearchTechColumns = []string{
+	"econ_tech_lvl", "production_tech_lvl", "integrity_tech_lvl",
+	"defense_tech_lvl", "intel_tech_lvl", "speed_tech_lvl", "military_tech_lvl",
+}
+
+// aiResearchMaxLevel and aiResearchCostPerLevel duplicate MaxResearchLevel
+// and researchCost from internal/bot/handlers/research.go.
+const aiResearchMaxLevel = 20
+const aiResearchCostPerLevel = 8
+
+// aiUpgradeableModules duplicates the non-core module type strings from
+// camp.go's structural/defense-grid/infrastructure panels (tent/heap/
+// generator plus defenseGridModules and infrastructureModules) -
+// deliberately excludes "camp_core", since that already grows via the
+// garrison section below once a faction maxes its soldier/mech caps.
+var aiUpgradeableModules = []string{
+	"tent", "scrap_heap", "generator",
+	"light_laser", "heavy_laser", "gauss_cannon", "ion_cannon", "plasma_turret", "anti_missile", "warehouse",
+	"hangar", "radar", "solar_panel", "starport", "technology_center", "trade_beacon",
+	"small_shield", "large_shield", "engineering_bay", "metal_mine", "crystal_mine",
+}
+
+// aiModuleUpgradeCostPerLevel duplicates the Scrap cost-per-level used by
+// HandleStructuralUpgrades/HandleDefenseGridPanel/HandleInfrastructureGridPanel
+// (currentLvl*150) in internal/bot/handlers/camp.go.
+const aiModuleUpgradeCostPerLevel = 150
+
 // economicCollapseWarningThreshold gates the "ECONOMIC COLLAPSE" warning
 // added per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5 - a
 // combined post-raid resource total (Scrap+Metal+Crystal+Rations+
@@ -2453,6 +2485,20 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentCrystal)
 		newCrystal, _ := storagecap.Clamp(currentCrystal, float64(f.level)*0.02, storageCapacity)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = $1 WHERE encampment_id = $2", newCrystal, f.id)
+
+		// A trickle of Neuro Cores too - humans earn these mainly via
+		// Ether conversion (internal/bot/handlers/ether.go) or
+		// exploration finds, neither of which an AI faction does today,
+		// so without this the research block below would never have
+		// anything to spend. Rate deliberately sits between the Scrap
+		// and Crystal trickles above: research costs (aiResearchCost)
+		// are modest at low levels, so a faction can afford its first
+		// couple of upgrades in a reasonable number of ticks without
+		// Neuro Cores becoming trivially abundant.
+		var currentNeuroCores float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(neuro_cores,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentNeuroCores)
+		newNeuroCores, _ := storagecap.Clamp(currentNeuroCores, float64(f.level)*0.1, storageCapacity)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET neuro_cores = $1 WHERE encampment_id = $2", newNeuroCores, f.id)
 
 		// Occasionally buy an available listing that isn't its own,
 		// exactly like a human would via /exchange's Buy button -
@@ -2681,6 +2727,87 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 				if dollars >= aiArenaSoloEntryFee {
 					_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", aiArenaSoloEntryFee, f.id)
 					_, _ = tx.ExecContext(ctx, "INSERT INTO arena_queue (user_id, bracket) VALUES ($1, 'solo') ON CONFLICT DO NOTHING", f.userID)
+				}
+			}
+		}
+
+		// Occasionally advance a research tech node, exactly like a
+		// human would via /research's "Upgrade" buttons - part of the
+		// Item 4 inventory's "research/building upgrades" entry, which
+		// was left as an open question ("does 'unit upgrades' mean the
+		// existing garrison-building roll, or the human
+		// research/building-upgrade tree?") in this plan doc. Answer:
+		// both are real, distinct systems, so both get built - this is
+		// the tech-tree half. Mirrors HandleUpgradeTechCallback's exact
+		// mechanics (FOR UPDATE row lock, Neuro Core cost of
+		// currentLvl*8, MaxResearchLevel of 20) with the seven tech
+		// columns duplicated as literals rather than importing
+		// researchTree from internal/bot/handlers, since the tick
+		// engine deliberately doesn't depend on the bot/handlers package
+		// (same reasoning the exchange lot prices and federation cost
+		// above were duplicated for).
+		if rand.Float64() < 0.04 {
+			_, _ = tx.ExecContext(ctx, "INSERT INTO research_states (encampment_id) VALUES ($1) ON CONFLICT (encampment_id) DO NOTHING", f.id)
+
+			techColumn := aiResearchTechColumns[rand.Intn(len(aiResearchTechColumns))]
+			var currentLvl int
+			lockQuery := fmt.Sprintf("SELECT %s FROM research_states WHERE encampment_id = $1 FOR UPDATE", techColumn)
+			_ = tx.QueryRowContext(ctx, lockQuery, f.id).Scan(&currentLvl)
+
+			if currentLvl < aiResearchMaxLevel {
+				cost := currentLvl * aiResearchCostPerLevel
+				var neuroCores float64
+				_ = tx.QueryRowContext(ctx, "SELECT COALESCE(neuro_cores,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&neuroCores)
+				if neuroCores >= float64(cost) {
+					_, _ = tx.ExecContext(ctx, "UPDATE resources SET neuro_cores = neuro_cores - $1 WHERE encampment_id = $2", cost, f.id)
+					updateQuery := fmt.Sprintf("UPDATE research_states SET %s = %s + 1 WHERE encampment_id = $1", techColumn, techColumn)
+					_, _ = tx.ExecContext(ctx, updateQuery, f.id)
+				}
+			}
+		}
+
+		// Occasionally queue a facility upgrade, exactly like a human
+		// would via /camp's Structural/Defense Grid/Infrastructure
+		// panels - the building-upgrade half of the same Item 4 entry
+		// research handles above. Mirrors HandleUpgradeCallback's exact
+		// mechanics for non-core modules: one upgrade in flight at a
+		// time per Outpost (is_upgrading gate), a module's level can't
+		// exceed the Outpost's own level (same "Prerequisite Block" rule
+		// humans hit), cost of currentLvl*150 Scrap, and a 20-second
+		// build timer. Deliberately reuses resolveCompletedUpgrades
+		// unchanged - it already resolves any modules row with
+		// is_upgrading = TRUE regardless of who owns it, so an
+		// AI-queued upgrade completes and even notifies (to the
+		// faction's own negative user_id, read by no one, same as every
+		// other AI notification) with zero changes needed there.
+		// Doesn't touch camp_core - that already grows via the garrison
+		// section below once a faction maxes out its soldier/mech caps,
+		// so gating this list on faction level (not campLvl+1) avoids
+		// double-counting the same growth two different ways.
+		if rand.Float64() < 0.04 {
+			var alreadyUpgrading bool
+			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE)", f.id).Scan(&alreadyUpgrading)
+			if !alreadyUpgrading {
+				modType := aiUpgradeableModules[rand.Intn(len(aiUpgradeableModules))]
+
+				var currentLvl int
+				moduleQuery := `
+					INSERT INTO modules (encampment_id, type, level)
+					VALUES ($1, $2, 1)
+					ON CONFLICT (encampment_id, type)
+					DO UPDATE SET level = modules.level
+					RETURNING level`
+				_ = tx.QueryRowContext(ctx, moduleQuery, f.id, modType).Scan(&currentLvl)
+
+				if currentLvl < f.level {
+					cost := currentLvl * aiModuleUpgradeCostPerLevel
+					var scrap float64
+					_ = tx.QueryRowContext(ctx, "SELECT COALESCE(scrap,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&scrap)
+					if scrap >= float64(cost) {
+						_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, f.id)
+						readyAt := time.Now().UTC().Add(20 * time.Second)
+						_, _ = tx.ExecContext(ctx, "UPDATE modules SET is_upgrading = TRUE, upgrade_ready_at = $1 WHERE encampment_id = $2 AND type = $3", readyAt, f.id, modType)
+					}
 				}
 			}
 		}
