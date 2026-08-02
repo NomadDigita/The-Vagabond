@@ -88,6 +88,7 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	btnTaxRate := selector.Data("💰 Set Tax Rate", "admin_action", "tax_rate")
 	btnFaction := selector.Data("🎭 Change My Faction", "admin_action", "faction")
 	btnBroadcast := selector.Data("📡 Broadcast", "admin_action", "broadcast")
+	btnChangelog := selector.Data("📰 Publish Changelog", "admin_action", "changelog")
 	btnMetrics := selector.Data("🛰️ Server Metrics", "admin_action", "server_metrics")
 	btnDBReset := selector.Data("⚠️ Reset Database", "admin_action", "db_reset")
 
@@ -95,7 +96,8 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		selector.Row(btnTick, btnInject),
 		selector.Row(btnGiftPremium, btnGiftResources),
 		selector.Row(btnTaxRate, btnFaction),
-		selector.Row(btnBroadcast, btnMetrics),
+		selector.Row(btnBroadcast, btnChangelog),
+		selector.Row(btnMetrics),
 		selector.Row(btnDBReset),
 	)
 
@@ -127,6 +129,8 @@ func (h *AdminHandler) adminPromptFor(senderID int64, action string) string {
 		return "✍️ Reply with " + htmlCode("steel_vanguard") + " or " + htmlCode("rust_nomads") + "."
 	case "broadcast":
 		return "✍️ Reply with the message to broadcast to every survivor."
+	case "changelog":
+		return "✍️ Reply with 3 lines: category (feature/fix/balance), then title, then body.\nExample:\n" + htmlCode("feature\nLong-Range Scouting\nDispatch Scout Walkers to search the wasteland...")
 	default:
 		return "✍️ Reply with the required input."
 	}
@@ -151,7 +155,7 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		result, _ := h.doInjectSelf(ctx, sender.ID)
 		return c.Respond(&telebot.CallbackResponse{Text: result})
 
-	case "gift_premium", "gift_resources", "tax_rate", "faction", "broadcast":
+	case "gift_premium", "gift_resources", "tax_rate", "faction", "broadcast", "changelog":
 		prompt := h.adminPromptFor(sender.ID, action)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "✍️ Check the chat for your input prompt."})
 		return c.Send(prompt, telebot.ModeHTML)
@@ -269,6 +273,10 @@ func (h *AdminHandler) HandleAdminPendingInput(c telebot.Context) (handled bool,
 			return true, c.Send("⚠️ Broadcast message can't be empty - action cancelled, tap Broadcast again to retry.")
 		}
 		result, _ := h.doBroadcast(ctx, c.Text())
+		return true, c.Send(result, telebot.ModeHTML)
+
+	case "changelog":
+		result, _ := (&ChangelogHandler{DB: h.DB}).HandlePublishChangelogPendingInput(c)
 		return true, c.Send(result, telebot.ModeHTML)
 	}
 	return false, nil

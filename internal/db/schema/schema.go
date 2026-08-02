@@ -998,5 +998,27 @@ func Statements() []string {
 		// be reset even if last_ai_spawn_at is somehow cleared.
 		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS last_ai_spawn_at TIMESTAMP WITH TIME ZONE;`,
 		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS ai_factions_spawned_count INT NOT NULL DEFAULT 0;`,
+
+		// FEEDBACK_CHANGELOG_NLP_PLAN.md milestone 2: changelog home.
+		// changelog_reads is what makes "at least 5 oldest" meaningful -
+		// see doPublishChangelog/HandleChangelogPanel in
+		// internal/bot/handlers/changelog.go for the full reasoning: a
+		// brand-new or returning player has a backlog of entries they've
+		// never seen, and showing oldest-unread-first means they catch
+		// up in chronological order instead of landing mid-story.
+		`CREATE TABLE IF NOT EXISTS changelog_entries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			category VARCHAR(20) NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			published_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT changelog_entries_category CHECK (category IN ('feature', 'fix', 'balance'))
+		);`,
+		`CREATE TABLE IF NOT EXISTS changelog_reads (
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			entry_id UUID NOT NULL REFERENCES changelog_entries(id) ON DELETE CASCADE,
+			read_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, entry_id)
+		);`,
 	}
 }
