@@ -11,6 +11,7 @@ const (
 	navCaptionCombat  = "⚔️ Accessing Tactical Combat..."
 	navCaptionEconomy = "💰 Accessing Economic Systems..."
 	navCaptionProfile = "📊 Accessing Player Profile..."
+	navCaptionAdmin   = "🏛️ Accessing Admin Override Terminal..."
 )
 
 // sendPanelWithNav sends a panel that needs both its own inline action

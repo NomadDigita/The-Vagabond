@@ -104,7 +104,18 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	panelText := htmlBold("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED") + "\n" + divider +
 		"\nDeploy overrides using the secure inline controls or bottom submenu deck." +
 		"\nActions marked ⚠️ are destructive and require a confirmation tap."
-	return c.Send(panelText, telebot.ModeHTML, selector, keyboards.AdminNavigation())
+	// Previously this sent panelText directly via c.Send with BOTH the
+	// inline selector and keyboards.AdminNavigation() passed as separate
+	// ReplyMarkup arguments in one call - telebot only honors one
+	// *telebot.ReplyMarkup per message, so the inline one was silently
+	// dropped. Every admin action button (Tick, Inject, Gift Premium,
+	// Broadcast, Publish Changelog, all of them) never actually
+	// rendered. This is the exact "single-ReplyMarkup collision" this
+	// codebase's own sendPanelWithNav/sendPanelWithNavHTML helpers exist
+	// to prevent (see navhelper.go) - use it here too, like every other
+	// panel already does. See send_markup_guard_test.go for the
+	// regression guard against this reappearing anywhere else.
+	return sendPanelWithNavHTML(c, navCaptionAdmin, keyboards.AdminNavigation(), panelText, selector)
 }
 
 // adminPromptFor gives the guided-input prompt text for each action that

@@ -535,6 +535,18 @@ func Statements() []string {
 		// going forward - but they mean this migration can't reintroduce
 		// the same trap for anyone who skips straight to a fresh DB.
 		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS title VARCHAR(150) NOT NULL DEFAULT 'World Event';`,
+		// weather.go inserts the full formatted headline (e.g. "⚠️
+		// ENVIRONMENTAL ALERT: Solar Flare detected over Africa...")
+		// into this column, not a short label - VARCHAR(150) was too
+		// narrow and failed every world-event insert whose headline
+		// happened to run long, with the same silent-abort effect the
+		// comment above this table already documents for the
+		// title-was-NULL case: RunWeatherPass returns the error,
+		// aborting the whole tick's weather pass. Widened rather than
+		// truncating, since nothing in this codebase currently reads
+		// this column back (write-only today) - no reason to lose
+		// information a future reader might want.
+		`ALTER TABLE world_events ALTER COLUMN title TYPE VARCHAR(500);`,
 		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS starts_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
 
 		// Phase 7 (item 10): World Exploration. Sites rotate in per
