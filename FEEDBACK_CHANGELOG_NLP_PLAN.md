@@ -204,6 +204,63 @@ structured extraction (the tool's `quantity` parameter is typed as a
 number, not a string, so the model resolves the shorthand itself as
 part of emitting the tool call) - no separate regex parser needed.
 
+### Status: done
+Milestone 2 (Changelog home) was intentionally left mid-flight and
+picked up by another concurrent session (see its own commit); this
+session skipped straight to Milestone 3 per direct instruction, since
+the plan above never depended on Milestone 2's infrastructure.
+
+Built as `internal/game/nlpcommand` (Interpreter/prompt.go split
+matching every sibling AI package's Planner/prompt.go convention,
+zero I/O in prompt.go so the allow-list/parsing logic is independently
+unit-tested), wired as the new `FeatureCommandInterpreter` in
+`internal/ai/config.go`, and hooked into `nlp.HandleTextMessage` in
+`internal/bot/handlers/nlp.go`. All four starting actions implemented
+exactly as scoped above, with a couple of real decisions made along
+the way rather than left as gaps:
+
+- **`HandlePostListingCallback` only ever supported two fixed
+  listings** (50 Metal/$150, 20 Crystal/$300) - it never actually took
+  arbitrary quantity/price. Extracted a generalized `doPostListing`
+  core in `exchange.go` that accepts any resource/qty/price, and
+  added **Scrap** to the tradeable resource allow-list alongside Metal
+  and Crystal (it's a real `resources` column and the plan's own
+  literal example is "list 300k scrap") so the AI-parsed flow isn't
+  artificially narrower than what the feature request actually asked
+  for. The two quick-list buttons now call the same core with their
+  original fixed values - no behavior change for the existing UI.
+- **Placement ahead of the lexical "contains" shortcuts, not after
+  them.** The AI check runs after the exact mother-keyboard button
+  matches but *before* section 8's fuzzy `strings.Contains` rules -
+  because the existing catch-all `strings.Contains(text, "scout")` →
+  Raid Board rule would otherwise swallow "send 5 scouts" before the
+  classifier ever saw it. If the interpreter is unavailable or returns
+  no confident match, control falls through unchanged to those lexical
+  rules and finally the original "not recognized" message - so this is
+  purely additive with no regression when there's no live AI provider
+  configured.
+- **Mock-provider output is deliberately never shown here**, unlike
+  every other AI feature's dedicated advisor panel (which does show
+  the "no live AI configured" placeholder, since the player explicitly
+  tapped an AI button). A player typing ordinary free text never asked
+  for an AI feature, so a mock echo/placeholder string would read as
+  an implementation leak; the interpreter silently reports "no match"
+  in that case and the message degrades to pre-Milestone-3 behavior.
+- **Truncated model responses are never acted on** (checked via
+  `ai.IsTruncatedStopReason`, per ADR-025's discipline elsewhere).
+
+Tests: `internal/game/nlpcommand/prompt_test.go` covers the tool
+schema/allow-list and `ParseResponse` (matching, unknown tool names,
+clarify-text fallback, nil/truncated responses, arg coercion) with no
+I/O. `internal/bot/handlers/exchange_test.go` covers `doPostListing`
+against a real schema-migrated Postgres test DB (Metal/Crystal/Scrap
+all tradeable, reserve deduction, insufficient-resource rejection,
+unsupported-resource rejection, non-positive qty/price rejection),
+following the existing `rankingTestDB`/`SCHEMA_TEST_DATABASE_URL`
+convention. Full `go build ./...` + `go vet ./...` + `go test ./...`
+green, rebased cleanly onto Milestone 2's `main.go` changes (disjoint
+regions of the same file, no manual conflict resolution needed).
+
 ---
 
 ## Open questions this session is deciding rather than blocking on

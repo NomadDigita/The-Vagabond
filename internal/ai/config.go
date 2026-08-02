@@ -21,6 +21,16 @@ const (
 	FeatureDynamicGalaxy  Feature = "ai_dynamic_galaxy"
 	FeatureNPCIntel       Feature = "ai_npc_intelligence"
 	FeatureDevConsole     Feature = "ai_developer_console"
+
+	// FeatureCommandInterpreter is Milestone 3 of
+	// FEEDBACK_CHANGELOG_NLP_PLAN.md: the natural-language command
+	// interpreter wired as nlp.HandleTextMessage's final fallback.
+	// Unlike every feature above (advisory-only), this one's parsed
+	// intent can result in state-mutating game actions - always via
+	// the same doX core functions the button UI uses, and always
+	// behind an explicit Confirm/Cancel step for anything that spends
+	// resources. See the plan doc's "Why this is different" section.
+	FeatureCommandInterpreter Feature = "ai_command_interpreter"
 )
 
 // AllFeatures lists every known feature flag, used to seed defaults.
@@ -35,6 +45,7 @@ func AllFeatures() []Feature {
 		FeatureDynamicGalaxy,
 		FeatureNPCIntel,
 		FeatureDevConsole,
+		FeatureCommandInterpreter,
 	}
 }
 

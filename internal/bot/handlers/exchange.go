@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
@@ -94,55 +95,121 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
+// validMarketResources are the resource columns tradeable through the
+// public market exchange, keyed by their lowercase name as used
+// everywhere else in this codebase (resourceEmoji, etc). Kept as an
+// explicit allow-list rather than accepting any resources column name
+// straight from a caller-controlled string, so the fmt.Sprintf column
+// interpolation in doPostListing below can never receive anything but
+// one of these three hardcoded literals.
+var validMarketResources = map[string]string{
+	"metal":   "metal",
+	"crystal": "crystal",
+	"scrap":   "scrap",
+}
+
+// marketResourceColumn resolves a (case-insensitive) resource name to
+// its resources table column, reporting ok=false for anything not on
+// the exchange allow-list.
+func marketResourceColumn(resource string) (string, bool) {
+	col, ok := validMarketResources[strings.ToLower(strings.TrimSpace(resource))]
+	return col, ok
+}
+
+// capitalizeWord uppercases just the first byte - good enough for the
+// three all-ASCII resource names this package ever needs to display
+// (Metal/Crystal/Scrap), without pulling in the now-deprecated
+// strings.Title for such a small job.
+func capitalizeWord(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// doPostListing is the testable core shared by HandlePostListingCallback's
+// two fixed quick-list buttons and the natural-language "list X for
+// sale" command (see FEEDBACK_CHANGELOG_NLP_PLAN.md Milestone 3) - one
+// code path so the AI-parsed flow enforces the exact same balance
+// checks as the button-driven UI, matching doDispatchScoutMission's
+// established convention. Returns the HTML-formatted message to show
+// and, on failure, a non-nil error alongside a plain-text failure
+// notice.
+func (h *ExchangeHandler) doPostListing(ctx context.Context, campID string, resource string, qty int, price float64) (string, error) {
+	column, ok := marketResourceColumn(resource)
+	if !ok {
+		return fmt.Sprintf("❌ %s isn't tradeable on the exchange - try Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(resource))), errors.New("unsupported resource")
+	}
+	if qty <= 0 {
+		return "❌ Quantity must be positive.", errors.New("invalid quantity")
+	}
+	if price <= 0 {
+		return "❌ Price must be positive.", errors.New("invalid price")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "⚠️ Listing failed.", err
+	}
+	defer tx.Rollback()
+
+	var current float64
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", column), campID).Scan(&current); err != nil {
+		return "⚠️ Error reading your reserves.", err
+	}
+	if current < float64(qty) {
+		return fmt.Sprintf("❌ Insufficient %s! You have %s, need %s to list.",
+			capitalizeWord(column), htmlCode(fmt.Sprintf("%.0f", current)), htmlCode(fmt.Sprintf("%d", qty))), errors.New("insufficient resource")
+	}
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s - $1 WHERE encampment_id = $2", column, column), qty, campID); err != nil {
+		return "⚠️ Error committing listing.", err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO market_exchange (seller_id, item_type, quantity, price_dollars, is_sold) VALUES ($1, $2, $3, $4, FALSE)`,
+		campID, column, qty, price); err != nil {
+		log.Printf("Failed executing market exchange insert: %v", err)
+		return "⚠️ Error writing marketplace listing.", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Listing failed.", err
+	}
+
+	return "💱 " + htmlBold("LISTING POSTED") + "\n" + divider + "\n" +
+		fmt.Sprintf("%s %s listed for %s\n", resourceEmoji(column), htmlCode(fmt.Sprintf("%d %s", qty, column)), htmlCode(fmt.Sprintf("$%.0f", price))) +
+		divider, nil
+}
+
 func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid sender."})
+	}
 
 	item := c.Args()[0]
 
 	var campID string
-	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
-
-	tx, err := h.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Listing failed."})
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
 	}
-	defer tx.Rollback()
 
-	var metal, crystal float64
-	_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&metal, &crystal)
-
+	// The panel only ever offers these two quick-list quantities/prices
+	// (see HandleExchangePanel's btnPostSteel/btnPostUranium) - the
+	// natural-language flow posts arbitrary quantities/prices through
+	// the same doPostListing core below instead.
 	qty := 50
 	price := 150.0
-
-	switch item {
-	case "metal":
-		if metal < 50.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Metal! Need 50 tons to list."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - 50.0 WHERE encampment_id = $1", campID)
-		qty = 50
-		price = 150.0
-
-	case "crystal":
-		if crystal < 20.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Crystal! Need 20 kg to list."})
-		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - 20.0 WHERE encampment_id = $1", campID)
+	if item == "crystal" {
 		qty = 20
 		price = 300.0
 	}
 
-	query := `
-		INSERT INTO market_exchange (seller_id, item_type, quantity, price_dollars, is_sold) 
-		VALUES ($1, $2, $3, $4, FALSE)`
-	_, err = tx.ExecContext(ctx, query, campID, item, qty, price)
-	if err != nil {
-		log.Printf("Failed executing market exchange insert: %v", err)
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing marketplace listings."})
+	if _, err := h.doPostListing(ctx, campID, item, qty, price); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Listing failed - see the panel for details."})
 	}
 
-	_ = tx.Commit()
 	_ = c.Respond(&telebot.CallbackResponse{Text: "💱 Listing posted successfully on exchange!"})
 	return h.HandleExchangePanel(c)
 }
