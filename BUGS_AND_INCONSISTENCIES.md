@@ -1049,3 +1049,75 @@ missions (blocked on the drones prerequisite), and exploration — exploration
 is the suggested next pick since it follows the same single-faction-action
 pattern as research/upgrades above, not the clan-Leader-gated pattern
 diplomacy/wars/federations use.
+
+---
+
+## 2026-08-02 — "AI console shows PLACEHOLDER despite GEMINI_API_KEY/QWEN_API_KEY set" and "zero world events have ever fired" investigation
+
+No One reported (a) the AI Developer Console still returning mock
+`PLACEHOLDER (no live AI configured)` output after setting
+`GEMINI_API_KEY` and `QWEN_API_KEY` in Render, and (b) that no world
+event (weather/etc.) notification had ever been received, in a
+deployment confirmed to never idle-sleep (external auto-ping every
+10 min).
+
+**Findings — not new bugs, both systems audited and confirmed correct
+on `main` as of this commit:**
+
+- The mock-provider-always-wins bug (`Registry.Ordered()`) was already
+  fixed 2026-07-16 in `c844746` — `mock` is unconditionally sorted
+  last, so a valid `GEMINI_API_KEY`/`QWEN_API_KEY` should be tried
+  before it with zero extra `AI_DEFAULT_PROVIDER` config needed.
+  `internal/ai/providers/gemini` and the `openaicompat`-based Qwen
+  provider's `Available()` both correctly gate on `APIKey != ""`.
+- The per-continent weather/world-event system
+  (`internal/engine/world/weather.go`, added 2026-07-28 in `5751768`/
+  `b0e4e7f`) rolls a 10% chance per continent every tick and pushes
+  both a `world_news` row and a direct `notifications.QueueToRegion`
+  push on every trigger and every clear. `QueueToRegion` re-joins
+  `encampments`/`coordinates` live at broadcast time, so a player who
+  teleported or changed region via a job is already correctly covered
+  — no separate fix needed there.
+- Root cause for both symptoms could not be confirmed without Render
+  dashboard/log access, since the code paths themselves check out.
+  Leading hypothesis: the live Render service may not be tracking
+  `main`'s current HEAD (auto-deploy off, or pointed at a stale
+  build/branch) — worth confirming the deployed commit SHA against
+  `main` and forcing a redeploy.
+
+**What shipped this round (observability, not logic changes) so this
+class of question is self-diagnosable from inside Telegram next time
+instead of requiring a fresh code audit:**
+
+- `internal/engine/tick/engine.go`: `NewEngine` now guards against a
+  non-positive `GAME_TICK_SECONDS` (previously `time.NewTicker` would
+  panic and silently take the whole bot process down at boot — never
+  confirmed to be the actual cause here, but a real latent bug found
+  during the audit). Also added `Engine.LastTickStatus()` exposing
+  when the most recent tick pass started/finished.
+- `internal/engine/world/weather.go`: `RunWeatherPass` now logs a
+  one-line heartbeat every tick summarizing every continent's outcome
+  (`active`, `rolled,miss`, or `NEW HIT`) — previously this phase only
+  logged on an actual trigger, so "the phase never runs" and "the
+  phase runs and just keeps missing" produced identical (silent) log
+  output.
+- `internal/bot/handlers/admin.go`: the "🛰️ Server Metrics" admin panel
+  now shows last-tick-started/finished timestamps and every currently
+  active world event with its remaining duration, pulled straight from
+  `world_events`. Admins can now confirm the tick engine and weather
+  system are alive without Render log access.
+
+Verified with `go build ./...`, `go vet` on the three changed packages,
+and `go test ./internal/engine/world/... ./internal/engine/tick/...`
+(both pass without a live DB). Built via a temporary
+`gopkg.in/telebot.v3 => github.com/tucnak/telebot/v3` replace directive
+per this repo's established pattern (this sandbox can't reach
+`gopkg.in`); reverted before committing, `go.mod`/`go.sum` confirmed
+unchanged in the final diff.
+
+**Still to verify (needs Render dashboard access, which Claude
+doesn't have):** confirm the deployed commit SHA matches `main` HEAD;
+tap "AI Status" and check the "Providers (fallback order)" list for
+`gemini`/`qwen`; if listed but still falling through, check Render
+logs for `ai: provider "..." failed ... — trying next fallback` to see
+the underlying auth/model error.

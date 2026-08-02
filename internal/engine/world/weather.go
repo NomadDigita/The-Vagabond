@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
@@ -43,6 +44,16 @@ const eventRollChance = 0.10
 // event just expired gets a "conditions have cleared" headline before
 // it's eligible to roll again.
 func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
+	// Per-continent outcome for this pass, logged once at the end
+	// regardless of whether anything happened. Previously this
+	// function only logged on an actual trigger, so a live deployment
+	// that only ever rolled misses produced zero log output from this
+	// phase - indistinguishable from the phase not running at all when
+	// diagnosing "no world events have ever fired" reports. See
+	// LastTickStatus in internal/engine/tick/engine.go for the
+	// companion admin-visible confirmation that ticks are executing.
+	summary := make([]string, 0, len(Continents))
+
 	for _, continent := range Continents {
 		var eventID, eventType string
 		var expiresAt time.Time
@@ -55,6 +66,7 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		stillActive := hasRow && time.Now().UTC().Before(expiresAt.UTC())
 
 		if stillActive {
+			summary = append(summary, fmt.Sprintf("%s=%s(active,%s left)", continent, eventType, time.Until(expiresAt.UTC()).Round(time.Minute)))
 			continue // persistence barrier: this continent's event holds stable
 		}
 
@@ -81,6 +93,7 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if rand.Float64() >= eventRollChance {
+			summary = append(summary, fmt.Sprintf("%s=nominal(rolled,miss)", continent))
 			continue // this continent stays clear this pass
 		}
 
@@ -104,8 +117,11 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Failed broadcasting world-event notification for %s: %v", continent, err)
 		}
 
+		summary = append(summary, fmt.Sprintf("%s=%s(NEW HIT)", continent, newEvent))
 		log.Printf("World Event Pass: [%s] triggered over %s (expires %s).", newEvent, continent, expiresAt.Format(time.RFC3339))
 	}
+
+	log.Printf("Weather heartbeat: %s", strings.Join(summary, ", "))
 	return nil
 }
 

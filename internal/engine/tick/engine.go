@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/agent"
@@ -33,9 +34,29 @@ type Engine struct {
 	agentProcessor    *agent.Processor
 	lastIdleCheck     time.Time
 	lastAutoScan      time.Time
+
+	lastTickMu   sync.RWMutex
+	lastTickAt   time.Time
+	lastTickDone time.Time
 }
 
+// defaultTickInterval mirrors cmd/bot/main.go's own fallback so the two
+// stay in sync; duplicated here (rather than imported) to keep this
+// package free of a cmd/bot dependency.
+const defaultTickInterval = 60 * time.Second
+
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
+	if interval <= 0 {
+		// Guards against a startup crash: time.NewTicker panics on a
+		// non-positive duration, which previously meant a typo'd or
+		// accidentally-zeroed GAME_TICK_SECONDS (e.g. "0") would take
+		// down the entire bot process at boot instead of degrading
+		// gracefully. Confirmed bug (2026-08-02): nothing validated
+		// this value between os.Getenv/strconv.Atoi in cmd/bot/main.go
+		// and the NewTicker call in Start() below.
+		log.Printf("Tick Engine: invalid interval %v (GAME_TICK_SECONDS must be a positive integer number of seconds) — falling back to %v", interval, defaultTickInterval)
+		interval = defaultTickInterval
+	}
 	return &Engine{
 		DB:                db,
 		TickInterval:      interval,
@@ -69,6 +90,19 @@ func (e *Engine) Start() {
 
 func (e *Engine) Stop() {
 	close(e.stopChan)
+}
+
+// LastTickStatus reports when the most recent tick pass started and
+// finished, so admin-facing panels (see internal/bot/handlers/admin.go's
+// "server_metrics" action) can show at a glance whether the background
+// tick engine - and therefore the weather/world-event system, which
+// runs as its first phase - is actually alive in the current
+// deployment, instead of players having to infer it indirectly from
+// whether events have ever fired.
+func (e *Engine) LastTickStatus() (startedAt, finishedAt time.Time) {
+	e.lastTickMu.RLock()
+	defer e.lastTickMu.RUnlock()
+	return e.lastTickAt, e.lastTickDone
 }
 
 // tickPhase describes one isolated unit of tick work. Each phase gets its
@@ -727,6 +761,10 @@ func (e *Engine) ProcessTick() {
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
 
+	e.lastTickMu.Lock()
+	e.lastTickAt = start.UTC()
+	e.lastTickMu.Unlock()
+
 	ctx := context.Background()
 
 	phases := []tickPhase{
@@ -782,6 +820,10 @@ func (e *Engine) ProcessTick() {
 		e.runPhase(ctx, tickPhase{"auto_scan_sweep", e.autoScanSweep})
 		e.lastAutoScan = time.Now().UTC()
 	}
+
+	e.lastTickMu.Lock()
+	e.lastTickDone = time.Now().UTC()
+	e.lastTickMu.Unlock()
 
 	log.Printf("Tick pass complete. Duration: %s", time.Since(start))
 }
