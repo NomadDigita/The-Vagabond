@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
@@ -760,15 +761,15 @@ func (h *AdminHandler) HandleAdminMetrics(c telebot.Context) error {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
+	rows := [][]string{
+		{"👥 Survivors", fmt.Sprintf("%d", totalUsers)},
+		{"⛺ Encampments", fmt.Sprintf("%d", totalCamps)},
+		{"⚙️ Goroutines", fmt.Sprintf("%d", runtime.NumGoroutine())},
+		{"🧠 Mem (MB)", fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024.0/1024.0)},
+		{"🧩 GC Cycles", fmt.Sprintf("%d", memStats.NumGC)},
+	}
 	metricsReport := htmlBold("💻 ADMINISTRATIVE METRICS PANEL") + "\n" + divider + "\n" +
-		htmlBold("DATABASE TELEMETRY") + "\n" +
-		fmt.Sprintf("👥 Total Survivors: %s\n⛺ Total Encampments: %s\n\n",
-			htmlCode(fmt.Sprintf("%d", totalUsers)), htmlCode(fmt.Sprintf("%d", totalCamps))) +
-		htmlBold("GO ENGINE VIRTUAL PROFILES") + "\n" +
-		fmt.Sprintf("⚙️ Active Goroutines: %s\n🧠 Allocated Memory: %s MB\n🧩 Total GC Cycles Executed: %s\n",
-			htmlCode(fmt.Sprintf("%d", runtime.NumGoroutine())),
-			htmlCode(fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024.0/1024.0)),
-			htmlCode(fmt.Sprintf("%d", memStats.NumGC))) +
+		ai.HTMLTable([]string{"Metric", "Value"}, rows) + "\n" +
 		divider
 
 	return c.Send(metricsReport, telebot.ModeHTML, keyboards.MainNavigation())

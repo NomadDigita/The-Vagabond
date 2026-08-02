@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
@@ -190,28 +191,33 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 	}
 	referralLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, code)
 
-	panelText := fmt.Sprintf(
-		"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n"+
-			"👥 REFER YOUR FRIENDS 👥\n"+
-			"🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n\n"+
-			"Send your link below — anyone who taps it and starts the bot is automatically marked as referred by you. No code to type!\n\n"+
-			"🔗 Your Referral Link:\n%s\n\n"+
-			"🔑 Your Code: %s\n"+
-			"👥 Friends Referred: %d\n"+
-			"🎁 Reward per referral: 25,000 of every resource for both of you\n\n",
-		referralLink, code, referralCount,
-	)
+	var b strings.Builder
+	b.WriteString("🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n")
+	b.WriteString("👥 " + ai.HTMLBold("REFER YOUR FRIENDS") + " 👥\n")
+	b.WriteString("🎁━━━━━━━━━━━━━━━━━━━━━━🎁\n\n")
+	b.WriteString("Send your link below — anyone who taps it and starts the bot is automatically marked as referred by you. No code to type!\n\n")
+	fmt.Fprintf(&b, "🔗 Your Referral Link:\n%s\n\n", ai.HTMLCode(ai.HTMLEscape(referralLink)))
+	fmt.Fprintf(&b, "🔑 Your Code: %s\n", ai.HTMLCode(ai.HTMLEscape(code)))
+	fmt.Fprintf(&b, "👥 Friends Referred: %s\n", ai.HTMLBold(fmt.Sprintf("%d", referralCount)))
+	b.WriteString("🎁 Reward per referral: 25,000 of every resource for both of you\n\n")
 
-	panelText += "🏆 MILESTONE BONUSES:\n"
+	milestoneRows := make([][]string, 0, len(referralMilestones))
 	for _, m := range referralMilestones {
 		status := fmt.Sprintf("%d/%d", referralCount, m.Count)
 		if tierClaimed >= m.Count {
-			status = "✅ Claimed"
+			status = "✅ Done"
 		}
-		panelText += fmt.Sprintf("%d referrals → +%.0f Metal / +%.0f 🔮 Crystal / +%.0f Neuro (%s)\n", m.Count, m.Metal, m.Crystal, m.Neuro, status)
+		milestoneRows = append(milestoneRows, []string{
+			fmt.Sprintf("%d", m.Count),
+			fmt.Sprintf("+%.0f", m.Metal),
+			fmt.Sprintf("+%.0f", m.Crystal),
+			fmt.Sprintf("+%.0f", m.Neuro),
+			status,
+		})
 	}
+	b.WriteString("🏆 " + ai.HTMLBold("MILESTONE BONUSES") + "\n")
+	b.WriteString(ai.HTMLTable([]string{"Refs", "Metal", "🔮", "Neuro", "Status"}, milestoneRows) + "\n\n")
 
-	panelText += "\n🏅 TOP REFERRERS:\n"
 	rows, lbErr := h.DB.QueryContext(ctx, `
 		SELECT COALESCE(ref.first_name, 'Commander'), COUNT(*) AS cnt
 		FROM users child
@@ -220,21 +226,40 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 		ORDER BY cnt DESC
 		LIMIT 5`)
 	if lbErr == nil {
+		var topRows [][]string
 		rank := 1
 		for rows.Next() {
 			var name string
 			var cnt int
 			if scanErr := rows.Scan(&name, &cnt); scanErr == nil {
-				panelText += fmt.Sprintf("%s %d. %s — %d referred\n", medalFor(rank), rank, name, cnt)
+				// Telegram first names are free-form user input and can
+				// legitimately be long - clip the RAW name to a safe
+				// rune length before escaping, not after (escaping
+				// first and letting htmlTable's own clipping cut the
+				// result could slice through an entity like "&amp;"
+				// and produce invalid HTML Telegram would reject the
+				// whole message for - see ai.HTMLTable's doc comment).
+				if r := []rune(name); len(r) > 18 {
+					name = string(r[:17]) + "…"
+				}
+				topRows = append(topRows, []string{
+					medalFor(rank) + " " + fmt.Sprintf("%d", rank),
+					ai.HTMLEscape(name),
+					fmt.Sprintf("%d", cnt),
+				})
 				rank++
 			}
 		}
 		rows.Close()
+		if len(topRows) > 0 {
+			b.WriteString("🏅 " + ai.HTMLBold("TOP REFERRERS") + "\n")
+			b.WriteString(ai.HTMLTable([]string{"#", "Name", "Refs"}, topRows) + "\n\n")
+		}
 	}
 
-	panelText += "🎁━━━━━━━━━━━━━━━━━━━━━━🎁"
+	b.WriteString("🎁━━━━━━━━━━━━━━━━━━━━━━🎁")
 
-	return c.Send(panelText)
+	return c.Send(b.String(), telebot.ModeHTML)
 }
 
 // ── /feedback ─────────────────────────────────────────────────────────
