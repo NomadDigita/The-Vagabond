@@ -98,16 +98,38 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		newEvent := eventPool[rand.Intn(len(eventPool))]
-		expiresAt = time.Now().UTC().Add(eventDuration)
+		startsAt := time.Now().UTC()
+		expiresAt = startsAt.Add(eventDuration)
+		headline := eventHeadline(newEvent, continent)
 
+		// NOTE (2026-08-02, confirmed live via Render logs): world_events
+		// was originally created by migrations/001_initial_schema.sql with
+		// title VARCHAR(150) NOT NULL and starts_at TIMESTAMPTZ NOT NULL
+		// (plus description/multiplier, both nullable/defaulted). This
+		// package's simplified 4-column model (id/event_type/continent/
+		// expires_at) was added later via schema.go's `CREATE TABLE IF NOT
+		// EXISTS world_events`, which is a no-op against a table that
+		// already exists - so on any deployment whose DB predates that
+		// change, the live table still carries the old NOT NULL columns
+		// this INSERT never populated. Every single roll-hit was failing
+		// at the DB layer with "null value in column title violates
+		// not-null constraint", silently eating the whole weather pass
+		// (RunWeatherPass returns the error, aborting the tx) - this is
+		// the actual root cause of "zero world events have ever fired"
+		// despite the roll logic itself always having been correct.
+		// Supplying title/starts_at here fixes it directly; see schema.go
+		// for the accompanying idempotent ALTER TABLE that also relaxes
+		// the constraint with a DEFAULT, so a *fresh* database (no legacy
+		// columns at all) and this codebase's own migration order can't
+		// reintroduce the same trap.
 		_, err = tx.ExecContext(ctx,
-			"INSERT INTO world_events (event_type, continent, expires_at) VALUES ($1, $2, $3)",
-			newEvent, continent, expiresAt)
+			`INSERT INTO world_events (title, event_type, continent, starts_at, expires_at)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			headline, newEvent, continent, startsAt, expiresAt)
 		if err != nil {
 			return fmt.Errorf("failed inserting world event for %s: %w", continent, err)
 		}
 
-		headline := eventHeadline(newEvent, continent)
 		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 			log.Printf("Failed writing world-event news headline: %v", err)
 		}

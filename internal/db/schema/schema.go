@@ -509,6 +509,21 @@ func Statements() []string {
 		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS continent VARCHAR(50) NOT NULL DEFAULT 'Global';`,
 		`CREATE INDEX IF NOT EXISTS idx_world_events_continent ON world_events(continent, expires_at);`,
 
+		// Converges legacy (migrations/001_initial_schema.sql, which had
+		// title/starts_at NOT NULL with no default) and fresh
+		// (schema.go-only, no title/starts_at at all) deployments onto
+		// the same shape. See the 2026-08-02 note in
+		// internal/engine/world/weather.go's RunWeatherPass for the full
+		// story: on a legacy DB, every event-roll INSERT was silently
+		// failing on the old NOT NULL title constraint, which is why zero
+		// world events had ever actually been created despite the roll
+		// logic always being correct. The DEFAULTs here are a safety net
+		// only - RunWeatherPass populates both explicitly on every insert
+		// going forward - but they mean this migration can't reintroduce
+		// the same trap for anyone who skips straight to a fresh DB.
+		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS title VARCHAR(150) NOT NULL DEFAULT 'World Event';`,
+		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS starts_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
+
 		// Phase 7 (item 10): World Exploration. Sites rotate in per
 		// continent (same cadence/pattern as world_events above) and
 		// are claimed first-come-first-served by whichever outpost
@@ -587,6 +602,33 @@ func Statements() []string {
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_route_progress_range') THEN
 				ALTER TABLE raids ADD CONSTRAINT raids_route_progress_range
 					CHECK (route_progress >= 0.0 AND route_progress <= 1.0);
+			END IF;
+		END $$;`,
+
+		// Confirmed live via Render logs (2026-08-02): applyActiveLogisticsConsumption
+		// in internal/engine/tick/engine.go sets movement_state =
+		// 'awaiting_reinforcement' when a marching column runs out of
+		// supplies or sustains a power outage - and that value has been used
+		// throughout the app (combat.go, combat_road_encounters.go,
+		// devconsole/queries.go) since the resupply-convoy feature shipped.
+		// But raids_movement_state_valid above never included it, only
+		// 'supply_paused' (a name nothing in the codebase actually sets) -
+		// so every one of those UPDATEs was rejected by the CHECK
+		// constraint, which poisoned the transaction and made every later
+		// statement in that same tick phase fail with "current transaction
+		// is aborted", surfacing at commit time as "logistics_consumption:
+		// could not complete operation in a failed transaction" on
+		// essentially every tick. Given as its own constraint (not an ALTER
+		// of the original) because the original is guarded by
+		// `IF NOT EXISTS (SELECT ... conname = 'raids_movement_state_valid')`
+		// - once that first ran on a given database, editing this list in
+		// place would never actually reach it again.
+		`ALTER TABLE raids DROP CONSTRAINT IF EXISTS raids_movement_state_valid;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid_v2') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid_v2
+					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused', 'awaiting_reinforcement'));
 			END IF;
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending

@@ -1121,3 +1121,83 @@ tap "AI Status" and check the "Providers (fallback order)" list for
 `gemini`/`qwen`; if listed but still falling through, check Render
 logs for `ai: provider "..." failed ... — trying next fallback` to see
 the underlying auth/model error.
+
+---
+
+## 2026-08-02 (cont.) — Three confirmed root causes found via live Render logs
+
+No One captured live Render logs showing the actual errors, which
+turned static-analysis guesses into confirmed bugs. All three fixed:
+
+**1. Zero world events ever fired — CONFIRMED & FIXED.** Every roll-hit
+was failing at the DB layer: `inserting world event for Asia: pq: null
+value in column "title" of relation "world_events" violates not-null
+constraint`. Root cause: `migrations/001_initial_schema.sql` originally
+created `world_events` with `title VARCHAR(150) NOT NULL` (no default)
+and `starts_at TIMESTAMPTZ NOT NULL`. `schema.go`'s later, simplified
+4-column `CREATE TABLE IF NOT EXISTS world_events` is a no-op against a
+table that already exists, so any DB that ran migration 001 still has
+those legacy NOT NULL columns, which `RunWeatherPass`'s INSERT never
+populated. Fixed by (a) having the INSERT supply `title`/`starts_at`
+explicitly (reusing the already-computed headline text), and (b) adding
+idempotent `ADD COLUMN IF NOT EXISTS ... DEFAULT` statements to
+`schema.go` so a *fresh* DB that never saw migration 001 also has these
+columns, as a safety net.
+
+**2. `logistics_consumption` tick phase failing on every single tick —
+CONFIRMED & FIXED.** Logs: `Tick phase [logistics_consumption] failed
+to commit: could not complete operation in a failed transaction`, every
+~3-6s. Root cause: the `raids_movement_state_valid` CHECK constraint
+only allowed `('moving', 'encounter_pending', 'encounter_battle',
+'battle_recovery', 'weather_paused', 'supply_paused')` - but
+`applyActiveLogisticsConsumption` (and `combat.go`,
+`combat_road_encounters.go`, `devconsole/queries.go`) have used
+`'awaiting_reinforcement'` as a real, load-bearing movement_state since
+the resupply-convoy feature shipped. Every `UPDATE raids SET
+movement_state = 'awaiting_reinforcement'` was silently rejected by the
+constraint (errors swallowed via `_, _ = tx.ExecContext(...)`
+throughout this function), poisoning the transaction for every
+statement after it in that tick phase. Fixed by dropping the old
+constraint and adding `raids_movement_state_valid_v2` with
+`'awaiting_reinforcement'` included - given a new name specifically
+because the old one's `IF NOT EXISTS (SELECT ... conname = ...)` guard
+meant editing the list in place would never re-run against a DB that
+already had it.
+
+**3. Dispatcher burning retries on notifications no Telegram chat could
+ever receive — CONFIRMED & FIXED.** Logs: `Dispatcher giving up on
+notification ... to -908002 after 5 failed attempts` for a routine
+construction-complete alert; `telegram: chat not found (400)` repeated
+every drain cycle. AI factions get synthetic negative `user_id` values
+(`isRealPlayer(id) = id > 0`), and while `QueueToRegion`/`Queue()`
+correctly exclude them, roughly 50 of this codebase's
+`INSERT INTO notifications` call sites in `engine.go` write directly via
+raw SQL and mostly don't check `isRealPlayer` first (the construction-
+complete one at ~line 1571 confirmed as the one in these logs, but far
+from the only one). Rather than retrofitting 50 call sites, fixed
+centrally in `Dispatcher.drainQueue`: the select now filters
+`user_id > 0`, and a companion sweep marks any already-queued
+`user_id <= 0` rows `is_sent = TRUE` up front so they stop occupying
+batch slots or burning guaranteed-failed Telegram calls.
+
+**Not code bugs — account/quota issues, for awareness:**
+- Gemini: `RESOURCE_EXHAUSTED ... generativelanguage.googleapis.com/
+  generate_content_free_tier_requests, limit: 20, model:
+  gemini-3.5-flash` - the Google AI Studio free tier's actual daily
+  request cap, not something the app can work around in code.
+- Qwen: `AccessDenied.Unpurchased: Access is denied to this model` for
+  the default `qwen-plus` model - DashScope/Alibaba Cloud Model Studio
+  requires explicitly activating model access per account even with a
+  valid key; not fixable from this codebase. `QWEN_MODEL` env var can
+  point at a different, already-activated model if one exists on the
+  account.
+
+Confirms the fallback chain itself (Registry.Ordered(), mock always
+last) is genuinely working end-to-end in production: real `gemini` and
+`qwen` calls are being attempted with real errors coming back from
+Google/Alibaba, not silently skipped - it's just that both real
+providers are currently blocked for account-side reasons, so mock is
+what's left standing. This is no longer a code question.
+
+Verified: `go build ./...`, `go vet ./...`, and
+`go test ./internal/engine/... ./internal/db/...` all pass.
