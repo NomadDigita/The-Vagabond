@@ -168,13 +168,23 @@ func (e *Engine) decideOneAIFaction(ctx context.Context, tx *sql.Tx, factionID s
 		return nil
 	}
 
-	if overdue, err := e.pickOverdueRaidTarget(ctx, tx, factionID, factionLevel); err != nil {
+	// A faction that leads or belongs to a clan with an active pact
+	// (alliance or NAP) against another clan must not raid that clan's
+	// members - the same rule HasActivePact enforces for human-launched
+	// raids in combat.go. Resolved once per decision and threaded
+	// through both target pickers below, rather than reimplementing the
+	// clan lookup in each. NULL (not in a clan) simply excludes nothing,
+	// since no clan_diplomacy row can match a NULL clan id.
+	var factionClanID sql.NullString
+	_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans uc JOIN encampments e ON e.user_id = uc.user_id WHERE e.id = $1", factionID).Scan(&factionClanID)
+
+	if overdue, err := e.pickOverdueRaidTarget(ctx, tx, factionID, factionLevel, factionClanID); err != nil {
 		return fmt.Errorf("selecting overdue raid target: %w", err)
 	} else if overdue != nil {
 		return e.launchAIRaid(ctx, tx, factionID, *overdue)
 	}
 
-	target, err := e.pickFairAIRaidTarget(ctx, tx, factionID, factionLevel)
+	target, err := e.pickFairAIRaidTarget(ctx, tx, factionID, factionLevel, factionClanID)
 	if err != nil {
 		return fmt.Errorf("selecting raid target: %w", err)
 	}
@@ -280,8 +290,11 @@ func (e *Engine) aiScout(ctx context.Context, tx *sql.Tx, factionID, region stri
 // aiFairnessWideBandChance roll, up to aiFairnessWideBandAbove) - the
 // attack-up-only rule described where those constants are defined. The
 // band applies identically regardless of who's on the other side;
-// AI-vs-AI doesn't get a special exemption from it.
-func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int) (*aiRaidTarget, error) {
+// AI-vs-AI doesn't get a special exemption from it. factionClanID (may
+// be NULL/invalid if the faction isn't in a clan) excludes any target
+// whose clan has an active alliance or NAP with the faction's clan - the
+// same rule HasActivePact enforces for human-launched raids.
+func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int, factionClanID sql.NullString) (*aiRaidTarget, error) {
 	band := aiFairnessNormalBandAbove
 	if rand.Float64() < aiFairnessWideBandChance {
 		band = aiFairnessWideBandAbove
@@ -301,8 +314,16 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 				WHERE r.attacker_id = $1 AND r.defender_id = e.id
 				  AND r.state IN ('marching', 'engaged')
 			)
+		  AND NOT EXISTS (
+				SELECT 1 FROM user_clans defender_membership
+				JOIN clan_diplomacy cd ON (
+					(cd.clan_a_id = $4 AND cd.clan_b_id = defender_membership.clan_id) OR
+					(cd.clan_b_id = $4 AND cd.clan_a_id = defender_membership.clan_id)
+				)
+				WHERE defender_membership.user_id = e.user_id AND cd.status = 'active'
+			)
 		ORDER BY random()
-		LIMIT 5`, factionID, factionLevel, maxLevel)
+		LIMIT 5`, factionID, factionLevel, maxLevel, factionClanID)
 	if err != nil {
 		return nil, err
 	}
@@ -324,9 +345,12 @@ func (e *Engine) pickFairAIRaidTarget(ctx context.Context, tx *sql.Tx, factionID
 // at or above this faction's own level (still no exemption from the
 // attack-up-only rule - this only removes the probability roll, not the
 // other guardrails), who hasn't been raided by anyone in at least
-// aiOverdueRaidThreshold. Returns nil if no such target exists, in which
-// case the caller falls through to the normal probabilistic path.
-func (e *Engine) pickOverdueRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int) (*aiRaidTarget, error) {
+// aiOverdueRaidThreshold. A diplomatic pact still blocks the guarantee too
+// (see factionClanID's doc on pickFairAIRaidTarget) - a truce shouldn't
+// have a "unless the timer runs out" loophole. Returns nil if no such
+// target exists, in which case the caller falls through to the normal
+// probabilistic path.
+func (e *Engine) pickOverdueRaidTarget(ctx context.Context, tx *sql.Tx, factionID string, factionLevel int, factionClanID sql.NullString) (*aiRaidTarget, error) {
 	minLevel := factionLevel
 	if aiOverdueMinTargetLevel > minLevel {
 		minLevel = aiOverdueMinTargetLevel
@@ -351,8 +375,16 @@ func (e *Engine) pickOverdueRaidTarget(ctx context.Context, tx *sql.Tx, factionI
 				WHERE r.defender_id = e.id
 				  AND r.created_at > CURRENT_TIMESTAMP - ($3 * INTERVAL '1 minute')
 			)
+		  AND NOT EXISTS (
+				SELECT 1 FROM user_clans defender_membership
+				JOIN clan_diplomacy cd ON (
+					(cd.clan_a_id = $4 AND cd.clan_b_id = defender_membership.clan_id) OR
+					(cd.clan_b_id = $4 AND cd.clan_a_id = defender_membership.clan_id)
+				)
+				WHERE defender_membership.user_id = e.user_id AND cd.status = 'active'
+			)
 		ORDER BY random()
-		LIMIT 1`, factionID, minLevel, aiOverdueRaidThreshold.Minutes()).
+		LIMIT 1`, factionID, minLevel, aiOverdueRaidThreshold.Minutes(), factionClanID).
 		Scan(&t.id, &t.name, &t.level, &t.x, &t.y, &t.region, &t.userID, &t.isAIFaction)
 	if err == sql.ErrNoRows {
 		return nil, nil

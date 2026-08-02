@@ -229,7 +229,7 @@ several Scout Walkers riding together on any one of those three.
   notifications in quick succession rather than one combined message.
   Worth revisiting if that turns out to feel spammy in practice.
 
-## Item 4: AI factions actively using the rest of the game (market listing/buying, clans, clan wars, federations, arena queueing done; the rest remains a much larger, separate effort)
+## Item 4: AI factions actively using the rest of the game (market/clans/wars/federations/arena/research/upgrades/diplomacy done; the rest remains a much larger, separate effort)
 
 **Status: partially built - market listing (2026-08-01), then market
 buying + clan creation/application added the same day after the project
@@ -333,27 +333,44 @@ before.
   (entry fee debited, an `arena_queue` row inserted) using the cheapest
   `'solo'` bracket. New test:
   `TestGrowAICivilizationsCanQueueForArena`.
+- **Diplomacy (alliance/NAP pacts): done, 2026-08-02.** Also in
+  `growAICivilizations` (2% chance/tick, Leader-only). Checks for a
+  pending proposal addressed to this faction's clan first and responds
+  (accepts ~80% of the time, mirroring `HandleDiplomacyRespondCallback` -
+  an AI Leader isn't adversarial toward diplomacy by default); if none is
+  pending, proposes a new pact (50/50 alliance/NAP) to an unrelated clan
+  with no existing pending/active relationship, mirroring
+  `proposePact`/`HandleProposeAlliance`/`HandleProposeNAP`. **Also fixed
+  a real correctness gap this surfaced**: `pickFairAIRaidTarget` and
+  `pickOverdueRaidTarget` in `aidecisions.go` previously had no concept
+  of `clan_diplomacy` at all, so an AI faction could have formed a pact
+  through this very feature and then its own raid logic would have
+  ignored it entirely - both now take a `factionClanID sql.NullString`
+  parameter and exclude any target whose clan has an active pact with
+  the faction's clan, the same rule `HasActivePact` enforces for
+  human-launched raids in `combat.go`. New tests:
+  `TestGrowAICivilizationsCanProposeAndAcceptPacts`,
+  `TestPickFairAIRaidTargetRespectsActivePact`.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
   as before. Updated inventory of what's still missing, now that buying,
-  clans, clan wars, federations, arena queueing, research, and facility
-  upgrades are done: hero recruitment and equipping, job assignments,
-  diplomacy actions (`internal/bot/handlers/diplomacy.go` - alliance/NAP
-  pacts between clans, distinct from clan wars, being picked up in a
-  concurrent session), spy missions (`HandleSpyCallback` - blocked on AI
-  factions not currently building the "Spy Device" drones a spy mission
-  requires; would need `growAICivilizations` to also build drones first,
-  or a different resourcing path), and exploration (`exploration_sites`
-  - distinct from the `scout_missions` Item 3 covers). Each remains its
-  own subsystem needing its own read-the-handler-first pass, exactly
-  like every item above got.
-- **Suggested next subsystem**: with diplomacy handled concurrently and
-  research/facility upgrades done, exploration (`exploration_sites`) is
-  probably next-most self-contained - a single-faction action like
-  research/upgrades above, not a clan-Leader-gated one. Hero recruitment
-  and job assignments haven't had their handlers read yet this round.
-  Spy missions still need the drones prerequisite solved first. Confirm
-  before starting, same as always.
+  clans, clan wars, federations, arena queueing, research/facility
+  upgrades, and diplomacy are done: hero recruitment and equipping, job
+  assignments, spy missions (`HandleSpyCallback` - blocked on AI factions
+  not currently building the "Spy Device" drones a spy mission requires;
+  would need `growAICivilizations` to also build drones first, or a
+  different resourcing path), and exploration (`exploration_sites` -
+  distinct from the `scout_missions` Item 3 covers). Each remains its own
+  subsystem needing its own read-the-handler-first pass, exactly like
+  every item above got.
+- **Suggested next subsystem**: exploration (`exploration_sites`) is
+  probably next-most self-contained - a single-faction action, not a
+  clan-Leader-gated one, similar shape to the research/upgrades work.
+  Hero recruitment and job assignments haven't had their handlers read
+  yet. Spy missions still need the drones prerequisite solved first.
+  Confirm before starting, same as always.
+
+
 
 
 
@@ -373,16 +390,16 @@ before.
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
    market buying, clan creation/application, clan wars, federations,
-   arena queueing, research tech-tree upgrades, and facility upgrades
-   done** (listing merged with Item 1; the rest added across three
-   follow-up rounds - two after direct project owner instruction, the
-   third resolving the "unit upgrades" open question below); everything
-   else in Item 4 (hero recruitment, jobs, diplomacy, spy missions,
-   exploration) remains open and is realistically its own multi-session
-   project - see Item 4's own section for the reasoning and a suggested
-   starting point (exploration, now that research/upgrades established
-   the single-faction-action pattern; diplomacy is being handled in a
-   concurrent session).
+   arena queueing, research tech-tree upgrades, facility upgrades, and
+   diplomacy (alliance/NAP pacts, plus a fix so AI raid selection
+   actually respects them) done** (listing merged with Item 1; the rest
+   added across four follow-up rounds - two after direct project owner
+   instruction, a third resolving the "unit upgrades" open question, a
+   fourth for diplomacy); everything else in Item 4 (hero recruitment,
+   jobs, spy missions, exploration) remains open and is realistically
+   its own multi-session project - see Item 4's own section for the
+   reasoning and a suggested starting point (exploration, following the
+   same single-faction-action pattern research/upgrades established).
 
 ## Testing strategy
 

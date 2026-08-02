@@ -2711,6 +2711,68 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
+		// Occasionally engage in clan diplomacy, exactly like a human
+		// Clan Leader would via /ally, /nap, or the Accept/Reject
+		// buttons on /diplomacy - project owner direction 2026-08-01:
+		// "every single thing a human can do." Only fires for a
+		// Leader-role AI faction, mirroring proposePact's and
+		// HandleDiplomacyRespondCallback's "Leaders only" gate. Checks
+		// for a pending proposal addressed to this faction's clan
+		// first (an active Leader wouldn't leave one hanging forever),
+		// then falls back to proposing a new pact to an unrelated clan.
+		// aidecisions.go's pickFairAIRaidTarget/pickOverdueRaidTarget
+		// already respect whatever pact results from this - the same
+		// rule HasActivePact enforces for human-launched raids - so an
+		// AI faction can't form a truce here and then ignore it there.
+		if rand.Float64() < 0.02 {
+			var myClanID string
+			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
+				var pactID string
+				err := tx.QueryRowContext(ctx, `
+					SELECT id FROM clan_diplomacy
+					WHERE (clan_a_id = $1 OR clan_b_id = $1) AND status = 'pending' AND proposed_by != $2
+					ORDER BY random() LIMIT 1`, myClanID, f.userID).Scan(&pactID)
+				if err == nil {
+					// Accept most of the time - an AI Leader isn't
+					// adversarial toward diplomacy by default.
+					newStatus := "rejected"
+					if rand.Float64() < 0.8 {
+						newStatus = "active"
+					}
+					_, _ = tx.ExecContext(ctx, "UPDATE clan_diplomacy SET status = $1, responded_at = CURRENT_TIMESTAMP WHERE id = $2", newStatus, pactID)
+				} else {
+					var targetClanID, targetClanName string
+					err := tx.QueryRowContext(ctx, `
+						SELECT c.id, c.name FROM clans c
+						WHERE c.id != $1
+						AND NOT EXISTS (
+							SELECT 1 FROM clan_diplomacy cd
+							WHERE ((cd.clan_a_id = $1 AND cd.clan_b_id = c.id) OR (cd.clan_a_id = c.id AND cd.clan_b_id = $1))
+							AND cd.status IN ('pending', 'active')
+						)
+						ORDER BY random() LIMIT 1`, myClanID).Scan(&targetClanID, &targetClanName)
+					if err == nil {
+						pactType := "nap"
+						if rand.Float64() < 0.5 {
+							pactType = "alliance"
+						}
+						if _, err := tx.ExecContext(ctx, "INSERT INTO clan_diplomacy (clan_a_id, clan_b_id, pact_type, proposed_by) VALUES ($1, $2, $3, $4)", myClanID, targetClanID, pactType, f.userID); err == nil {
+							var targetLeaderID int64
+							_ = tx.QueryRowContext(ctx, "SELECT leader_id FROM clans WHERE id = $1", targetClanID).Scan(&targetLeaderID)
+							if targetLeaderID > 0 {
+								label := "🕊️ Non-Aggression Pact"
+								if pactType == "alliance" {
+									label = "🤝 Alliance"
+								}
+								alertMsg := fmt.Sprintf("🕊️ <b>DIPLOMATIC PROPOSAL</b>: %s proposed to your Clan by an AI-led Clan! Review it via <code>/diplomacy</code>.", label)
+								_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetLeaderID, alertMsg)
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Occasionally queue for the arena, exactly like a human would
 		// via /arena. Mirrors HandleJoinQueueCallback's exact mechanics
 		// (entry fee debited, an arena_queue row inserted) using the
