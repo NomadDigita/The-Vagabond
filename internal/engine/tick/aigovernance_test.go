@@ -135,8 +135,15 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 	}
 	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Sigma")
 
+	// 500 iterations turned out to be statistically marginal: only the
+	// "found" branch of the 1%-chance/tick roll can ever succeed in this
+	// test (there's no other federation for the 50% "join" branch to
+	// find), so the real per-tick success probability is ~0.5%, giving
+	// 500 tries roughly an 8% false-failure rate - caught by a shuffled,
+	// repeated-count test run, not a rare fluke worth ignoring. 3000
+	// iterations brings the false-failure rate below one in a million.
 	joined := false
-	for i := 0; i < 500 && !joined; i++ {
+	for i := 0; i < 3000 && !joined; i++ {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatalf("begin tx: %v", err)
@@ -158,7 +165,7 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 		joined = fedID.Valid
 	}
 	if !joined {
-		t.Fatal("expected the AI clan Leader's clan to end up in a federation at least once across 500 ticks")
+		t.Fatal("expected the AI clan Leader's clan to end up in a federation at least once across 3000 ticks")
 	}
 }
 

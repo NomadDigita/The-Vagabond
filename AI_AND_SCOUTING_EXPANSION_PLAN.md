@@ -229,7 +229,7 @@ several Scout Walkers riding together on any one of those three.
   notifications in quick succession rather than one combined message.
   Worth revisiting if that turns out to feel spammy in practice.
 
-## Item 4: AI factions actively using the rest of the game (market/clans/wars/federations/arena/research/upgrades/diplomacy done; the rest remains a much larger, separate effort)
+## Item 4: AI factions actively using the rest of the game (market/clans/wars/federations/arena/research/upgrades/diplomacy/jobs done, exploration in progress elsewhere; the rest remains a much larger, separate effort)
 
 **Status: partially built - market listing (2026-08-01), then market
 buying + clan creation/application added the same day after the project
@@ -351,24 +351,55 @@ before.
   human-launched raids in `combat.go`. New tests:
   `TestGrowAICivilizationsCanProposeAndAcceptPacts`,
   `TestPickFairAIRaidTargetRespectsActivePact`.
+- **Jobs panel actions: done, 2026-08-02.** New file/phase
+  `internal/engine/tick/aijobs.go` (`runAIJobs`, registered as
+  `"ai_civilization_jobs"`, split out rather than folded into the
+  already-large `growAICivilizations` - matches the existing
+  `aispawning.go`/`aidecisions.go` separation-by-concern pattern). Covers
+  every resource-only action from `jobs.go`: Gather Sunlight (free
+  Electricity, 30-min cooldown), Repair Units (Scrap → +5 Soldiers),
+  Repair Buildings (Scrap halves a module's remaining upgrade time -
+  naturally a no-op until a faction actually has one upgrading, which
+  the research/facility-upgrade work above made possible), HyperSpeed
+  (Electricity halves a raid's remaining resolve time - naturally a
+  no-op until a faction has an active raid via `launchAIRaid`), Orbital
+  Maneuver (Electricity → temporary defense buff), and Extend Planet
+  (scaling Metal/Crystal → permanent storage cap increase). Each mirrors
+  its handler's exact cost/effect. Deliberately excludes
+  `HandleTeleport` - Ghost Protocol (`maybeAIFlee` in `aidecisions.go`)
+  already gives AI factions a real relocation mechanic, and a second,
+  unrelated one risked fighting Item 1's continent-balanced spawn
+  placement for no benefit. New tests:
+  `TestRunAIJobsCanGatherSunlight` (also confirms the cooldown blocks a
+  second gain), `TestRunAIJobsCanRepairUnits`,
+  `TestRunAIJobsCanRushBuildingUpgrade`, `TestRunAIJobsCanUseHyperSpeed`,
+  `TestRunAIJobsCanUseOrbitalManeuverAndExtendPlanet`. Also fixed a real
+  pre-existing test flake this session's verification (shuffled,
+  repeated-count reruns) surfaced in an *earlier* round's federation
+  test - `TestGrowAICivilizationsCanFoundOrJoinFederation` only had one
+  clan in its fixture, so the 50%-of-the-time "join an existing
+  federation" branch could never succeed, making the true per-tick
+  success rate half of what the iteration count assumed (~8%
+  false-failure rate at 500 tries); raised to 3000 iterations.
+- **Exploration (`exploration_sites`): being handled in a separate,
+  concurrently-running section as of this round** - not attempted here
+  to avoid a collision; check `git log` on this file/`main` for whether
+  it landed before picking it up again.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
   as before. Updated inventory of what's still missing, now that buying,
   clans, clan wars, federations, arena queueing, research/facility
-  upgrades, and diplomacy are done: hero recruitment and equipping, job
-  assignments, spy missions (`HandleSpyCallback` - blocked on AI factions
-  not currently building the "Spy Device" drones a spy mission requires;
-  would need `growAICivilizations` to also build drones first, or a
-  different resourcing path), and exploration (`exploration_sites` -
-  distinct from the `scout_missions` Item 3 covers). Each remains its own
-  subsystem needing its own read-the-handler-first pass, exactly like
-  every item above got.
-- **Suggested next subsystem**: exploration (`exploration_sites`) is
-  probably next-most self-contained - a single-faction action, not a
-  clan-Leader-gated one, similar shape to the research/upgrades work.
-  Hero recruitment and job assignments haven't had their handlers read
-  yet. Spy missions still need the drones prerequisite solved first.
-  Confirm before starting, same as always.
+  upgrades, diplomacy, and jobs are done (and exploration is in
+  progress elsewhere): hero recruitment and equipping, spy missions
+  (`HandleSpyCallback` - blocked on AI factions not currently building
+  the "Spy Device" drones a spy mission requires; would need
+  `growAICivilizations` to also build drones first, or a different
+  resourcing path). Each remains its own subsystem needing its own
+  read-the-handler-first pass, exactly like every item above got.
+- **Suggested next subsystem**: hero recruitment/equipping hasn't had its
+  handler read yet this round - worth scoping next once exploration's
+  status is confirmed. Spy missions still need the drones prerequisite
+  solved first. Confirm before starting, same as always.
 
 
 
@@ -390,16 +421,17 @@ before.
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
    market buying, clan creation/application, clan wars, federations,
-   arena queueing, research tech-tree upgrades, facility upgrades, and
+   arena queueing, research tech-tree upgrades, facility upgrades,
    diplomacy (alliance/NAP pacts, plus a fix so AI raid selection
-   actually respects them) done** (listing merged with Item 1; the rest
-   added across four follow-up rounds - two after direct project owner
-   instruction, a third resolving the "unit upgrades" open question, a
-   fourth for diplomacy); everything else in Item 4 (hero recruitment,
-   jobs, spy missions, exploration) remains open and is realistically
-   its own multi-session project - see Item 4's own section for the
-   reasoning and a suggested starting point (exploration, following the
-   same single-faction-action pattern research/upgrades established).
+   actually respects them), and Jobs panel actions (repair/hyperspeed/
+   sunlight/orbital maneuver/extend planet) done** (listing merged with
+   Item 1; the rest added across five follow-up rounds - two after
+   direct project owner instruction, a third resolving the "unit
+   upgrades" open question, a fourth for diplomacy, a fifth for jobs);
+   exploration is in progress in a separate concurrent section as of
+   this round; everything else in Item 4 (hero recruitment, spy
+   missions) remains open and is realistically its own multi-session
+   project - see Item 4's own section for the reasoning.
 
 ## Testing strategy
 

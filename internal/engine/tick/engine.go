@@ -742,6 +742,7 @@ func (e *Engine) ProcessTick() {
 		{"supply_convoys", e.processSupplyConvoys},
 		{"ai_civilization_spawn", e.spawnNewAIFactions},
 		{"ai_civilization_growth", e.growAICivilizations},
+		{"ai_civilization_jobs", e.runAIJobs},
 		{"ai_civilization_decisions", e.decideAIFactionActions},
 		{"arena_matchmaking", e.processArenaMatchmaking},
 		{"espionage", e.resolvePendingEspionageMissions},
