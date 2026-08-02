@@ -25,7 +25,19 @@ const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 type Provider struct {
 	APIKey       string
 	DefaultModel string
-	HTTPClient   *http.Client
+	// ModelFallbacks are additional model names tried in order, within
+	// this same provider, if DefaultModel (or req.Model) comes back
+	// quota-exhausted or overloaded - see Complete's isRetryableModelError.
+	// Google's free-tier quotas are tracked per model, not per account,
+	// so a different model is frequently still available even when the
+	// configured one is exhausted (confirmed live via Render logs,
+	// 2026-08-02: gemini-3.5-flash hit RESOURCE_EXHAUSTED on its 20-
+	// request/day free allotment). This only ever cycles models within
+	// Gemini - if every model here is exhausted too, Complete returns
+	// the last error and internal/ai.Service's own provider-level
+	// fallback (Registry.Ordered) takes over, moving on to Qwen/mock.
+	ModelFallbacks []string
+	HTTPClient     *http.Client
 	// BaseURL defaults to Google's real endpoint; overridable so tests
 	// can point this at a local httptest server instead of requiring
 	// live network access to verify the wire format end-to-end.
@@ -33,7 +45,8 @@ type Provider struct {
 }
 
 // New builds a Gemini provider. apiKey may be empty; Available() will
-// correctly report false in that case.
+// correctly report false in that case. modelFallbacks may be nil/empty;
+// see ModelFallbacks' doc comment.
 //
 // Default model note (confirmed via web search 2026-07-16, superseding
 // this package's earlier 2026-07-15 note): Google shipped an entire
@@ -48,15 +61,16 @@ type Provider struct {
 // rumored (not Google-confirmed) July 17, 2026 GA date circulating in
 // the press. Do not configure GEMINI_MODEL=gemini-3.5-pro until that
 // is independently confirmed generally available.
-func New(apiKey, defaultModel string) *Provider {
+func New(apiKey, defaultModel string, modelFallbacks []string) *Provider {
 	if defaultModel == "" {
 		defaultModel = "gemini-3.5-flash"
 	}
 	return &Provider{
-		APIKey:       apiKey,
-		DefaultModel: defaultModel,
-		HTTPClient:   &http.Client{Timeout: 60 * time.Second},
-		BaseURL:      defaultBaseURL,
+		APIKey:         apiKey,
+		DefaultModel:   defaultModel,
+		ModelFallbacks: modelFallbacks,
+		HTTPClient:     &http.Client{Timeout: 60 * time.Second},
+		BaseURL:        defaultBaseURL,
 	}
 }
 
@@ -133,15 +147,79 @@ func toGeminiRole(r ai.Role) string {
 	return "user"
 }
 
+// isRetryableModelError reports whether an error from one Gemini model
+// is worth retrying against a different model in ModelFallbacks, versus
+// an error that would just as surely fail again with any model (bad
+// API key, malformed request, network failure) - in which case Complete
+// returns immediately so internal/ai.Service's provider-level fallback
+// can move on to the next *provider* without wasting a request per
+// fallback model first. RESOURCE_EXHAUSTED/429 is Google's quota-hit
+// status (confirmed live via Render logs, 2026-08-02); UNAVAILABLE/503
+// is transient overload - both are specific to the model that was
+// asked for, not the account or the request.
+func isRetryableModelError(status string, httpStatusCode int) bool {
+	switch status {
+	case "RESOURCE_EXHAUSTED", "UNAVAILABLE":
+		return true
+	}
+	return httpStatusCode == http.StatusTooManyRequests || httpStatusCode == http.StatusServiceUnavailable
+}
+
 func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.CompletionResponse, error) {
 	if !p.Available() {
 		return nil, fmt.Errorf("gemini: no API key configured")
 	}
 
-	model := req.Model
-	if model == "" {
-		model = p.DefaultModel
+	primary := req.Model
+	if primary == "" {
+		primary = p.DefaultModel
 	}
+	// req.Model (a specific caller-requested model) is honored as the
+	// first attempt, but ModelFallbacks still applies after it - a
+	// caller asking for a specific model doesn't want a totally silent
+	// account-wide outage just because that one model is exhausted.
+	models := []string{primary}
+	for _, m := range p.ModelFallbacks {
+		if m != primary {
+			models = append(models, m)
+		}
+	}
+
+	var lastErr error
+	for i, model := range models {
+		resp, err := p.completeWithModel(ctx, req, model)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+
+		var status string
+		var httpStatusCode int
+		if me, ok := err.(*modelError); ok {
+			status, httpStatusCode = me.status, me.httpStatusCode
+		}
+		if !isRetryableModelError(status, httpStatusCode) {
+			return nil, err
+		}
+		if i < len(models)-1 {
+			continue // this model is exhausted/overloaded specifically - try the next one
+		}
+	}
+	return nil, lastErr
+}
+
+// modelError carries the Gemini-reported status/HTTP code alongside the
+// formatted message, so Complete's retry loop can distinguish "try a
+// different model" from "give up" without re-parsing error strings.
+type modelError struct {
+	status         string
+	httpStatusCode int
+	msg            string
+}
+
+func (e *modelError) Error() string { return e.msg }
+
+func (p *Provider) completeWithModel(ctx context.Context, req ai.CompletionRequest, model string) (*ai.CompletionResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = 1024
@@ -207,13 +285,20 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 		return nil, fmt.Errorf("gemini: decode response (status %d): %w", httpResp.StatusCode, err)
 	}
 	if wr2.Error != nil {
-		return nil, fmt.Errorf("gemini: api error (%s): %s", wr2.Error.Status, wr2.Error.Message)
+		return nil, &modelError{
+			status:         wr2.Error.Status,
+			httpStatusCode: httpResp.StatusCode,
+			msg:            fmt.Sprintf("gemini: api error (%s) on model %s: %s", wr2.Error.Status, model, wr2.Error.Message),
+		}
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini: unexpected status %d: %s", httpResp.StatusCode, string(raw))
+		return nil, &modelError{
+			httpStatusCode: httpResp.StatusCode,
+			msg:            fmt.Sprintf("gemini: unexpected status %d on model %s: %s", httpResp.StatusCode, model, string(raw)),
+		}
 	}
 	if len(wr2.Candidates) == 0 {
-		return nil, fmt.Errorf("gemini: response contained no candidates")
+		return nil, fmt.Errorf("gemini: response contained no candidates (model %s)", model)
 	}
 
 	candidate := wr2.Candidates[0]

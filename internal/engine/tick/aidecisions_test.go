@@ -214,7 +214,7 @@ func TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel(t *testing.T) 
 		if err != nil {
 			t.Fatalf("begin tx: %v", err)
 		}
-		target, err := e.pickFairAIRaidTarget(ctx, tx2, faction, 10)
+		target, err := e.pickFairAIRaidTarget(ctx, tx2, faction, 10, sql.NullString{})
 		_ = tx2.Rollback()
 		if err != nil {
 			t.Fatalf("pickFairAIRaidTarget: %v", err)
@@ -279,7 +279,7 @@ func TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability(t *te
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	target, err := e.pickOverdueRaidTarget(ctx, tx, faction, 3)
+	target, err := e.pickOverdueRaidTarget(ctx, tx, faction, 3, sql.NullString{})
 	if err != nil {
 		t.Fatalf("pickOverdueRaidTarget: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	target, err := e.pickFairAIRaidTarget(ctx, tx, faction, 1)
+	target, err := e.pickFairAIRaidTarget(ctx, tx, faction, 1, sql.NullString{})
 	if err != nil {
 		t.Fatalf("pickFairAIRaidTarget: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 		if _, err := tx.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, player); err != nil {
 			t.Fatalf("seeding discovery: %v", err)
 		}
-		target, err = e.pickFairAIRaidTarget(ctx, tx, faction, 1)
+		target, err = e.pickFairAIRaidTarget(ctx, tx, faction, 1, sql.NullString{})
 		if err != nil || target == nil {
 			t.Fatalf("expected a fair target after seeding discovery, got %v, err %v", target, err)
 		}
@@ -430,7 +430,7 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin tx: %v", err)
 		}
-		target, err := e.pickFairAIRaidTarget(ctx, tx, factionA, 5)
+		target, err := e.pickFairAIRaidTarget(ctx, tx, factionA, 5, sql.NullString{})
 		if err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("pickFairAIRaidTarget: %v", err)
@@ -483,7 +483,7 @@ func TestAILaunchedRaidParticipatesInRoadEncounters(t *testing.T) {
 	if _, err := tx.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, player); err != nil {
 		t.Fatalf("seeding discovery: %v", err)
 	}
-	target, err := e.pickFairAIRaidTarget(ctx, tx, faction, 1)
+	target, err := e.pickFairAIRaidTarget(ctx, tx, faction, 1, sql.NullString{})
 	if err != nil || target == nil {
 		t.Fatalf("expected a fair target, got %v, err %v", target, err)
 	}

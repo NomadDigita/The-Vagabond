@@ -88,6 +88,7 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	btnTaxRate := selector.Data("💰 Set Tax Rate", "admin_action", "tax_rate")
 	btnFaction := selector.Data("🎭 Change My Faction", "admin_action", "faction")
 	btnBroadcast := selector.Data("📡 Broadcast", "admin_action", "broadcast")
+	btnChangelog := selector.Data("📰 Publish Changelog", "admin_action", "changelog")
 	btnMetrics := selector.Data("🛰️ Server Metrics", "admin_action", "server_metrics")
 	btnDBReset := selector.Data("⚠️ Reset Database", "admin_action", "db_reset")
 
@@ -95,7 +96,8 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		selector.Row(btnTick, btnInject),
 		selector.Row(btnGiftPremium, btnGiftResources),
 		selector.Row(btnTaxRate, btnFaction),
-		selector.Row(btnBroadcast, btnMetrics),
+		selector.Row(btnBroadcast, btnChangelog),
+		selector.Row(btnMetrics),
 		selector.Row(btnDBReset),
 	)
 
@@ -127,6 +129,8 @@ func (h *AdminHandler) adminPromptFor(senderID int64, action string) string {
 		return "✍️ Reply with " + htmlCode("steel_vanguard") + " or " + htmlCode("rust_nomads") + "."
 	case "broadcast":
 		return "✍️ Reply with the message to broadcast to every survivor."
+	case "changelog":
+		return "✍️ Reply with 3 lines: category (feature/fix/balance), then title, then body.\nExample:\n" + htmlCode("feature\nLong-Range Scouting\nDispatch Scout Walkers to search the wasteland...")
 	default:
 		return "✍️ Reply with the required input."
 	}
@@ -151,7 +155,7 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		result, _ := h.doInjectSelf(ctx, sender.ID)
 		return c.Respond(&telebot.CallbackResponse{Text: result})
 
-	case "gift_premium", "gift_resources", "tax_rate", "faction", "broadcast":
+	case "gift_premium", "gift_resources", "tax_rate", "faction", "broadcast", "changelog":
 		prompt := h.adminPromptFor(sender.ID, action)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "✍️ Check the chat for your input prompt."})
 		return c.Send(prompt, telebot.ModeHTML)
@@ -170,6 +174,53 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 				htmlCode(fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024.0/1024.0)),
 				htmlCode(fmt.Sprintf("%d", memStats.NumGC))) +
 			divider
+
+		// Tick-engine + world-event liveness. Added 2026-08-02 after a
+		// player-reported "world events never fire" investigation that
+		// had no way to distinguish "the tick engine isn't running in
+		// this deployment" from "it's running, just rolling misses" -
+		// both looked identical from inside the game. See
+		// internal/engine/tick/engine.go's LastTickStatus and
+		// internal/engine/world/weather.go's per-tick heartbeat log for
+		// the underlying instrumentation this reads/complements.
+		metricsReport += "\n" + htmlBold("🌍 WORLD ENGINE LIVENESS") + "\n"
+		if h.TickEngine != nil {
+			startedAt, finishedAt := h.TickEngine.LastTickStatus()
+			if startedAt.IsZero() {
+				metricsReport += "⏱️ No tick has run yet since this process started.\n"
+			} else {
+				metricsReport += fmt.Sprintf("⏱️ Last tick started: %s (%s ago)\n",
+					htmlCode(startedAt.Format("15:04:05 MST")), htmlCode(time.Since(startedAt).Round(time.Second).String()))
+				if finishedAt.After(startedAt) {
+					metricsReport += fmt.Sprintf("✅ Last tick finished: %s\n", htmlCode(finishedAt.Format("15:04:05 MST")))
+				} else {
+					metricsReport += "⚠️ Last tick has not finished — may still be running or may have stalled.\n"
+				}
+			}
+		} else {
+			metricsReport += "⚠️ Tick engine reference unavailable to this handler.\n"
+		}
+
+		var activeEvents int
+		var eventList strings.Builder
+		if rows, err := h.DB.QueryContext(ctx, `SELECT continent, event_type, expires_at FROM world_events WHERE expires_at > CURRENT_TIMESTAMP ORDER BY continent`); err == nil {
+			for rows.Next() {
+				var continent, eventType string
+				var expiresAt time.Time
+				if rows.Scan(&continent, &eventType, &expiresAt) == nil {
+					activeEvents++
+					eventList.WriteString(fmt.Sprintf("  • %s: %s (%s left)\n", continent, eventType, time.Until(expiresAt).Round(time.Minute)))
+				}
+			}
+			rows.Close()
+		}
+		if activeEvents == 0 {
+			metricsReport += "🌤️ No active world events right now (nominal on every continent).\n"
+		} else {
+			metricsReport += fmt.Sprintf("⚡ %d active world event(s):\n%s", activeEvents, eventList.String())
+		}
+		metricsReport += divider
+
 		_ = c.Respond(&telebot.CallbackResponse{Text: "🛰️ Memory telemetry fetched!"})
 		return c.Send(metricsReport, telebot.ModeHTML, keyboards.AdminNavigation())
 
@@ -269,6 +320,10 @@ func (h *AdminHandler) HandleAdminPendingInput(c telebot.Context) (handled bool,
 			return true, c.Send("⚠️ Broadcast message can't be empty - action cancelled, tap Broadcast again to retry.")
 		}
 		result, _ := h.doBroadcast(ctx, c.Text())
+		return true, c.Send(result, telebot.ModeHTML)
+
+	case "changelog":
+		result, _ := (&ChangelogHandler{DB: h.DB}).HandlePublishChangelogPendingInput(c)
 		return true, c.Send(result, telebot.ModeHTML)
 	}
 	return false, nil

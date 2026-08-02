@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
@@ -43,6 +44,16 @@ const eventRollChance = 0.10
 // event just expired gets a "conditions have cleared" headline before
 // it's eligible to roll again.
 func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
+	// Per-continent outcome for this pass, logged once at the end
+	// regardless of whether anything happened. Previously this
+	// function only logged on an actual trigger, so a live deployment
+	// that only ever rolled misses produced zero log output from this
+	// phase - indistinguishable from the phase not running at all when
+	// diagnosing "no world events have ever fired" reports. See
+	// LastTickStatus in internal/engine/tick/engine.go for the
+	// companion admin-visible confirmation that ticks are executing.
+	summary := make([]string, 0, len(Continents))
+
 	for _, continent := range Continents {
 		var eventID, eventType string
 		var expiresAt time.Time
@@ -55,6 +66,7 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		stillActive := hasRow && time.Now().UTC().Before(expiresAt.UTC())
 
 		if stillActive {
+			summary = append(summary, fmt.Sprintf("%s=%s(active,%s left)", continent, eventType, time.Until(expiresAt.UTC()).Round(time.Minute)))
 			continue // persistence barrier: this continent's event holds stable
 		}
 
@@ -81,20 +93,43 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if rand.Float64() >= eventRollChance {
+			summary = append(summary, fmt.Sprintf("%s=nominal(rolled,miss)", continent))
 			continue // this continent stays clear this pass
 		}
 
 		newEvent := eventPool[rand.Intn(len(eventPool))]
-		expiresAt = time.Now().UTC().Add(eventDuration)
+		startsAt := time.Now().UTC()
+		expiresAt = startsAt.Add(eventDuration)
+		headline := eventHeadline(newEvent, continent)
 
+		// NOTE (2026-08-02, confirmed live via Render logs): world_events
+		// was originally created by migrations/001_initial_schema.sql with
+		// title VARCHAR(150) NOT NULL and starts_at TIMESTAMPTZ NOT NULL
+		// (plus description/multiplier, both nullable/defaulted). This
+		// package's simplified 4-column model (id/event_type/continent/
+		// expires_at) was added later via schema.go's `CREATE TABLE IF NOT
+		// EXISTS world_events`, which is a no-op against a table that
+		// already exists - so on any deployment whose DB predates that
+		// change, the live table still carries the old NOT NULL columns
+		// this INSERT never populated. Every single roll-hit was failing
+		// at the DB layer with "null value in column title violates
+		// not-null constraint", silently eating the whole weather pass
+		// (RunWeatherPass returns the error, aborting the tx) - this is
+		// the actual root cause of "zero world events have ever fired"
+		// despite the roll logic itself always having been correct.
+		// Supplying title/starts_at here fixes it directly; see schema.go
+		// for the accompanying idempotent ALTER TABLE that also relaxes
+		// the constraint with a DEFAULT, so a *fresh* database (no legacy
+		// columns at all) and this codebase's own migration order can't
+		// reintroduce the same trap.
 		_, err = tx.ExecContext(ctx,
-			"INSERT INTO world_events (event_type, continent, expires_at) VALUES ($1, $2, $3)",
-			newEvent, continent, expiresAt)
+			`INSERT INTO world_events (title, event_type, continent, starts_at, expires_at)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			headline, newEvent, continent, startsAt, expiresAt)
 		if err != nil {
 			return fmt.Errorf("failed inserting world event for %s: %w", continent, err)
 		}
 
-		headline := eventHeadline(newEvent, continent)
 		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 			log.Printf("Failed writing world-event news headline: %v", err)
 		}
@@ -104,8 +139,11 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Failed broadcasting world-event notification for %s: %v", continent, err)
 		}
 
+		summary = append(summary, fmt.Sprintf("%s=%s(NEW HIT)", continent, newEvent))
 		log.Printf("World Event Pass: [%s] triggered over %s (expires %s).", newEvent, continent, expiresAt.Format(time.RFC3339))
 	}
+
+	log.Printf("Weather heartbeat: %s", strings.Join(summary, ", "))
 	return nil
 }
 

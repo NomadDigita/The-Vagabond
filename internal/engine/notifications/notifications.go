@@ -95,11 +95,27 @@ func looksLikeHTML(msg string) bool {
 func (d *Dispatcher) drainQueue() {
 	ctx := context.Background()
 
+	// AI factions have synthetic negative user_id rows (see isRealPlayer
+	// in internal/engine/tick/engine.go and cmd/bot/main.go's AI
+	// civilization seeding) with no Telegram session behind them at all.
+	// Most of this codebase's ~50 "INSERT INTO notifications" call sites
+	// (construction-complete, combat reports, etc.) don't check
+	// isRealPlayer before queuing - confirmed live via Render logs
+	// (2026-08-02): "Dispatcher giving up on notification ... to -908002
+	// after 5 failed attempts" for a routine construction-complete alert.
+	// Rather than retrofitting every insert site (same reasoning as the
+	// dedup step below), sweep any that already got queued before ever
+	// attempting delivery, so they don't burn 5 guaranteed-failed
+	// Telegram calls apiece or sit in the table forever.
+	if _, err := d.DB.ExecContext(ctx, "UPDATE notifications SET is_sent = TRUE WHERE is_sent = FALSE AND user_id <= 0"); err != nil {
+		log.Printf("Dispatcher failed sweeping non-player (AI faction) notifications: %v", err)
+	}
+
 	// Select unsent notifications
 	query := `
 		SELECT id, user_id, message, failed_attempts 
 		FROM notifications 
-		WHERE is_sent = FALSE 
+		WHERE is_sent = FALSE AND user_id > 0
 		ORDER BY queued_at ASC 
 		LIMIT 10`
 

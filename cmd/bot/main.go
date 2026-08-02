@@ -31,6 +31,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/galaxyadvisor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
+	"github.com/NomadDigita/The-Vagabond/internal/game/nlpcommand"
 	"github.com/NomadDigita/The-Vagabond/internal/game/npcintel"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"github.com/joho/godotenv"
@@ -378,12 +379,12 @@ func main() {
 	rebellion := handlers.NewRebellionHandler(db)
 	federation := handlers.NewFederationHandler(db)
 	profile := handlers.NewProfileHandler(db, admin.AdminIDs)
+	changelog := handlers.NewChangelogHandler(db, admin.AdminIDs)
 	ether := handlers.NewEtherHandler(db)
 	jobs := handlers.NewJobsHandler(db)
 	exploration := handlers.NewExplorationHandler(db)
 	scoutMissions := handlers.NewScoutMissionsHandler(db)
 	diplomacy := handlers.NewDiplomacyHandler(db)
-	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
 	// Provider-agnostic by design: register additional providers here
@@ -398,7 +399,7 @@ func main() {
 	aiRegistry.Register(openaicompat.New("deepseek", "https://api.deepseek.com/v1", aiConfig.DeepSeekAPIKey, aiConfig.DeepSeekModel, true))
 	aiRegistry.Register(openaicompat.New("qwen", aiConfig.QwenBaseURL, aiConfig.QwenAPIKey, aiConfig.QwenModel, true))
 	aiRegistry.Register(openaicompat.New("grok", "https://api.x.ai/v1", aiConfig.GrokAPIKey, aiConfig.GrokModel, true))
-	aiRegistry.Register(gemini.New(aiConfig.GeminiAPIKey, aiConfig.GeminiModel))
+	aiRegistry.Register(gemini.New(aiConfig.GeminiAPIKey, aiConfig.GeminiModel, aiConfig.GeminiModelFallbacks))
 	aiRegistry.Register(ollama.New(aiConfig.OllamaBaseURL, aiConfig.OllamaModel))
 	aiRegistry.Register(mock.New())
 	aiCostTracker := ai.NewPostgresCostTracker(db)
@@ -447,6 +448,15 @@ func main() {
 	// ADMIN_IDS a second time.
 	aiDevConsole := devconsole.New(db, aiService)
 	devConsoleHandler := handlers.NewDevConsoleHandler(aiDevConsole, admin.AdminIDs)
+
+	// --- AI Command Interpreter wiring (Milestone 3, FEEDBACK_CHANGELOG_NLP_PLAN.md) ---
+	// Constructed after aiService (unlike every handler above, nlp
+	// used to be built before the AI Foundation section existed) so
+	// it can be handed a real interpreter. See internal/game/nlpcommand
+	// for the safety design - this is the only AI feature in the
+	// codebase whose parsed output can directly trigger a game action.
+	aiCommandInterpreter := nlpcommand.New(aiService)
+	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world, scoutMissions, aiCommandInterpreter)
 
 	bot.Handle("/start", onboarding.HandleStart)
 	bot.Handle("/name", onboarding.HandleRenameOutpost)
@@ -513,6 +523,9 @@ func main() {
 	bot.Handle("/feedback", profile.HandleFeedback)
 	bot.Handle("💬 Send Feedback", profile.HandleFeedbackButton)
 	bot.Handle("/feedback_inbox", profile.HandleFeedbackInbox)
+	bot.Handle("/changelog", changelog.HandleChangelogPanel)
+	bot.Handle("🗞️ Changelog", changelog.HandleChangelogPanel)
+	bot.Handle("\fchangelog_more", changelog.HandleChangelogMoreCallback)
 	bot.Handle("/msg", profile.HandleMsg)
 	bot.Handle("/mute", profile.HandleMute)
 	bot.Handle("/unmute", profile.HandleUnmute)
@@ -602,6 +615,8 @@ func main() {
 	bot.Handle("\fgalaxy_advisor_refresh", galaxyAdvisorHandler.HandleGalaxyAdvisorRefreshCallback)
 	bot.Handle("/npc_intel", npcIntelHandler.HandleNPCIntel)
 	bot.Handle("\fnpc_intel_refresh", npcIntelHandler.HandleNPCIntelRefreshCallback)
+	bot.Handle("\fnlp_c", nlp.HandleNLPConfirmCallback)
+	bot.Handle("\fnlp_x", nlp.HandleNLPCancelCallback)
 	bot.Handle("/weekly_report", devConsoleHandler.HandleWeeklyReport)
 	bot.Handle("📅 Weekly Report", devConsoleHandler.HandleWeeklyReport)
 	bot.Handle("\fdev_console_refresh", devConsoleHandler.HandleDevConsoleRefreshCallback)

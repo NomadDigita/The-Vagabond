@@ -229,7 +229,7 @@ several Scout Walkers riding together on any one of those three.
   notifications in quick succession rather than one combined message.
   Worth revisiting if that turns out to feel spammy in practice.
 
-## Item 4: AI factions actively using the rest of the game (market listing/buying, clans, clan wars, federations, arena queueing done; the rest remains a much larger, separate effort)
+## Item 4: AI factions actively using the rest of the game (market/clans/wars/federations/arena/research/upgrades/diplomacy/jobs done, exploration in progress elsewhere; the rest remains a much larger, separate effort)
 
 **Status: partially built - market listing (2026-08-01), then market
 buying + clan creation/application added the same day after the project
@@ -351,28 +351,72 @@ before.
   `TestGrowAICivilizationsCanDispatchExploration`,
   `TestGrowAICivilizationsWontDispatchExplorationConcurrently`,
   `TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies`.
+- **Diplomacy (alliance/NAP pacts): done, 2026-08-02**, in a session
+  running concurrently with the exploration work above. Also in
+  `growAICivilizations` (2% chance/tick, Leader-only). Checks for a
+  pending proposal addressed to this faction's clan first and responds
+  (accepts ~80% of the time, mirroring `HandleDiplomacyRespondCallback` -
+  an AI Leader isn't adversarial toward diplomacy by default); if none is
+  pending, proposes a new pact (50/50 alliance/NAP) to an unrelated clan
+  with no existing pending/active relationship, mirroring
+  `proposePact`/`HandleProposeAlliance`/`HandleProposeNAP`. **Also fixed
+  a real correctness gap this surfaced**: `pickFairAIRaidTarget` and
+  `pickOverdueRaidTarget` in `aidecisions.go` previously had no concept
+  of `clan_diplomacy` at all, so an AI faction could have formed a pact
+  through this very feature and then its own raid logic would have
+  ignored it entirely - both now take a `factionClanID sql.NullString`
+  parameter and exclude any target whose clan has an active pact with
+  the faction's clan, the same rule `HasActivePact` enforces for
+  human-launched raids in `combat.go`. New tests:
+  `TestGrowAICivilizationsCanProposeAndAcceptPacts`,
+  `TestPickFairAIRaidTargetRespectsActivePact`.
+- **Jobs panel actions: done, 2026-08-02**, same concurrent session as
+  diplomacy above. New file/phase `internal/engine/tick/aijobs.go`
+  (`runAIJobs`, registered as `"ai_civilization_jobs"`, split out rather
+  than folded into the already-large `growAICivilizations` - matches the
+  existing `aispawning.go`/`aidecisions.go` separation-by-concern
+  pattern). Covers every resource-only action from `jobs.go`: Gather
+  Sunlight (free Electricity, 30-min cooldown), Repair Units (Scrap →
+  +5 Soldiers), Repair Buildings (Scrap halves a module's remaining
+  upgrade time - naturally a no-op until a faction actually has one
+  upgrading, which the research/facility-upgrade work above made
+  possible), HyperSpeed (Electricity halves a raid's remaining resolve
+  time - naturally a no-op until a faction has an active raid via
+  `launchAIRaid`), Orbital Maneuver (Electricity → temporary defense
+  buff), and Extend Planet (scaling Metal/Crystal → permanent storage
+  cap increase). Each mirrors its handler's exact cost/effect.
+  Deliberately excludes `HandleTeleport` - Ghost Protocol
+  (`maybeAIFlee` in `aidecisions.go`) already gives AI factions a real
+  relocation mechanic, and a second, unrelated one risked fighting
+  Item 1's continent-balanced spawn placement for no benefit. New tests:
+  `TestRunAIJobsCanGatherSunlight` (also confirms the cooldown blocks a
+  second gain), `TestRunAIJobsCanRepairUnits`,
+  `TestRunAIJobsCanRushBuildingUpgrade`, `TestRunAIJobsCanUseHyperSpeed`,
+  `TestRunAIJobsCanUseOrbitalManeuverAndExtendPlanet`. Also fixed a real
+  pre-existing test flake that session's verification (shuffled,
+  repeated-count reruns) surfaced in an *earlier* round's federation
+  test - `TestGrowAICivilizationsCanFoundOrJoinFederation` only had one
+  clan in its fixture, so the 50%-of-the-time "join an existing
+  federation" branch could never succeed, making the true per-tick
+  success rate half of what the iteration count assumed (~8%
+  false-failure rate at 500 tries); raised to 3000 iterations.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
   as before. Updated inventory of what's still missing, now that buying,
   clans, clan wars, federations, arena queueing, research, facility
-  upgrades, and exploration are done: hero recruitment and equipping,
-  job assignments, and diplomacy actions
-  (`internal/bot/handlers/diplomacy.go` - alliance/NAP pacts between
-  clans, distinct from clan wars, being picked up in a concurrent
-  session). Spy missions (`HandleSpyCallback`) remain blocked on AI
-  factions not currently building the "Spy Device" drones a spy mission
-  requires; would need `growAICivilizations` to also build drones first,
-  or a different resourcing path. Each remaining item is its own
-  subsystem needing its own read-the-handler-first pass, exactly like
-  every item above got.
-- **Suggested next subsystem**: with diplomacy handled concurrently and
-  research/upgrades/exploration all done, job assignments is probably
-  next-most self-contained, since like exploration it's a single-faction
-  action rather than a clan-Leader-gated one. Hero recruitment hasn't
-  had its handler read yet this round, and may turn out to be a bigger
-  lift (equipping likely touches inventory/items tables not explored
-  yet). Spy missions still need the drones prerequisite solved first.
+  upgrades, exploration, diplomacy, and jobs are all done: hero
+  recruitment and equipping, and spy missions (`HandleSpyCallback` -
+  blocked on AI factions not currently building the "Spy Device" drones
+  a spy mission requires; would need `growAICivilizations` to also build
+  drones first, or a different resourcing path). Each remaining item is
+  its own subsystem needing its own read-the-handler-first pass, exactly
+  like every item above got.
+- **Suggested next subsystem**: hero recruitment/equipping hasn't had its
+  handler read yet - likely the biggest remaining lift, since equipping
+  probably touches inventory/items tables not explored by any round so
+  far. Spy missions still need the drones prerequisite solved first.
   Confirm before starting, same as always.
+
 
 
 
@@ -392,17 +436,19 @@ before.
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
    market buying, clan creation/application, clan wars, federations,
-   arena queueing, research tech-tree upgrades, facility upgrades, and
-   exploration done** (listing merged with Item 1; the rest added across
-   four follow-up rounds - two after direct project owner instruction,
-   the third resolving the "unit upgrades" open question, the fourth
-   picking exploration as the next self-contained item); everything else
-   in Item 4 (hero recruitment, jobs, diplomacy, spy missions) remains
-   open and is realistically its own multi-session project - see Item
-   4's own section for the reasoning and a suggested starting point (job
-   assignments, now that research/upgrades/exploration established the
-   single-faction-action pattern; diplomacy is being handled in a
-   concurrent session).
+   arena queueing, research tech-tree upgrades, facility upgrades,
+   exploration, diplomacy (alliance/NAP pacts, plus a fix so AI raid
+   selection actually respects them), and Jobs panel actions
+   (repair/hyperspeed/sunlight/orbital maneuver/extend planet) done**
+   (listing merged with Item 1; the rest added across six follow-up
+   rounds - two after direct project owner instruction, a third
+   resolving the "unit upgrades" open question, a fourth for exploration
+   and a fourth-in-parallel for diplomacy (two sessions run
+   concurrently, merged cleanly), a fifth/sixth for jobs); everything
+   else in Item 4 (hero recruitment, spy missions) remains open and is
+   realistically its own multi-session project - see Item 4's own
+   section for the reasoning.
+
 
 ## Testing strategy
 

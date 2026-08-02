@@ -21,6 +21,16 @@ const (
 	FeatureDynamicGalaxy  Feature = "ai_dynamic_galaxy"
 	FeatureNPCIntel       Feature = "ai_npc_intelligence"
 	FeatureDevConsole     Feature = "ai_developer_console"
+
+	// FeatureCommandInterpreter is Milestone 3 of
+	// FEEDBACK_CHANGELOG_NLP_PLAN.md: the natural-language command
+	// interpreter wired as nlp.HandleTextMessage's final fallback.
+	// Unlike every feature above (advisory-only), this one's parsed
+	// intent can result in state-mutating game actions - always via
+	// the same doX core functions the button UI uses, and always
+	// behind an explicit Confirm/Cancel step for anything that spends
+	// resources. See the plan doc's "Why this is different" section.
+	FeatureCommandInterpreter Feature = "ai_command_interpreter"
 )
 
 // AllFeatures lists every known feature flag, used to seed defaults.
@@ -35,6 +45,7 @@ func AllFeatures() []Feature {
 		FeatureDynamicGalaxy,
 		FeatureNPCIntel,
 		FeatureDevConsole,
+		FeatureCommandInterpreter,
 	}
 }
 
@@ -92,8 +103,17 @@ type Config struct {
 
 	// GeminiAPIKey / GeminiModel configure the Gemini provider
 	// (internal/ai/providers/gemini, registered as "gemini").
-	GeminiAPIKey string
-	GeminiModel  string
+	// GeminiModelFallbacks are additional models the provider itself
+	// cycles through before giving up (see gemini.Provider.Complete) -
+	// Google tracks free-tier quota per model, not per account, so a
+	// different model is frequently still usable even when the
+	// configured one is exhausted. Defaults to a hand-picked list of
+	// free-tier-eligible models (see LoadConfig below); set
+	// GEMINI_MODEL_FALLBACKS="" explicitly to disable and fail straight
+	// to the next provider instead.
+	GeminiAPIKey         string
+	GeminiModel          string
+	GeminiModelFallbacks []string
 
 	// OllamaBaseURL / OllamaModel configure the Ollama provider
 	// (internal/ai/providers/ollama, registered as "ollama") for
@@ -184,6 +204,9 @@ func getenvString(key, def string) string {
 //	GROK_MODEL                 (string, default "grok-4-fast")
 //	GEMINI_API_KEY             (string, default "")
 //	GEMINI_MODEL               (string, default "gemini-3.5-flash")
+//	GEMINI_MODEL_FALLBACKS     (string, comma-separated, default
+//	                            "gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash";
+//	                            "none" disables)
 //	OLLAMA_BASE_URL            (string, default "" — unset means disabled)
 //	OLLAMA_MODEL               (string, default "llama3.1")
 //	AI_MAX_USER_COST_USD_DAY   (float,  default 0.50)
@@ -201,6 +224,17 @@ func LoadConfig() *Config {
 		p = strings.TrimSpace(p)
 		if p != "" {
 			order = append(order, p)
+		}
+	}
+
+	geminiModelFallbacksRaw := getenvString("GEMINI_MODEL_FALLBACKS", "gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash")
+	var geminiModelFallbacks []string
+	if !strings.EqualFold(strings.TrimSpace(geminiModelFallbacksRaw), "none") {
+		for _, m := range strings.Split(geminiModelFallbacksRaw, ",") {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				geminiModelFallbacks = append(geminiModelFallbacks, m)
+			}
 		}
 	}
 
@@ -231,8 +265,9 @@ func LoadConfig() *Config {
 		GrokAPIKey: os.Getenv("GROK_API_KEY"),
 		GrokModel:  getenvString("GROK_MODEL", "grok-4-fast"),
 
-		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:  getenvString("GEMINI_MODEL", "gemini-3.5-flash"),
+		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:          getenvString("GEMINI_MODEL", "gemini-3.5-flash"),
+		GeminiModelFallbacks: geminiModelFallbacks,
 
 		OllamaBaseURL: os.Getenv("OLLAMA_BASE_URL"),
 		OllamaModel:   getenvString("OLLAMA_MODEL", "llama3.1"),

@@ -13,11 +13,11 @@ import (
 )
 
 func TestProvider_Available(t *testing.T) {
-	p := gemini.New("", "")
+	p := gemini.New("", "", nil)
 	if p.Available() {
 		t.Fatalf("expected Available() == false with no API key")
 	}
-	p2 := gemini.New("test-key", "")
+	p2 := gemini.New("test-key", "", nil)
 	if !p2.Available() {
 		t.Fatalf("expected Available() == true with an API key set")
 	}
@@ -50,7 +50,7 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-3.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash", nil)
 	p.BaseURL = server.URL
 
 	resp, err := p.Complete(context.Background(), ai.CompletionRequest{
@@ -105,7 +105,7 @@ func TestProvider_Complete_JSONModeSetsResponseMimeType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-3.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash", nil)
 	p.BaseURL = server.URL
 
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
@@ -127,7 +127,7 @@ func TestProvider_Complete_JSONModeSetsResponseMimeType(t *testing.T) {
 }
 
 func TestProvider_Complete_NoAPIKeyReturnsError(t *testing.T) {
-	p := gemini.New("", "gemini-3.5-flash")
+	p := gemini.New("", "gemini-3.5-flash", nil)
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
 		Feature:  "ai_planet_governor",
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
@@ -144,7 +144,7 @@ func TestProvider_Complete_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := gemini.New("test-key", "gemini-3.5-flash")
+	p := gemini.New("test-key", "gemini-3.5-flash", nil)
 	p.BaseURL = server.URL
 
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
@@ -153,5 +153,91 @@ func TestProvider_Complete_APIError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected an error for a 400 response")
+	}
+}
+
+// TestProvider_Complete_RetriesOnQuotaExhaustedToNextModel confirms the
+// 2026-08-02 fix: a RESOURCE_EXHAUSTED response for the primary model
+// (Google's quota-hit status, confirmed live via Render logs) should
+// make Complete retry against the next entry in ModelFallbacks instead
+// of failing the whole provider outright - free-tier quota is tracked
+// per model, not per account, so a different model is frequently still
+// usable.
+func TestProvider_Complete_RetriesOnQuotaExhaustedToNextModel(t *testing.T) {
+	var requestedModels []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Path shape is "/{model}:generateContent" per completeWithModel's
+		// endpoint format.
+		model := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), ":generateContent")
+		requestedModels = append(requestedModels, model)
+
+		if model == "gemini-3.5-flash" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error": {"message": "quota exceeded", "status": "RESOURCE_EXHAUSTED"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "hello from the fallback model"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {"promptTokenCount": 4, "candidatesTokenCount": 5}
+		}`))
+	}))
+	defer server.Close()
+
+	p := gemini.New("test-key", "gemini-3.5-flash", []string{"gemini-2.5-flash-lite", "gemini-2.5-flash"})
+	p.BaseURL = server.URL
+
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{
+		Feature:  "ai_fleet_commander",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("expected Complete to succeed via fallback model, got error: %v", err)
+	}
+	if resp.Text != "hello from the fallback model" {
+		t.Errorf("expected the fallback model's response text, got %q", resp.Text)
+	}
+	if resp.Model != "gemini-2.5-flash-lite" {
+		t.Errorf("expected resp.Model to report the model that actually answered, got %q", resp.Model)
+	}
+	wantModels := []string{"gemini-3.5-flash", "gemini-2.5-flash-lite"}
+	if strings.Join(requestedModels, ",") != strings.Join(wantModels, ",") {
+		t.Errorf("expected requests in order %v, got %v (gemini-2.5-flash should never have been tried - it stops at the first success)", wantModels, requestedModels)
+	}
+}
+
+// TestProvider_Complete_NonRetryableErrorSkipsFallbackModels confirms
+// the other half of the same fix: an error that isn't quota/overload
+// specific (e.g. a malformed request, or a bad API key) should fail
+// immediately rather than burning a request against every fallback
+// model too - that error will just as surely repeat on every model, so
+// internal/ai.Service's provider-level fallback (moving on to the next
+// *provider* entirely) should get the chance sooner, not later.
+func TestProvider_Complete_NonRetryableErrorSkipsFallbackModels(t *testing.T) {
+	var requestCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error": {"message": "invalid request", "status": "INVALID_ARGUMENT"}}`))
+	}))
+	defer server.Close()
+
+	p := gemini.New("test-key", "gemini-3.5-flash", []string{"gemini-2.5-flash-lite", "gemini-2.5-flash"})
+	p.BaseURL = server.URL
+
+	_, err := p.Complete(context.Background(), ai.CompletionRequest{
+		Feature:  "ai_fleet_commander",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected an error for a 400 response")
+	}
+	if requestCount != 1 {
+		t.Errorf("expected exactly 1 request (no fallback models attempted for a non-retryable error), got %d", requestCount)
 	}
 }

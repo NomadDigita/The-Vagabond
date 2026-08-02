@@ -1050,37 +1050,289 @@ is the suggested next pick since it follows the same single-faction-action
 pattern as research/upgrades above, not the clan-Leader-gated pattern
 diplomacy/wars/federations use.
 
-## AI faction session (2026-08-02, later same day) — exploration expeditions
-
-Continued the same session's Item 4 sweep, picking exploration
-(`exploration_sites`/`exploration_dispatches`) as the next self-contained
-item per the plan doc's own suggestion, deliberately not diplomacy (handled
-in a concurrent session).
-
-Read the real handler first (`internal/bot/handlers/exploration.go`) and
-confirmed `resolveExplorationDispatches` in `engine.go` already resolves any
-dispatch generically regardless of which encampment sent it — so the only
-code needed was the dispatch side. Added to `growAICivilizations` (4%
-chance/tick): one exploration expedition in flight at a time per Outpost,
-30 Rations + 15 Metal cost, and the same weighted reward-site roll a human
-gets (duplicated as `aiExplorationTemplates` literals, same reasoning as
-every other duplicated literal in this function). An AI faction's
-expedition resolves through the exact same tick-engine code path as a
-human's, including the first-contact discovery roll off Scout Walker count.
-
-Full mechanics and reasoning are in `AI_AND_SCOUTING_EXPANSION_PLAN.md`'s
-Item 4 section (updated in the same commit). Three new tests in a new
-`internal/engine/tick/aiexploration_test.go`:
-`TestGrowAICivilizationsCanDispatchExploration`,
-`TestGrowAICivilizationsWontDispatchExplorationConcurrently`,
-`TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies`.
-
-Verified with a real-Postgres `go build ./... && go vet ./... && go test
-./...` pass, two `-shuffle=on` reruns of `internal/engine/tick`, and a
-checksum-confirmed `go.mod`/`go.sum` restore. Checked for concurrent pushes
-to `main` before committing — none found this round.
-
 Still open in Item 4: hero recruitment/equipping, job assignments, and spy
 missions (blocked on the drones prerequisite). Job assignments suggested
 next, since it's a single-faction action like this one rather than
 clan-gated.
+
+---
+
+## 2026-08-02 — "AI console shows PLACEHOLDER despite GEMINI_API_KEY/QWEN_API_KEY set" and "zero world events have ever fired" investigation
+
+No One reported (a) the AI Developer Console still returning mock
+`PLACEHOLDER (no live AI configured)` output after setting
+`GEMINI_API_KEY` and `QWEN_API_KEY` in Render, and (b) that no world
+event (weather/etc.) notification had ever been received, in a
+deployment confirmed to never idle-sleep (external auto-ping every
+10 min).
+
+**Findings — not new bugs, both systems audited and confirmed correct
+on `main` as of this commit:**
+
+- The mock-provider-always-wins bug (`Registry.Ordered()`) was already
+  fixed 2026-07-16 in `c844746` — `mock` is unconditionally sorted
+  last, so a valid `GEMINI_API_KEY`/`QWEN_API_KEY` should be tried
+  before it with zero extra `AI_DEFAULT_PROVIDER` config needed.
+  `internal/ai/providers/gemini` and the `openaicompat`-based Qwen
+  provider's `Available()` both correctly gate on `APIKey != ""`.
+- The per-continent weather/world-event system
+  (`internal/engine/world/weather.go`, added 2026-07-28 in `5751768`/
+  `b0e4e7f`) rolls a 10% chance per continent every tick and pushes
+  both a `world_news` row and a direct `notifications.QueueToRegion`
+  push on every trigger and every clear. `QueueToRegion` re-joins
+  `encampments`/`coordinates` live at broadcast time, so a player who
+  teleported or changed region via a job is already correctly covered
+  — no separate fix needed there.
+- Root cause for both symptoms could not be confirmed without Render
+  dashboard/log access, since the code paths themselves check out.
+  Leading hypothesis: the live Render service may not be tracking
+  `main`'s current HEAD (auto-deploy off, or pointed at a stale
+  build/branch) — worth confirming the deployed commit SHA against
+  `main` and forcing a redeploy.
+
+**What shipped this round (observability, not logic changes) so this
+class of question is self-diagnosable from inside Telegram next time
+instead of requiring a fresh code audit:**
+
+- `internal/engine/tick/engine.go`: `NewEngine` now guards against a
+  non-positive `GAME_TICK_SECONDS` (previously `time.NewTicker` would
+  panic and silently take the whole bot process down at boot — never
+  confirmed to be the actual cause here, but a real latent bug found
+  during the audit). Also added `Engine.LastTickStatus()` exposing
+  when the most recent tick pass started/finished.
+- `internal/engine/world/weather.go`: `RunWeatherPass` now logs a
+  one-line heartbeat every tick summarizing every continent's outcome
+  (`active`, `rolled,miss`, or `NEW HIT`) — previously this phase only
+  logged on an actual trigger, so "the phase never runs" and "the
+  phase runs and just keeps missing" produced identical (silent) log
+  output.
+- `internal/bot/handlers/admin.go`: the "🛰️ Server Metrics" admin panel
+  now shows last-tick-started/finished timestamps and every currently
+  active world event with its remaining duration, pulled straight from
+  `world_events`. Admins can now confirm the tick engine and weather
+  system are alive without Render log access.
+
+Verified with `go build ./...`, `go vet` on the three changed packages,
+and `go test ./internal/engine/world/... ./internal/engine/tick/...`
+(both pass without a live DB). Built via a temporary
+`gopkg.in/telebot.v3 => github.com/tucnak/telebot/v3` replace directive
+per this repo's established pattern (this sandbox can't reach
+`gopkg.in`); reverted before committing, `go.mod`/`go.sum` confirmed
+unchanged in the final diff.
+
+**Still to verify (needs Render dashboard access, which Claude
+doesn't have):** confirm the deployed commit SHA matches `main` HEAD;
+tap "AI Status" and check the "Providers (fallback order)" list for
+`gemini`/`qwen`; if listed but still falling through, check Render
+logs for `ai: provider "..." failed ... — trying next fallback` to see
+the underlying auth/model error.
+
+---
+
+## 2026-08-02 (cont.) — Three confirmed root causes found via live Render logs
+
+No One captured live Render logs showing the actual errors, which
+turned static-analysis guesses into confirmed bugs. All three fixed:
+
+**1. Zero world events ever fired — CONFIRMED & FIXED.** Every roll-hit
+was failing at the DB layer: `inserting world event for Asia: pq: null
+value in column "title" of relation "world_events" violates not-null
+constraint`. Root cause: `migrations/001_initial_schema.sql` originally
+created `world_events` with `title VARCHAR(150) NOT NULL` (no default)
+and `starts_at TIMESTAMPTZ NOT NULL`. `schema.go`'s later, simplified
+4-column `CREATE TABLE IF NOT EXISTS world_events` is a no-op against a
+table that already exists, so any DB that ran migration 001 still has
+those legacy NOT NULL columns, which `RunWeatherPass`'s INSERT never
+populated. Fixed by (a) having the INSERT supply `title`/`starts_at`
+explicitly (reusing the already-computed headline text), and (b) adding
+idempotent `ADD COLUMN IF NOT EXISTS ... DEFAULT` statements to
+`schema.go` so a *fresh* DB that never saw migration 001 also has these
+columns, as a safety net.
+
+**2. `logistics_consumption` tick phase failing on every single tick —
+CONFIRMED & FIXED.** Logs: `Tick phase [logistics_consumption] failed
+to commit: could not complete operation in a failed transaction`, every
+~3-6s. Root cause: the `raids_movement_state_valid` CHECK constraint
+only allowed `('moving', 'encounter_pending', 'encounter_battle',
+'battle_recovery', 'weather_paused', 'supply_paused')` - but
+`applyActiveLogisticsConsumption` (and `combat.go`,
+`combat_road_encounters.go`, `devconsole/queries.go`) have used
+`'awaiting_reinforcement'` as a real, load-bearing movement_state since
+the resupply-convoy feature shipped. Every `UPDATE raids SET
+movement_state = 'awaiting_reinforcement'` was silently rejected by the
+constraint (errors swallowed via `_, _ = tx.ExecContext(...)`
+throughout this function), poisoning the transaction for every
+statement after it in that tick phase. Fixed by dropping the old
+constraint and adding `raids_movement_state_valid_v2` with
+`'awaiting_reinforcement'` included - given a new name specifically
+because the old one's `IF NOT EXISTS (SELECT ... conname = ...)` guard
+meant editing the list in place would never re-run against a DB that
+already had it.
+
+**3. Dispatcher burning retries on notifications no Telegram chat could
+ever receive — CONFIRMED & FIXED.** Logs: `Dispatcher giving up on
+notification ... to -908002 after 5 failed attempts` for a routine
+construction-complete alert; `telegram: chat not found (400)` repeated
+every drain cycle. AI factions get synthetic negative `user_id` values
+(`isRealPlayer(id) = id > 0`), and while `QueueToRegion`/`Queue()`
+correctly exclude them, roughly 50 of this codebase's
+`INSERT INTO notifications` call sites in `engine.go` write directly via
+raw SQL and mostly don't check `isRealPlayer` first (the construction-
+complete one at ~line 1571 confirmed as the one in these logs, but far
+from the only one). Rather than retrofitting 50 call sites, fixed
+centrally in `Dispatcher.drainQueue`: the select now filters
+`user_id > 0`, and a companion sweep marks any already-queued
+`user_id <= 0` rows `is_sent = TRUE` up front so they stop occupying
+batch slots or burning guaranteed-failed Telegram calls.
+
+**Not code bugs — account/quota issues, for awareness:**
+- Gemini: `RESOURCE_EXHAUSTED ... generativelanguage.googleapis.com/
+  generate_content_free_tier_requests, limit: 20, model:
+  gemini-3.5-flash` - the Google AI Studio free tier's actual daily
+  request cap, not something the app can work around in code.
+- Qwen: `AccessDenied.Unpurchased: Access is denied to this model` for
+  the default `qwen-plus` model - DashScope/Alibaba Cloud Model Studio
+  requires explicitly activating model access per account even with a
+  valid key; not fixable from this codebase. `QWEN_MODEL` env var can
+  point at a different, already-activated model if one exists on the
+  account.
+
+Confirms the fallback chain itself (Registry.Ordered(), mock always
+last) is genuinely working end-to-end in production: real `gemini` and
+`qwen` calls are being attempted with real errors coming back from
+Google/Alibaba, not silently skipped - it's just that both real
+providers are currently blocked for account-side reasons, so mock is
+what's left standing. This is no longer a code question.
+
+Verified: `go build ./...`, `go vet ./...`, and
+`go test ./internal/engine/... ./internal/db/...` all pass.
+
+---
+
+## 2026-08-02 (cont. 2) — Gemini per-provider model fallback + AI_DEFAULT_PROVIDER/AI_FALLBACK_PROVIDERS config note
+
+No One asked for automatic model-level fallback within Gemini ("use
+gemini, then it picks any available model itself... before falling to
+mock at all") after hitting the real 20-request/day free-tier cap on
+gemini-3.5-flash.
+
+**Shipped:** `internal/ai/providers/gemini/provider.go`'s `Complete`
+now tries `GEMINI_MODEL` first, then walks `GEMINI_MODEL_FALLBACKS`
+(new env var, comma-separated, defaults to
+`gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash`) - but
+*only* retries the next model on a quota/overload-shaped error
+(`RESOURCE_EXHAUSTED`/`UNAVAILABLE` status, or HTTP 429/503). A non-
+retryable error (bad key, malformed request) fails immediately instead
+of burning a request against every fallback model too, so
+`internal/ai.Service`'s provider-level fallback (moving on to Qwen,
+then mock) still gets to happen promptly. Google's free-tier quota is
+tracked per model, not per account, so cycling models is a genuinely
+different quota bucket each time, not a retry of the same wall.
+`GEMINI_MODEL_FALLBACKS=none` opts out entirely. Two new tests cover
+both the retry-on-quota-error and don't-retry-on-real-error paths.
+
+**Also clarified (not a bug, but worth documenting):** the Render env
+screenspot showed `AI_DEFAULT_PROVIDER=GEMINI_API_KEY` and
+`AI_FALLBACK_PROVIDERS=QWEN_API_KEY,MOCK` - both are env var *names*
+pasted in by mistake where provider *names* (`gemini`, `qwen`, `mock`)
+belong. Confirmed via `Registry.Ordered()` (internal/ai/registry.go)
+that this doesn't actually break anything: unmatched names in
+`r.order` are silently skipped, and every registered-but-unmentioned
+provider is appended afterward regardless - so gemini/qwen still get
+tried, just in Go's randomized map-iteration order between them
+instead of a deterministic one. Fixing the values to `gemini` and
+`qwen,mock` respectively isn't required, but would make Gemini
+consistently tried before Qwen on every restart rather than a coin
+flip.
+
+Verified: `go build ./...`, `go vet ./...`, and `go test ./...` (whole
+repo) all pass, including two new tests in
+`internal/ai/providers/gemini/provider_test.go`.
+
+---
+
+## 2026-08-02 (cont. 3) — HOTFIX: self-inflicted production outage from the earlier constraint fix
+
+The `raids_movement_state_valid_v2` fix shipped earlier today
+(commit 72b42ed) took the whole server down. Render's deploy logs for
+the very next deploy (unrelated Gemini commit 6f1b71b, which just
+happened to trigger the next restart) showed:
+
+```
+Fatal: Failed to execute startup database initialization script:
+pq: check constraint "raids_movement_state_valid" of relation "raids"
+is violated by some row (23514)
+```
+
+**Root cause of the outage:** the original guarded block (`IF NOT
+EXISTS (SELECT ... conname = 'raids_movement_state_valid') THEN
+CREATE ...`) was left in schema.go unchanged, sitting right next to
+the new `DROP CONSTRAINT IF EXISTS raids_movement_state_valid` +
+`raids_movement_state_valid_v2` pair added after it. Since
+`Statements()` runs on every boot: boot 1 - old constraint already
+existed (from long ago) so the guard skipped it, the DROP removed it,
+v2 was created successfully. Boot 2 (any restart after) - the guard's
+`IF NOT EXISTS` was now true again (because boot 1's DROP had removed
+it), so it tried to recreate the *old*, narrower constraint - which
+immediately failed Postgres's mandatory validate-existing-rows check
+against real `'awaiting_reinforcement'` rows already sitting in the
+table. Every single restart repeated this, so the server could never
+successfully boot again after that first deploy. **Fixed** by deleting
+the old constraint's creation entirely (nothing left in the file that
+can recreate it) instead of leaving it dangling next to the DROP.
+
+**A second, related bug caught in the same pass:** the
+`raids_movement_state_valid_v2` list was missing `'camped'`
+(`internal/engine/tick/engine.go` line ~2108), a real, in-use value -
+confirmed via `grep -rnE
+"movement_state[[:space:]]*[=:][[:space:]]*['\"][a-z_]+['\"]"` across
+the whole repo, the only reliable way to enumerate every literal value
+actually written, after eyeballing the list against memory had already
+missed one value once already that same day. Rather than trust another
+manual enumeration, the `ADD CONSTRAINT` was also switched to
+**`NOT VALID`** - the standard safe pattern for adding a CHECK
+constraint to a table with existing live data: it skips validating
+pre-existing rows at creation time entirely, while still being fully
+enforced for every INSERT/UPDATE from that point forward. This means a
+future un-enumerated legacy value can no longer take the whole server
+down at boot the way both of today's outages did.
+
+**Verification, not just "should work":** since this class of bug had
+already bitten twice in one session, installed a real local Postgres
+16 and replicated production's *exact* broken state by hand - created
+`raids` with the old narrow constraint, dropped it (simulating fix
+#1's own DROP having already run once), inserted rows with
+`'awaiting_reinforcement'` and `'camped'` (values only writable in that
+post-DROP window), then ran the actual fixed DROP+`NOT VALID` statement
+pair verbatim against it. Confirmed: constraint attaches successfully
+despite the dirty rows already present (`convalidated = f`), remains
+fully enforced going forward (a bogus value was rejected immediately
+on INSERT), and legitimate values (`'camped'`) insert fine. Also ran
+`go build ./...`, `go vet ./...`, and the full
+`internal/engine/... internal/db/...` test suites, all passing.
+
+**Lesson for next time, added here rather than just fixed in code:**
+when a CHECK constraint needs to change on a table that already has
+live production data, default to `NOT VALID` and a full repo-wide grep
+for every literal value in use, rather than trusting a guarded
+`IF NOT EXISTS` block plus manual enumeration - both failure modes
+here came from skipping one of those two things.
+
+## Merge fix (2026-08-02) — world_events.title column too short
+
+Merging two concurrently-running sessions' work onto `main` (exploration +
+research/facility-upgrades from one, diplomacy + jobs from the other)
+surfaced a real, previously-undetected bug during the merge's mandatory
+full-suite verification: `TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly`
+failed with `value too long for type character varying(150)`.
+`eventHeadline()` in `internal/engine/world/weather.go` produces strings
+over 150 characters for several event types (`solar_flare`, `emp`,
+`disease`) once the leading emoji and a longer continent name (e.g.
+`Americas`) are counted, but `world_events.title` was `VARCHAR(150)` -
+meaning every roll-hit for those event types was silently failing its
+INSERT and aborting the whole weather pass in production, on top of the
+separate root cause already documented above (the legacy-schema NOT NULL
+trap). Fixed by widening the column to `VARCHAR(300)` via an idempotent
+`ALTER COLUMN TYPE` in `schema.go` rather than shortening the (real,
+player-facing) headline copy to fit. Verified with the same
+build/vet/test/shuffled-rerun pass described in every entry above.

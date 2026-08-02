@@ -413,6 +413,19 @@ func Statements() []string {
 			is_sold BOOLEAN DEFAULT FALSE
 		);`,
 
+		// ask_type/ask_quantity generalize market_exchange beyond
+		// cash-only listings: a seller can ask for another resource
+		// instead of dollars (barter). ask_type = 'dollars' keeps the
+		// original behavior (ask_quantity mirrors price_dollars for
+		// that row); any other ask_type is a tradeable resource name
+		// and ask_quantity is how much of it is wanted. price_dollars
+		// is kept as-is for backward compatibility with existing
+		// readers (econadvisor, the AI faction auto-buy tick) rather
+		// than migrated away - see doPostListing in exchange.go.
+		`ALTER TABLE market_exchange ADD COLUMN IF NOT EXISTS ask_type VARCHAR(50) NOT NULL DEFAULT 'dollars';`,
+		`ALTER TABLE market_exchange ADD COLUMN IF NOT EXISTS ask_quantity DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+		`UPDATE market_exchange SET ask_quantity = price_dollars WHERE ask_type = 'dollars' AND ask_quantity = 0 AND price_dollars > 0;`,
+
 		`CREATE TABLE IF NOT EXISTS spy_missions (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			spy_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
@@ -509,6 +522,36 @@ func Statements() []string {
 		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS continent VARCHAR(50) NOT NULL DEFAULT 'Global';`,
 		`CREATE INDEX IF NOT EXISTS idx_world_events_continent ON world_events(continent, expires_at);`,
 
+		// Converges legacy (migrations/001_initial_schema.sql, which had
+		// title/starts_at NOT NULL with no default) and fresh
+		// (schema.go-only, no title/starts_at at all) deployments onto
+		// the same shape. See the 2026-08-02 note in
+		// internal/engine/world/weather.go's RunWeatherPass for the full
+		// story: on a legacy DB, every event-roll INSERT was silently
+		// failing on the old NOT NULL title constraint, which is why zero
+		// world events had ever actually been created despite the roll
+		// logic always being correct. The DEFAULTs here are a safety net
+		// only - RunWeatherPass populates both explicitly on every insert
+		// going forward - but they mean this migration can't reintroduce
+		// the same trap for anyone who skips straight to a fresh DB.
+		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS title VARCHAR(150) NOT NULL DEFAULT 'World Event';`,
+		`ALTER TABLE world_events ADD COLUMN IF NOT EXISTS starts_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
+
+		// Found via this session's full-suite verification
+		// (TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly):
+		// VARCHAR(150) above is too short for eventHeadline()'s longer
+		// strings (solar_flare/emp/disease, especially with a longer
+		// continent name and the leading emoji) - several event types
+		// were silently failing this INSERT with "value too long for
+		// type character varying(150)", the same class of
+		// zero-world-events bug the note above already describes for a
+		// different root cause. Widened rather than shortening the
+		// headline text, since that's real player-facing flavor copy,
+		// not something to truncate to fit an arbitrary column limit.
+		// Safe to run on every startup - ALTER COLUMN TYPE to the same
+		// or a wider VARCHAR is a no-op once already applied.
+		`ALTER TABLE world_events ALTER COLUMN title TYPE VARCHAR(300);`,
+
 		// Phase 7 (item 10): World Exploration. Sites rotate in per
 		// continent (same cadence/pattern as world_events above) and
 		// are claimed first-come-first-served by whichever outpost
@@ -580,13 +623,78 @@ func Statements() []string {
 		`ALTER TABLE raids ALTER COLUMN route_progress SET NOT NULL;`,
 		`DO $$
 		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid') THEN
-				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid
-					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused'));
-			END IF;
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_route_progress_range') THEN
 				ALTER TABLE raids ADD CONSTRAINT raids_route_progress_range
 					CHECK (route_progress >= 0.0 AND route_progress <= 1.0);
+			END IF;
+		END $$;`,
+
+		// PRODUCTION OUTAGE, self-inflicted and fixed same day (2026-08-02):
+		// this DO block used to also (IF NOT EXISTS) create
+		// raids_movement_state_valid with the narrow, pre-'awaiting_
+		// reinforcement' CHECK list. That combined with the DROP+v2 pair
+		// below it into an infinite crash loop: every boot dropped the
+		// old constraint (DROP CONSTRAINT IF EXISTS, a few statements
+		// down), which meant IF NOT EXISTS here was true again on the
+		// *next* boot, which recreated the old (narrow) constraint, which
+		// then immediately failed Postgres's mandatory validate-existing-
+		// rows check against real 'awaiting_reinforcement' rows already
+		// in the table - a fatal error (schema init treats failures as
+		// fatal and refuses to start), confirmed via Render's deploy logs
+		// ("Fatal: Failed to execute startup database initialization
+		// script: pq: check constraint "raids_movement_state_valid" of
+		// relation "raids" is violated by some row (23514)"), crash-
+		// looping the whole server on every single restart. The old
+		// constraint's creation is deleted outright (not just left
+		// unreferenced) so there is nothing left in this file that can
+		// ever recreate it. See the comment further below, on the
+		// DROP + raids_movement_state_valid_v2 pair, for the actual
+		// content fix this was meant to ship alongside.
+
+		// Confirmed live via Render logs (2026-08-02): applyActiveLogisticsConsumption
+		// in internal/engine/tick/engine.go sets movement_state =
+		// 'awaiting_reinforcement' when a marching column runs out of
+		// supplies or sustains a power outage - and that value has been used
+		// throughout the app (combat.go, combat_road_encounters.go,
+		// devconsole/queries.go) since the resupply-convoy feature shipped.
+		// But raids_movement_state_valid above never included it, only
+		// 'supply_paused' (a name nothing in the codebase actually sets) -
+		// so every one of those UPDATEs was rejected by the CHECK
+		// constraint, which poisoned the transaction and made every later
+		// statement in that same tick phase fail with "current transaction
+		// is aborted", surfacing at commit time as "logistics_consumption:
+		// could not complete operation in a failed transaction" on
+		// essentially every tick. Given as its own constraint (not an ALTER
+		// of the original) because the original is guarded by
+		// `IF NOT EXISTS (SELECT ... conname = 'raids_movement_state_valid')`
+		// - once that first ran on a given database, editing this list in
+		// place would never actually reach it again.
+		// PRODUCTION OUTAGE #2, same day (2026-08-02): the first fix
+		// above (raids_movement_state_valid_v2) still validated every
+		// existing row against its new CHECK list at creation time -
+		// standard Postgres behavior for ADD CONSTRAINT, but risky here
+		// because it means missing even one real, in-use value crashes
+		// the boot exactly like outage #1 did. That's exactly what
+		// happened: this list didn't include 'camped'
+		// (internal/engine/tick/engine.go's handleRoadIncident-style
+		// pause flow), confirmed via `grep -rnE
+		// "movement_state[[:space:]]*[=:][[:space:]]*['\"][a-z_]+['\"]"`
+		// across the whole repo - the only reliable way to enumerate
+		// every value actually in use, since eyeballing the CHECK list
+		// against memory had already missed it once. Added 'camped'
+		// AND switched to NOT VALID, which skips validating existing
+		// rows at creation time entirely (still enforced for every new
+		// INSERT/UPDATE going forward) - this is the standard safe
+		// pattern for adding a CHECK constraint to a table that already
+		// has live data, and means a future un-enumerated legacy value
+		// can no longer take the whole server down at boot the way both
+		// outages today did.
+		`ALTER TABLE raids DROP CONSTRAINT IF EXISTS raids_movement_state_valid;`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'raids_movement_state_valid_v2') THEN
+				ALTER TABLE raids ADD CONSTRAINT raids_movement_state_valid_v2
+					CHECK (movement_state IN ('moving', 'encounter_pending', 'encounter_battle', 'battle_recovery', 'weather_paused', 'supply_paused', 'awaiting_reinforcement', 'camped')) NOT VALID;
 			END IF;
 		END $$;`,
 		`CREATE INDEX IF NOT EXISTS idx_raids_marching_radar_pending
@@ -998,5 +1106,27 @@ func Statements() []string {
 		// be reset even if last_ai_spawn_at is somehow cleared.
 		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS last_ai_spawn_at TIMESTAMP WITH TIME ZONE;`,
 		`ALTER TABLE world_state ADD COLUMN IF NOT EXISTS ai_factions_spawned_count INT NOT NULL DEFAULT 0;`,
+
+		// FEEDBACK_CHANGELOG_NLP_PLAN.md milestone 2: changelog home.
+		// changelog_reads is what makes "at least 5 oldest" meaningful -
+		// see doPublishChangelog/HandleChangelogPanel in
+		// internal/bot/handlers/changelog.go for the full reasoning: a
+		// brand-new or returning player has a backlog of entries they've
+		// never seen, and showing oldest-unread-first means they catch
+		// up in chronological order instead of landing mid-story.
+		`CREATE TABLE IF NOT EXISTS changelog_entries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			category VARCHAR(20) NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			published_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT changelog_entries_category CHECK (category IN ('feature', 'fix', 'balance'))
+		);`,
+		`CREATE TABLE IF NOT EXISTS changelog_reads (
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			entry_id UUID NOT NULL REFERENCES changelog_entries(id) ON DELETE CASCADE,
+			read_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, entry_id)
+		);`,
 	}
 }
