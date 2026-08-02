@@ -2569,6 +2569,122 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
+		// Occasionally declare a clan war, exactly like a human Leader
+		// would via the clan panel - project owner direction
+		// 2026-08-01: "every single thing a human can do." Mirrors
+		// HandleDeclareClanWarCallback's exact mechanics (random enemy
+		// clan not already at war, 48h duration, notifies all members
+		// of both clans - real humans only, an AI member's negative
+		// telegram_id has nothing reading its notifications). Only
+		// fires if this faction actually leads a clan (role = 'Leader'
+		// in user_clans - a rank-and-file AI member declaring a war
+		// isn't a thing a human member could do either) and that clan
+		// isn't already at war. War *scoring* itself needed no new
+		// code at all - it's computed from the raids table by whoever
+		// already resolves clan_wars, and an AI-launched raid via
+		// launchAIRaid is already an ordinary raids row, so it already
+		// counts once a member's clan is at war.
+		if rand.Float64() < 0.02 {
+			var myClanID string
+			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
+				var alreadyAtWar bool
+				_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM clan_wars WHERE (clan_a_id = $1 OR clan_b_id = $1) AND status = 'active')", myClanID).Scan(&alreadyAtWar)
+				if !alreadyAtWar {
+					var enemyID, enemyName string
+					err := tx.QueryRowContext(ctx, `
+						SELECT id, name FROM clans
+						WHERE id != $1
+						AND id NOT IN (SELECT clan_a_id FROM clan_wars WHERE status = 'active' UNION SELECT clan_b_id FROM clan_wars WHERE status = 'active')
+						ORDER BY random() LIMIT 1`, myClanID).Scan(&enemyID, &enemyName)
+					if err == nil {
+						endsAt := time.Now().UTC().Add(48 * time.Hour)
+						if _, err := tx.ExecContext(ctx, "INSERT INTO clan_wars (clan_a_id, clan_b_id, ends_at) VALUES ($1, $2, $3)", myClanID, enemyID, endsAt); err == nil {
+							var myClanName string
+							_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", myClanID).Scan(&myClanName)
+							alert := fmt.Sprintf("🚨⚔️ <b>CLAN WAR DECLARED!</b> ⚔️🚨\n\n%s has declared war on your Clan! Duration: <code>48 hours</code>.\n📊 Every successful raid your Clan members win against enemy Clan members earns War Score.",
+								htmlEscapeTick(myClanName))
+							rows, _ := tx.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id IN ($1, $2)", myClanID, enemyID)
+							if rows != nil {
+								var memberIDs []int64
+								for rows.Next() {
+									var uid int64
+									if rows.Scan(&uid) == nil {
+										memberIDs = append(memberIDs, uid)
+									}
+								}
+								rows.Close()
+								for _, uid := range memberIDs {
+									if uid > 0 {
+										_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, alert)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Occasionally found or join a federation, exactly like a
+		// Clan Leader would via /fed_found or /fed_join. Mirrors
+		// HandleFoundFederation (aiFederationFoundCost Crystal, same
+		// figure as federationFoundCost in
+		// internal/bot/handlers/federation.go - duplicated as a literal
+		// rather than imported, since the tick engine deliberately
+		// doesn't depend on the bot/handlers package, same reasoning
+		// the exchange lot prices above were duplicated for) and
+		// HandleJoinFederation (free, just points the clan at an
+		// existing federation). Only fires for a Clan Leader whose clan
+		// isn't already in a federation.
+		if rand.Float64() < 0.01 {
+			var myClanID string
+			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
+				var existingFed sql.NullString
+				_ = tx.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", myClanID).Scan(&existingFed)
+				if !existingFed.Valid {
+					const aiFederationFoundCost = 5000.0
+					if rand.Float64() < 0.5 {
+						var crystal float64
+						_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&crystal)
+						if crystal >= aiFederationFoundCost {
+							var myClanName string
+							_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", myClanID).Scan(&myClanName)
+							var fedID string
+							if err := tx.QueryRowContext(ctx, "INSERT INTO federations (name, founder_clan_id) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING id", myClanName+" Federation", myClanID).Scan(&fedID); err == nil && fedID != "" {
+								_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", aiFederationFoundCost, f.id)
+								_, _ = tx.ExecContext(ctx, "UPDATE clans SET federation_id = $1 WHERE id = $2", fedID, myClanID)
+							}
+						}
+					} else {
+						var fedID string
+						if err := tx.QueryRowContext(ctx, "SELECT id FROM federations ORDER BY random() LIMIT 1").Scan(&fedID); err == nil {
+							_, _ = tx.ExecContext(ctx, "UPDATE clans SET federation_id = $1 WHERE id = $2", fedID, myClanID)
+						}
+					}
+				}
+			}
+		}
+
+		// Occasionally queue for the arena, exactly like a human would
+		// via /arena. Mirrors HandleJoinQueueCallback's exact mechanics
+		// (entry fee debited, an arena_queue row inserted) using the
+		// cheapest ('solo') bracket - whatever tick pass matches queued
+		// players needs no AI-specific handling, since this is just
+		// another user_id sitting in the same queue.
+		if rand.Float64() < 0.02 {
+			var alreadyQueued bool
+			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM arena_queue WHERE user_id = $1)", f.userID).Scan(&alreadyQueued)
+			if !alreadyQueued {
+				const aiArenaSoloEntryFee = 50.0
+				var dollars float64
+				_ = tx.QueryRowContext(ctx, "SELECT COALESCE(dollars,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&dollars)
+				if dollars >= aiArenaSoloEntryFee {
+					_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", aiArenaSoloEntryFee, f.id)
+					_, _ = tx.ExecContext(ctx, "INSERT INTO arena_queue (user_id, bracket) VALUES ($1, 'solo') ON CONFLICT DO NOTHING", f.userID)
+				}
+			}
+		}
+
 		// Occasionally list surplus resources on the exchange, exactly
 		// like a human would via /exchange - project owner direction
 		// 2026-08-01: AI factions should "literally do every single

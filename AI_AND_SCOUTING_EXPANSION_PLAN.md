@@ -229,7 +229,7 @@ several Scout Walkers riding together on any one of those three.
   notifications in quick succession rather than one combined message.
   Worth revisiting if that turns out to feel spammy in practice.
 
-## Item 4: AI factions actively using the rest of the game (market listing + buying + clan create/apply done; the rest remains a much larger, separate effort)
+## Item 4: AI factions actively using the rest of the game (market listing/buying, clans, clan wars, federations, arena queueing done; the rest remains a much larger, separate effort)
 
 **Status: partially built - market listing (2026-08-01), then market
 buying + clan creation/application added the same day after the project
@@ -270,20 +270,53 @@ before.
   needs a direct answer on what "upgrades" means (the existing
   garrison-building roll, or the human research/building-upgrade tree in
   `internal/game/researchplanner`) before anyone builds it.
+- **Clan wars: done.** Also in `growAICivilizations` (2% chance/tick,
+  only for a faction with `role = 'Leader'` in `user_clans` - a
+  rank-and-file AI member can't declare war, matching the human
+  "Leaders only" rule), mirrors `HandleDeclareClanWarCallback` exactly:
+  picks a random enemy clan not already at war, 48h duration, notifies
+  all members of both clans (real humans only). War *scoring* itself
+  needed zero new code - it's computed from the `raids` table by
+  whatever already resolves `clan_wars`, and an AI-launched raid via
+  `launchAIRaid` was already an ordinary `raids` row, so it already
+  counted once this shipped. New tests:
+  `TestGrowAICivilizationsCanDeclareClanWar`,
+  `TestGrowAICivilizationsWontDeclareWarWhenNotLeader`.
+- **Federations: done.** Also in `growAICivilizations` (1% chance/tick,
+  Leader-only, only when the clan isn't already federated), 50/50
+  between founding (mirrors `HandleFoundFederation`: costs
+  5000 Crystal - the constant is duplicated as a literal rather than
+  imported from `internal/bot/handlers/federation.go`, since the tick
+  engine deliberately doesn't depend on the `bot/handlers` package, the
+  same reasoning the exchange lot prices were duplicated for) and
+  joining an existing one (mirrors `HandleJoinFederation`: free, just
+  points the clan at it). New test:
+  `TestGrowAICivilizationsCanFoundOrJoinFederation`.
+- **Arena queueing: done.** Also in `growAICivilizations` (2%
+  chance/tick), mirrors `HandleJoinQueueCallback`'s exact mechanics
+  (entry fee debited, an `arena_queue` row inserted) using the cheapest
+  `'solo'` bracket. New test:
+  `TestGrowAICivilizationsCanQueueForArena`.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
-  as before. Updated inventory of what's still missing, now that buying
-  and clans are done: research/building upgrades, hero recruitment and
-  equipping, job assignments, clan wars (an AI faction can now join or
-  lead a clan, but doesn't yet participate in `clan_wars`), diplomacy
-  actions, arena queueing, spy missions, and exploration
-  (`exploration_sites` - distinct from the `scout_missions` Item 3
-  covers). Each remains its own subsystem needing its own read-the-
-  handler-first pass, exactly like market buying and clans just got.
-- **Suggested next subsystem**: with clan membership now real, **clan
-  wars** is the most natural next step (a faction that just joined or
-  led a clan currently can't participate in the wars that clan fights) -
-  but confirm with the project owner before starting, same as always.
+  as before. Updated inventory of what's still missing, now that buying,
+  clans, clan wars, federations, and arena queueing are done:
+  research/building upgrades, hero recruitment and equipping, job
+  assignments, diplomacy actions (`internal/bot/handlers/diplomacy.go` -
+  alliance/NAP pacts between clans, distinct from clan wars), spy
+  missions (`HandleSpyCallback` - blocked on AI factions not currently
+  building the "Spy Device" drones a spy mission requires; would need
+  `growAICivilizations` to also build drones first, or a different
+  resourcing path), and exploration (`exploration_sites` - distinct from
+  the `scout_missions` Item 3 covers). Each remains its own subsystem
+  needing its own read-the-handler-first pass, exactly like every item
+  above got.
+- **Suggested next subsystem**: diplomacy (alliance/NAP pacts) is
+  probably next-most self-contained, since it follows the same
+  clan-Leader-gated pattern as clan wars/federations above and this
+  session already read `diplomacy.go`'s function list while scoping this
+  round. Spy missions need the drones prerequisite solved first. Confirm
+  before starting, same as always.
 
 
 
@@ -302,14 +335,14 @@ before.
    so its effects can be observed cleanly before anything else compounds
    on top.
 4. Item 4 (AI factions using the rest of the game) - **market listing,
-   market buying, and clan creation/application done** (listing merged
-   with Item 1; buying and clans added the same day after direct
-   follow-up); everything else in Item 4 (research/building upgrades,
-   hero recruitment, jobs, clan wars, and the rest of the inventory
-   listed there) remains open and is realistically its own
-   multi-session project - see Item 4's own section for the reasoning
-   and a suggested starting point (clan wars, now that clan membership
-   is real).
+   market buying, clan creation/application, clan wars, federations, and
+   arena queueing done** (listing merged with Item 1; the rest added
+   across two follow-up rounds after direct project owner instruction);
+   everything else in Item 4 (research/building upgrades, hero
+   recruitment, jobs, diplomacy, spy missions, exploration) remains open
+   and is realistically its own multi-session project - see Item 4's own
+   section for the reasoning and a suggested starting point (diplomacy,
+   now that the clan-Leader-gated pattern is established).
 
 ## Testing strategy
 
