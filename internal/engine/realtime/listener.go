@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"runtime/debug"
 	"time"
 
 	"github.com/lib/pq"
@@ -53,7 +54,19 @@ func (l *Listener) Start() {
 					return
 				}
 				if notification != nil {
-					l.dispatchNotification(notification.Extra)
+					// Same defense-in-depth as the tick engine and
+					// notification dispatcher: an unrecovered panic in
+					// dispatchNotification would otherwise kill this
+					// goroutine and silently stop all future realtime
+					// (LISTEN/NOTIFY-driven) push events forever.
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Printf("Realtime Listener: PANIC (recovered), listener stays alive: %v\n%s", r, debug.Stack())
+							}
+						}()
+						l.dispatchNotification(notification.Extra)
+					}()
 				}
 			case <-l.stopChan:
 				_ = l.pqListener.UnlistenAll()

@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -75,10 +76,23 @@ func (e *Engine) Start() {
 	ticker := time.NewTicker(e.TickInterval)
 
 	go func() {
+		// Third layer of defense-in-depth (runPhase and ProcessTick each
+		// have their own recover() too): if a panic ever still reaches
+		// here, log it and keep the loop alive for the *next* tick
+		// instead of letting the goroutine die and silently stopping the
+		// game clock forever. Wrapped per-iteration (not once for the
+		// whole loop) so recovering doesn't exit the for/select loop.
 		for {
 			select {
 			case <-ticker.C:
-				e.ProcessTick()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Tick Engine: top-level PANIC (recovered), engine stays alive: %v\n%s", r, debug.Stack())
+						}
+					}()
+					e.ProcessTick()
+				}()
 			case <-e.stopChan:
 				ticker.Stop()
 				log.Println("Tick Engine background goroutine stopped.")
@@ -119,6 +133,24 @@ type tickPhase struct {
 // even if this one fails. Errors are logged with the phase name attached
 // for easier diagnosis.
 func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
+	// Panic recovery here is critical: previously an unrecovered panic in
+	// any single phase (e.g. a nil pointer deref while resolving one bad
+	// raid row) would propagate all the way up through ProcessTick and
+	// out of the tick engine's background goroutine in Start(), silently
+	// killing that goroutine forever. Since nothing restarts it, every
+	// subsequent tick simply never ran again - which is why players saw
+	// raids permanently stuck showing "(0s remaining)": the countdown
+	// target time had passed, but the tick pass that resolves/advances
+	// raids had stopped running entirely, so nothing ever cleared the
+	// stale state. Confirmed root cause 2026-08-03. Recovering here keeps
+	// one bad phase from taking down the whole engine, matching the
+	// isolation runPhase already provides via per-phase transactions.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Tick phase [%s] PANIC (recovered): %v\n%s", p.name, r, debug.Stack())
+		}
+	}()
+
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Tick phase [%s] failed to open transaction: %v", p.name, err)
@@ -758,6 +790,18 @@ func (e *Engine) notifyClanMembers(ctx context.Context, tx *sql.Tx, clanID, mess
 }
 
 func (e *Engine) ProcessTick() {
+	// Outer safety net in addition to runPhase's own per-phase recover().
+	// Anything in ProcessTick that runs outside a phase (e.g. the idle/
+	// auto-scan cadence checks below, or a future addition) is still
+	// inside the same background goroutine started in Start(); an
+	// unrecovered panic there would permanently stop all future ticks
+	// the same way an unrecovered per-phase panic used to.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Tick Engine: ProcessTick PANIC (recovered): %v\n%s", r, debug.Stack())
+		}
+	}()
+
 	start := time.Now()
 	log.Println("⌛ Processing master game tick pass...")
 

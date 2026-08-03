@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -59,10 +60,22 @@ func (d *Dispatcher) Start() {
 	ticker := time.NewTicker(3 * time.Second) // Polls every 3s
 
 	go func() {
+		// Same defense-in-depth as the tick engine (internal/engine/
+		// tick/engine.go): an unrecovered panic inside drainQueue would
+		// otherwise kill this goroutine permanently, silently stopping
+		// all future outbound player notifications with no crash log
+		// pointing at the cause.
 		for {
 			select {
 			case <-ticker.C:
-				d.drainQueue()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Notification Dispatcher: PANIC (recovered), dispatcher stays alive: %v\n%s", r, debug.Stack())
+						}
+					}()
+					d.drainQueue()
+				}()
 			case <-d.stopChan:
 				ticker.Stop()
 				log.Println("Notification Dispatcher stopped.")

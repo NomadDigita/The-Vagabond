@@ -1371,3 +1371,66 @@ for concurrent pushes to `main` before starting and before committing.
 This closes out every item in Item 4's original inventory except spy
 missions, which remain blocked on AI factions not building the "Spy
 Device" drones a spy mission requires.
+
+## Tick engine session (2026-08-03) — raids stuck at "(0s remaining)" root cause
+
+Player report: raids/expeditions/inbound-invasion-warning HUD entries
+were all showing "(0s remaining)" and never resolving, even though the
+displayed arrival timestamps were in the past. A prior session (not
+pushed - lost, per the recurring "push early" failure mode this doc has
+flagged before) had already diagnosed this correctly; this session
+re-derived and fixed it independently since none of that work existed on
+any remote branch.
+
+**Root cause:** `internal/engine/tick/engine.go`'s `runPhase` (which
+executes each of the ~28 per-tick phases, including raid combat
+resolution) had zero panic recovery. `ProcessTick()` itself and the
+`Start()` background goroutine that calls it on every tick also had none.
+So an unrecovered panic in *any single phase* (e.g. a nil-pointer deref
+on one malformed raid row) didn't just fail that one phase - it
+propagated all the way out of the goroutine `Start()` launches, killing
+it permanently. Nothing restarts that goroutine, so every future tick
+silently stopped firing forever. Raids whose arrival time had already
+passed stayed marked MARCHING/HALTED because the phase that would have
+resolved them never ran again - hence a countdown permanently pinned at
+"(0s remaining)" instead of either counting down or resolving.
+
+**Fix:** added three layers of defense-in-depth `recover()`, matching
+the isolation `runPhase` already provided at the transaction level:
+1. `runPhase` - recovers so one bad phase can't take down the others
+   (mirrors its existing "always returns" contract for `error`s).
+2. `ProcessTick` - outer net for anything outside the phase list (the
+   idle-miner/auto-scan cadence checks).
+3. The `Start()` ticker loop itself - recovers per-tick so even a panic
+   somehow reaching this level logs and lets the *next* tick still fire,
+   instead of ending the loop.
+
+Applied the identical pattern to the other two always-on background
+goroutines that had the same gap and the same "silently dies forever"
+failure mode: `internal/engine/notifications/notifications.go`'s
+`Dispatcher.Start()` (would have stopped all outbound player
+notifications) and `internal/engine/realtime/listener.go`'s
+`Listener.Start()` (would have stopped realtime LISTEN/NOTIFY push
+events). Left `cmd/bot/main.go`'s three goroutines alone: the Telegram
+long-poll loop already gets panic protection from
+`bot.Use(middleware.Recover(...))`, and the HTTP health server /
+keep-alive pinger goroutines already handle their own errors without a
+raw unrecovered-panic path.
+
+**Keyboard collision audit:** re-ran the existing
+`internal/bot/keyboards/navigation_test.go` collision test (added in an
+earlier session per this doc) against current `main` - it passes clean.
+The three mother/child keyboard pairs (`JobsNavigation`,
+`AdvisorsNavigation`, `ProfileNavigation`) and earlier button-collision
+fixes from that session are already merged to `main`; no new button-ID
+collisions found this pass.
+
+Verified with `go build ./... && go vet ./internal/engine/tick/...
+./internal/engine/notifications/... ./internal/engine/realtime/... && go
+test ./internal/engine/... ./internal/bot/keyboards/...` (all green) via
+a temporary local `replace gopkg.in/telebot.v3 =>
+github.com/tucnak/telebot v3.3.8+incompatible` in `go.mod`, reverted
+before committing per this doc's existing telebot-verification note.
+Pushed straight to `main` after confirming no concurrent unmerged work on
+this file (checked every `agent/*` and other open branch - all fully
+merged, zero diff from `main`).
