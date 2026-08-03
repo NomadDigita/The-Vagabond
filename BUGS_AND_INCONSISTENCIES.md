@@ -1336,3 +1336,38 @@ trap). Fixed by widening the column to `VARCHAR(300)` via an idempotent
 `ALTER COLUMN TYPE` in `schema.go` rather than shortening the (real,
 player-facing) headline copy to fit. Verified with the same
 build/vet/test/shuffled-rerun pass described in every entry above.
+
+## AI faction session (2026-08-02, continued) — Hero Commander training/healing
+
+Picked up hero recruitment/equipping, the item this plan doc's own notes
+suggested was likely the biggest remaining lift. Reading the real handler
+(`internal/bot/handlers/hero.go`) first turned up a correction to that
+assumption: there's no "recruitment" step or "equipping"/items system for
+heroes at all. Every Outpost lazily gets exactly one Hero on first panel
+view, flavor-named off the player's faction, and the only two actions are
+Train (Scrap -> XP) and Heal (Rations -> clear injuries).
+
+Added to `growAICivilizations`: a lazy hero-creation check (mirroring
+`HandleHeroPanel`'s insert-on-missing), then the same Train/Heal rolls
+`HandleHeroCallback` exposes. One deliberate AI-side addition: Heal only
+fires when the hero is actually injured, avoiding a pointless real-cost
+no-op the human UI would technically also allow but no rational AI
+"player" would choose. Left Manual Defense Garrison alone - it's a
+reservation mechanic with no gameplay effect for a faction whose garrison
+already can't be drafted from by anyone.
+
+Full mechanics and reasoning are in `AI_AND_SCOUTING_EXPANSION_PLAN.md`'s
+Item 4 section (updated in the same commit). Five new tests in a new
+`internal/engine/tick/aihero_test.go`:
+`TestGrowAICivilizationsCreatesHeroOnFirstTick`,
+`TestGrowAICivilizationsWontDuplicateHero`,
+`TestGrowAICivilizationsCanTrainHero`, `TestGrowAICivilizationsCanHealHero`,
+`TestGrowAICivilizationsWontHealAlreadyHealthyHero`.
+
+Verified with a real-Postgres `go build ./... && go vet ./... && go test
+./...` pass and two `-shuffle=on` reruns of `internal/engine/tick`. Checked
+for concurrent pushes to `main` before starting and before committing.
+
+This closes out every item in Item 4's original inventory except spy
+missions, which remain blocked on AI factions not building the "Spy
+Device" drones a spy mission requires.

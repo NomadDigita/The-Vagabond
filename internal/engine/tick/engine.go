@@ -3032,6 +3032,78 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
+		// Ensure a Hero Commander exists, then occasionally train or heal
+		// them, exactly like a human would via /hero - the last item
+		// from Item 4's inventory. Reading the real handler
+		// (internal/bot/handlers/hero.go) turned up a genuine surprise:
+		// there's no separate "recruitment" or "equipping" system at
+		// all - every Outpost lazily gets exactly one Hero on first
+		// panel view (HandleHeroPanel), flavor-named off the player's
+		// faction, and the only actions are Train (Scrap -> XP, levels
+		// at 100 XP) and Heal (Rations -> clears injuries). The
+		// "equipping" half of the open question in this plan doc was
+		// simply wrong - there's no items/inventory system for heroes
+		// to equip. (Manual Defense Garrison lives in the same handler
+		// file but is a distinct, resource-free reservation mechanic
+		// already fully expressed by aiCivilizationMaxSoldiersPerLevel/
+		// aiCivilizationMaxMechsPerLevel capping how many units an AI
+		// faction ever has to garrison in the first place - adding a
+		// garrison split on top would just move numbers between two
+		// AI-only bookkeeping columns with no gameplay effect, since
+		// nothing ever drafts *from* an AI faction's own garrison.)
+		var heroInjuries string
+		var heroExists bool
+		_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM heroes WHERE encampment_id = $1)", f.id).Scan(&heroExists)
+		if !heroExists {
+			var playerFaction string
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(faction,'') FROM users WHERE telegram_id = $1", f.userID).Scan(&playerFaction)
+			heroName, heroTrait, heroInjuriesStart, heroSuperpower := "Waste Phantom", "Salvage Specialist", "Cybernetic Hand", "⚙️ Scrap Recovery (+10% combat scrap loot)"
+			if playerFaction == "steel_vanguard" {
+				heroName, heroTrait, heroInjuriesStart, heroSuperpower = "Iron Warden", "Fortress Tactician", "Scarred Eye", "🛡️ Kinetic Barrier (Reduces incoming damage by 15%)"
+			}
+			_, _ = tx.ExecContext(ctx, `
+				INSERT INTO heroes (encampment_id, name, trait, injuries, battles_survived, superpower, level, xp)
+				VALUES ($1, $2, $3, $4, 0, $5, 1, 0)
+				ON CONFLICT (encampment_id) DO NOTHING`,
+				f.id, heroName, heroTrait, heroInjuriesStart, heroSuperpower)
+		}
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(injuries,'') FROM heroes WHERE encampment_id = $1", f.id).Scan(&heroInjuries)
+
+		if rand.Float64() < 0.03 {
+			var scrap float64
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(scrap,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&scrap)
+			const aiHeroTrainScrapCost = 50.0
+			if scrap >= aiHeroTrainScrapCost {
+				var currentLvl, currentXp int
+				_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level,1), COALESCE(xp,0) FROM heroes WHERE encampment_id = $1 FOR UPDATE", f.id).Scan(&currentLvl, &currentXp)
+				newXp := currentXp + 20
+				newLvl := currentLvl
+				if newXp >= 100 {
+					newLvl++
+					newXp = 0
+				}
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", aiHeroTrainScrapCost, f.id)
+				_, _ = tx.ExecContext(ctx, "UPDATE heroes SET level = $1, xp = $2 WHERE encampment_id = $3", newLvl, newXp, f.id)
+			}
+		}
+
+		// Heal only when actually injured - unlike Train (which a human
+		// might click repeatedly for XP with no real "waste" concept),
+		// clicking Heal on an already-'Perfect Health' Hero produces the
+		// exact same state for a real Rations cost, which is the kind
+		// of pointless spend the AI-vs-human parity goal never asked
+		// for; every prior resource-spending block in this function
+		// checks for an actual need first, same reasoning here.
+		if rand.Float64() < 0.03 && heroInjuries != "" && heroInjuries != "Perfect Health" {
+			var rations float64
+			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(rations,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&rations)
+			const aiHeroHealRationsCost = 50.0
+			if rations >= aiHeroHealRationsCost {
+				_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - $1 WHERE encampment_id = $2", aiHeroHealRationsCost, f.id)
+				_, _ = tx.ExecContext(ctx, "UPDATE heroes SET injuries = 'Perfect Health' WHERE encampment_id = $1", f.id)
+			}
+		}
+
 		// Occasionally list surplus resources on the exchange, exactly
 		// like a human would via /exchange - project owner direction
 		// 2026-08-01: AI factions should "literally do every single

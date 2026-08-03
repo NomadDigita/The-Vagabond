@@ -400,22 +400,48 @@ before.
   federation" branch could never succeed, making the true per-tick
   success rate half of what the iteration count assumed (~8%
   false-failure rate at 500 tries); raised to 3000 iterations.
+- **Hero Commander (train/heal): done, 2026-08-02.** Also in
+  `growAICivilizations`, mirrors `HandleHeroPanel`/`HandleHeroCallback`
+  exactly. Turned out this plan doc's own assumption was wrong: there's
+  no separate "recruitment" step or "equipping"/items system at all -
+  reading the real handler (`internal/bot/handlers/hero.go`) showed
+  every Outpost lazily gets exactly one Hero on first view, flavor-named
+  off the player's faction (`steel_vanguard` -> Iron Warden, else ->
+  Waste Phantom), and the only two actions are Train (50 Scrap -> +20
+  XP, levels at 100 XP, 3% chance/tick) and Heal (50 Rations -> clears
+  injuries, 3% chance/tick). AI factions get the same lazy hero-creation
+  check on their first tick, then roll the same two actions. One
+  deliberate AI-side addition on top of the human mechanics: Heal only
+  fires when the hero actually has an injury (`heroInjuries != "Perfect
+  Health"`), since re-healing an already-healthy hero produces the
+  identical end state for a real cost with zero benefit - the kind of
+  waste every other resource-spending block in this function already
+  guards against. Manual Defense Garrison (same handler file, but a
+  distinct reservation mechanic) was deliberately left alone -
+  `aiCivilizationMaxSoldiersPerLevel`/`aiCivilizationMaxMechsPerLevel`
+  already cap how many units an AI faction ever has, and nothing ever
+  drafts *from* an AI faction's own garrison, so a garrison split would
+  just move numbers between two AI-only columns with no gameplay effect.
+  New tests: `TestGrowAICivilizationsCreatesHeroOnFirstTick`,
+  `TestGrowAICivilizationsWontDuplicateHero`,
+  `TestGrowAICivilizationsCanTrainHero`,
+  `TestGrowAICivilizationsCanHealHero`,
+  `TestGrowAICivilizationsWontHealAlreadyHealthyHero`.
 - **The rest of "literally everything"/"many other" abilities: still not
   built, deliberately**, for the same one-subsystem-at-a-time reasoning
-  as before. Updated inventory of what's still missing, now that buying,
-  clans, clan wars, federations, arena queueing, research, facility
-  upgrades, exploration, diplomacy, and jobs are all done: hero
-  recruitment and equipping, and spy missions (`HandleSpyCallback` -
-  blocked on AI factions not currently building the "Spy Device" drones
-  a spy mission requires; would need `growAICivilizations` to also build
-  drones first, or a different resourcing path). Each remaining item is
-  its own subsystem needing its own read-the-handler-first pass, exactly
-  like every item above got.
-- **Suggested next subsystem**: hero recruitment/equipping hasn't had its
-  handler read yet - likely the biggest remaining lift, since equipping
-  probably touches inventory/items tables not explored by any round so
-  far. Spy missions still need the drones prerequisite solved first.
-  Confirm before starting, same as always.
+  as before. Only one item from the original inventory remains: spy
+  missions (`HandleSpyCallback` - blocked on AI factions not currently
+  building the "Spy Device" drones a spy mission requires; would need
+  `growAICivilizations` to also build drones first, or a different
+  resourcing path).
+- **Suggested next subsystem**: spy missions are the last item, but
+  genuinely blocked on the drones prerequisite - either build AI drone
+  production first (its own small subsystem, would need reading
+  whatever handler builds Spy Device drones for humans) or find a
+  different resourcing path before attempting spy missions themselves.
+  With that done, Item 4's "literally everything a human can do" ask is
+  functionally complete. Confirm direction before starting, same as
+  always.
 
 
 
@@ -438,16 +464,18 @@ before.
    market buying, clan creation/application, clan wars, federations,
    arena queueing, research tech-tree upgrades, facility upgrades,
    exploration, diplomacy (alliance/NAP pacts, plus a fix so AI raid
-   selection actually respects them), and Jobs panel actions
-   (repair/hyperspeed/sunlight/orbital maneuver/extend planet) done**
-   (listing merged with Item 1; the rest added across six follow-up
-   rounds - two after direct project owner instruction, a third
-   resolving the "unit upgrades" open question, a fourth for exploration
-   and a fourth-in-parallel for diplomacy (two sessions run
-   concurrently, merged cleanly), a fifth/sixth for jobs); everything
-   else in Item 4 (hero recruitment, spy missions) remains open and is
-   realistically its own multi-session project - see Item 4's own
-   section for the reasoning.
+   selection actually respects them), Jobs panel actions
+   (repair/hyperspeed/sunlight/orbital maneuver/extend planet), and Hero
+   Commander training/healing done** (listing merged with Item 1; the
+   rest added across seven follow-up rounds - two after direct project
+   owner instruction, a third resolving the "unit upgrades" open
+   question, a fourth for exploration and a fourth-in-parallel for
+   diplomacy (two sessions run concurrently, merged cleanly), a
+   fifth/sixth for jobs, a seventh for the Hero Commander - which also
+   corrected this doc's own earlier "equipping" assumption, since no
+   items/inventory system for heroes actually exists); only spy missions
+   remain in Item 4, blocked on the drones prerequisite - see Item 4's
+   own section for the reasoning.
 
 
 ## Testing strategy
