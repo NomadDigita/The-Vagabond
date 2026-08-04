@@ -232,12 +232,14 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 
 			// Same Hangar capacity rule enforced on the manual Recruit
 			// Soldier path (factory.go HandleCraftItemCallback):
-			// maxCapacity = 50 + hangarLvl*20, blocked once totalUnits
-			// hits that cap. The agent must not be able to auto-recruit
-			// past what a manual recruit would allow.
+			// maxCapacity = 500 + hangarLvl*200 (10x pass on the original
+			// 50 + hangarLvl*20 - level 1 now holds 700 instead of 70,
+			// level 2 holds 900 instead of 90, etc.), blocked once
+			// totalUnits hits that cap. The agent must not be able to
+			// auto-recruit past what a manual recruit would allow.
 			var hangarLvl int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", a.CampID).Scan(&hangarLvl)
-			maxCapacity := 50 + hangarLvl*20
+			maxCapacity := 500 + hangarLvl*200
 
 			var totalUnits int
 			_ = tx.QueryRowContext(ctx, `

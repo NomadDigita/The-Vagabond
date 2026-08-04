@@ -526,9 +526,12 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 	// Hangar capacity check, scaled by quantity - see the original
 	// single-unit version of this check (still the same cap formula,
 	// still the same set of columns summed) for why the cap exists.
+	// 10x pass: 500 + hangarLvl*200 (was 50 + hangarLvl*20) - keep in
+	// sync with the identical formula in engine/agent/agent.go's
+	// auto-recruit path.
 	var hangarLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", campID).Scan(&hangarLvl)
-	maxCapacity := 50 + hangarLvl*20
+	maxCapacity := 500 + hangarLvl*200
 	var totalUnits int
 	_ = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(soldiers,0)+COALESCE(drones,0)+COALESCE(mechs,0)+COALESCE(nukes,0)+COALESCE(buggies,0)+COALESCE(ships,0)+COALESCE(jets,0)+

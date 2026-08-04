@@ -201,7 +201,7 @@ func (h *CampHandler) HandleDefenseGridPanel(c telebot.Context) error {
 // buildings. Same generic modules table + HandleUpgradeCallback pipeline -
 // no new upgrade logic needed, just new type strings.
 var infrastructureModules = []defenseModule{
-	{"hangar", "🛬", "Hangar", "Increases maximum unit capacity (+20 per level)."},
+	{"hangar", "🛬", "Hangar", "Increases maximum unit capacity (+200 per level)."},
 	{"radar", "📡", "Radar", "Improves early-warning intel and counter-espionage odds."},
 	{"solar_panel", "☀️", "Solar Panel", "Generates bonus Electricity independent of your Generator."},
 	{"starport", "🚀", "Starport", "Reduces fuel cost for launching raids."},
