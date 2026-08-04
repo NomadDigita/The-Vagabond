@@ -595,6 +595,7 @@ func main() {
 	bot.Handle("🤖 AI Status", aiStatus.HandleAIStatus)
 	bot.Handle("/ai_status_toggle", aiStatus.HandleAIStatusToggle)
 	bot.Handle("/ai_probe", aiStatus.HandleAIProbe)
+	bot.Handle("🔬 AI Probe", aiStatus.HandleAIProbe)
 	bot.Handle("/ai_settings", aiStatus.HandleAISettings)
 	bot.Handle("🤖 AI Settings", aiStatus.HandleAISettings)
 	bot.Handle("/governor", governorHandler.HandleGovernor)

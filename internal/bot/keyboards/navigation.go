@@ -236,12 +236,14 @@ func AdminNavigation() *telebot.ReplyMarkup {
 	btnBalance := menu.Text("⚖️ Balance Report")
 	btnWeekly := menu.Text("📅 Weekly Report")
 	btnAIStatus := menu.Text("🤖 AI Status")
+	btnAIProbe := menu.Text("🔬 AI Probe")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnTick, btnResources),
 		menu.Row(btnMetrics, btnBalance),
 		menu.Row(btnWeekly, btnAIStatus),
+		menu.Row(btnAIProbe),
 		menu.Row(btnBack),
 	)
 
