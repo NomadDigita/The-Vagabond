@@ -1497,3 +1497,128 @@ tick going forward.
 Verified with `go build ./... && go vet ./... && go test ./...` (all
 green) via the same temporary telebot `replace` directive, reverted before
 committing (`git diff --stat go.mod go.sum` empty).
+
+---
+
+## Marches still not resolving after the resolveStalledColumns watchdog - the real root cause was the supply drain rate itself
+
+**Report:** player screenshot showed the exact same symptom as before -
+their own outbound column HALTED at "0s remaining", plus AI-faction
+inbound invasions stuck the same way, even after the watchdog above
+shipped.
+
+**Root cause (the watchdog was a real fix, but for a downstream symptom -
+this is the actual disease):** `applyActiveLogisticsConsumption` drained
+a column's field rations/ammo/electricity/logistics by a flat
+-4/-4/-3/-2 **every tick**, regardless of how long the march itself takes.
+At this deployment's real ~10s tick interval, that empties a column's
+tank in about 4 minutes - full stop, no matter whether the march is
+quoted as 15 minutes or "5d 2h remaining". So halting at
+`awaiting_reinforcement` wasn't an occasional consequence of a long
+risky campaign, it was the *guaranteed* outcome of any march longer than
+~4 minutes, for players and AI factions alike. Separately, and worse:
+the home-base "fuel shortage" delay (pushes `resolve_time` back 3 minutes
+whenever home Metal is at 0) was re-checking *current* state every tick
+instead of the zero-to-zero *transition*, so a base sitting at 0 Metal
+for any stretch stacked another 3-minute delay onto `resolve_time` every
+~10 real seconds - arrival receding into the future faster than time
+elapses, a column in that state could provably never arrive regardless
+of any watchdog, since `movement_state` never even left `'moving'`.
+
+**Fix, all in `applyActiveLogisticsConsumption`:**
+1. AI factions (`encampments.is_ai_faction = TRUE`) are now exempt from
+   both consumption paths entirely. They have no `HandleDispatchConvoy`
+   or retreat mechanism available to them (both require a real Telegram
+   sender matching `raids.attacker_id`), so subjecting them to a
+   resource-management minigame they can never play was never anything
+   but a slow-motion permanent stall.
+2. Real players' field-supply drain now scales to the column's own
+   `base_march_minutes` via `e.TickInterval`, keeping roughly a 140-220%
+   safety margin depending on the gauge - a normal, uninterrupted march
+   no longer empties its tank on a clock unrelated to the trip's actual
+   length, while a march meaningfully slowed by road encounters or
+   weather can still genuinely run dry (the intended risk, not a
+   guaranteed one).
+3. The home-Metal fuel delay now fires once per shortage (old-value>0,
+   new-value<=0 transition) instead of once per tick of an ongoing
+   shortage - no more runaway compounding.
+
+This is fully complementary to `resolveStalledColumns` above, not a
+replacement for it: that watchdog still catches (a) real players who
+genuinely ignore an alert past its grace window, and (b) every row that
+was already wedged from before this fix shipped.
+
+Verified with `go build ./... && go vet ./... && go test ./...` (all
+green) via the same temporary telebot `replace` directive, reverted
+before committing (`git diff --stat go.mod go.sum` empty).
+
+---
+
+## Convoy dispatch had no way to choose quantity or transport count
+
+**Report:** "Dispatch Convoy" always sent a hardcoded 50% supply package
+with exactly 1 Hauler + 1 Tanker - no way to send more resources, more
+transports, or preview cost before committing.
+
+**Fix:** `HandleDispatchConvoy` is now a two-step flow. The HUD's
+"Configure Convoy" button opens a new `HandleConvoyConfigPanel`
+(`\fconvoy_cfg`) that edits itself in place as the player taps: package
+size per pair (25/50/75/100%, `convoyPctOptions`) and transport pairs
+committed (1-3, `convoyMaxPairs`) - each pair contributes its package
+size to the total delivered, capped at a real 100% resupply
+(`convoyCarriedPct`), and the panel previews cost/ETA live before
+anything is spent. Cost scales via `convoyCost`: Scrap scales with both
+fill level and distance (relative to the original 50%/1-pair cost as
+baseline, so the default selection is byte-for-byte the old flat cost),
+Metal scales with pair count alone (transports' own fuel/upkeep,
+independent of how full they're loaded). Confirm hands off to the actual
+`HandleDispatchConvoy`, which now reads pct/pairs from its own callback
+args (still defaults to 50%/1 pair if invoked with just a raid ID, for
+back-compat) and requires `pairs` available Haulers *and* Tankers instead
+of a hardcoded 1 each.
+
+**Scoped out, flagged rather than silently skipped:** sending additional
+*combat* units (soldiers/mechs, not just Hauler/Tanker transports) along
+with a convoy to reinforce an already-marching column mid-route is a
+materially bigger feature - it means mutating `raid_forces` on a raid
+that's mid-flight and making sure combat-power recalculation, coop
+member accounting, and the eventual battle resolution all still line up
+correctly with a force that changed size after launch. Didn't attempt it
+here; flagging for a dedicated follow-up rather than bolting it onto the
+convoy picker.
+
+Verified with `go build ./... && go vet ./... && go test ./...` (all
+green) via the same temporary telebot `replace` directive, reverted
+before committing (`git diff --stat go.mod go.sum` empty).
+
+---
+
+## Weather system mechanical-effect audit (no code change - confirmed working as designed)
+
+**Report:** "is weather changing effects really affecting or it's just
+some noise that does nothing?"
+
+**Findings:** weather is genuinely wired into multiple systems, not
+decorative text. Confirmed live consumers of `world.ActiveEventFor` /
+`ActiveEventsByContinent`:
+- `internal/engine/resource/resource.go`: `solar_flare` doubles
+  electricity generation, `radiation_storm` halves it, `emp` zeroes it
+  outright; `disease` multiplies troop ration consumption by 1.5x.
+- `internal/engine/tick/engine.go`: `acid_rain` corrodes mech counts
+  (search `case "acid_rain":` near the mech-corrosion block), `sandstorm`
+  has its own separate handling in the road-incident severity/duration
+  tables.
+- `internal/game/roadcombat/roadcombat.go`: an active `acid_rain` raises
+  flood-incident odds, `radiation_storm` raises radiation-incident odds,
+  `emp` raises emp/storm-incident odds, `sandstorm` raises
+  sandstorm/heatwave-incident odds on any column marching through that
+  continent.
+- `internal/bot/handlers/economy.go`: `supply_crisis` is checked directly
+  for market/economy effects.
+- `internal/bot/handlers/camp.go` / `combat.go`: `acid_rain` and other
+  events are consulted for construction and raid-launch flavor plus
+  mechanical gating.
+
+No fix needed here - flagging in this doc anyway since it was asked
+directly and the answer is worth having on record for the next session
+that gets the same question.

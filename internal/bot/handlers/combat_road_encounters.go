@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
@@ -643,12 +644,15 @@ func (h *CombatHandler) resolveRoadEncounterContinue(ctx context.Context, tx *sq
 	return nil
 }
 
-// convoySupplyPackage is the fixed resupply amount a standard convoy
-// carries per field-supply gauge (rations/ammo/electricity/logistics are
-// all 0-100 scales, see attacker_* columns on raids). A real logistics
-// operation restocks a meaningful chunk, not a full instant refill - the
-// stranded column still has to make the most of it and may need a second
-// convoy on a very long remaining leg.
+// convoySupplyPackage is the default resupply amount (in the picker's
+// 25/50/75/100 tiers) a standard single-pair convoy carries per
+// field-supply gauge (rations/ammo/electricity/logistics are all 0-100
+// scales, see attacker_* columns on raids) when the player doesn't
+// change anything. A real logistics operation restocks a meaningful
+// chunk, not a full instant refill - the stranded column still has to
+// make the most of it and may need a second convoy on a very long
+// remaining leg, unless the player commits more pairs or a bigger
+// package via HandleConvoyConfigPanel below.
 const convoySupplyPackage = 50.0
 
 // convoyScrapCostBase / convoyScrapCostPerUnit price a convoy by distance:
@@ -660,21 +664,243 @@ const convoyScrapCostBase = 300.0
 const convoyScrapCostPerDistanceUnit = 4.0
 const convoyMetalCost = 150.0
 
+// convoyMaxPairs caps how many Hauler+Tanker pairs a single convoy order
+// can commit at once - the player-facing answer to "let me send more
+// units/more resources with the convoy": each additional pair both adds
+// to the total delivered (capped at a full 100% resupply) and to the
+// transports actually placed at risk if the convoy is ambushed en route.
+const convoyMaxPairs = 3
+
+// convoyPctOptions are the selectable per-pair fill tiers in
+// HandleConvoyConfigPanel.
+var convoyPctOptions = []int{25, 50, 75, 100}
+
+// convoyCarriedPct is how much of each field-supply gauge (0-100) the
+// convoy actually delivers: each committed pair contributes pct
+// percentage points, stacking up to a hard 100% cap - so 2 pairs at 50%
+// or 1 pair at 100% both deliver a full resupply, just at different
+// cost/risk trade-offs.
+func convoyCarriedPct(pct, pairs int) float64 {
+	total := float64(pct * pairs)
+	if total > 100.0 {
+		total = 100.0
+	}
+	return total
+}
+
+// convoyCost scales the base distance-priced Scrap cost by both fill
+// level (pct, relative to the original 50% baseline so the default
+// selection reproduces the original flat cost exactly) and pair count,
+// while Metal cost - modeling the transports' own fuel/upkeep - scales
+// with pair count alone, regardless of how full they're loaded.
+func convoyCost(distance float64, pct, pairs int) (scrapCost, metalCost float64) {
+	scrapCost = (convoyScrapCostBase + distance*convoyScrapCostPerDistanceUnit) * float64(pairs) * (float64(pct) / 50.0)
+	metalCost = convoyMetalCost * float64(pairs)
+	return scrapCost, metalCost
+}
+
+// convoyTargetDistance re-derives a stranded column's frozen current
+// position (same logic HandleDispatchConvoy already used) and returns
+// its distance from home - shared by the config panel (to preview cost)
+// and the actual dispatch handler (to charge the same cost it just
+// previewed).
+func (h *CombatHandler) convoyTargetDistance(ctx context.Context, targetRaidID, attackerID string) (distance float64, homeX, homeY int, targetPos roadcombat.Position, err error) {
+	var state string
+	var originX, originY, destX, destY int
+	var legStartedAt time.Time
+	var legTotalMinutes float64
+	var pausedAt sql.NullTime
+	err = h.DB.QueryRowContext(ctx, `
+		SELECT state, COALESCE(origin_x,0), COALESCE(origin_y,0), COALESCE(destination_x,0), COALESCE(destination_y,0),
+		       COALESCE(leg_started_at, created_at, CURRENT_TIMESTAMP), COALESCE(leg_total_minutes, base_march_minutes, 15.0), paused_at
+		FROM raids WHERE id = $1`, targetRaidID).Scan(
+		&state, &originX, &originY, &destX, &destY, &legStartedAt, &legTotalMinutes, &pausedAt)
+	if err != nil {
+		return 0, 0, 0, roadcombat.Position{}, err
+	}
+
+	effectiveNow := time.Now().UTC()
+	if pausedAt.Valid {
+		effectiveNow = pausedAt.Time.UTC()
+	}
+	progress := roadcombat.RouteProgress(legStartedAt.UTC(), legTotalMinutes, effectiveNow)
+	targetPos = roadcombat.CurrentPosition(state, originX, originY, destX, destY, progress)
+
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(c.x,0), COALESCE(c.y,0) FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", attackerID).Scan(&homeX, &homeY)
+	distance = roadcombat.Distance(roadcombat.Position{X: float64(homeX), Y: float64(homeY)}, targetPos)
+	return distance, homeX, homeY, targetPos, nil
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// HandleConvoyConfigPanel is the interactive picker: how much of each
+// field-supply gauge to carry per pair (25/50/75/100%) and how many
+// Hauler+Tanker pairs to commit (more pairs = more delivered, capped at
+// a full 100% resupply, and more risk if the convoy is ambushed).
+// Answers "let me choose how much to send" directly - a convoy used to
+// always be a hardcoded 50% package with exactly 1 Hauler + 1 Tanker and
+// no way to send more. Every button here re-renders this same panel with
+// the new selection except the final Confirm, which hands off to
+// HandleDispatchConvoy with the chosen pct/pairs baked into its
+// callback data.
+func (h *CombatHandler) HandleConvoyConfigPanel(c telebot.Context) error {
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid convoy order."})
+	}
+	targetRaidID := args[0]
+	pct, pairs := 50, 1
+	if len(args) >= 2 {
+		if v, convErr := strconv.Atoi(args[1]); convErr == nil {
+			pct = v
+		}
+	}
+	if len(args) >= 3 {
+		if v, convErr := strconv.Atoi(args[2]); convErr == nil {
+			pairs = v
+		}
+	}
+	if pairs < 1 {
+		pairs = 1
+	}
+	if pairs > convoyMaxPairs {
+		pairs = convoyMaxPairs
+	}
+
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid sender context."})
+	}
+
+	var attackerID, movementState string
+	_ = h.DB.QueryRowContext(ctx, "SELECT attacker_id, COALESCE(movement_state,'moving') FROM raids WHERE id = $1", targetRaidID).Scan(&attackerID, &movementState)
+	if attackerID == "" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That expedition no longer exists."})
+	}
+	var callerCampID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&callerCampID); err != nil || callerCampID != attackerID {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Only the expedition commander can configure this convoy."})
+	}
+	if movementState != "awaiting_reinforcement" {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That column is not currently awaiting reinforcement."})
+	}
+
+	var haulers, tankers int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(haulers,0), COALESCE(tankers,0) FROM workshop_inventory WHERE encampment_id = $1", attackerID).Scan(&haulers, &tankers)
+	available := haulers
+	if tankers < available {
+		available = tankers
+	}
+	if pairs > available && available > 0 {
+		pairs = available
+	}
+
+	distance, _, _, _, distErr := h.convoyTargetDistance(ctx, targetRaidID, attackerID)
+	if distErr != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Could not chart a route to that column."})
+	}
+	travelMinutes := roadcombat.ConvoyTravelMinutes(distance)
+	carried := convoyCarriedPct(pct, pairs)
+	scrapCost, metalCost := convoyCost(distance, pct, pairs)
+
+	selector := &telebot.ReplyMarkup{}
+	var pctBtns []telebot.Btn
+	for _, opt := range convoyPctOptions {
+		label := fmt.Sprintf("%d%%/pair", opt)
+		if opt == pct {
+			label = "✅ " + label
+		}
+		pctBtns = append(pctBtns, selector.Data(label, "convoy_cfg", targetRaidID, strconv.Itoa(opt), strconv.Itoa(pairs)))
+	}
+	var pairBtns []telebot.Btn
+	for p := 1; p <= convoyMaxPairs; p++ {
+		label := fmt.Sprintf("%d Pair%s", p, pluralS(p))
+		if p == pairs {
+			label = "✅ " + label
+		}
+		pairBtns = append(pairBtns, selector.Data(label, "convoy_cfg", targetRaidID, strconv.Itoa(pct), strconv.Itoa(p)))
+	}
+	// Plain (uncolored) buttons here rather than keyboards.Styled - the
+	// styled-button helper only supports SendStyled (always posts a new
+	// message, no in-place edit), and this panel needs to edit itself in
+	// place on every tap so re-selecting a tier doesn't spam a fresh
+	// message each time. The ✅/🚚/❌ prefixes carry the same meaning
+	// color would have.
+	confirmBtn := selector.Data("🚚 Confirm Dispatch", "dispatch_convoy", targetRaidID, strconv.Itoa(pct), strconv.Itoa(pairs))
+	cancelBtn := selector.Data("❌ Cancel", "convoy_cancel", targetRaidID)
+	selector.Inline(selector.Row(pctBtns...), selector.Row(pairBtns...), selector.Row(confirmBtn), selector.Row(cancelBtn))
+
+	panelText := fmt.Sprintf(
+		"🚚 %s\n"+divider+"\n"+
+			"Package: %s%% rations/ammo/electricity/logistics per pair\n"+
+			"Transports: %s Hauler+Tanker pair(s) (you have %d available)\n"+
+			"Total delivered: %s%% of each gauge (caps at 100%%)\n\n"+
+			"Cost: %s Scrap, %s Metal\n"+
+			"ETA: ~%s minutes\n\n"+
+			"%s\n"+divider,
+		htmlBold("CONFIGURE RESUPPLY CONVOY"),
+		htmlCode(strconv.Itoa(pct)), htmlCode(strconv.Itoa(pairs)), available,
+		htmlCode(fmt.Sprintf("%.0f", carried)),
+		htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)),
+		htmlCode(fmt.Sprintf("%.0f", travelMinutes)),
+		htmlItalic("Pick a package size and transport count, then confirm."),
+	)
+	return renderOrEditHTML(c, panelText, selector)
+}
+
+// HandleConvoyCancel dismisses the config panel without dispatching
+// anything or spending resources.
+func (h *CombatHandler) HandleConvoyCancel(c telebot.Context) error {
+	_ = c.Respond(&telebot.CallbackResponse{Text: "❌ Convoy order cancelled."})
+	if c.Callback() != nil {
+		return c.Edit("❌ Convoy order cancelled. No resources spent.", keyboards.MainNavigation())
+	}
+	return c.Send("❌ Convoy order cancelled. No resources spent.", keyboards.MainNavigation())
+}
+
 // HandleDispatchConvoy implements the "reinforcement resources... transported
 // by dedicated resource units" requirement: a commander with a column
 // halted at movement_state = 'awaiting_reinforcement' can send a convoy
 // from home carrying rations/ammo/electricity/logistics, gated on actually
-// having a hauler and a tanker to commit (matching the existing raid-launch
-// rule that transports must be real, staged units) and a scrap/metal cost
-// that scales with the real distance to the stranded column's current,
-// frozen position.
+// having the Hauler+Tanker pairs to commit (matching the existing
+// raid-launch rule that transports must be real, staged units) and a
+// scrap/metal cost that scales with the real distance to the stranded
+// column's current, frozen position, the chosen package size, and pair
+// count - see HandleConvoyConfigPanel, which is what actually presents
+// the picker; args[1]/args[2] (pct/pairs) arrive pre-selected from
+// there, defaulting to the original flat 50%/1-pair behavior if called
+// with just a raid ID (kept for any other caller/back-compat).
 func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 	if sender == nil || len(c.Args()) < 1 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid convoy order."})
 	}
-	targetRaidID := c.Args()[0]
+	args := c.Args()
+	targetRaidID := args[0]
+	pct, pairs := 50, 1
+	if len(args) >= 2 {
+		if v, convErr := strconv.Atoi(args[1]); convErr == nil {
+			pct = v
+		}
+	}
+	if len(args) >= 3 {
+		if v, convErr := strconv.Atoi(args[2]); convErr == nil {
+			pairs = v
+		}
+	}
+	if pairs < 1 {
+		pairs = 1
+	}
+	if pairs > convoyMaxPairs {
+		pairs = convoyMaxPairs
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -726,29 +952,30 @@ func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(c.x,0), COALESCE(c.y,0) FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", attackerID).Scan(&homeX, &homeY)
 	distance := roadcombat.Distance(roadcombat.Position{X: float64(homeX), Y: float64(homeY)}, targetPos)
 	travelMinutes := roadcombat.ConvoyTravelMinutes(distance)
-	scrapCost := convoyScrapCostBase + distance*convoyScrapCostPerDistanceUnit
+	scrapCost, metalCost := convoyCost(distance, pct, pairs)
+	carried := convoyCarriedPct(pct, pairs)
 
 	var haulers, tankers int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(haulers,0), COALESCE(tankers,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&haulers, &tankers)
-	if haulers < 1 || tankers < 1 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Convoy Requires Transports: You need at least 1 available Hauler and 1 available Tanker at home to dispatch a resupply convoy."})
+	if haulers < pairs || tankers < pairs {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Convoy Requires Transports: You need at least %d available Hauler(s) and %d available Tanker(s) at home to dispatch this convoy.", pairs, pairs)})
 	}
 
 	var homeScrap, homeMetal float64
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(scrap,0), COALESCE(metal,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", attackerID).Scan(&homeScrap, &homeMetal)
-	if homeScrap < scrapCost || homeMetal < convoyMetalCost {
-		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Insufficient Materiel: Dispatching this convoy costs %.0f Scrap and %.0f Metal.", scrapCost, convoyMetalCost)})
+	if homeScrap < scrapCost || homeMetal < metalCost {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Insufficient Materiel: This convoy costs %.0f Scrap and %.0f Metal.", scrapCost, metalCost)})
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2 WHERE encampment_id = $3", scrapCost, convoyMetalCost, attackerID)
-	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers - 1, tankers = tankers - 1 WHERE encampment_id = $1", attackerID)
+	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2 WHERE encampment_id = $3", scrapCost, metalCost, attackerID)
+	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers - $1, tankers = tankers - $1 WHERE encampment_id = $2", pairs, attackerID)
 
 	resolveTime := time.Now().UTC().Add(time.Duration(travelMinutes) * time.Minute)
 	_, _ = tx.ExecContext(ctx, `
 		INSERT INTO supply_convoys (home_encampment_id, target_raid_id, rations_carried, ammo_carried, electricity_carried, logistics_carried,
 		    haulers_committed, tankers_committed, origin_x, origin_y, destination_x, destination_y, resolve_time)
-		VALUES ($1, $2, $3, $3, $3, $3, 1, 1, $4, $5, $6, $7, $8)`,
-		attackerID, targetRaidID, convoySupplyPackage, homeX, homeY, int(math.Round(targetPos.X)), int(math.Round(targetPos.Y)), resolveTime)
+		VALUES ($1, $2, $3, $3, $3, $3, $9, $9, $4, $5, $6, $7, $8)`,
+		attackerID, targetRaidID, carried, homeX, homeY, int(math.Round(targetPos.X)), int(math.Round(targetPos.Y)), resolveTime, pairs)
 
 	if err := tx.Commit(); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Failed to dispatch convoy."})
@@ -757,10 +984,10 @@ func (h *CombatHandler) HandleDispatchConvoy(c telebot.Context) error {
 	etaMinutes := int(travelMinutes)
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🚚 Convoy dispatched!"})
 	return c.Send(fmt.Sprintf(
-		"🚚 %s\n"+divider+"\n1 Hauler + 1 Tanker committed, carrying %s%% rations/ammo/electricity/logistics.\nCost: %s Scrap, %s Metal.\nETA: ~%s minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
-		htmlBold("RESUPPLY CONVOY DISPATCHED"),
-		htmlCode(fmt.Sprintf("%.0f", convoySupplyPackage)), htmlCode(fmt.Sprintf("%.0f", scrapCost)),
-		htmlCode(fmt.Sprintf("%.0f", convoyMetalCost)), htmlCode(fmt.Sprintf("%d", etaMinutes)),
+		"🚚 %s\n"+divider+"\n%d Hauler(s) + %d Tanker(s) committed, carrying %s%% rations/ammo/electricity/logistics.\nCost: %s Scrap, %s Metal.\nETA: ~%s minutes.\n\nYour stranded column will resume its journey automatically once the convoy arrives.",
+		htmlBold("RESUPPLY CONVOY DISPATCHED"), pairs, pairs,
+		htmlCode(fmt.Sprintf("%.0f", carried)), htmlCode(fmt.Sprintf("%.0f", scrapCost)),
+		htmlCode(fmt.Sprintf("%.0f", metalCost)), htmlCode(fmt.Sprintf("%d", etaMinutes)),
 	), telebot.ModeHTML, keyboards.MainNavigation())
 }
 

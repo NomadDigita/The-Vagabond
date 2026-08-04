@@ -1213,7 +1213,7 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		       COALESCE(r.attacker_rations, 100.0), COALESCE(r.attacker_ammo, 100.0),
 		       COALESCE(r.attacker_electricity, 100.0), COALESCE(r.attacker_logistics, 100.0),
 		       COALESCE(r.base_march_minutes, 15.0), COALESCE(ed.name, 'Rogue Drone Nest'),
-		       COALESCE(r.movement_state, 'moving')
+		       COALESCE(r.movement_state, 'moving'), COALESCE(ea.is_ai_faction, FALSE)
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		LEFT JOIN encampments ed ON ed.id = r.defender_id
@@ -1238,13 +1238,14 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		baseMarchMinutes float64
 		defenderName     string
 		movementState    string
+		isAIFaction      bool
 	}
 
 	var exps []activeExp
 	for rows.Next() {
 		var ex activeExp
 		if err := rows.Scan(&ex.id, &ex.attackerID, &ex.state, &ex.resolveTime, &ex.userID,
-			&ex.rations, &ex.ammo, &ex.electricity, &ex.logistics, &ex.baseMarchMinutes, &ex.defenderName, &ex.movementState); err == nil {
+			&ex.rations, &ex.ammo, &ex.electricity, &ex.logistics, &ex.baseMarchMinutes, &ex.defenderName, &ex.movementState, &ex.isAIFaction); err == nil {
 			exps = append(exps, ex)
 		}
 	}
@@ -1255,6 +1256,28 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 			// awaiting reinforcement - the column has halted, so it isn't
 			// burning marching supplies (or re-triggering this same
 			// depletion check) until it resumes.
+			continue
+		}
+
+		// AI factions can never manage either of the two consumption
+		// pools below - HandleDispatchConvoy and the "abort" branch of
+		// HandleExpeditionActions both require a real Telegram sender
+		// whose encampment matches raids.attacker_id (see combat.go /
+		// combat_road_encounters.go), and nothing in aidecisions.go ever
+		// tops off an AI faction's home Metal or orders it a retreat.
+		// Previously this meant EVERY AI-attacker column that outran
+		// either pool was doomed one of two ways: halted forever at
+		// movement_state = 'awaiting_reinforcement' (now mitigated by
+		// resolveStalledColumns, but still a slow multi-cycle crawl), or
+		// - worse, and untouched by that watchdog since movement_state
+		// never changes - its resolve_time getting pushed 3 minutes
+		// further into the future on every ~10s tick once home Metal hit
+		// zero, a runaway loop where "arrival" recedes faster than real
+		// time passes and the raid provably never completes. Real
+		// players get a genuine logistics minigame (that's the point);
+		// AI factions were just never eligible to play it, so exempt
+		// them entirely instead of leaving a fight they can't win.
+		if ex.isAIFaction {
 			continue
 		}
 
@@ -1274,7 +1297,18 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		newMetalFuel := math.Max(metalFuel-deductMetalFuel, 0.0)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2 WHERE encampment_id = $3", newHomeRations, newMetalFuel, ex.attackerID)
 
-		if newMetalFuel <= 0 {
+		// Bugfix: this used to check newMetalFuel <= 0 (current state),
+		// which re-fired every single tick for as long as home Metal
+		// stayed at zero - stacking another 3-minute delay on top of the
+		// last one every ~10s. That's a runaway loop: resolve_time gets
+		// pushed into the future faster than real time elapses, so a
+		// column whose home base ran out of Metal and stayed there
+		// (trivially easy - Metal has plenty of other draws) could never
+		// arrive, full stop, with nothing on the radar or Expedition
+		// Control panel explaining why. Checking the old->new transition
+		// instead means the one-time "fuel shortage" penalty applies
+		// once per shortage, not once per tick of an ongoing shortage.
+		if metalFuel > 0 && newMetalFuel <= 0 {
 			delayedResolve := ex.resolveTime.UTC().Add(3 * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
 		}
@@ -1284,14 +1318,41 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		// this is what actually reflects "the army in the field is running
 		// out of what it packed for the march", and previously ammo was a
 		// dead stub that never moved off its 100.0 default.
+		//
+		// Bugfix: this used to be a flat -4/-4/-3/-2 per tick regardless
+		// of how long the march actually takes. At the ~10s real-world
+		// tick interval this game actually runs at, rations/ammo hit
+		// zero in ~4 minutes no matter what - so any march longer than
+		// that (the overwhelming majority: raids routinely quote 15m to
+		// multi-day arrivals) was *guaranteed* to halt at
+		// awaiting_reinforcement long before arriving, not as an
+		// occasional consequence of a long campaign but as the default
+		// outcome of marching at all. Scaling the drain to the column's
+		// own base_march_minutes means a normal, uninterrupted march
+		// keeps a real safety margin (supplies theoretically stretch to
+		// ~140-220% of the march's expected duration) instead of
+		// draining on a clock that has nothing to do with the trip's
+		// actual length - while a march that gets meaningfully slowed
+		// down by road encounters or weather can still genuinely run dry,
+		// which is the intended risk, not a guaranteed one.
+		tickSeconds := e.TickInterval.Seconds()
+		if tickSeconds <= 0 {
+			tickSeconds = float64(defaultTickInterval / time.Second)
+		}
+		legTicks := math.Max(1.0, math.Ceil((ex.baseMarchMinutes*60.0)/tickSeconds))
+		rationsDrainPerTick := math.Max(0.5, 100.0/(legTicks*1.4))
+		ammoDrainPerTick := rationsDrainPerTick
+		electricityDrainPerTick := math.Max(0.5, 100.0/(legTicks*1.8))
+		logisticsDrainPerTick := math.Max(0.5, 100.0/(legTicks*2.2))
+
 		oldRations := ex.rations
 		oldAmmo := ex.ammo
 		oldElectricity := ex.electricity
 		oldLogistics := ex.logistics
-		newRations := math.Max(oldRations-4.0, 0.0)
-		newAmmo := math.Max(oldAmmo-4.0, 0.0)
-		newElectricity := math.Max(oldElectricity-3.0, 0.0)
-		newLogistics := math.Max(oldLogistics-2.0, 0.0)
+		newRations := math.Max(oldRations-rationsDrainPerTick, 0.0)
+		newAmmo := math.Max(oldAmmo-ammoDrainPerTick, 0.0)
+		newElectricity := math.Max(oldElectricity-electricityDrainPerTick, 0.0)
+		newLogistics := math.Max(oldLogistics-logisticsDrainPerTick, 0.0)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1, attacker_ammo = $2, attacker_electricity = $4, attacker_logistics = $5 WHERE id = $3", newRations, newAmmo, ex.id, newElectricity, newLogistics)
 

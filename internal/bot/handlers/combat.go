@@ -297,7 +297,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 					outboundText += "   🏕️ HALTED: Temporary camp - waiting for weather conditions to clear.\n\n"
 				case "awaiting_reinforcement":
 					outboundText += "   🛑 HALTED: Out of supplies - awaiting a resupply convoy or retreat order.\n\n"
-					btnConvoy := selector.Data(fmt.Sprintf("🚚 Dispatch Convoy [%d]", index), "dispatch_convoy", rID)
+					btnConvoy := selector.Data(fmt.Sprintf("🚚 Configure Convoy [%d]", index), "convoy_cfg", rID, "50", "1")
 					buttons = append(buttons, selector.Row(btnConvoy))
 				case "encounter_pending":
 					outboundText += "   🚧 HALTED: Road contact - decide below.\n\n"

@@ -735,6 +735,8 @@ func main() {
 	bot.Handle("\froad_encounter", combat.HandleRoadEncounterCallback)
 	bot.Handle("\frbe", combat.HandleRoadBaseEncounterCallback)
 	bot.Handle("\fdispatch_convoy", combat.HandleDispatchConvoy)
+	bot.Handle("\fconvoy_cfg", combat.HandleConvoyConfigPanel)
+	bot.Handle("\fconvoy_cancel", combat.HandleConvoyCancel)
 	bot.Handle("\fcraft_item", factory.HandleCraftCallback)
 	bot.Handle("\fcraft_qty", factory.HandleCraftQuantityCallback)
 	bot.Handle("\fdeconstruct_item", deconstruct.HandleDeconstructCallback)
