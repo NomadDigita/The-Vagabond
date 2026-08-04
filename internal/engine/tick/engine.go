@@ -822,6 +822,7 @@ func (e *Engine) ProcessTick() {
 		{"road_base_encounters", e.evaluateRoadBaseEncounters},
 		{"route_weather_incidents", e.evaluateRouteWeatherIncidents},
 		{"supply_convoys", e.processSupplyConvoys},
+		{"stalled_columns", e.resolveStalledColumns},
 		{"ai_civilization_spawn", e.spawnNewAIFactions},
 		{"ai_civilization_growth", e.growAICivilizations},
 		{"ai_civilization_jobs", e.runAIJobs},
@@ -2430,6 +2431,126 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 		if isRealPlayer(userID) {
 			_ = notifications.Queue(ctx, tx, userID,
 				"📦✅ "+htmlBoldTick("CONVOY ARRIVED")+": Reinforcement supplies have reached your stranded column. The journey resumes.", "route_status")
+		}
+	}
+	return nil
+}
+
+// stalledColumnGraceAIFaction / stalledColumnGraceRealPlayer bound how long
+// a column may sit halted at movement_state = 'awaiting_reinforcement'
+// before resolveStalledColumns steps in. AI factions can NEVER dispatch a
+// convoy or order a retreat themselves (HandleDispatchConvoy and
+// HandleExpeditionActions both require a real Telegram sender whose
+// encampment matches raids.attacker_id - see combat.go / combat_road_
+// encounters.go), so without this watchdog any AI-attacker column that
+// outruns its own supplies halts permanently: resolveRaidCombats only
+// picks up rows with movement_state = 'moving', so the raid's resolve_time
+// - and therefore its "INBOUND INVASION WARNING ... (0s remaining)" radar
+// entry on the defender's side - never advances or expires again. A real
+// player's own column can ALSO be stranded indefinitely if they lack the
+// Hauler+Tanker or Scrap/Metal a convoy costs and don't notice the alert,
+// so the same watchdog applies there too, just with a much longer grace
+// window that respects the player's intended choice between "pay for a
+// convoy" and "eat the 20% scrap penalty and retreat" before acting for
+// them. This was a genuinely separate bug from the tick-engine panic fixed
+// in ADR "Fix raids stuck at (0s remaining)" - that fix stopped a dead
+// background goroutine from freezing ALL ticks; this fixes columns that
+// are correctly excluded, tick after tick, by design, with nothing ever
+// changing their excluded state. See BUGS_AND_INCONSISTENCIES.md.
+const stalledColumnGraceAIFaction = 15 * time.Minute
+const stalledColumnGraceRealPlayer = 3 * time.Hour
+
+// stalledColumnMinResupplyPct is the (partial, "just enough to move")
+// emergency resupply granted when the watchdog fires - deliberately far
+// below the 100% a real dispatched convoy delivers, so this reads as a
+// last-resort bridge rather than a free substitute for the real mechanic.
+const stalledColumnMinResupplyPct = 20.0
+
+// resolveStalledColumns is the watchdog described above: it finds every
+// column that has been sitting at movement_state = 'awaiting_reinforcement'
+// longer than its grace window, tops its field supplies up to a bare
+// minimum (mirroring the "delivered" branch of processSupplyConvoys - same
+// clock-shift approach, so leg progress and resolve_time stay coherent),
+// and lets it resume marching or returning on its own. A column with an
+// active resupply convoy already en route is left alone; that convoy will
+// resolve it first (delivered, ambushed, or missed contact) well within
+// either grace window under normal travel times.
+func (e *Engine) resolveStalledColumns(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id, r.attacker_id, r.state, ea.user_id, r.paused_at,
+		       COALESCE(ea.is_ai_faction, FALSE)
+		FROM raids r
+		JOIN encampments ea ON ea.id = r.attacker_id
+		WHERE r.movement_state = 'awaiting_reinforcement'
+		  AND r.paused_at IS NOT NULL
+		  AND (r.state = 'marching' OR r.state = 'returning')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM supply_convoys sc
+		      WHERE sc.target_raid_id = r.id AND sc.state = 'marching'
+		  )`)
+	if err != nil {
+		return fmt.Errorf("querying stalled columns: %w", err)
+	}
+
+	type stalled struct {
+		id         string
+		attackerID string
+		state      string
+		userID     int64
+		pausedAt   time.Time
+		isAI       bool
+	}
+	var candidates []stalled
+	for rows.Next() {
+		var s stalled
+		if err := rows.Scan(&s.id, &s.attackerID, &s.state, &s.userID, &s.pausedAt, &s.isAI); err == nil {
+			candidates = append(candidates, s)
+		}
+	}
+	rows.Close()
+
+	now := time.Now().UTC()
+	for _, s := range candidates {
+		grace := stalledColumnGraceRealPlayer
+		if s.isAI || !isRealPlayer(s.userID) {
+			grace = stalledColumnGraceAIFaction
+		}
+		if now.Sub(s.pausedAt.UTC()) < grace {
+			continue
+		}
+
+		clamp := func(v float64) float64 {
+			if v < stalledColumnMinResupplyPct {
+				return stalledColumnMinResupplyPct
+			}
+			return v
+		}
+		var rations, ammo, electricity, logistics float64
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_rations,0), COALESCE(attacker_ammo,0), COALESCE(attacker_electricity,0), COALESCE(attacker_logistics,0) FROM raids WHERE id = $1 FOR UPDATE", s.id).
+			Scan(&rations, &ammo, &electricity, &logistics)
+
+		_, execErr := tx.ExecContext(ctx, `
+			UPDATE raids
+			SET attacker_rations = $1, attacker_ammo = $2, attacker_electricity = $3, attacker_logistics = $4,
+			    movement_state = 'moving',
+			    high_tech_offline = FALSE, power_outage_ticks = 0,
+			    leg_started_at = leg_started_at + (CURRENT_TIMESTAMP - paused_at),
+			    resolve_time = resolve_time + (CURRENT_TIMESTAMP - paused_at),
+			    paused_at = NULL
+			WHERE id = $5`,
+			clamp(rations), clamp(ammo), clamp(electricity), clamp(logistics), s.id)
+		if execErr != nil {
+			continue
+		}
+
+		if isRealPlayer(s.userID) {
+			verb := "marching on"
+			if s.state == "returning" {
+				verb = "returning to base after"
+			}
+			_ = notifications.Queue(ctx, tx, s.userID,
+				fmt.Sprintf("🛟 %s: Your column %s its objective sat stranded too long with no resupply convoy dispatched. An emergency logistics airdrop has restored just enough supplies (%.0f%%) to get it moving again.",
+					htmlBoldTick("EMERGENCY RESUPPLY"), verb, stalledColumnMinResupplyPct), "route_status")
 		}
 	}
 	return nil

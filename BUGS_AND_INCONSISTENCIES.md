@@ -1434,3 +1434,66 @@ before committing per this doc's existing telebot-verification note.
 Pushed straight to `main` after confirming no concurrent unmerged work on
 this file (checked every `agent/*` and other open branch - all fully
 merged, zero diff from `main`).
+
+---
+
+## Stalled columns permanently stuck at "(0s remaining)" - separate bug from the panic-recovery fix above
+
+**Report:** player screenshot showed a column HALTED (`awaiting_reinforcement`,
+out of supplies) sitting at "0s remaining" on its arrival clock, *and*
+multiple simultaneous "INBOUND INVASION WARNING ... (0s remaining)" radar
+entries for AI-faction attacks that never resolved - even after the panic-
+recovery fix above was live and ticks were confirmed still running every
+~5-10s in the Render logs.
+
+**Root cause (genuinely different from the panic-recovery bug):**
+`resolveRaidCombats` only ever picks up rows where
+`COALESCE(movement_state,'moving') = 'moving'` - by design, since a column
+halted for supply/weather/road-contact reasons is meant to sit until the
+player resolves it. The two built-in unstick paths for
+`movement_state = 'awaiting_reinforcement'` are `HandleDispatchConvoy` and
+the `abort` branch of `HandleExpeditionActions` - **both require a real
+Telegram `sender` whose encampment matches `raids.attacker_id`.** AI
+factions (Phase 6, real `encampments` rows with `is_ai_faction = TRUE`)
+launch raids via `launchAIRaid` and burn supplies via the same
+`applyActiveLogisticsConsumption` phase as any player column, but nothing
+in `aidecisions.go` ever dispatches a convoy or orders a retreat for them.
+Once an AI-attacker column ran dry, it was `awaiting_reinforcement`
+*forever* - permanently excluded from `resolveRaidCombats`, its
+`resolve_time` never advancing, showing "(0s remaining)" on both the
+attacker's own radar (if a player) and every defender's "INBOUND INVASION
+WARNING" list indefinitely. A real player's own column has the same
+failure mode if they lack the Hauler+Tanker or Scrap/Metal a convoy costs
+and never notices the alert - "halts forever" either way, just with a
+human escape hatch that may go unused. `camped` (weather) and
+`encounter_pending` (road contact) halts already had their own tick-driven
+expiry (`clearRouteWeatherIncidents`, `expireRoadEncounters`); only
+`awaiting_reinforcement` had no watchdog.
+
+**Fix:** new tick phase `resolveStalledColumns`, registered right after
+`supply_convoys` (ADR-pattern: same "shift `leg_started_at`/`resolve_time`
+forward by the halted duration" approach `processSupplyConvoys` already
+uses on delivery, so leg progress stays coherent). It fires only after a
+grace window - 15 minutes for AI-faction attackers (`is_ai_faction = TRUE`
+or a non-real `user_id`, who can never act), 3 hours for real players (an
+abandonment safety net that doesn't preempt a player who's actually about
+to dispatch a convoy or retreat). Skips any column that already has a
+`supply_convoys` row `state = 'marching'` toward it, so it never races a
+real rescue in progress. Tops field supplies to a bare 20% floor (well
+below a real convoy's 100%, so this reads as "emergency airdrop", not a
+free substitute for the mechanic) and clears `movement_state` back to
+`'moving'`. Real players get a distinct "🛟 EMERGENCY RESUPPLY" notification
+explaining what happened; AI factions get none (no `isRealPlayer` -
+matches the existing notification-guard convention this file already
+documents above). No scrap penalty applied (unlike a manual `abort`) since
+this is a watchdog firing on the player's behalf, not a deliberate choice.
+
+This also retroactively un-sticks every row that was *already* wedged in
+`awaiting_reinforcement` before this fix shipped - no separate migration
+needed, since the new phase queries current DB state (specifically
+`paused_at`, already set whenever the column originally halted) on every
+tick going forward.
+
+Verified with `go build ./... && go vet ./... && go test ./...` (all
+green) via the same temporary telebot `replace` directive, reverted before
+committing (`git diff --stat go.mod go.sum` empty).
