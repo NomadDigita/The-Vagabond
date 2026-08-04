@@ -1678,3 +1678,64 @@ workaround: that workaround itself needs `sum.golang.org` and
 current network allowlist, unlike prior sessions where it worked).
 `gofmt -l` clean on every changed/added file. `git diff go.mod go.sum`
 confirmed empty (no module changes needed for this package).
+
+## AI-foundation session (2026-08-05) — /ai_probe immediately found a real bug: a dead fallback model was blocking every model after it
+
+The project owner ran the new `/ai_probe` command (previous session)
+against the live deployment. It worked exactly as designed and turned
+up a genuine, previously invisible bug on the first use: `gemini —
+FAILED ↳ gemini: api error (NOT_FOUND) on model gemini-2.5-flash-lite:
+This model models/gemini-2.5-flash-lite is no longer available to new
+users.` (Qwen still shows the already-documented
+`AccessDenied.Unpurchased` account-activation gap — unchanged, not a
+code issue.)
+
+**Confirmed via web search, not assumed:** `gemini-2.5-flash-lite` is
+genuinely retired. Per Google's own deprecations page as of this
+session, `gemini-3.5-flash` (this project's primary model) remains
+current with no shutdown date announced, and `gemini-3.1-flash-lite` is
+valid through at least May 2027; `gemini-3.6-flash` and
+`gemini-3.5-flash-lite` (a different, current model — not to be
+confused with the retired `gemini-2.5-flash-lite`) reached general
+availability around 2026-07-30 as Google's new default Flash-tier
+models.
+
+**Two real bugs, not one — fixed both:**
+
+1. **Stale fallback model list** — `gemini-2.5-flash-lite` (and the
+   equally-outdated `gemini-2.5-flash`) were still hardcoded as
+   defaults. `internal/ai/config.go`'s `GEMINI_MODEL_FALLBACKS` default
+   and `.env.example` updated to
+   `gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.1-flash-lite`.
+
+2. **The actual code bug, more important than #1: a single retired
+   model name anywhere in `ModelFallbacks` permanently blocked every
+   model listed after it.** `isRetryableModelError`
+   (`internal/ai/providers/gemini/provider.go`) only treated
+   `RESOURCE_EXHAUSTED`/`UNAVAILABLE` (quota/overload) as
+   "try the next fallback model" — `NOT_FOUND` (a retired/nonexistent
+   model ID) fell into the same bucket as a genuinely bad request
+   (`INVALID_ARGUMENT`, bad key), which correctly gives up immediately
+   rather than burning a call per fallback model. But a retired model
+   name is nothing like a bad request — it's specific to that one model
+   string, exactly like a quota error is. Added `NOT_FOUND`/404 to the
+   retryable set, so a stale entry in the fallback list is now skipped
+   over instead of masking every working model configured after it.
+   This means fix #1 above will age better too: the next time Google
+   retires a model in this list, the fallback chain degrades instead of
+   silently going fully dark again.
+
+New test `TestProvider_Complete_RetriesOnModelNotFoundToNextModel`
+reproduces the exact live failure (a `NOT_FOUND` response for one
+model, success on the next) and asserts `Complete` still succeeds via
+the later model. Existing
+`TestProvider_Complete_NonRetryableErrorSkipsFallbackModels` (asserting
+`INVALID_ARGUMENT` still fails fast, unaffected by this change) still
+passes, confirming the distinction is preserved correctly.
+
+Verified: `go build`, `go vet`, and `go test -v` clean on
+`internal/ai/...` (`internal/ai/providers/gemini` specifically, plus
+the wider `internal/ai` package — same sandbox network limitation as
+the previous session prevents building the full `cmd/bot` tree here,
+unrelated to this change). `gofmt -l` clean. `git diff go.mod go.sum`
+empty.

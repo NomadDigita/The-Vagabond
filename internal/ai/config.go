@@ -205,7 +205,7 @@ func getenvString(key, def string) string {
 //	GEMINI_API_KEY             (string, default "")
 //	GEMINI_MODEL               (string, default "gemini-3.5-flash")
 //	GEMINI_MODEL_FALLBACKS     (string, comma-separated, default
-//	                            "gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash";
+//	                            "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.1-flash-lite";
 //	                            "none" disables)
 //	OLLAMA_BASE_URL            (string, default "" — unset means disabled)
 //	OLLAMA_MODEL               (string, default "llama3.1")
@@ -227,7 +227,7 @@ func LoadConfig() *Config {
 		}
 	}
 
-	geminiModelFallbacksRaw := getenvString("GEMINI_MODEL_FALLBACKS", "gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash")
+	geminiModelFallbacksRaw := getenvString("GEMINI_MODEL_FALLBACKS", "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.1-flash-lite")
 	var geminiModelFallbacks []string
 	if !strings.EqualFold(strings.TrimSpace(geminiModelFallbacksRaw), "none") {
 		for _, m := range strings.Split(geminiModelFallbacksRaw, ",") {

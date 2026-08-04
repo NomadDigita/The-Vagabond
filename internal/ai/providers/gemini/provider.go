@@ -48,19 +48,18 @@ type Provider struct {
 // correctly report false in that case. modelFallbacks may be nil/empty;
 // see ModelFallbacks' doc comment.
 //
-// Default model note (confirmed via web search 2026-07-16, superseding
-// this package's earlier 2026-07-15 note): Google shipped an entire
-// new generation since gemini-2.5-flash was last verified as current —
-// Gemini 3.5 launched at I/O on 2026-05-19, with gemini-3.5-flash
-// reaching general availability the same day ($1.50 input / $9.00
-// output per million tokens, confirmed against a dedicated pricing
-// tracker dated 2026-05-22). gemini-2.5-flash likely still works (no
-// deprecation was found for it specifically) but is no longer the
-// current generation. Gemini 3.5 Pro is NOT yet generally available
-// as of this check — it remains in limited enterprise preview, with a
-// rumored (not Google-confirmed) July 17, 2026 GA date circulating in
-// the press. Do not configure GEMINI_MODEL=gemini-3.5-pro until that
-// is independently confirmed generally available.
+// Default model note (confirmed via web search 2026-08-05, superseding
+// this package's 2026-07-16 note): gemini-3.5-flash (this default)
+// remains current with no shutdown date announced per Google's own
+// deprecations page. Google has since shipped Gemini 3.6 Flash and
+// Gemini 3.5 Flash-Lite to general availability (~2026-07-30) as the
+// new default fallback models below, replacing the 2.5-generation
+// names this package shipped with initially - gemini-2.5-flash-lite
+// was confirmed dead in production via /ai_probe on 2026-08-05
+// ("model gemini-2.5-flash-lite is no longer available to new users"),
+// and the wider 2.0/2.5 Flash family is being wound down through 2026
+// per Google's changelog. gemini-3.1-flash-lite (the third fallback)
+// is confirmed still valid through at least May 2027.
 func New(apiKey, defaultModel string, modelFallbacks []string) *Provider {
 	if defaultModel == "" {
 		defaultModel = "gemini-3.5-flash"
@@ -156,13 +155,23 @@ func toGeminiRole(r ai.Role) string {
 // fallback model first. RESOURCE_EXHAUSTED/429 is Google's quota-hit
 // status (confirmed live via Render logs, 2026-08-02); UNAVAILABLE/503
 // is transient overload - both are specific to the model that was
-// asked for, not the account or the request.
+// asked for, not the account or the request. NOT_FOUND/404 (confirmed
+// live via /ai_probe, 2026-08-05: "model gemini-2.5-flash-lite is no
+// longer available to new users") is the same category for a different
+// reason - Google periodically retires specific model IDs, and a
+// retired *fallback* model name is a stale config value, not a request
+// problem, so the sensible behavior is to skip past it to the next
+// configured fallback rather than let one dead model name in
+// ModelFallbacks permanently block every model listed after it. This
+// only ever cycles within the caller-configured list, so a genuinely
+// wrong model name still surfaces as an error once every fallback is
+// exhausted - it just no longer masks working models later in the list.
 func isRetryableModelError(status string, httpStatusCode int) bool {
 	switch status {
-	case "RESOURCE_EXHAUSTED", "UNAVAILABLE":
+	case "RESOURCE_EXHAUSTED", "UNAVAILABLE", "NOT_FOUND":
 		return true
 	}
-	return httpStatusCode == http.StatusTooManyRequests || httpStatusCode == http.StatusServiceUnavailable
+	return httpStatusCode == http.StatusTooManyRequests || httpStatusCode == http.StatusServiceUnavailable || httpStatusCode == http.StatusNotFound
 }
 
 func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.CompletionResponse, error) {

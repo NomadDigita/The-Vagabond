@@ -241,3 +241,55 @@ func TestProvider_Complete_NonRetryableErrorSkipsFallbackModels(t *testing.T) {
 		t.Errorf("expected exactly 1 request (no fallback models attempted for a non-retryable error), got %d", requestCount)
 	}
 }
+
+// TestProvider_Complete_RetriesOnModelNotFoundToNextModel is a direct
+// regression test for the confirmed live bug (2026-08-05, via
+// /ai_probe): gemini-2.5-flash-lite, a previous default fallback
+// model, was retired by Google and started returning NOT_FOUND ("model
+// ... is no longer available to new users"). Before this fix, a
+// retired model anywhere in ModelFallbacks permanently blocked every
+// model listed after it, since NOT_FOUND wasn't treated as
+// retryable-to-next-model. A stale/retired fallback entry should be
+// skipped over, not treated the same as a genuine bad-key/malformed-
+// request failure.
+func TestProvider_Complete_RetriesOnModelNotFoundToNextModel(t *testing.T) {
+	var requestedModels []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		model := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), ":generateContent")
+		requestedModels = append(requestedModels, model)
+
+		if model == "gemini-2.5-flash-lite" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": {"message": "model models/gemini-2.5-flash-lite is no longer available to new users", "status": "NOT_FOUND"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "hello from the still-valid model"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {"promptTokenCount": 4, "candidatesTokenCount": 5}
+		}`))
+	}))
+	defer server.Close()
+
+	p := gemini.New("test-key", "gemini-2.5-flash-lite", []string{"gemini-3.6-flash"})
+	p.BaseURL = server.URL
+
+	resp, err := p.Complete(context.Background(), ai.CompletionRequest{
+		Feature:  "ai_fleet_commander",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("expected Complete to succeed via the next fallback model despite a retired primary model, got error: %v", err)
+	}
+	if resp.Model != "gemini-3.6-flash" {
+		t.Errorf("expected resp.Model to report the model that actually answered, got %q", resp.Model)
+	}
+	wantModels := []string{"gemini-2.5-flash-lite", "gemini-3.6-flash"}
+	if strings.Join(requestedModels, ",") != strings.Join(wantModels, ",") {
+		t.Errorf("expected requests in order %v, got %v", wantModels, requestedModels)
+	}
+}
