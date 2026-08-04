@@ -48,6 +48,22 @@ func (r *Registry) SetOrder(names []string) {
 // ADR-003's invariant in code.
 const mockProviderName = "mock"
 
+// AllNames returns every registered provider's name, regardless of
+// Available(), in no particular order. Unlike Ordered() (which is
+// deliberately scoped to "what Service.Complete would actually try
+// right now"), this exists for diagnostics that need to see and probe
+// a provider even when it's reporting itself unavailable — see
+// Service.ProbeAllProviders.
+func (r *Registry) AllNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Ordered returns the currently-available providers in fallback order,
 // with one hard rule enforced regardless of configured order: the
 // provider named "mock" is always placed last.

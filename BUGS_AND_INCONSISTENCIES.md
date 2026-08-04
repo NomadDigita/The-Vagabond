@@ -1622,3 +1622,59 @@ decorative text. Confirmed live consumers of `world.ActiveEventFor` /
 No fix needed here - flagging in this doc anyway since it was asked
 directly and the answer is worth having on record for the next session
 that gets the same question.
+
+## AI-foundation observability session (2026-08-04) — closing the actual gap behind the recurring "AI console still shows PLACEHOLDER" report
+
+Re-read every prior entry in this file about this symptom (2026-08-02's
+three separate rounds) before touching anything, rather than
+re-investigating from scratch. Conclusion those sessions already
+reached, confirmed again here: **this was never a code bug.** The
+2026-07-16 mock-always-last fix (`c844746`) is correct and still in
+place; live Render logs from 2026-08-02 confirmed the fallback chain
+genuinely tries Gemini and Qwen for real and gets real account-side
+errors back — Gemini's free-tier 20-requests/day cap, and Qwen/DashScope
+requiring the `qwen-plus` model to be explicitly activated on the
+account (`AccessDenied.Unpurchased`). Mock is what's correctly left
+standing after two real providers both fail for reasons outside this
+codebase.
+
+**What was actually still missing, and is now fixed:** every one of
+those investigations required live Render dashboard/log access to see
+*why* — `/ai_status`'s "Providers" list only ever showed whether a key
+was *configured* (`Available()`, i.e. `APIKey != ""`), never whether a
+call using it actually succeeds. A bad key, an exhausted quota, and an
+unpurchased model all rendered identically ("available ✅") to a
+provider that's genuinely working. That gap is why this got
+independently re-investigated multiple times instead of being
+diagnosable in one look from inside Telegram.
+
+**Shipped:** `internal/ai/probe.go`, `Service.ProbeAllProviders` — issues
+one minimal real completion call (16 max tokens, "reply OK") directly
+against every registered non-mock provider, bypassing the cache/permission
+layers (admin diagnostic, not a game feature), and returns each
+provider's exact success/failure plus the provider's own error text
+verbatim on failure. Respects the global daily budget (skips with a
+clear reason if already exhausted, rather than spending past the cap)
+and records real cost on success so repeated runs are still tracked.
+New admin command `/ai_probe` (`internal/bot/handlers/ai_status.go`,
+registered in `cmd/bot/main.go`) renders the results; `/ai_status`
+itself now points at it. Six new tests in `internal/ai/probe_test.go`
+cover: real error text surfaced (not swallowed into "unavailable"),
+success reporting, unavailable providers never actually called, mock
+excluded, cost recorded on success, and the budget-exhausted skip path.
+
+Net effect: the next time this symptom is reported, `/ai_probe` answers
+"is it a code bug, a stale deploy, or an account/quota issue, and if the
+latter, exactly which error" in one Telegram message — no Render access
+required, and no reason for a seventh investigation session to re-derive
+what the 2026-08-02 sessions already found.
+
+Verified: `go build`, `go vet`, and `go test -v` all pass clean against
+`internal/ai` (the package this change lives in — the wider
+`internal/bot/handlers`/`cmd/bot` tree cannot be built in this sandbox at
+all right now, not just via the usual telebot.v3 replace-directive
+workaround: that workaround itself needs `sum.golang.org` and
+`golang.org` for its transitive deps, and neither is in this sandbox's
+current network allowlist, unlike prior sessions where it worked).
+`gofmt -l` clean on every changed/added file. `git diff go.mod go.sum`
+confirmed empty (no module changes needed for this package).

@@ -90,6 +90,58 @@ func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 	b.WriteString(fmt.Sprintf("\nMaster switch: %v | Per-user daily cap: $%.2f | Cache TTL: %s",
 		h.Service.Config.Enabled, h.Service.Config.MaxUserCostPerDayUSD, formatDuration(time.Duration(h.Service.Config.CacheTTLSeconds)*time.Second)))
 
+	// The list above only shows whether a key is *configured*, not
+	// whether the provider actually works — a provider with a bad
+	// key, an exhausted quota, or an unpurchased model still shows up
+	// here as "available ✅" (Available() only checks for a non-empty
+	// key) and silently falls through to mock at request time. Point
+	// straight at the live diagnostic rather than let another session
+	// re-derive that gap from scratch.
+	b.WriteString("\n\nRun /ai_probe for a live test call to each provider above — it will show the exact error (quota, auth, model access, etc.) if one is silently falling back to mock.")
+
+	return c.Send(b.String())
+}
+
+// ── /ai_probe (admin only) ──────────────────────────────────────────
+//
+// Live-tests every registered, non-mock provider with one minimal
+// real completion call each and reports the exact success/failure
+// result, including the provider's own error text on failure. Unlike
+// /ai_status's "Providers" list (which only ever shows whether a key
+// is *configured*, not whether it actually works), this answers "is
+// this provider genuinely reachable and usable right now" directly
+// from Telegram — no Render dashboard/log access required. Costs
+// count against the normal daily budget; each call is capped at 16
+// output tokens, so the cost per run is negligible relative to a real
+// advisor request.
+func (h *AIStatusHandler) HandleAIProbe(c telebot.Context) error {
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	if !h.isAdmin(sender.ID) {
+		return c.Send("⛔ Administrator access required.")
+	}
+
+	_ = c.Send("🔬 Probing every configured AI provider with a live test call — this takes a few seconds…")
+
+	ctx := context.Background()
+	results := h.Service.ProbeAllProviders(ctx)
+
+	var b strings.Builder
+	b.WriteString("🔬 AI PROVIDER PROBE RESULTS\n\n")
+	if len(results) == 0 {
+		b.WriteString("No non-mock providers are registered.\n")
+	}
+	for _, r := range results {
+		if r.OK {
+			b.WriteString(fmt.Sprintf("✅ %s — OK (model: %s, %s)\n", r.Provider, r.Model, r.Latency.Round(10*time.Millisecond)))
+			continue
+		}
+		b.WriteString(fmt.Sprintf("❌ %s — FAILED\n     ↳ %s\n", r.Provider, r.Err))
+	}
+	b.WriteString("\nA ❌ here (not \"not configured\") means the key is set but the provider itself is rejecting the request — quota exhausted, model not activated on the account, bad key, etc. That exact reason is above; this is the same text a fix would otherwise require Render log access to see.")
+
 	return c.Send(b.String())
 }
 
