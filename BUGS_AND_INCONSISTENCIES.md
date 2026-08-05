@@ -1739,3 +1739,77 @@ the wider `internal/ai` package — same sandbox network limitation as
 the previous session prevents building the full `cmd/bot` tree here,
 unrelated to this change). `gofmt -l` clean. `git diff go.mod go.sum`
 empty.
+
+---
+
+## Battle reports "only ever show Soldiers/Mechs" - investigation, one real bug found, most of it working as designed
+
+**Report:** "no other units usually show [in battle reports]... does that mean other units don't engage in battles?"
+
+**Findings, in order of how surprising they were:**
+
+1. **Not a bug:** `battlereport.Render` skips any unit line with count 0. If a
+   fight only shows Soldiers/Mechs, that's genuinely all either side
+   committed - Destroyers, Bombers, Liberators, Wraiths, Battlecruisers,
+   Doomsday Rigs (attacker) and Drones, Jets, Soldiers, Mechs (defender)
+   all render correctly with real losses when present.
+2. **Not a bug, by design:** Guardian, Observer (garrison-only, never
+   leave home, show as a bonus note not a body count), Piercing Missile
+   (silo-launched siege weapon, not a marching trooper), Cargo Ships/Scout
+   (zero attack rating, pure logistics/recon) never appear as combatants.
+3. **Not a bug, by design (confirmed via content/units.go flavor text):**
+   Buggies, Clipper Ships, and Cargo Jets mobilized onto an *outbound* raid
+   are travel-only transports - "required to cross oceans", "reduces
+   travel to a flat 2h" - zero attack rating, by design, matching Buggies'
+   existing salvage-only role. They were never meant to fight when
+   mobilized offensively. (Asymmetric wrinkle worth knowing: the exact
+   same `jets` inventory column DOES act as a real combat unit,
+   contributing to `defenseForce` and taking real losses, when sitting at
+   home defending instead of mobilized on a raid - a coherent "your jets
+   scramble to intercept when they're not off on cargo duty" design, not
+   an inconsistency.) Added a `attackerNotes` line to the actual battle
+   report (`🚚 Escort: N Buggy(s), N Ship(s), N Jet(s) along for transport
+   only`) so this is explained in the report itself instead of just
+   silently omitted, and added the same "(non-combat)" qualifiers to the
+   raid draft screen's per-unit lines.
+4. **A real bug:** Nukes mobilized into a raid (`nukes_mobilized`) were
+   never used anywhere in raid combat resolution - zero attack power,
+   never in the composition/loss tallies, always returned home 100%
+   intact regardless of outcome. Retired rather than patched: Nukes
+   already have a complete, separate, well-implemented mechanic
+   (`HandleLaunchICBMCallback` / `HandleLaunchPiercingMissileCallback` via
+   the Strategic Silo - intercept odds, Nuclear Shields, structural
+   damage) that a Nuke riding along on a marching raid would only
+   duplicate and conflict with. Removed the `+Nuke`/`-Nuke` draft buttons
+   and the `nuke`/`nukes` text-shortcut alias; both `HandleAdjustDraftCallback`
+   and `handleBulkDraftCommand` now redirect to the Silo instead of
+   silently accepting a draft change that did nothing.
+
+## "There's no way to launch nukes/missiles" - systematic dead-button audit
+
+**Root cause:** ran every `bot.Handle("<text>", ...)` reply-keyboard
+registration in `main.go` against every `menu.Text("<text>")` call across
+`keyboards/` and `handlers/`. Two handlers were fully implemented,
+registered, and reachable via their exact button text in code - but that
+button text was never actually rendered on any menu a player would see:
+
+- `☢️ Strategic Silo` (`HandleSiloPanel` - nuke/piercing missile launches)
+  was only reachable by typing `/silo` blind. Nukes and Piercing Missiles
+  were never actually unlaunchable, the launch panel itself was just
+  unreachable. Added to `CombatNavigation()`.
+- `📦 Warehouse Reserves` (`HandleWarehouseReserves` - a resource-totals
+  panel) had the same problem. Added to `EconomyNavigation()`.
+
+**Bonus fix while in the Silo code:** its target-acquisition query was
+`WHERE e.id != $1 LIMIT 3` - any 3 encampments in the whole game, in
+whatever order Postgres felt like, completely bypassing the
+`encampment_discoveries` fog-of-war gate every other targeting surface in
+the game respects (`HandleRaidBoard` requires you to have scouted a
+target first). Rewrote it to match: same discovery-gated query, ordered
+by `last_seen_at DESC`, `LIMIT 5`, with an updated empty-state message
+pointing at Scan Targets / Long-Range Scouting instead of a generic
+"radar clean" line.
+
+Verified with `go build ./... && go vet ./... && go test ./...` (all
+green) via the same temporary telebot `replace` directive, reverted
+before committing (`git diff --stat go.mod go.sum` empty).

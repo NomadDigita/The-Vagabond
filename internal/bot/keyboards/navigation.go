@@ -70,6 +70,16 @@ func CombatNavigation() *telebot.ReplyMarkup {
 	btnExplore := menu.Text("🧭 World Exploration")
 	btnScout := menu.Text("🔭 Long-Range Scouting")
 	btnMap := menu.Text("🗺️ Sector Map")
+	// BUGFIX: handlers.HandleSiloPanel (nuke/piercing missile launches)
+	// was fully implemented and registered at bot.Handle("☢️ Strategic
+	// Silo", ...) in main.go, but no menu.Text() anywhere ever rendered
+	// that exact string - a systematic audit (every bot.Handle text
+	// button vs every menu.Text() call across keyboards/ and handlers/)
+	// found this was the only combat-facing dead button. The only way
+	// to reach it was typing /silo blind. Nukes and Piercing Missiles
+	// were never actually unlaunchable - the launch panel was just
+	// unreachable.
+	btnSilo := menu.Text("☢️ Strategic Silo")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
@@ -77,6 +87,7 @@ func CombatNavigation() *telebot.ReplyMarkup {
 		menu.Row(btnAutoScan, btnNews),
 		menu.Row(btnArena, btnExplore),
 		menu.Row(btnScout, btnMap),
+		menu.Row(btnSilo),
 		menu.Row(btnBack),
 	)
 
@@ -92,12 +103,17 @@ func EconomyNavigation() *telebot.ReplyMarkup {
 	btnBoard := menu.Text("📋 Clan Board")
 	btnExchange := menu.Text("💱 Market Exchange")
 	btnEther := menu.Text("🛒 Ether Shop")
+	// BUGFIX: same systematic audit as CombatNavigation's Strategic Silo
+	// button above - handlers.HandleWarehouseReserves (a straightforward
+	// resource-totals panel) was registered at bot.Handle("📦 Warehouse
+	// Reserves", ...) but never rendered on any menu.
+	btnWarehouse := menu.Text("📦 Warehouse Reserves")
 	btnBack := menu.Text("⬅️ Back to HQ")
 
 	menu.Reply(
 		menu.Row(btnVault, btnClan),
 		menu.Row(btnBoard, btnExchange),
-		menu.Row(btnEther),
+		menu.Row(btnEther, btnWarehouse),
 		menu.Row(btnBack),
 	)
 

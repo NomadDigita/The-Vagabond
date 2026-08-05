@@ -3650,8 +3650,8 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS, primaryLiberators, primaryWraiths int
-		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS, &primaryLiberators, &primaryWraiths)
+		var primarySoldiers, primaryMechs, primaryBuggies, primaryDestroyers, primaryBombers, primaryBC, primaryDS, primaryLiberators, primaryWraiths, primaryShips, primaryJets int
+		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0), COALESCE(destroyers_mobilized, 0), COALESCE(bombers_mobilized, 0), COALESCE(battlecruisers_mobilized, 0), COALESCE(deathstars_mobilized, 0), COALESCE(liberators_mobilized, 0), COALESCE(wraiths_mobilized, 0), COALESCE(ships_mobilized, 0), COALESCE(jets_mobilized, 0) FROM raid_forces WHERE raid_id = $1 FOR UPDATE", r.id).Scan(&primarySoldiers, &primaryMechs, &primaryBuggies, &primaryDestroyers, &primaryBombers, &primaryBC, &primaryDS, &primaryLiberators, &primaryWraiths, &primaryShips, &primaryJets)
 
 		type coopContributor struct {
 			encampment_id string
@@ -4243,6 +4243,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		var attackerNotes []string
 		if attackerHeroSuperpower != "" {
 			attackerNotes = append(attackerNotes, fmt.Sprintf("🎖️ Commander's Superpower: %s.", attackerHeroSuperpower))
+		}
+		// "Why don't Buggies/Ships/Jets ever show up as losses?" - they're
+		// travel-only transports (Clipper Ships cross oceans, Cargo Jets
+		// cut travel to a flat 2h, Buggies enable ground crossing +
+		// salvage), zero attack rating by design (content/units.go), not
+		// combatants that were forgotten. Surfacing them here as a plain
+		// count answers that question directly in the report itself
+		// instead of leaving their absence unexplained.
+		if primaryBuggies+primaryShips+primaryJets > 0 {
+			attackerNotes = append(attackerNotes, fmt.Sprintf("🚚 Escort: %d Buggy(s), %d Ship(s), %d Jet(s) along for transport only - non-combat, unaffected by this fight.", primaryBuggies, primaryShips, primaryJets))
 		}
 
 		report := battlereport.Round{

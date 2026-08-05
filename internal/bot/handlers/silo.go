@@ -48,12 +48,26 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 	var piercingMissiles int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE((SELECT piercing_missiles FROM workshop_inventory WHERE encampment_id = $1), 0)", campID).Scan(&piercingMissiles)
 
+	// BUGFIX: this used to be `WHERE e.id != $1 LIMIT 3` - any 3
+	// encampments in the entire game, in whatever order Postgres felt
+	// like returning them, with no relation to what this commander has
+	// actually scouted. Every other targeting surface in the game (the
+	// raid board's HandleRaidBoard, above) gates on encampment_discoveries
+	// - you have to scout a target before you can act on it, the fog-of-
+	// war rule this game is built around. The Silo was the one exception,
+	// silently bypassing it while also being effectively random about
+	// which handful of (mostly un-scouted, unreachable-by-raid) outposts
+	// it even offered. Now it shows the same discovered targets the raid
+	// board would, most-recently-scouted first.
 	queryTargets := `
-		SELECT e.id, e.name, u.first_name 
-		FROM encampments e
+		SELECT e.id, e.name, u.first_name
+		FROM encampment_discoveries d
+		JOIN encampments e ON e.id = d.target_encampment_id
 		JOIN users u ON u.telegram_id = e.user_id
-		WHERE e.id != $1
-		LIMIT 3`
+		WHERE d.observer_encampment_id = $1
+		  AND d.target_encampment_id IS NOT NULL
+		ORDER BY d.last_seen_at DESC
+		LIMIT 5`
 
 	rows, err := h.DB.QueryContext(ctx, queryTargets, campID)
 	var targetsText string
@@ -77,7 +91,7 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 			}
 		}
 		if targetsText == "" {
-			targetsText = "⚠️ " + htmlItalic("Radar Clean: No rival outposts detected in strike range.") + "\n"
+			targetsText = "⚠️ " + htmlItalic("No scouted targets on file. Use 🛰️ Scan Targets or 🔭 Long-Range Scouting to discover an outpost before you can strike it.") + "\n"
 		}
 	}
 

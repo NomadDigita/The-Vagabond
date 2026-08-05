@@ -1179,21 +1179,21 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 			"👻 Wraiths: %d / %d active\n"+
 			"🚢👑 Battlecruisers: %d / %d active\n"+
 			"🌑💀 Doomsday Rigs: %d / %d active\n"+
-			"🚗 Buggies: %d / %d active\n"+
-			"⛵ Clipper Ships: %d / %d active\n"+
-			"✈️ Cargo Jets: %d / %d active\n"+
-			"☢️ Nukes: %d / %d active\n\n"+
+			"🚗 Buggies: %d / %d active (route/travel only - non-combat)\n"+
+			"⛵ Clipper Ships: %d / %d active (ocean crossing only - non-combat)\n"+
+			"✈️ Cargo Jets: %d / %d active (fast travel only - non-combat)\n\n"+
 			"🚚 Haulers: %d / %d staged\n"+
 			"⛽ Tankers: %d / %d staged\n"+
 			"🚚 Cargo Mk I / II / III: %d/%d  %d/%d  %d/%d staged\n"+
 			"Logistics rule: stage at least one transport; owning one at home is not enough.\n\n"+
+			"☢️ Nukes are launched separately from the Strategic Silo (Combat menu), not mobilized into a raid.\n\n"+
 			"🗺️ TACTICAL ROUTING PATHS:\n"+
 			"🚀 [Direct Route] — Base travel speed. Alerts defenders.\n"+
 			"🛡️ [Safe Route] — Costs 1.5x Fuel. Travels fast (0.7x duration).\n"+
 			"🛰️ [Stealth Route] — Slow travel (1.5x duration). BYPASSES ALL RADAR WARNINGS!\n"+
 			"🎖️━━━━━━━━━━━━━━━━━━━━━━🎖️",
 		stepLabel,
-		dSols, availSoldiers, dMechs, availMechs, dDestroyers, availDestroyers, dBombers, availBombers, dLiberators, availLiberators, dWraiths, availWraiths, dBC, availBC, dDS, availDS, dBuggies, availBuggies, dShips, availShips, dJets, availJets, dNukes, availNukes,
+		dSols, availSoldiers, dMechs, availMechs, dDestroyers, availDestroyers, dBombers, availBombers, dLiberators, availLiberators, dWraiths, availWraiths, dBC, availBC, dDS, availDS, dBuggies, availBuggies, dShips, availShips, dJets, availJets,
 		dHaulers, availHaulers, dTankers, availTankers, dCargoMk1, availCargoMk1, dCargoMk2, availCargoMk2, dCargoMk3, availCargoMk3,
 	)
 
@@ -1224,8 +1224,6 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	btnMinusShip := selector.Data("⛵ -Ship", "adjust_draft", "ship", "dec")
 	btnPlusJet := selector.Data("✈️ +Jet", "adjust_draft", "jet", "inc")
 	btnMinusJet := selector.Data("✈️ -Jet", "adjust_draft", "jet", "dec")
-	btnPlusNuke := selector.Data("☢️ +Nuke", "adjust_draft", "nuke", "inc")
-	btnMinusNuke := selector.Data("☢️ -Nuke", "adjust_draft", "nuke", "dec")
 	btnPlusHauler := selector.Data("🚚 +Hauler", "adjust_draft", "hauler", "inc")
 	btnMinusHauler := selector.Data("🚚 -Hauler", "adjust_draft", "hauler", "dec")
 	btnPlusTanker := selector.Data("⛽ +Tanker", "adjust_draft", "tanker", "inc")
@@ -1254,7 +1252,6 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 		selector.Row(btnPlusBuggy, btnMinusBuggy),
 		selector.Row(btnPlusShip, btnMinusShip),
 		selector.Row(btnPlusJet, btnMinusJet),
-		selector.Row(btnPlusNuke, btnMinusNuke),
 		selector.Row(btnPlusHauler, btnMinusHauler),
 		selector.Row(btnPlusTanker, btnMinusTanker),
 		selector.Row(btnPlusCargo1, btnMinusCargo1),
@@ -1324,7 +1321,10 @@ func (h *CombatHandler) handleBulkDraftCommand(c telebot.Context, sign int) erro
 
 	unitKey, ok := draftUnitAliases[strings.ToLower(args[1])]
 	if !ok {
-		return c.Send("⚠️ Unrecognized unit. Try: soldiers, mechs, destroyers, bombers, liberators, wraiths, battlecruisers, deathstars, buggies, ships, jets, nukes")
+		return c.Send("⚠️ Unrecognized unit. Try: soldiers, mechs, destroyers, bombers, liberators, wraiths, battlecruisers, deathstars, buggies, ships, jets")
+	}
+	if unitKey == "nuke" {
+		return c.Send("☢️ Nukes don't march with a raid - use the Strategic Silo (Combat menu) to launch one directly at a scouted target instead.")
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
@@ -1407,6 +1407,20 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	sender := c.Sender()
 	unitType := c.Args()[0]
 	action := c.Args()[1]
+
+	// BUGFIX: Nukes mobilized into a marching raid (nukes_mobilized on
+	// raid_forces) were never actually used anywhere in raid combat
+	// resolution - they contributed zero attack power, never appeared in
+	// the battle report, and always returned home 100% intact regardless
+	// of outcome. Nukes' real, fully-implemented mechanic is the
+	// Strategic Silo's direct-launch strike (HandleLaunchICBMCallback) -
+	// interception odds, Nuclear Shields, structural damage, the works.
+	// Rather than inventing a second, redundant "nuke joins the raid"
+	// mechanic from scratch, retire the dead one and point players at
+	// the real one.
+	if unitType == "nuke" {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: "☢️ Nukes don't march with a raid - use the Strategic Silo (Combat menu) to launch one directly at a scouted target instead."})
+	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
