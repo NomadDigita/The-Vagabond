@@ -179,11 +179,11 @@ func FormatForTelegram(rec *Recommendation) string {
 
 	if rec.FellBackToRawText {
 		if rec.Truncated {
-			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — showing the partial reply below:") + "\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("The AI's response got cut off before it finished — tap below to expand the partial reply:") + "\n\n")
 		} else {
-			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — showing its raw reply below:") + "\n\n")
+			b.WriteString("⚠️ " + ai.HTMLItalic("Couldn't parse the AI's structured response — tap below to expand its raw reply:") + "\n\n")
 		}
-		b.WriteString(ai.HTMLPre(ai.HTMLEscape(rec.Summary)))
+		b.WriteString(ai.HTMLExpandableQuote(ai.HTMLEscape(rec.Summary)))
 		return b.String()
 	}
 

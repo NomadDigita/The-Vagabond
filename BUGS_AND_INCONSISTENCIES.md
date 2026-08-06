@@ -2033,3 +2033,47 @@ manual live test of: the NLP Confirm/Cancel cards actually disabling
 after one tap, target-matrix pagination with >5 scouted targets, the
 Scout panel's mute toggle round-tripping correctly, and HyperSpeed
 picking up a returning scout mission when no raid is active.
+
+## Interface polish pass (2026-08-06, same batch, continued) — expandable blockquotes on AI advisor raw-fallback text
+
+Follow-up to the bug batch above: researched current Telegram Bot API
+features for anything applicable given this project's telebot.v3 fork
+(v3.3.8) - `sendRichMessage`/Rich Messages (Bot API 10.1, June 2026)
+isn't exposed by this library version and would need a real library
+upgrade to adopt safely, so left alone rather than hand-rolling raw
+HTTP calls around telebot for it. Checked for `message_effect_id`
+(animated send effects) support in the vendored go-telebot fork - not
+present either.
+
+What *was* already in the codebase but under-applied: `internal/ai`'s
+`HTMLExpandableQuote` (Telegram's collapsible `<blockquote
+expandable>`, Bot API 7.3+) and `HTMLTable` helpers, already used by
+`battlereport.go` (battle debris) and `devconsole/prompt.go` (weekly
+report narratives) - but 8 of the 9 AI advisor packages
+(governor, fleetcommander, econadvisor, researchplanner,
+battleanalyst, guildassistant, galaxyadvisor, npcintel) were still
+dumping their raw-fallback text (shown when JSON parsing fails or a
+response gets truncated - see ADR-025) through plain `HTMLPre`, a
+non-collapsing monospace block, so a long raw LLM reply just sat as an
+uncollapsed wall of text. Swapped all 8 (+devconsole's remaining one)
+over to `HTMLExpandableQuote`, and updated each accompanying hint line
+from "showing ... below" to "tap below to expand ..." so the new
+tap-to-expand affordance is actually signposted rather than silent.
+
+Also checked `htmlSpoiler` (internal/bot/handlers/render.go) - defined
+with a doc comment about hiding surprise loot, but has zero call sites
+anywhere in the codebase. Left it alone rather than bolting a "mystery
+reward" mechanic onto an existing panel just to use it - that would be
+inventing a new game mechanic under the banner of "beautification,"
+which isn't what was asked for. Flagging it here as an available,
+ready-to-use helper if a real surprise-reveal mechanic (loot box,
+mystery crate, etc.) is ever designed on purpose.
+
+Verified: `go build`, `go vet`, `go test ./...` all clean (temporary
+telebot.v3 replace-directive method, `go.mod`/`go.sum` diff confirmed
+empty before commit). `gofmt -l` clean on all 9 touched `prompt.go`
+files. Could not visually confirm the collapsed/expand rendering
+against a live Telegram client in this sandbox - the HTML is
+byte-identical to the already-proven `battlereport.go`/`devconsole`
+usage of the same helper, so it's the same trusted code path, not new
+untested markup.
