@@ -269,22 +269,22 @@ func (h *ExchangeHandler) HandlePostListingCallback(c telebot.Context) error {
 	return h.HandleExchangePanel(c)
 }
 
-func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
-	ctx := context.Background()
-	sender := c.Sender()
-	if sender == nil || len(c.Args()) < 1 {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing."})
-	}
-	listingID := c.Args()[0]
-
-	var myCampID string
-	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID); err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
-	}
-
+// doBuyListing is the testable core shared by HandleBuyListingCallback
+// (buying a specific listing the player tapped in the exchange panel)
+// and doBuyMarketItem below (buying a listing found by searching, for
+// the natural-language "buy X" command - see
+// FEEDBACK_CHANGELOG_NLP_PLAN.md Milestone 3) - one code path so both
+// enforce the exact same balance/ownership/expiry checks, matching
+// doPostListing's established convention. Unchanged logic from the
+// pre-2026-08-05 HandleBuyListingCallback, just extracted so it no
+// longer needs a telebot.Context.
+//
+// Returns a plain-text or HTML-safe message (caller decides how to
+// send it) and, on failure, a non-nil error.
+func (h *ExchangeHandler) doBuyListing(ctx context.Context, myCampID, listingID string) (string, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+		return "⚠️ Transaction failed.", err
 	}
 	defer tx.Rollback()
 
@@ -299,14 +299,14 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		WHERE id = $1 FOR UPDATE`
 
 	if err := tx.QueryRowContext(ctx, query, listingID).Scan(&sellerID, &itemType, &qty, &askType, &askQty, &isSold); err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Expired: This listing is no longer available."})
+		return "❌ Expired: This listing is no longer available.", err
 	}
 
 	if isSold {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already sold."})
+		return "❌ Already sold.", errors.New("listing already sold")
 	}
 	if sellerID == myCampID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ You can't buy your own listing."})
+		return "❌ You can't buy your own listing.", errors.New("cannot buy own listing")
 	}
 
 	itemColumn, ok := marketResourceColumn(itemType)
@@ -315,7 +315,7 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		// column name into a query - shouldn't happen for anything
 		// listed through doPostListing, but a defensive floor for any
 		// older/out-of-band row.
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ This listing is no longer valid."})
+		return "❌ This listing is no longer valid.", errors.New("unrecognized item column")
 	}
 
 	askIsDollars := askType == "dollars"
@@ -323,7 +323,7 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	if !askIsDollars {
 		col, ok := marketResourceColumn(askType)
 		if !ok {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ This listing is no longer valid."})
+			return "❌ This listing is no longer valid.", errors.New("unrecognized ask column")
 		}
 		askColumn = col
 	}
@@ -333,19 +333,19 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 		var buyerDollars float64
 		_ = tx.QueryRowContext(ctx, "SELECT dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", myCampID).Scan(&buyerDollars)
 		if buyerDollars < askQty {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Cash! Need $%.0f.", askQty)})
+			return fmt.Sprintf("❌ Insufficient Cash! Need $%.0f.", askQty), errors.New("insufficient dollars")
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE resources SET dollars = dollars - $1 WHERE encampment_id = $2", askQty, myCampID); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+			return "⚠️ Transaction failed.", err
 		}
 	} else {
 		var buyerAskBalance float64
 		_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", askColumn), myCampID).Scan(&buyerAskBalance)
 		if buyerAskBalance < askQty {
-			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient %s! Need %s.", capitalizeWord(askColumn), htmlCode(fmt.Sprintf("%.0f", askQty)))})
+			return fmt.Sprintf("❌ Insufficient %s! Need %s.", capitalizeWord(askColumn), htmlCode(fmt.Sprintf("%.0f", askQty))), errors.New("insufficient ask resource")
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s - $1 WHERE encampment_id = $2", askColumn, askColumn), askQty, myCampID); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+			return "⚠️ Transaction failed.", err
 		}
 	}
 
@@ -379,9 +379,74 @@ func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
 	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sellerUserID, alertMsg)
 
 	if err := tx.Commit(); err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Transaction failed."})
+		return "⚠️ Transaction failed.", err
+	}
+
+	return fmt.Sprintf("🛍️✅ %s Bought %s %s for %s.", htmlBold("PURCHASE COMPLETE!"), htmlCode(fmt.Sprintf("%d", qty)), itemType, htmlCode(formatAsk(askType, askQty))), nil
+}
+
+func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing."})
+	}
+	listingID := c.Args()[0]
+
+	var myCampID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	if _, err := h.doBuyListing(ctx, myCampID, listingID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ That purchase couldn't be completed - it may be sold or expired."})
 	}
 	_ = c.Respond(&telebot.CallbackResponse{Text: "🛍️ Materials acquired successfully!"})
 
 	return h.HandleExchangePanel(c)
+}
+
+// doBuyMarketItem is the testable core for the natural-language "buy X"
+// command (nlpcommand.ActionBuyMarketItem, see
+// FEEDBACK_CHANGELOG_NLP_PLAN.md Milestone 3's incremental-growth
+// design). Unlike doBuyListing above (which buys one specific,
+// already-known listing), this SEARCHES existing dollar-priced
+// listings for the given resource and picks the best match, then
+// delegates to doBuyListing for the actual transaction - so both entry
+// points share identical balance/ownership/expiry enforcement.
+//
+// "Best match" = cheapest total price among listings that satisfy both
+// minQty (buy at least this much) and maxDollars (pay no more than
+// this), tie-broken by the smallest quantity (least overbuy beyond
+// what was asked for). This game's market only ever sells whole
+// listings, not partial fills (same constraint doBuyListing already
+// has), so the quantity actually bought may exceed minQty - the
+// returned message always states the real quantity and price bought,
+// never a value the caller assumed going in.
+func (h *ExchangeHandler) doBuyMarketItem(ctx context.Context, myCampID, resource string, minQty int, maxDollars float64) (string, error) {
+	column, ok := marketResourceColumn(resource)
+	if !ok {
+		return fmt.Sprintf("❌ %s isn't tradeable on the exchange - try Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(resource))), errors.New("unsupported resource")
+	}
+	if minQty <= 0 {
+		return "❌ Quantity must be positive.", errors.New("invalid quantity")
+	}
+	if maxDollars <= 0 {
+		return "❌ Budget must be positive.", errors.New("invalid budget")
+	}
+
+	var listingID string
+	err := h.DB.QueryRowContext(ctx,
+		`SELECT id FROM market_exchange
+		 WHERE item_type = $1 AND ask_type = 'dollars' AND is_sold = FALSE
+		   AND quantity >= $2 AND ask_quantity <= $3 AND seller_id != $4
+		 ORDER BY ask_quantity ASC, quantity ASC
+		 LIMIT 1`,
+		column, minQty, maxDollars, myCampID).Scan(&listingID)
+	if err != nil {
+		return fmt.Sprintf("❌ No listing currently matches - at least %s %s for $%.0f or less. Try a higher budget or check back later.",
+			htmlCode(fmt.Sprintf("%d", minQty)), capitalizeWord(column), maxDollars), errors.New("no matching listing")
+	}
+
+	return h.doBuyListing(ctx, myCampID, listingID)
 }

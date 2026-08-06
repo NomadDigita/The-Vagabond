@@ -6,10 +6,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-func TestToolDefinitions_FourActionsMatchAllowList(t *testing.T) {
+func TestToolDefinitions_FiveActionsMatchAllowList(t *testing.T) {
 	defs := ToolDefinitions()
-	if len(defs) != 4 {
-		t.Fatalf("expected 4 tool definitions, got %d", len(defs))
+	if len(defs) != 5 {
+		t.Fatalf("expected 5 tool definitions, got %d", len(defs))
 	}
 	for _, d := range defs {
 		if !Action(d.Name).Valid() {
@@ -19,7 +19,7 @@ func TestToolDefinitions_FourActionsMatchAllowList(t *testing.T) {
 }
 
 func TestActionValid(t *testing.T) {
-	valid := []Action{ActionListMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus}
+	valid := []Action{ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus}
 	for _, a := range valid {
 		if !a.Valid() {
 			t.Errorf("expected %q to be Valid()", a)
@@ -34,7 +34,7 @@ func TestActionValid(t *testing.T) {
 }
 
 func TestActionRequiresConfirmation(t *testing.T) {
-	mustConfirm := []Action{ActionListMarketItem, ActionDispatchScoutMission}
+	mustConfirm := []Action{ActionListMarketItem, ActionBuyMarketItem, ActionDispatchScoutMission}
 	for _, a := range mustConfirm {
 		if !a.RequiresConfirmation() {
 			t.Errorf("expected %q to require confirmation", a)
@@ -93,6 +93,35 @@ func TestParseResponse_BarterListing(t *testing.T) {
 	}
 	if got := result.Command.ArgFloat("ask_quantity"); got != 40000.0 {
 		t.Errorf("expected ask_quantity 40000, got %v", got)
+	}
+}
+
+// TestParseResponse_BuyMarketItem covers the 2026-08-05 addition:
+// "buy 200 metal for $500" should parse to ActionBuyMarketItem with
+// min_quantity/max_dollars, not be confused with list_market_item.
+func TestParseResponse_BuyMarketItem(t *testing.T) {
+	resp := &ai.CompletionResponse{
+		ToolCalls: []ai.ToolCall{
+			{Name: "buy_market_item", Input: map[string]any{
+				"resource": "metal", "min_quantity": 200.0, "max_dollars": 500.0,
+			}},
+		},
+	}
+	result := ParseResponse(resp)
+	if !result.Matched {
+		t.Fatal("expected Matched=true")
+	}
+	if result.Command.Action != ActionBuyMarketItem {
+		t.Errorf("expected action %q, got %q", ActionBuyMarketItem, result.Command.Action)
+	}
+	if got := result.Command.ArgString("resource"); got != "metal" {
+		t.Errorf("expected resource %q, got %q", "metal", got)
+	}
+	if got := result.Command.ArgInt("min_quantity"); got != 200 {
+		t.Errorf("expected min_quantity 200, got %d", got)
+	}
+	if got := result.Command.ArgFloat("max_dollars"); got != 500.0 {
+		t.Errorf("expected max_dollars 500.0, got %v", got)
 	}
 }
 

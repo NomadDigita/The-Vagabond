@@ -292,3 +292,75 @@ project and everything below is documented either way)
    (`ai.ToolDefinition`/`ToolCall`) has never been exercised by any
    existing feature in this codebase - worth having the smaller wins
    banked first.
+
+---
+
+## Post-Milestone-3 addition (2026-08-05): `buy_market_item`
+
+By explicit project-owner request ("I am supposed to be able to do
+every other stuffs by just typing... buy and selling"). Adds the
+system's fifth allow-listed action, exactly per this doc's own
+"designed to grow this way" note under Milestone 3's starting action
+set - one new `Action` constant, one new tool definition, one new
+dispatch case, one new confirmation card template, no rewrite needed.
+
+**Why this one isn't a 1:1 reuse of an existing button, unlike
+`list_market_item` → `doPostListing`:** the market's existing buy path
+(`HandleBuyListingCallback`) buys one *specific, already-known* listing
+by ID - there was no existing "search the market and buy the best
+match" capability for a player to tap a button for, since the panel UI
+always shows you the listing before you buy it. "Buy 200 metal for
+$500" has no listing ID in it at all - it's a search query, not a
+purchase of something already selected. Building this required two
+real pieces, not just wiring:
+
+1. Extracted `doBuyListing(ctx, myCampID, listingID)` out of
+   `HandleBuyListingCallback`'s body (unchanged logic, same as every
+   other `doX` extraction this project has done) so both the
+   button-driven purchase and the new search-driven one share
+   identical balance/ownership/expiry enforcement.
+2. New `doBuyMarketItem(ctx, myCampID, resource, minQty, maxDollars)`:
+   searches open dollar-priced listings for `resource` with
+   `quantity >= minQty` and `ask_quantity <= maxDollars`, picks the
+   cheapest match (tie-broken by least quantity, i.e. least overbuy),
+   and delegates to `doBuyListing`. Since this market only ever sells
+   whole listings (no partial fills), the quantity actually bought can
+   exceed what was asked for - the confirmation card and the result
+   message both say so explicitly rather than implying an exact-qty
+   purchase, so there's no surprise between what was requested and what
+   gets charged.
+
+Confirmation card is worded as a search ("buy the best available
+listing of at least X for up to $Y"), not a fixed preview, since -
+unlike `list_market_item` where every detail is fully known from the
+player's own message - there's no listing to show yet at card-render
+time; the actual match is only found once Confirm is tapped.
+
+Tests: `internal/game/nlpcommand/prompt_test.go` covers the new tool
+definition/allow-list/confirmation-required entries and
+`ParseResponse` matching `buy_market_item` (5/5 existing tests updated
+for the new 5-action count, 1 new dedicated parse test) - all pure,
+no I/O, ran directly in this sandbox. `doBuyListing`/`doBuyMarketItem`
+themselves could NOT be exercised against a real Postgres here (same
+sandbox limitation noted in the combat-balance/confirm-button commits
+earlier the same day) - `doBuyListing`'s logic is unchanged from the
+already-working `HandleBuyListingCallback` it was extracted from, and
+`doBuyMarketItem`'s new search query follows the same
+parameterized-SQL, `FOR UPDATE`-locked conventions as every other
+query in this file. A manual live test (post a real listing, then use
+natural language to buy it, both success and no-match cases) is
+recommended before considering this closed.
+
+Verified: `go build`/`go vet` clean across the full repo (temporary
+telebot.v3 replace-directive method, reverted before commit). `gofmt
+-l` clean. `go test -v` clean on `internal/game/nlpcommand/...` (12/12),
+plus `internal/bot/keyboards/...`, `internal/game/combatmath/...`, and
+`internal/ai/...` (all unaffected, still green) confirming no
+regression elsewhere.
+
+Still not attempted: `launch_raid` by text (flagged in the original
+combat-balance/confirm-button session as intentionally deferred - a
+raid currently goes through a whole target-selection/draft-composition
+UI for good reason, and collapsing that into one text command safely
+needs its own design pass, not a quick addition like this one), and the
+clan resource-donation feature (still a genuine gap, not started).

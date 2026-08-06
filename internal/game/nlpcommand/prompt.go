@@ -46,6 +46,16 @@ const (
 	// for sale on the player auction market exchange. Mutating -
 	// requires confirmation.
 	ActionListMarketItem Action = "list_market_item"
+	// ActionBuyMarketItem searches existing market listings for a
+	// resource and buys the best-matching one against a cash budget.
+	// 2026-08-05 addition, following this file's own "add a tool
+	// definition + one dispatch case + one confirmation template"
+	// design for incremental growth - see doBuyMarketItem in
+	// exchange.go for the match/purchase logic and why it's a new
+	// core rather than a reuse of HandleBuyListingCallback (which
+	// buys by a specific already-known listing ID, not by searching).
+	// Mutating - requires confirmation.
+	ActionBuyMarketItem Action = "buy_market_item"
 	// ActionCheckResources looks up the player's current resource
 	// stockpile. Read-only - no confirmation needed.
 	ActionCheckResources Action = "check_resources"
@@ -57,12 +67,12 @@ const (
 	ActionCheckScoutStatus Action = "check_scout_status"
 )
 
-// Valid reports whether a is one of the four actions this milestone
+// Valid reports whether a is one of the five actions this milestone
 // actually implements - anything else (e.g. a hallucinated tool name)
 // is rejected rather than dispatched.
 func (a Action) Valid() bool {
 	switch a {
-	case ActionListMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus:
+	case ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus:
 		return true
 	default:
 		return false
@@ -74,7 +84,7 @@ func (a Action) Valid() bool {
 // than executed immediately - see the plan doc's safety rule #2.
 func (a Action) RequiresConfirmation() bool {
 	switch a {
-	case ActionListMarketItem, ActionDispatchScoutMission:
+	case ActionListMarketItem, ActionBuyMarketItem, ActionDispatchScoutMission:
 		return true
 	default:
 		return false
@@ -184,6 +194,29 @@ func ToolDefinitions() []ai.ToolDefinition {
 					},
 				},
 				"required": []string{"resource", "quantity", "ask_type", "ask_quantity"},
+			},
+		},
+		{
+			Name:        string(ActionBuyMarketItem),
+			Description: "Search the player auction market exchange for an existing listing of a resource and buy it, paying cash. Only call this when the player clearly wants to buy something right now from the market (e.g. 'buy 200 metal for 500 dollars', 'buy any crystal listing under $1000'). This only ever buys a whole existing listing as posted by its seller - it cannot create a custom listing to order, so the quantity actually bought may be somewhat more than asked if that's what the best matching listing contains; the executor will show the real quantity and price before anything is charged.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"resource": map[string]any{
+						"type":        "string",
+						"enum":        []string{"metal", "crystal", "scrap"},
+						"description": "Which resource to buy.",
+					},
+					"min_quantity": map[string]any{
+						"type":        "number",
+						"description": "The minimum quantity the player wants - only listings with at least this much of the resource are considered. Resolve shorthand like '300k' to 300000.",
+					},
+					"max_dollars": map[string]any{
+						"type":        "number",
+						"description": "The most the player is willing to pay in total, in dollars. Only listings asking this much or less are considered. Resolve shorthand like '1.5m' to 1500000.",
+					},
+				},
+				"required": []string{"resource", "min_quantity", "max_dollars"},
 			},
 		},
 		{

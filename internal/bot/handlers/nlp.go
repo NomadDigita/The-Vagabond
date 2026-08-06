@@ -245,6 +245,8 @@ func (h *NLPHandler) dispatchParsedCommand(c telebot.Context, cmd nlpcommand.Par
 		return h.ScoutMissions.HandleScoutPanel(c)
 	case nlpcommand.ActionListMarketItem:
 		return h.confirmListMarketItem(c, cmd)
+	case nlpcommand.ActionBuyMarketItem:
+		return h.confirmBuyMarketItem(c, cmd)
 	case nlpcommand.ActionDispatchScoutMission:
 		return h.confirmDispatchScoutMission(c, cmd)
 	default:
@@ -291,6 +293,40 @@ func (h *NLPHandler) confirmListMarketItem(c telebot.Context, cmd nlpcommand.Par
 
 	selector := &telebot.ReplyMarkup{}
 	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm", "nlp_c", "mkt", resource, fmt.Sprintf("%d", qty), askType, fmt.Sprintf("%.0f", askQty)), keyboards.StyleSuccess)
+	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "nlp_x", ""), keyboards.StyleDanger)
+	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
+}
+
+// confirmBuyMarketItem renders the Confirm/Cancel card for a parsed
+// buy_market_item command. Nothing here touches the database - the
+// search for a matching listing AND the purchase itself only happen
+// if the player taps Confirm, via HandleNLPConfirmCallback calling
+// doBuyMarketItem. The card is deliberately worded as a search-and-buy
+// ("buy the best available X for up to $Y"), not a promise of an
+// exact quantity/price, since doBuyMarketItem only finds out which
+// listing (if any) matches at the moment Confirm is tapped - there's
+// no listing to preview yet at card-render time, unlike
+// confirmListMarketItem where every detail is already fully specified
+// by the player's own message.
+func (h *NLPHandler) confirmBuyMarketItem(c telebot.Context, cmd nlpcommand.ParsedCommand) error {
+	resource := strings.ToLower(strings.TrimSpace(cmd.ArgString("resource")))
+	minQty := cmd.ArgInt("min_quantity")
+	maxDollars := cmd.ArgFloat("max_dollars")
+
+	if minQty <= 0 || maxDollars <= 0 {
+		return c.Send("🤖 I couldn't quite catch what to buy - try something like \"buy 200 metal for $500\".")
+	}
+	if _, ok := marketResourceColumn(resource); !ok {
+		return c.Send(fmt.Sprintf("🤖 %s isn't tradeable on the exchange - try Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(resource))))
+	}
+
+	cardText := "🤖 " + htmlBold("CONFIRM PURCHASE") + "\n" + divider + "\n" +
+		fmt.Sprintf("%s Buy the best available listing of at least %s %s for up to %s?\n", resourceEmoji(resource), htmlCode(fmt.Sprintf("%d", minQty)), htmlEscape(resource), htmlCode(fmt.Sprintf("$%.0f", maxDollars))) +
+		htmlItalic("The market only sells whole listings - the exact quantity and price will be shown once a match is found.") + "\n" +
+		divider
+
+	selector := &telebot.ReplyMarkup{}
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm", "nlp_c", "buy", resource, fmt.Sprintf("%d", minQty), fmt.Sprintf("%.0f", maxDollars)), keyboards.StyleSuccess)
 	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "nlp_x", ""), keyboards.StyleDanger)
 	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
 }
@@ -350,6 +386,28 @@ func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Could not list - see the panel for details."})
 		}
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💱 Listing posted!"})
+		return h.Exchange.HandleExchangePanel(c)
+
+	case "buy":
+		if h.Exchange == nil || len(c.Args()) < 4 {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid purchase request."})
+		}
+		resource := c.Args()[1]
+		minQty, qtyErr := strconv.Atoi(c.Args()[2])
+		maxDollars, dollarsErr := strconv.ParseFloat(c.Args()[3], 64)
+		if qtyErr != nil || dollarsErr != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid purchase details."})
+		}
+
+		var campID string
+		if err := h.Exchange.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+		}
+
+		if _, err := h.Exchange.doBuyMarketItem(ctx, campID, resource, minQty, maxDollars); err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "❌ No matching listing was found within that budget - check the Exchange panel to see what's actually available."})
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: "🛍️ Purchase complete!"})
 		return h.Exchange.HandleExchangePanel(c)
 
 	case "sct":
