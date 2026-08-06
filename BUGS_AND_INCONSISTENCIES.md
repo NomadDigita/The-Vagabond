@@ -1902,3 +1902,41 @@ confirm callback. Recommend a manual live test of both flows (prompt
 card renders correctly, Cancel truly charges nothing, Confirm charges
 the previewed amount and relocates) before considering this fully
 closed.
+
+## Confirm-button rollout continued (2026-08-05, same session) — HyperSpeed, Extend Planet, Orbital Maneuver, Field Repairs, Construction Rush
+
+Continuation of the Teleport/Ghost Protocol confirm-button fix above,
+extending the same pattern to every other resource-spending job in
+`internal/bot/handlers/jobs.go`: HyperSpeed, Extend Planet, Orbital
+Maneuver, Repair Units (Field Repairs), and Repair Buildings
+(Construction Rush) now all show a cost-preview Confirm/Cancel card
+before spending anything, via a new shared `sendConfirmCard`/
+`sendCancelledCard` helper pair (rather than duplicating the card-
+building code five more times). Each handler was split the same way
+Teleport/Ghost Protocol were: `HandleX` now only previews (read-only),
+`doX` holds the unchanged original execution logic, and
+`HandleXConfirmCallback`/`HandleXCancelCallback` wire the card's
+buttons - registered in `cmd/bot/main.go` as
+`\f{actionkey}_c`/`\f{actionkey}_x`.
+
+**Deliberately NOT given a confirm card:** Gather Sunlight (pure
+resource gain, no cost/downside to confirm against - a confirm step
+here would be pure friction with zero protective value) and the four
+scan/trade command aliases (`HandleManualScanAlias` etc., which are
+purely informational text redirects with no state change at all).
+Flagging this explicitly rather than blindly adding confirm cards
+everywhere "for all jobs" would have been technically compliant with
+the letter of the request but not its actual purpose (preventing
+costly mistaken taps).
+
+Verified: `go build`, `go vet` clean across the full repo (temporary
+telebot.v3 replace-directive method, reverted before commit). `gofmt
+-l` clean. `go test -v` clean on `internal/bot/keyboards/...`
+(button-collision test passes with all 8 new inline callback routes)
+and `internal/game/combatmath/...` (unaffected, still 6/6). Same
+sandbox limitation as the Teleport/Ghost Protocol fix above applies
+here too - the five `doX` DB cores could not be exercised against a
+real Postgres instance in this sandbox; each is a direct, logic-
+unchanged move of code that worked before this session, just relocated
+behind a confirm callback. A manual live test of all five Confirm/Cancel
+flows is recommended before considering this fully closed.

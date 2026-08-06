@@ -27,6 +27,34 @@ func (h *JobsHandler) myCamp(ctx context.Context, userID int64) (string, error) 
 	return campID, err
 }
 
+// sendConfirmCard renders the standard Confirm/Cancel prompt card used
+// by every resource-spending job below (2026-08-05, by explicit
+// project-owner direction - "let there be confirm buttons for all
+// jobs... in a situation whereby you mistakenly pressed teleport, it
+// will just automatically go"). actionKey is the short callback-data
+// prefix registered in cmd/bot/main.go as "\f"+actionKey+"_c" (confirm)
+// and "\f"+actionKey+"_x" (cancel) - see HandleTeleport/
+// HandleGhostProtocol above for the pattern this generalizes.
+func sendConfirmCard(c telebot.Context, title, costLine, whyLine, actionKey string) error {
+	cardText := title + "\n" + divider + "\n" +
+		costLine + "\n\n" +
+		htmlItalic(whyLine) + "\n" +
+		divider
+
+	selector := &telebot.ReplyMarkup{}
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm", actionKey+"_c"), keyboards.StyleSuccess)
+	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", actionKey+"_x"), keyboards.StyleDanger)
+	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
+}
+
+// sendCancelledCard is the standard reply for every "❌ Cancel" callback
+// below - nothing was ever charged or executed, so this just closes out
+// the card with a plain confirmation of that.
+func sendCancelledCard(c telebot.Context, jobLabel string) error {
+	_ = c.Edit(fmt.Sprintf("%s cancelled - nothing was charged, nothing changed.", jobLabel))
+	return c.Respond()
+}
+
 // HandleJobsPanel is the "🛠️ Odd Jobs" mother-keyboard entry point -
 // plants the JobsNavigation child keyboard (via sendPanelWithNav, see
 // navhelper.go's doc comment for why a plain c.Send with two reply-markup
@@ -35,7 +63,11 @@ func (h *JobsHandler) myCamp(ctx context.Context, userID int64) (string, error) 
 // to trigger each job blind. Every button on the JobsNavigation keyboard
 // fires its job directly - see that function's doc comment in
 // internal/bot/keyboards/navigation.go for why there's no further
-// sub-panel here.
+// sub-panel here. As of 2026-08-05, every resource-spending job (all
+// except Gather Sunlight, which only ever gains resources with no
+// downside to confirm against, and the pure-informational scan/trade
+// aliases) shows its own inline Confirm/Cancel card before actually
+// executing - see HandleTeleport's doc comment for the full rationale.
 func (h *JobsHandler) HandleJobsPanel(c telebot.Context) error {
 	panelText := "🛠️━━━━━━━━━━━━━━━━━━━━━━🛠️\n" +
 		htmlBold("ODD JOBS - FIELD OPERATIONS") + "\n" +
@@ -57,6 +89,10 @@ func (h *JobsHandler) HandleJobsPanel(c telebot.Context) error {
 // HandleHyperSpeed (/newjobhyperspeed) shaves time off your earliest
 // active raid's remaining travel, matching the SpaceHunt tip about
 // launching HyperSpeed before departing a raid.
+// HandleHyperSpeed (/newjobhyperspeed) shows a Confirm/Cancel preview
+// before spending Electricity to halve your nearest active mission's
+// remaining time - 2026-08-05 fix, same rationale as HandleTeleport.
+// See doHyperSpeed for the execution core.
 func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -69,44 +105,102 @@ func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
+	var raidID string
+	var resolveTime time.Time
+	err = h.DB.QueryRowContext(ctx, "SELECT id, resolve_time FROM raids WHERE attacker_id = $1 AND state IN ('marching','engaged','returning') ORDER BY resolve_time ASC LIMIT 1", campID).Scan(&raidID, &resolveTime)
+	if err != nil {
+		return c.Send("❌ No active missions to accelerate. Launch a raid first!")
+	}
+	if remaining := time.Until(resolveTime); remaining < time.Minute {
+		return c.Send("⚠️ That mission is about to resolve already - no need for HyperSpeed.")
+	}
+
+	return sendConfirmCard(c, "🚀 "+htmlBold("CONFIRM HYPERSPEED"),
+		fmt.Sprintf("Cost: %s Electricity. Cuts your nearest active mission's remaining time in half.", htmlCode("300")),
+		"This spends real Electricity for a one-time timing boost - confirming first avoids burning it on a mission you'd rather let resolve naturally.",
+		"hyperspeed")
+}
+
+// HandleHyperSpeedConfirmCallback fires when a player taps "✅
+// Confirm" on the HyperSpeed card. Re-derives the caller's encampment
+// server-side and calls doHyperSpeed, which re-validates funds and the
+// target mission fresh.
+func (h *JobsHandler) HandleHyperSpeedConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doHyperSpeed(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleHyperSpeedCancelCallback fires when a player taps "❌ Cancel".
+func (h *JobsHandler) HandleHyperSpeedCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🚀 HyperSpeed")
+}
+
+// doHyperSpeed is the testable core of HandleHyperSpeedConfirmCallback -
+// unchanged logic from the pre-2026-08-05 HandleHyperSpeed, just moved
+// behind the new confirm callback and returning its result instead of
+// sending it directly.
+func (h *JobsHandler) doHyperSpeed(ctx context.Context, campID string) (string, error) {
 	const cost = 300.0 // Electricity
+
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ HyperSpeed activation failed.")
+		return "⚠️ HyperSpeed activation failed.", err
 	}
 	defer tx.Rollback()
 
 	var electricity float64
 	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost)), htmlCode(fmt.Sprintf("%.0f", electricity))), telebot.ModeHTML)
+		return fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost)), htmlCode(fmt.Sprintf("%.0f", electricity))), errors.New("insufficient electricity")
 	}
 
 	var raidID string
 	var resolveTime time.Time
 	err = tx.QueryRowContext(ctx, "SELECT id, resolve_time FROM raids WHERE attacker_id = $1 AND state IN ('marching','engaged','returning') ORDER BY resolve_time ASC LIMIT 1 FOR UPDATE", campID).Scan(&raidID, &resolveTime)
 	if err != nil {
-		return c.Send("❌ No active missions to accelerate. Launch a raid first!")
+		return "❌ No active missions to accelerate. Launch a raid first!", err
 	}
 
 	remaining := time.Until(resolveTime)
 	if remaining < time.Minute {
-		return c.Send("⚠️ That mission is about to resolve already - no need for HyperSpeed.")
+		return "⚠️ That mission is about to resolve already - no need for HyperSpeed.", errors.New("mission resolving imminently")
 	}
 	newResolve := resolveTime.Add(-remaining / 2) // cuts remaining time in half
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID)
-
-	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error activating HyperSpeed.")
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID); err != nil {
+		return "⚠️ Error deducting HyperSpeed's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID); err != nil {
+		return "⚠️ Error activating HyperSpeed.", err
 	}
 
-	return c.Send(fmt.Sprintf("🚀⚡ %s Your nearest mission's remaining time was cut in half. New ETA: %s", htmlBold("HYPERSPEED ENGAGED!"), htmlCode(newResolve.UTC().Format("15:04 MST"))), telebot.ModeHTML)
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Error activating HyperSpeed.", err
+	}
+
+	return fmt.Sprintf("🚀⚡ %s Your nearest mission's remaining time was cut in half. New ETA: %s", htmlBold("HYPERSPEED ENGAGED!"), htmlCode(newResolve.UTC().Format("15:04 MST"))), nil
 }
 
-// HandleExtendPlanet (/newjobextendplanet) permanently increases storage
-// capacity - a real, growing investment rather than a one-time bonus.
+// HandleExtendPlanet (/newjobextendplanet) shows a Confirm/Cancel
+// preview before permanently increasing storage capacity - 2026-08-05
+// fix, same rationale as HandleTeleport. A real, growing investment
+// rather than a one-time bonus, and cost grows every level, so
+// confirming first matters more here as a player progresses. See
+// doExtendPlanet for the execution core.
 func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -119,9 +213,51 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
+	var extensionLvl int
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(extension_lvl, 0) FROM encampments WHERE id = $1", campID).Scan(&extensionLvl)
+	metalCost := float64(500 * (extensionLvl + 1))
+	crystalCost := float64(100 * (extensionLvl + 1))
+
+	return sendConfirmCard(c, "🌍 "+htmlBold("CONFIRM PLANET EXTENSION"),
+		fmt.Sprintf("Cost: %s Metal, %s Crystal. +1000 storage capacity, permanently (extension level %d → %d).",
+			htmlCode(fmt.Sprintf("%.0f", metalCost)), htmlCode(fmt.Sprintf("%.0f", crystalCost)), extensionLvl, extensionLvl+1),
+		"This is a permanent, ever-growing investment - each level costs more than the last, so confirming first avoids spending on a level-up you weren't ready to commit to yet.",
+		"extendplanet")
+}
+
+// HandleExtendPlanetConfirmCallback fires when a player taps "✅
+// Confirm" on the Extend Planet card.
+func (h *JobsHandler) HandleExtendPlanetConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doExtendPlanet(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleExtendPlanetCancelCallback fires when a player taps "❌ Cancel".
+func (h *JobsHandler) HandleExtendPlanetCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🌍 Planet Extension")
+}
+
+// doExtendPlanet is the testable core of HandleExtendPlanetConfirmCallback -
+// unchanged logic from the pre-2026-08-05 HandleExtendPlanet, just moved
+// behind the new confirm callback.
+func (h *JobsHandler) doExtendPlanet(ctx context.Context, campID string) (string, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Extension failed.")
+		return "⚠️ Extension failed.", err
 	}
 	defer tx.Rollback()
 
@@ -134,17 +270,21 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 	var metal, crystal float64
 	_ = tx.QueryRowContext(ctx, "SELECT metal, crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&metal, &crystal)
 	if metal < metalCost || crystal < crystalCost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s for extension level %d.", htmlBold("Insufficient Materials!"), htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost, crystalCost)), extensionLvl+1), telebot.ModeHTML)
+		return fmt.Sprintf("❌ %s Need %s for extension level %d.", htmlBold("Insufficient Materials!"), htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost, crystalCost)), extensionLvl+1), errors.New("insufficient materials")
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", metalCost, crystalCost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE encampments SET extension_lvl = extension_lvl + 1 WHERE id = $1", campID)
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET metal = metal - $1, crystal = crystal - $2 WHERE encampment_id = $3", metalCost, crystalCost, campID); err != nil {
+		return "⚠️ Error deducting extension's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE encampments SET extension_lvl = extension_lvl + 1 WHERE id = $1", campID); err != nil {
+		return "⚠️ Error extending planet.", err
+	}
 
 	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error extending planet.")
+		return "⚠️ Error extending planet.", err
 	}
 
-	return c.Send(fmt.Sprintf("🌍✅ %s Storage capacity +1000 permanently (extension level %d). Next extension: %s.", htmlBold("PLANET EXTENDED!"), extensionLvl+1, htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost*2, crystalCost*2))), telebot.ModeHTML)
+	return fmt.Sprintf("🌍✅ %s Storage capacity +1000 permanently (extension level %d). Next extension: %s.", htmlBold("PLANET EXTENDED!"), extensionLvl+1, htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost*2, crystalCost*2))), nil
 }
 
 // teleportCooldown and teleportCostFraction: 2026-08-05 rebalance, by
@@ -457,39 +597,81 @@ func (h *JobsHandler) HandleOrbitalManeuver(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
-	campID, err := h.myCamp(ctx, sender.ID)
-	if err != nil {
+	if _, err := h.myCamp(ctx, sender.ID); err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
+	return sendConfirmCard(c, "🛰️ "+htmlBold("CONFIRM ORBITAL MANEUVER"),
+		fmt.Sprintf("Cost: %s Electricity. +30%% defense rating for the next 2 hours.", htmlCode("400")),
+		"This spends real Electricity for a time-limited defensive buff - confirming first avoids burning it before you actually need the extra defense.",
+		"orbitalmvr")
+}
+
+// HandleOrbitalManeuverConfirmCallback fires when a player taps "✅
+// Confirm" on the Orbital Maneuver card.
+func (h *JobsHandler) HandleOrbitalManeuverConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doOrbitalManeuver(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleOrbitalManeuverCancelCallback fires when a player taps "❌ Cancel".
+func (h *JobsHandler) HandleOrbitalManeuverCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🛰️ Orbital Maneuver")
+}
+
+// doOrbitalManeuver is the testable core of
+// HandleOrbitalManeuverConfirmCallback - unchanged logic from the
+// pre-2026-08-05 HandleOrbitalManeuver, just moved behind the new
+// confirm callback.
+func (h *JobsHandler) doOrbitalManeuver(ctx context.Context, campID string) (string, error) {
 	const cost = 400.0 // Electricity
 	const buffDuration = 2 * time.Hour
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Maneuver failed.")
+		return "⚠️ Maneuver failed.", err
 	}
 	defer tx.Rollback()
 
 	var electricity float64
 	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
 	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
+		return fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), errors.New("insufficient electricity")
 	}
 
 	buffUntil := time.Now().UTC().Add(buffDuration)
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE encampments SET orbital_buff_until = $1 WHERE id = $2", buffUntil, campID)
-
-	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error activating maneuver.")
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID); err != nil {
+		return "⚠️ Error deducting maneuver's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE encampments SET orbital_buff_until = $1 WHERE id = $2", buffUntil, campID); err != nil {
+		return "⚠️ Error activating maneuver.", err
 	}
 
-	return c.Send(fmt.Sprintf("🛰️✅ %s +30%% defense rating for the next %s.", htmlBold("ORBITAL MANEUVER ACTIVE!"), htmlCode(fmt.Sprintf("%.0f minutes", buffDuration.Minutes()))), telebot.ModeHTML)
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Error activating maneuver.", err
+	}
+
+	return fmt.Sprintf("🛰️✅ %s +30%% defense rating for the next %s.", htmlBold("ORBITAL MANEUVER ACTIVE!"), htmlCode(fmt.Sprintf("%.0f minutes", buffDuration.Minutes()))), nil
 }
 
-// HandleRepairUnits (/newjobrepairunits) - field repairs bring back a
-// small batch of Soldiers for a Scrap cost.
+// HandleRepairUnits (/newjobrepairunits) shows a Confirm/Cancel preview
+// before field-repairing a small batch of Soldiers for a Scrap cost -
+// 2026-08-05 fix, same rationale as HandleTeleport. See doRepairUnits
+// for the execution core.
 func (h *JobsHandler) HandleRepairUnits(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -497,38 +679,79 @@ func (h *JobsHandler) HandleRepairUnits(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 
-	campID, err := h.myCamp(ctx, sender.ID)
-	if err != nil {
+	if _, err := h.myCamp(ctx, sender.ID); err != nil {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
+	return sendConfirmCard(c, "🔧 "+htmlBold("CONFIRM FIELD REPAIRS"),
+		fmt.Sprintf("Cost: %s Scrap. Restores 5 Soldiers to fighting condition.", htmlCode("200")),
+		"This spends real Scrap for a small, immediate gain - confirming first avoids spending it reflexively before you've decided you actually need more Soldiers right now.",
+		"repairunits")
+}
+
+// HandleRepairUnitsConfirmCallback fires when a player taps "✅
+// Confirm" on the Field Repairs card.
+func (h *JobsHandler) HandleRepairUnitsConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doRepairUnits(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleRepairUnitsCancelCallback fires when a player taps "❌ Cancel".
+func (h *JobsHandler) HandleRepairUnitsCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🔧 Field Repairs")
+}
+
+// doRepairUnits is the testable core of HandleRepairUnitsConfirmCallback -
+// unchanged logic from the pre-2026-08-05 HandleRepairUnits, just moved
+// behind the new confirm callback.
+func (h *JobsHandler) doRepairUnits(ctx context.Context, campID string) (string, error) {
 	const cost = 200.0 // Scrap, repairs 5 Soldiers
 	const repaired = 5
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Repair failed.")
+		return "⚠️ Repair failed.", err
 	}
 	defer tx.Rollback()
 
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 	if scrap < cost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
+		return fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), errors.New("insufficient scrap")
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1 WHERE encampment_id = $2", repaired, campID)
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID); err != nil {
+		return "⚠️ Error deducting repair's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1 WHERE encampment_id = $2", repaired, campID); err != nil {
+		return "⚠️ Error repairing units.", err
+	}
 
 	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error repairing units.")
+		return "⚠️ Error repairing units.", err
 	}
 
-	return c.Send(fmt.Sprintf("🔧✅ %s +%d Soldiers restored to fighting condition.", htmlBold("FIELD REPAIRS COMPLETE!"), repaired), telebot.ModeHTML)
+	return fmt.Sprintf("🔧✅ %s +%d Soldiers restored to fighting condition.", htmlBold("FIELD REPAIRS COMPLETE!"), repaired), nil
 }
 
-// HandleRepairBuildings (/newjobrepairbuildings) speeds up any in-progress
-// building upgrade.
+// HandleRepairBuildings (/newjobrepairbuildings) shows a Confirm/Cancel
+// preview before spending Scrap to rush any in-progress building
+// upgrade - 2026-08-05 fix, same rationale as HandleTeleport. See
+// doRepairBuildings for the execution core.
 func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -541,11 +764,53 @@ func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
+	var readyAt time.Time
+	if err := h.DB.QueryRowContext(ctx, "SELECT upgrade_ready_at FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE ORDER BY upgrade_ready_at ASC LIMIT 1", campID).Scan(&readyAt); err != nil {
+		return c.Send("❌ No buildings currently under construction to repair/rush.")
+	}
+
+	return sendConfirmCard(c, "🏗️ "+htmlBold("CONFIRM CONSTRUCTION RUSH"),
+		fmt.Sprintf("Cost: %s Scrap. Cuts your active building upgrade's remaining time in half.", htmlCode("150")),
+		"This spends real Scrap for a one-time timing boost - confirming first avoids burning it on an upgrade you'd rather let finish naturally.",
+		"repairbldg")
+}
+
+// HandleRepairBuildingsConfirmCallback fires when a player taps "✅
+// Confirm" on the Construction Rush card.
+func (h *JobsHandler) HandleRepairBuildingsConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doRepairBuildings(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleRepairBuildingsCancelCallback fires when a player taps "❌ Cancel".
+func (h *JobsHandler) HandleRepairBuildingsCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🏗️ Construction Rush")
+}
+
+// doRepairBuildings is the testable core of
+// HandleRepairBuildingsConfirmCallback - unchanged logic from the
+// pre-2026-08-05 HandleRepairBuildings, just moved behind the new
+// confirm callback.
+func (h *JobsHandler) doRepairBuildings(ctx context.Context, campID string) (string, error) {
 	const cost = 150.0 // Scrap
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Repair failed.")
+		return "⚠️ Repair failed.", err
 	}
 	defer tx.Rollback()
 
@@ -553,26 +818,30 @@ func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 	var readyAt time.Time
 	err = tx.QueryRowContext(ctx, "SELECT id, upgrade_ready_at FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE ORDER BY upgrade_ready_at ASC LIMIT 1 FOR UPDATE", campID).Scan(&moduleID, &readyAt)
 	if err != nil {
-		return c.Send("❌ No buildings currently under construction to repair/rush.")
+		return "❌ No buildings currently under construction to repair/rush.", err
 	}
 
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 	if scrap < cost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
+		return fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Scrap!"), htmlCode(fmt.Sprintf("%.0f", cost))), errors.New("insufficient scrap")
 	}
 
 	remaining := time.Until(readyAt)
 	newReady := readyAt.Add(-remaining / 2)
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE modules SET upgrade_ready_at = $1 WHERE id = $2", newReady, moduleID)
-
-	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error rushing construction.")
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID); err != nil {
+		return "⚠️ Error deducting rush's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE modules SET upgrade_ready_at = $1 WHERE id = $2", newReady, moduleID); err != nil {
+		return "⚠️ Error rushing construction.", err
 	}
 
-	return c.Send("🏗️✅ "+htmlBold("CONSTRUCTION CREW DEPLOYED!")+" Remaining build time on your active upgrade cut in half.", telebot.ModeHTML)
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Error rushing construction.", err
+	}
+
+	return "🏗️✅ " + htmlBold("CONSTRUCTION CREW DEPLOYED!") + " Remaining build time on your active upgrade cut in half.", nil
 }
 
 // HandleGatherSunlight (/newjobgathersunlight) - instant manual burst of
