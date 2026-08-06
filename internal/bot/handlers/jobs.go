@@ -147,8 +147,31 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("🌍✅ %s Storage capacity +1000 permanently (extension level %d). Next extension: %s.", htmlBold("PLANET EXTENDED!"), extensionLvl+1, htmlCode(fmt.Sprintf("%.0f Metal, %.0f Crystal", metalCost*2, crystalCost*2))), telebot.ModeHTML)
 }
 
-// HandleTeleport (/newjobteleport) relocates your outpost to a fresh
-// random coordinate, on a cooldown to prevent spam-hopping.
+// teleportCooldown and teleportCostFraction: 2026-08-05 rebalance, by
+// explicit project-owner direction ("increase the price for Teleporting
+// ... to almost unaffordable, make it super costly, make players see
+// why"). Teleport used to cost a flat 1000 Electricity - negligible
+// against typical late-game balances (a live report showed a player
+// sitting on 7M+ Electricity, i.e. the "cost" was ~0.014% of holdings
+// and functionally free). Now priced the same way as Ghost Protocol
+// below - a FRACTION of current holdings across five resources, so it
+// scales with wealth instead of going stale as the economy grows - but
+// at a third of Ghost Protocol's severity, preserving the intentional
+// tier gap between "frequent utility hop" (24h cooldown, relocate
+// only) and "rare emergency measure" (90-day cooldown, relocate AND
+// erase every intel lock on this base).
+const (
+	teleportCooldown     = 24 * time.Hour
+	teleportCostFraction = 0.15
+)
+
+// HandleTeleport (/newjobteleport) shows a cost-preview Confirm/Cancel
+// card rather than relocating immediately - 2026-08-05 fix, by explicit
+// project-owner direction ("let there be confirm buttons for all jobs
+// ... in a situation whereby you mistakenly pressed teleport, it will
+// just automatically go"). Nothing is charged or moved until
+// HandleTeleportConfirmCallback fires. See doTeleport for the actual
+// execution core.
 func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -163,38 +186,110 @@ func (h *JobsHandler) HandleTeleport(c telebot.Context) error {
 
 	var lastTeleport sql.NullTime
 	_ = h.DB.QueryRowContext(ctx, "SELECT last_teleport_at FROM encampments WHERE id = $1", campID).Scan(&lastTeleport)
-	if lastTeleport.Valid && time.Since(lastTeleport.Time) < 24*time.Hour {
-		remaining := 24*time.Hour - time.Since(lastTeleport.Time)
+	if lastTeleport.Valid && time.Since(lastTeleport.Time) < teleportCooldown {
+		remaining := teleportCooldown - time.Since(lastTeleport.Time)
 		return c.Send(fmt.Sprintf("⏳ Teleport is on cooldown for another %.1f hours.", remaining.Hours()))
 	}
 
-	const cost = 1000.0 // Electricity
+	var scrap, metal, crystal, electricity, dollars float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, metal, crystal, electricity, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &metal, &crystal, &electricity, &dollars)
+	scrapCost, metalCost, crystalCost, electricityCost, dollarsCost :=
+		scrap*teleportCostFraction, metal*teleportCostFraction, crystal*teleportCostFraction, electricity*teleportCostFraction, dollars*teleportCostFraction
+
+	cardText := "🌀 " + htmlBold("CONFIRM TELEPORT") + "\n" + divider + "\n" +
+		fmt.Sprintf("This will relocate your outpost to a fresh random coordinate and cost %s%% of your CURRENT holdings:\n", htmlCode(fmt.Sprintf("%.0f", teleportCostFraction*100))) +
+		fmt.Sprintf("⚙️ %s Scrap  🔩 %s Metal  🔮 %s Crystal\n", htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)), htmlCode(fmt.Sprintf("%.0f", crystalCost))) +
+		fmt.Sprintf("⚡ %s Electricity  💵 $%s\n\n", htmlCode(fmt.Sprintf("%.0f", electricityCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))) +
+		htmlItalic("Why so steep: relocating abandons every scout/raider's existing fix on this outpost's position for free - a cheap Teleport would let anyone dodge an incoming raid or hide from a scout on a whim. The cost scales with your own holdings so it stays meaningful at any stage, not just early game.") + "\n" +
+		divider
+
+	selector := &telebot.ReplyMarkup{}
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm Teleport", "teleport_c"), keyboards.StyleSuccess)
+	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "teleport_x"), keyboards.StyleDanger)
+	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
+}
+
+// HandleTeleportConfirmCallback fires when a player taps "✅ Confirm
+// Teleport" on the card HandleTeleport rendered. Re-derives the
+// caller's encampment server-side (never trusts anything from
+// callback_data for this) and re-validates the cooldown fresh -
+// doTeleport re-checks it independently of HandleTeleport's earlier
+// check, since time may have passed (or a second Teleport already
+// happened) between the prompt being shown and Confirm being tapped.
+func (h *JobsHandler) HandleTeleportConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doTeleport(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleTeleportCancelCallback fires when a player taps "❌ Cancel" -
+// nothing was ever charged or moved, so this just closes out the card.
+func (h *JobsHandler) HandleTeleportCancelCallback(c telebot.Context) error {
+	_ = c.Edit("🌀 Teleport cancelled - nothing was charged, your outpost hasn't moved.")
+	return c.Respond()
+}
+
+// doTeleport is the testable core of HandleTeleportConfirmCallback,
+// following the same pattern as doGhostProtocol below: no
+// telebot.Context dependency, so it can be exercised directly against a
+// real database in tests. Returns the message to send and, on failure,
+// a non-nil error (in which case the message is plain-text, not HTML).
+func (h *JobsHandler) doTeleport(ctx context.Context, campID string) (string, error) {
+	var lastTeleport sql.NullTime
+	_ = h.DB.QueryRowContext(ctx, "SELECT last_teleport_at FROM encampments WHERE id = $1", campID).Scan(&lastTeleport)
+	if lastTeleport.Valid && time.Since(lastTeleport.Time) < teleportCooldown {
+		remaining := teleportCooldown - time.Since(lastTeleport.Time)
+		return fmt.Sprintf("⏳ Teleport is on cooldown for another %.1f hours.", remaining.Hours()), errors.New("on cooldown")
+	}
+
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Teleport failed.")
+		return "⚠️ Teleport failed.", err
 	}
 	defer tx.Rollback()
 
-	var electricity float64
-	_ = tx.QueryRowContext(ctx, "SELECT electricity FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&electricity)
-	if electricity < cost {
-		return c.Send(fmt.Sprintf("❌ %s Need %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost))), telebot.ModeHTML)
+	var scrap, metal, crystal, electricity, dollars float64
+	if err := tx.QueryRowContext(ctx, "SELECT scrap, metal, crystal, electricity, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap, &metal, &crystal, &electricity, &dollars); err != nil {
+		return "⚠️ Error reading your resources.", err
 	}
+	scrapCost, metalCost, crystalCost, electricityCost, dollarsCost :=
+		scrap*teleportCostFraction, metal*teleportCostFraction, crystal*teleportCostFraction, electricity*teleportCostFraction, dollars*teleportCostFraction
 
 	newContinent := randomContinent(rand.New(rand.NewSource(time.Now().UnixNano())))
 	newCoordID, newX, newY, err := allocateCoordinate(ctx, tx, time.Now().UnixNano(), newContinent)
 	if err != nil {
-		return c.Send("⚠️ Error finding new coordinates.")
+		return "⚠️ Error finding new coordinates.", err
 	}
 
-	_, _ = tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID)
-	_, _ = tx.ExecContext(ctx, "UPDATE encampments SET coordinate_id = $1, last_teleport_at = CURRENT_TIMESTAMP WHERE id = $2", newCoordID, campID)
+	if _, err := tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1, metal = metal - $2, crystal = crystal - $3, electricity = electricity - $4, dollars = dollars - $5 WHERE encampment_id = $6",
+		scrapCost, metalCost, crystalCost, electricityCost, dollarsCost, campID); err != nil {
+		return "⚠️ Error deducting Teleport's cost.", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE encampments SET coordinate_id = $1, last_teleport_at = CURRENT_TIMESTAMP WHERE id = $2", newCoordID, campID); err != nil {
+		return "⚠️ Error relocating.", err
+	}
 
 	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error completing teleport.")
+		return "⚠️ Error completing teleport.", err
 	}
 
-	return c.Send(fmt.Sprintf("🌀✨ %s Your outpost now stands near %s.", htmlBold("TELEPORT COMPLETE!"), locationDescriptor(newX, newY, newContinent)), telebot.ModeHTML)
+	return fmt.Sprintf("🌀✨ %s Your outpost now stands near %s, at a cost of %s Scrap, %s Metal, %s Crystal, %s Electricity, and $%s.",
+		htmlBold("TELEPORT COMPLETE!"), locationDescriptor(newX, newY, newContinent),
+		htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)), htmlCode(fmt.Sprintf("%.0f", crystalCost)),
+		htmlCode(fmt.Sprintf("%.0f", electricityCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))), nil
 }
 
 // ghostProtocolCooldown and ghostProtocolCostFraction are deliberately
@@ -213,16 +308,24 @@ const (
 	ghostProtocolCostFraction = 0.50
 )
 
-// HandleGhostProtocol (/ghostprotocol) is a separate, far more severe
-// action than /newjobteleport - see
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4 for why the
-// existing cheap/frequent teleport was deliberately NOT repurposed for
-// this. In addition to relocating (reusing /newjobteleport's random-
-// coordinate logic), this deletes every known_locations row where this
-// encampment is the target - every scout/attacker who'd locked this
-// base's position loses that lock and must rediscover it from scratch.
-// encampment_discoveries (the permanent "have you ever heard of this
-// entity" relationship) is untouched - only the coordinate lock resets.
+// HandleGhostProtocol (/ghostprotocol) shows a cost-preview
+// Confirm/Cancel card rather than executing immediately - 2026-08-05
+// fix, same rationale as HandleTeleport above, arguably even more
+// important here given how much more severe and rarer (90-day
+// cooldown) this action is. Nothing is charged, relocated, or erased
+// until HandleGhostProtocolConfirmCallback fires. See doGhostProtocol
+// for the actual execution core (unchanged).
+//
+// This is a separate, far more severe action than /newjobteleport -
+// see AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 3.4 for why
+// the existing cheap/frequent teleport was deliberately NOT
+// repurposed for this. In addition to relocating (reusing
+// /newjobteleport's random-coordinate logic), this deletes every
+// known_locations row where this encampment is the target - every
+// scout/attacker who'd locked this base's position loses that lock
+// and must rediscover it from scratch. encampment_discoveries (the
+// permanent "have you ever heard of this entity" relationship) is
+// untouched - only the coordinate lock resets.
 func (h *JobsHandler) HandleGhostProtocol(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -235,15 +338,65 @@ func (h *JobsHandler) HandleGhostProtocol(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start")
 	}
 
-	message, err := h.doGhostProtocol(ctx, campID)
-	if err != nil {
-		return c.Send(message)
+	var lastGhost sql.NullTime
+	_ = h.DB.QueryRowContext(ctx, "SELECT last_ghost_protocol_at FROM encampments WHERE id = $1", campID).Scan(&lastGhost)
+	if lastGhost.Valid && time.Since(lastGhost.Time) < ghostProtocolCooldown {
+		remaining := ghostProtocolCooldown - time.Since(lastGhost.Time)
+		return c.Send(fmt.Sprintf("⏳ Ghost Protocol is on cooldown for another %.0f days.", remaining.Hours()/24))
 	}
-	return c.Send(message, telebot.ModeHTML)
+
+	var scrap, metal, crystal, dollars float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, metal, crystal, dollars FROM resources WHERE encampment_id = $1", campID).Scan(&scrap, &metal, &crystal, &dollars)
+	scrapCost, metalCost, crystalCost, dollarsCost := scrap*ghostProtocolCostFraction, metal*ghostProtocolCostFraction, crystal*ghostProtocolCostFraction, dollars*ghostProtocolCostFraction
+
+	cardText := "👻 " + htmlBold("CONFIRM GHOST PROTOCOL") + "\n" + divider + "\n" +
+		fmt.Sprintf("This will relocate your outpost AND erase every scout/raider's lock on your current position - permanently, until they rediscover you. Cost: %s%% of your CURRENT holdings:\n", htmlCode(fmt.Sprintf("%.0f", ghostProtocolCostFraction*100))) +
+		fmt.Sprintf("⚙️ %s Scrap  🔩 %s Metal  🔮 %s Crystal  💵 $%s\n\n", htmlCode(fmt.Sprintf("%.0f", scrapCost)), htmlCode(fmt.Sprintf("%.0f", metalCost)), htmlCode(fmt.Sprintf("%.0f", crystalCost)), htmlCode(fmt.Sprintf("%.0f", dollarsCost))) +
+		htmlItalic("Why so severe: this is a 90-day-cooldown emergency measure, not a routine hop - it wipes out an attacker's entire scouting investment in you for free, so the cost has to genuinely hurt or it would trivialize raid-avoidance for anyone who can afford it.") + "\n" +
+		divider
+
+	selector := &telebot.ReplyMarkup{}
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm Ghost Protocol", "ghost_c"), keyboards.StyleSuccess)
+	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "ghost_x"), keyboards.StyleDanger)
+	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
 }
 
-// doGhostProtocol is the testable core of HandleGhostProtocol, following
-// the same pattern as admin.go's doSetTaxRate: no telebot.Context
+// HandleGhostProtocolConfirmCallback fires when a player taps "✅
+// Confirm Ghost Protocol" on the card HandleGhostProtocol rendered.
+// Re-derives the caller's encampment server-side and calls the
+// unchanged doGhostProtocol core, which re-validates the cooldown
+// fresh - see HandleTeleportConfirmCallback's doc comment for why that
+// re-check matters even though HandleGhostProtocol already checked it
+// once when the card was shown.
+func (h *JobsHandler) HandleGhostProtocolConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid confirmation."})
+	}
+
+	campID, err := h.myCamp(ctx, sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	message, err := h.doGhostProtocol(ctx, campID)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleGhostProtocolCancelCallback fires when a player taps "❌
+// Cancel" - nothing was ever charged, relocated, or erased, so this
+// just closes out the card.
+func (h *JobsHandler) HandleGhostProtocolCancelCallback(c telebot.Context) error {
+	_ = c.Edit("👻 Ghost Protocol cancelled - nothing was charged, your outpost hasn't moved, and no intel locks were cleared.")
+	return c.Respond()
+}
+
+// doGhostProtocol is the testable core of HandleGhostProtocolConfirmCallback,
+// following the same pattern as admin.go's doSetTaxRate: no telebot.Context
 // dependency, so it can be exercised directly against a real database in
 // tests. Returns the message to send and, on failure, a non-nil error
 // (in which case the message is a plain-text failure notice, not HTML).

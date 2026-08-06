@@ -1813,3 +1813,92 @@ pointing at Scan Targets / Long-Range Scouting instead of a generic
 Verified with `go build ./... && go vet ./... && go test ./...` (all
 green) via the same temporary telebot `replace` directive, reverted
 before committing (`git diff --stat go.mod go.sum` empty).
+
+## Combat balance + job-confirmation session (2026-08-05) — Doomsday Rig toughness bug, Teleport/Ghost Protocol confirm-before-execute
+
+Reported live by the project owner with a battle-report screenshot: a
+fleet of 4 Doomsday Rigs (the single most expensive, "almost
+indestructible" unit in the game) died down to 0 within 2-3 raid
+rounds, alongside a general complaint that other high-cost units feel
+too fragile.
+
+**Root cause found:** `resolveRaidCombats`
+(`internal/engine/tick/engine.go`) already had a toughness system
+(`destroyerToughness=4, bomberToughness=4, bcToughness=20,
+dsToughness=200, liberatorToughness=8, wraithToughness=3`) meant to
+protect expensive units - but it only used those constants to compute
+one pool-wide AVERAGE toughness, which shrank the *total* specialist
+casualties for the round. The total was then split among the six
+specialist types purely by **raw headcount share**, so an individual
+Doomsday Rig's own 200-toughness constant never protected that Rig's
+own survival odds beyond its small contribution to the shared average.
+In the reported fleet (14 Destroyers/5 Bombers/34 Liberators/32
+Wraiths/30 Battlecruisers/4 Doomsday Rigs), the 4 Rigs got ~3.4% of
+losses (4/119 headcount share) - essentially the same rate as
+everything else, despite being 50x tougher than a Destroyer.
+
+**Fix:** new package `internal/game/combatmath` (pure, DB-free, fully
+unit-tested - deliberately extracted out of the DB-heavy tick engine so
+this kind of arithmetic bug is fast and deterministic to test, unlike
+the engine loop itself, which per this project's convention is only
+exercised via real-Postgres tests). `AllocateSpecialistLosses` replaces
+the headcount-only split with a hazard-weighted split - each type's
+share of losses is proportional to (count / toughness), not count
+alone, so a tougher unit's own survival is now actually protected in
+proportion to its toughness. Six tests, including one that reproduces
+the exact reported fleet composition and asserts Doomsday Rig losses
+land far below the old headcount share. The pool-wide total casualty
+count (`effectiveDbCas`) is unchanged - only how it's distributed among
+types changed, so this doesn't touch the already-tuned overall
+raid-difficulty balance, just who specifically dies.
+
+**Separately, also fixed by explicit project-owner request in the same
+session:** `/newjobteleport` and `/ghostprotocol` used to execute
+immediately on tap/command with zero confirmation - a mis-tap moved
+your outpost (and, for Ghost Protocol, wiped every scout's lock on your
+position) with no way to back out. Both now show a cost-preview
+Confirm/Cancel card (reusing the existing `keyboards.Styled`/
+`SendStyled` pattern already established for NLP-driven listing
+confirmations in `nlp.go`) before anything is charged or executed.
+Teleport's cost also changed from a flat 1,000 Electricity (confirmed
+live as ~0.014% of a real player's holdings, i.e. functionally free) to
+15% of current Scrap/Metal/Crystal/Electricity/Dollars - the same
+percentage-of-holdings style Ghost Protocol (50%) already used, at a
+third of its severity to preserve the intentional tier gap between the
+two. Both cards explain the reasoning inline ("why so costly") per the
+project owner's explicit request that players "see why."
+
+**Scope note, so this isn't rediscovered as "still not done":** this
+session did NOT attempt (a) confirm buttons on every other job in the
+game, (b) expanding the natural-language command interpreter beyond its
+current 4 intents (list/check-resources/scout/scout-status) to cover
+buying, selling, or raiding by text, (c) a clan resource-donation
+feature (clan wars and co-op battle-support already exist and were
+verified working - only resource donation to a clan turned out to be a
+genuine gap), or (d) a full keyboard/UI design pass. All four are real,
+sized asks from the same conversation, explicitly deferred pending the
+project owner's sign-off on scope/order, consistent with this
+project's practice of authorizing large phases via a plan doc rather
+than having an agent rush them unscoped.
+
+Verified: `go build`, `go vet` clean across the full repo (via the
+established temporary telebot.v3 replace-directive method, reverted
+before commit). `gofmt -l` clean on every touched file.
+`go test -v` clean on `internal/game/combatmath` (6/6, new),
+`internal/ai/...` (unaffected, still green), and
+`internal/bot/keyboards/...` (button-collision test still passes - no
+new keyboard buttons were added this session, only two new inline
+callback pairs). `doTeleport`/`doGhostProtocol` themselves could NOT be
+exercised against a real Postgres instance in this sandbox - `apt-get
+install postgresql` failed here (mirror returned 404s for the
+locale/libpq/postgresql packages specifically, an environment issue,
+not a network-allowlist block like the earlier Go-toolchain ones).
+`doTeleport` was modeled directly on `doGhostProtocol`'s already-proven
+transaction pattern (BeginTx, `SELECT ... FOR UPDATE`, deduct, update,
+commit) and reuses the same `allocateCoordinate`/`randomContinent`
+helpers `HandleTeleport` already called directly before this change;
+`doGhostProtocol`'s own logic is unchanged, only moved behind the new
+confirm callback. Recommend a manual live test of both flows (prompt
+card renders correctly, Cancel truly charges nothing, Confirm charges
+the previewed amount and relocates) before considering this fully
+closed.

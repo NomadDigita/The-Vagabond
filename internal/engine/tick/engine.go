@@ -18,6 +18,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/starvation"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/battlereport"
+	"github.com/NomadDigita/The-Vagabond/internal/game/combatmath"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
@@ -4068,12 +4069,44 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			effectiveDbCas := int(float64(dbCas) / weightedToughness)
 
-			lostAttDestroyers = int(float64(effectiveDbCas) * float64(totDestroyers) / float64(specialistPool))
-			lostAttBombers = int(float64(effectiveDbCas) * float64(totBombers) / float64(specialistPool))
-			lostAttBC = int(float64(effectiveDbCas) * float64(totBC) / float64(specialistPool))
-			lostAttLiberators = int(float64(effectiveDbCas) * float64(totLiberators) / float64(specialistPool))
-			lostAttWraiths = int(float64(effectiveDbCas) * float64(totWraiths) / float64(specialistPool))
-			lostAttDS = effectiveDbCas - lostAttDestroyers - lostAttBombers - lostAttBC - lostAttLiberators - lostAttWraiths
+			// 2026-08-05 fix: effectiveDbCas above is sized correctly
+			// (a pool-wide average toughness, unchanged), but it used
+			// to be split among types by raw headcount share alone,
+			// which meant a type's own toughness never protected that
+			// type's individual survival odds beyond its small
+			// contribution to the shared average - a Doomsday Rig
+			// (200x a Destroyer's toughness) died at essentially the
+			// same rate as everything else in a mixed fleet. See
+			// combatmath.AllocateSpecialistLosses' doc comment for the
+			// full reasoning; this now splits by (count/toughness)
+			// hazard share instead, so a tougher type genuinely dies
+			// less often per unit, not just on average.
+			specialistLosses := combatmath.AllocateSpecialistLosses(
+				effectiveDbCas,
+				combatmath.SpecialistCounts{
+					Destroyers:     totDestroyers,
+					Bombers:        totBombers,
+					Battlecruisers: totBC,
+					DoomsdayRigs:   totDS,
+					Liberators:     totLiberators,
+					Wraiths:        totWraiths,
+				},
+				combatmath.SpecialistToughness{
+					Destroyers:     destroyerToughness,
+					Bombers:        bomberToughness,
+					Battlecruisers: bcToughness,
+					DoomsdayRigs:   dsToughness,
+					Liberators:     liberatorToughness,
+					Wraiths:        wraithToughness,
+				},
+			)
+			lostAttDestroyers = specialistLosses.Destroyers
+			lostAttBombers = specialistLosses.Bombers
+			lostAttBC = specialistLosses.Battlecruisers
+			lostAttDS = specialistLosses.DoomsdayRigs
+			lostAttLiberators = specialistLosses.Liberators
+			lostAttWraiths = specialistLosses.Wraiths
+
 			if lostAttDestroyers > primaryDestroyers {
 				lostAttDestroyers = primaryDestroyers
 			}
