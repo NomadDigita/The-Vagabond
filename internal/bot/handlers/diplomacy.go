@@ -261,21 +261,21 @@ func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 
 	targetName := c.Message().Payload
 	if targetName == "" {
-		return c.Send("⚠️ Usage: /break_pact [clan_name]")
+		return c.Send("⚠️ Usage: /break_pact [clan_name]", keyboards.EconomyNavigation())
 	}
 
 	myClanID, _, isLeader, err := h.getMyClanForDiplomacy(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
+		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.", keyboards.EconomyNavigation())
 	}
 	if !isLeader {
-		return c.Send("❌ Only your Clan's Leader can break a diplomatic pact.")
+		return c.Send("❌ Only your Clan's Leader can break a diplomatic pact.", keyboards.EconomyNavigation())
 	}
 
 	var targetClanID string
 	err = h.DB.QueryRowContext(ctx, "SELECT id FROM clans WHERE LOWER(name) = LOWER($1)", targetName).Scan(&targetClanID)
 	if err != nil {
-		return c.Send("❌ No Clan found with that name.")
+		return c.Send("❌ No Clan found with that name.", keyboards.EconomyNavigation())
 	}
 
 	res, err := h.DB.ExecContext(ctx, `
@@ -283,13 +283,13 @@ func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 		WHERE ((clan_a_id = $1 AND clan_b_id = $2) OR (clan_a_id = $2 AND clan_b_id = $1)) AND status = 'active'`,
 		myClanID, targetClanID)
 	if err != nil {
-		return c.Send("⚠️ Error breaking pact.")
+		return c.Send("⚠️ Error breaking pact.", keyboards.EconomyNavigation())
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return c.Send("❌ No active pact found with that Clan.")
+		return c.Send("❌ No active pact found with that Clan.", keyboards.EconomyNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.", htmlEscape(targetName)), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.", htmlEscape(targetName)), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 // pactQueryer is satisfied by both *sql.DB and *sql.Tx, so combat.go's

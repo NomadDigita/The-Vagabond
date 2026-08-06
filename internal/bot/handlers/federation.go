@@ -151,21 +151,21 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 
 	name := c.Message().Payload
 	if name == "" {
-		return c.Send(fmt.Sprintf("⚠️ Usage: /fed_found [name]\n💰 Cost: %.0f Crystal\n🔒 Only your Clan's Leader can found a Federation.", federationFoundCost))
+		return c.Send(fmt.Sprintf("⚠️ Usage: /fed_found [name]\n💰 Cost: %.0f Crystal\n🔒 Only your Clan's Leader can found a Federation.", federationFoundCost), keyboards.EconomyNavigation())
 	}
 
 	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
+		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.", keyboards.EconomyNavigation())
 	}
 	if !isLeader {
-		return c.Send("❌ Only your Clan's Leader can found a Federation.")
+		return c.Send("❌ Only your Clan's Leader can found a Federation.", keyboards.EconomyNavigation())
 	}
 
 	var existingFed sql.NullString
 	_ = h.DB.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", clanID).Scan(&existingFed)
 	if existingFed.Valid {
-		return c.Send("❌ Your Clan is already part of a Federation. Use /fed_leave first.")
+		return c.Send("❌ Your Clan is already part of a Federation. Use /fed_leave first.", keyboards.EconomyNavigation())
 	}
 
 	var campID string
@@ -173,31 +173,31 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Founding transaction failed.")
+		return c.Send("⚠️ Founding transaction failed.", keyboards.EconomyNavigation())
 	}
 	defer tx.Rollback()
 
 	var crystal float64
 	_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&crystal)
 	if crystal < federationFoundCost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Crystal: Need %.0f, you have %.0f.", federationFoundCost, crystal))
+		return c.Send(fmt.Sprintf("❌ Insufficient Crystal: Need %.0f, you have %.0f.", federationFoundCost, crystal), keyboards.EconomyNavigation())
 	}
 
 	var fedID string
 	err = tx.QueryRowContext(ctx, "INSERT INTO federations (name, founder_clan_id) VALUES ($1, $2) RETURNING id", name, clanID).Scan(&fedID)
 	if err != nil {
-		return c.Send("❌ Name Taken: A Federation with that name already exists.")
+		return c.Send("❌ Name Taken: A Federation with that name already exists.", keyboards.EconomyNavigation())
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", federationFoundCost, campID)
 	_, _ = tx.ExecContext(ctx, "UPDATE clans SET federation_id = $1 WHERE id = $2", fedID, clanID)
 
 	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error founding Federation.")
+		return c.Send("⚠️ Error founding Federation.", keyboards.EconomyNavigation())
 	}
 
 	return c.Send(fmt.Sprintf("🌐🎉 %s: \"%s\"! Other Clan Leaders can now join with %s",
-		htmlBold("FEDERATION FOUNDED"), htmlEscape(name), htmlCode(fmt.Sprintf("/fed_join %s", htmlEscape(name)))), telebot.ModeHTML)
+		htmlBold("FEDERATION FOUNDED"), htmlEscape(name), htmlCode(fmt.Sprintf("/fed_join %s", htmlEscape(name)))), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 // HandleJoinFederation (/fed_join [name]) - a Clan Leader brings their whole
@@ -211,15 +211,15 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 
 	name := c.Message().Payload
 	if name == "" {
-		return c.Send("⚠️ Usage: /fed_join [federation name]")
+		return c.Send("⚠️ Usage: /fed_join [federation name]", keyboards.EconomyNavigation())
 	}
 
 	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.")
+		return c.Send("⚠️ You must be in a Clan first. Use /clan to create or join one.", keyboards.EconomyNavigation())
 	}
 	if !isLeader {
-		return c.Send("❌ Only your Clan's Leader can join a Federation.")
+		return c.Send("❌ Only your Clan's Leader can join a Federation.", keyboards.EconomyNavigation())
 	}
 
 	// BUGFIX: HandleFoundFederation already blocks founding while in a
@@ -228,21 +228,21 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 	var existingFed sql.NullString
 	_ = h.DB.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", clanID).Scan(&existingFed)
 	if existingFed.Valid {
-		return c.Send("❌ Your Clan is already part of a Federation. Use /fed_leave first.")
+		return c.Send("❌ Your Clan is already part of a Federation. Use /fed_leave first.", keyboards.EconomyNavigation())
 	}
 
 	var fedID string
 	err = h.DB.QueryRowContext(ctx, "SELECT id FROM federations WHERE LOWER(name) = LOWER($1)", name).Scan(&fedID)
 	if err != nil {
-		return c.Send("❌ No Federation found with that name. Check /federations for the list.")
+		return c.Send("❌ No Federation found with that name. Check /federations for the list.", keyboards.EconomyNavigation())
 	}
 
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET federation_id = $1 WHERE id = $2", fedID, clanID)
 	if err != nil {
-		return c.Send("⚠️ Error joining Federation.")
+		return c.Send("⚠️ Error joining Federation.", keyboards.EconomyNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("🌐✅ Your Clan has joined \"%s\"!", htmlEscape(name)), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("🌐✅ Your Clan has joined \"%s\"!", htmlEscape(name)), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
 // HandleLeaveFederation (/fed_leave) - a Clan Leader removes their Clan from
@@ -256,16 +256,16 @@ func (h *FederationHandler) HandleLeaveFederation(c telebot.Context) error {
 
 	clanID, isLeader, err := h.getMyClan(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ You must be in a Clan first.")
+		return c.Send("⚠️ You must be in a Clan first.", keyboards.EconomyNavigation())
 	}
 	if !isLeader {
-		return c.Send("❌ Only your Clan's Leader can leave a Federation.")
+		return c.Send("❌ Only your Clan's Leader can leave a Federation.", keyboards.EconomyNavigation())
 	}
 
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET federation_id = NULL WHERE id = $1", clanID)
 	if err != nil {
-		return c.Send("⚠️ Error leaving Federation.")
+		return c.Send("⚠️ Error leaving Federation.", keyboards.EconomyNavigation())
 	}
 
-	return c.Send("🌐 Your Clan has left its Federation.")
+	return c.Send("🌐 Your Clan has left its Federation.", keyboards.EconomyNavigation())
 }

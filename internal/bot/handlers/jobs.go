@@ -86,12 +86,82 @@ func (h *JobsHandler) HandleJobsPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, "🛠️ Accessing Field Operations...", keyboards.JobsNavigation(), panelText, &telebot.ReplyMarkup{})
 }
 
+// hyperspeedTarget is the nearest-resolving accelerable mission - either
+// an outbound/returning raid (raids.resolve_time) or a scout party
+// already on its way home (scout_missions.return_eta, phase='returning').
+// 2026-08-06 direct request: "job HyperSpeed should be able to work to
+// HyperSpeed long range scouting units returning home" - previously
+// HyperSpeed only ever looked at the raids table, so a player with no
+// active raid but a scout party inbound had nothing to accelerate even
+// though one clearly existed. A scout mission still in its 'searching'
+// phase has no fixed ETA to cut in half (that's the whole point of an
+// open-ended search - see scoutMissionPingInterval's doc comment in
+// internal/engine/tick/scoutmissions.go), so only 'returning' qualifies,
+// mirroring how a raid only qualifies once it has a resolve_time at all.
+type hyperspeedTarget struct {
+	kind        string // "raid" or "scout"
+	id          string
+	resolveTime time.Time
+}
+
+// hyperspeedQuerier is satisfied by both *sql.DB (preview) and *sql.Tx
+// (execution, where the row must be locked FOR UPDATE) - findHyperSpeedTarget
+// runs the same two candidate queries either way and returns whichever
+// resolves soonest.
+type hyperspeedQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
+func findHyperSpeedTarget(ctx context.Context, q hyperspeedQuerier, campID string, forUpdate bool) (hyperspeedTarget, error) {
+	raidLock, scoutLock := "", ""
+	if forUpdate {
+		raidLock, scoutLock = " FOR UPDATE", " FOR UPDATE"
+	}
+
+	var best hyperspeedTarget
+	found := false
+
+	var raidID string
+	var raidResolve time.Time
+	if err := q.QueryRowContext(ctx,
+		"SELECT id, resolve_time FROM raids WHERE attacker_id = $1 AND state IN ('marching','engaged','returning') ORDER BY resolve_time ASC LIMIT 1"+raidLock,
+		campID).Scan(&raidID, &raidResolve); err == nil {
+		best = hyperspeedTarget{kind: "raid", id: raidID, resolveTime: raidResolve}
+		found = true
+	}
+
+	var scoutID string
+	var scoutResolve time.Time
+	if err := q.QueryRowContext(ctx,
+		"SELECT id, return_eta FROM scout_missions WHERE encampment_id = $1 AND phase = 'returning' ORDER BY return_eta ASC LIMIT 1"+scoutLock,
+		campID).Scan(&scoutID, &scoutResolve); err == nil {
+		if !found || scoutResolve.Before(best.resolveTime) {
+			best = hyperspeedTarget{kind: "scout", id: scoutID, resolveTime: scoutResolve}
+			found = true
+		}
+	}
+
+	if !found {
+		return hyperspeedTarget{}, sql.ErrNoRows
+	}
+	return best, nil
+}
+
+func (t hyperspeedTarget) label() string {
+	if t.kind == "scout" {
+		return "long-range scouting party"
+	}
+	return "raid/expedition"
+}
+
 // HandleHyperSpeed (/newjobhyperspeed) shaves time off your earliest
 // active raid's remaining travel, matching the SpaceHunt tip about
 // launching HyperSpeed before departing a raid.
 // HandleHyperSpeed (/newjobhyperspeed) shows a Confirm/Cancel preview
 // before spending Electricity to halve your nearest active mission's
 // remaining time - 2026-08-05 fix, same rationale as HandleTeleport.
+// Since 2026-08-06, "nearest active mission" spans both raids and
+// returning scout parties - see findHyperSpeedTarget's doc comment.
 // See doHyperSpeed for the execution core.
 func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 	ctx := context.Background()
@@ -102,21 +172,19 @@ func (h *JobsHandler) HandleHyperSpeed(c telebot.Context) error {
 
 	campID, err := h.myCamp(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
-	var raidID string
-	var resolveTime time.Time
-	err = h.DB.QueryRowContext(ctx, "SELECT id, resolve_time FROM raids WHERE attacker_id = $1 AND state IN ('marching','engaged','returning') ORDER BY resolve_time ASC LIMIT 1", campID).Scan(&raidID, &resolveTime)
+	target, err := findHyperSpeedTarget(ctx, h.DB, campID, false)
 	if err != nil {
-		return c.Send("❌ No active missions to accelerate. Launch a raid first!")
+		return c.Send("❌ No active missions to accelerate. Launch a raid or dispatch scouts first!", keyboards.JobsNavigation())
 	}
-	if remaining := time.Until(resolveTime); remaining < time.Minute {
-		return c.Send("⚠️ That mission is about to resolve already - no need for HyperSpeed.")
+	if remaining := time.Until(target.resolveTime); remaining < time.Minute {
+		return c.Send("⚠️ That mission is about to resolve already - no need for HyperSpeed.", keyboards.JobsNavigation())
 	}
 
 	return sendConfirmCard(c, "🚀 "+htmlBold("CONFIRM HYPERSPEED"),
-		fmt.Sprintf("Cost: %s Electricity. Cuts your nearest active mission's remaining time in half.", htmlCode("300")),
+		fmt.Sprintf("Cost: %s Electricity. Cuts your nearest active mission's remaining time in half (currently your %s).", htmlCode("300"), target.label()),
 		"This spends real Electricity for a one-time timing boost - confirming first avoids burning it on a mission you'd rather let resolve naturally.",
 		"hyperspeed")
 }
@@ -152,7 +220,10 @@ func (h *JobsHandler) HandleHyperSpeedCancelCallback(c telebot.Context) error {
 // doHyperSpeed is the testable core of HandleHyperSpeedConfirmCallback -
 // unchanged logic from the pre-2026-08-05 HandleHyperSpeed, just moved
 // behind the new confirm callback and returning its result instead of
-// sending it directly.
+// sending it directly. Since 2026-08-06 it picks the nearest-resolving
+// target across both raids and returning scout missions (see
+// findHyperSpeedTarget) and updates whichever table that target came
+// from.
 func (h *JobsHandler) doHyperSpeed(ctx context.Context, campID string) (string, error) {
 	const cost = 300.0 // Electricity
 
@@ -168,31 +239,37 @@ func (h *JobsHandler) doHyperSpeed(ctx context.Context, campID string) (string, 
 		return fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient Electricity!"), htmlCode(fmt.Sprintf("%.0f", cost)), htmlCode(fmt.Sprintf("%.0f", electricity))), errors.New("insufficient electricity")
 	}
 
-	var raidID string
-	var resolveTime time.Time
-	err = tx.QueryRowContext(ctx, "SELECT id, resolve_time FROM raids WHERE attacker_id = $1 AND state IN ('marching','engaged','returning') ORDER BY resolve_time ASC LIMIT 1 FOR UPDATE", campID).Scan(&raidID, &resolveTime)
+	target, err := findHyperSpeedTarget(ctx, tx, campID, true)
 	if err != nil {
-		return "❌ No active missions to accelerate. Launch a raid first!", err
+		return "❌ No active missions to accelerate. Launch a raid or dispatch scouts first!", err
 	}
 
-	remaining := time.Until(resolveTime)
+	remaining := time.Until(target.resolveTime)
 	if remaining < time.Minute {
 		return "⚠️ That mission is about to resolve already - no need for HyperSpeed.", errors.New("mission resolving imminently")
 	}
-	newResolve := resolveTime.Add(-remaining / 2) // cuts remaining time in half
+	newResolve := target.resolveTime.Add(-remaining / 2) // cuts remaining time in half
 
 	if _, err := tx.ExecContext(ctx, "UPDATE resources SET electricity = electricity - $1 WHERE encampment_id = $2", cost, campID); err != nil {
 		return "⚠️ Error deducting HyperSpeed's cost.", err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, raidID); err != nil {
-		return "⚠️ Error activating HyperSpeed.", err
+
+	switch target.kind {
+	case "scout":
+		if _, err := tx.ExecContext(ctx, "UPDATE scout_missions SET return_eta = $1 WHERE id = $2", newResolve, target.id); err != nil {
+			return "⚠️ Error activating HyperSpeed.", err
+		}
+	default:
+		if _, err := tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", newResolve, target.id); err != nil {
+			return "⚠️ Error activating HyperSpeed.", err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return "⚠️ Error activating HyperSpeed.", err
 	}
 
-	return fmt.Sprintf("🚀⚡ %s Your nearest mission's remaining time was cut in half. New ETA: %s", htmlBold("HYPERSPEED ENGAGED!"), htmlCode(newResolve.UTC().Format("15:04 MST"))), nil
+	return fmt.Sprintf("🚀⚡ %s Your nearest %s's remaining time was cut in half. New ETA: %s", htmlBold("HYPERSPEED ENGAGED!"), target.label(), htmlCode(newResolve.UTC().Format("15:04 MST"))), nil
 }
 
 // HandleExtendPlanet (/newjobextendplanet) shows a Confirm/Cancel
@@ -210,7 +287,7 @@ func (h *JobsHandler) HandleExtendPlanet(c telebot.Context) error {
 
 	campID, err := h.myCamp(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
 	var extensionLvl int
@@ -598,7 +675,7 @@ func (h *JobsHandler) HandleOrbitalManeuver(c telebot.Context) error {
 	}
 
 	if _, err := h.myCamp(ctx, sender.ID); err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
 	return sendConfirmCard(c, "🛰️ "+htmlBold("CONFIRM ORBITAL MANEUVER"),
@@ -680,7 +757,7 @@ func (h *JobsHandler) HandleRepairUnits(c telebot.Context) error {
 	}
 
 	if _, err := h.myCamp(ctx, sender.ID); err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
 	return sendConfirmCard(c, "🔧 "+htmlBold("CONFIRM FIELD REPAIRS"),
@@ -761,12 +838,12 @@ func (h *JobsHandler) HandleRepairBuildings(c telebot.Context) error {
 
 	campID, err := h.myCamp(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
 	var readyAt time.Time
 	if err := h.DB.QueryRowContext(ctx, "SELECT upgrade_ready_at FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE ORDER BY upgrade_ready_at ASC LIMIT 1", campID).Scan(&readyAt); err != nil {
-		return c.Send("❌ No buildings currently under construction to repair/rush.")
+		return c.Send("❌ No buildings currently under construction to repair/rush.", keyboards.JobsNavigation())
 	}
 
 	return sendConfirmCard(c, "🏗️ "+htmlBold("CONFIRM CONSTRUCTION RUSH"),
@@ -855,14 +932,14 @@ func (h *JobsHandler) HandleGatherSunlight(c telebot.Context) error {
 
 	campID, err := h.myCamp(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.JobsNavigation())
 	}
 
 	var lastSunlight sql.NullTime
 	_ = h.DB.QueryRowContext(ctx, "SELECT last_sunlight_at FROM encampments WHERE id = $1", campID).Scan(&lastSunlight)
 	if lastSunlight.Valid && time.Since(lastSunlight.Time) < 30*time.Minute {
 		remaining := 30*time.Minute - time.Since(lastSunlight.Time)
-		return c.Send(fmt.Sprintf("⏳ Solar panels still recharging - %.0f minutes left.", remaining.Minutes()))
+		return c.Send(fmt.Sprintf("⏳ Solar panels still recharging - %.0f minutes left.", remaining.Minutes()), keyboards.JobsNavigation())
 	}
 
 	const gain = 150.0
@@ -873,23 +950,23 @@ func (h *JobsHandler) HandleGatherSunlight(c telebot.Context) error {
 	_, _ = h.DB.ExecContext(ctx, "UPDATE resources SET electricity = $1 WHERE encampment_id = $2", newElectricity, campID)
 	_, _ = h.DB.ExecContext(ctx, "UPDATE encampments SET last_sunlight_at = CURRENT_TIMESTAMP WHERE id = $1", campID)
 
-	return c.Send(fmt.Sprintf("☀️✅ %s +%s Electricity harvested manually.", htmlBold("SUNLIGHT GATHERED!"), htmlCode(fmt.Sprintf("%.0f", gain))), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("☀️✅ %s +%s Electricity harvested manually.", htmlBold("SUNLIGHT GATHERED!"), htmlCode(fmt.Sprintf("%.0f", gain))), telebot.ModeHTML, keyboards.JobsNavigation())
 }
 
 // ── Scan command aliases for full command-name parity ──────────────────
 
 func (h *JobsHandler) HandleManualScanAlias(c telebot.Context) error {
-	return c.Send("🔍 Manual Scan: use /scout [username] to instantly look up a rival's basic intel.")
+	return c.Send("🔍 Manual Scan: use /scout [username] to instantly look up a rival's basic intel.", keyboards.JobsNavigation())
 }
 
 func (h *JobsHandler) HandleAutoScanAlias(c telebot.Context) error {
-	return c.Send("📡 Automatic Scan: use /autoscan to toggle periodic automated recon reports.")
+	return c.Send("📡 Automatic Scan: use /autoscan to toggle periodic automated recon reports.", keyboards.JobsNavigation())
 }
 
 func (h *JobsHandler) HandleAdvancedScanAlias(c telebot.Context) error {
-	return c.Send("🛰️ Advanced Scan: after a /scout lookup, tap 'Intercept Signal' to launch a full satellite recon mission with real travel time and deeper intel.")
+	return c.Send("🛰️ Advanced Scan: after a /scout lookup, tap 'Intercept Signal' to launch a full satellite recon mission with real travel time and deeper intel.", keyboards.JobsNavigation())
 }
 
 func (h *JobsHandler) HandlePublishTradeAlias(c telebot.Context) error {
-	return c.Send("💱 Publish Trade: open the Market Exchange from /econ ➜ Market Exchange to list Metal or Crystal for sale to other survivors.")
+	return c.Send("💱 Publish Trade: open the Market Exchange from /econ ➜ Market Exchange to list Metal or Crystal for sale to other survivors.", keyboards.JobsNavigation())
 }

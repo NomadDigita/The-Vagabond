@@ -15,6 +15,14 @@ import (
 // just tagging more call sites with an existing one.
 var MutableCategories = map[string]bool{
 	"route_status": true,
+	// scout_status: 2026-08-06 direct request - long-range scouting's
+	// periodic pings ("still searching", "en route home", "party
+	// returned") used to share the single route_status toggle with
+	// unrelated road/convoy chatter. Split out so a player can silence
+	// scouting noise without also silencing road-encounter/convoy
+	// status. "CONTACT!"/"SPOTTED" discovery events are never tagged
+	// with this - see scoutMissionFindsTarget's doc comment.
+	"scout_status": true,
 }
 
 // querier is satisfied by both *sql.DB and *sql.Tx, so tick-engine code
@@ -38,6 +46,11 @@ func IsCategoryMuted(ctx context.Context, q querier, userID int64, category stri
 	switch category {
 	case "route_status":
 		err := q.QueryRowContext(ctx, "SELECT mute_route_status FROM notification_preferences WHERE user_id = $1", userID).Scan(&muted)
+		if err != nil {
+			return false // no row yet == default (unmuted)
+		}
+	case "scout_status":
+		err := q.QueryRowContext(ctx, "SELECT mute_scout_status FROM notification_preferences WHERE user_id = $1", userID).Scan(&muted)
 		if err != nil {
 			return false // no row yet == default (unmuted)
 		}

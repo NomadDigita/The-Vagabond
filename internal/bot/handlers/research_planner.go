@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/researchplanner"
 	"gopkg.in/telebot.v3"
 )
@@ -79,13 +80,13 @@ func (h *ResearchPlannerHandler) HandleResearchPlanner(c telebot.Context) error 
 	ctx := context.Background()
 	text, keyboard, err := h.renderResearchPlannerReport(ctx, sender.ID, goal)
 	if errors.Is(err, researchplanner.ErrNoEncampment) {
-		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
+		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.", keyboards.AdvisorsNavigation())
 	}
 	if err != nil {
-		return c.Send("⚠️ The AI Research Planner is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Research Planner is temporarily unavailable: "+err.Error(), keyboards.AdvisorsNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
 // ── callback: research_refresh ──────────────────────────────────────

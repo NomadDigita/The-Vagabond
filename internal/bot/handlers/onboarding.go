@@ -235,33 +235,33 @@ func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 		return c.Send(fmt.Sprintf(
 			"✏️ RENAME OUTPOST\n\nUsage: /name [new name]\n\n💰 Cost: %.0f Crystal + $%.0f\n📏 3-20 characters, letters/numbers/spaces/hyphens only.\n\n⚠️ This changes your public display name everywhere - battle reports, rankings, and leaderboards.",
 			nameChangeCostCrystal, nameChangeCostDollars,
-		))
+		), keyboards.MainNavigation())
 	}
 
 	if len(newName) < 3 || len(newName) > 20 {
-		return c.Send("❌ Invalid Length: Name must be 3-20 characters.")
+		return c.Send("❌ Invalid Length: Name must be 3-20 characters.", keyboards.MainNavigation())
 	}
 
 	validName := regexp.MustCompile(`^[a-zA-Z0-9 \-]+$`)
 	if !validName.MatchString(newName) {
-		return c.Send("❌ Invalid Characters: Only letters, numbers, spaces, and hyphens are allowed.")
+		return c.Send("❌ Invalid Characters: Only letters, numbers, spaces, and hyphens are allowed.", keyboards.MainNavigation())
 	}
 
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
 	var existing string
 	err = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE LOWER(name) = LOWER($1) AND id != $2", newName, campID).Scan(&existing)
 	if err == nil {
-		return c.Send("❌ Name Taken: Another survivor already claims that name.")
+		return c.Send("❌ Name Taken: Another survivor already claims that name.", keyboards.MainNavigation())
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Rename transaction failed.")
+		return c.Send("⚠️ Rename transaction failed.", keyboards.MainNavigation())
 	}
 	defer tx.Rollback()
 
@@ -269,21 +269,21 @@ func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 	_ = tx.QueryRowContext(ctx, "SELECT crystal, dollars FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&crystal, &dollars)
 
 	if crystal < nameChangeCostCrystal || dollars < nameChangeCostDollars {
-		return c.Send(fmt.Sprintf("❌ Insufficient Funds: Need %.0f Crystal + $%.0f. You have %.0f Crystal + $%.0f.", nameChangeCostCrystal, nameChangeCostDollars, crystal, dollars))
+		return c.Send(fmt.Sprintf("❌ Insufficient Funds: Need %.0f Crystal + $%.0f. You have %.0f Crystal + $%.0f.", nameChangeCostCrystal, nameChangeCostDollars, crystal, dollars), keyboards.MainNavigation())
 	}
 
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1, dollars = dollars - $2 WHERE encampment_id = $3", nameChangeCostCrystal, nameChangeCostDollars, campID)
 	_, err = tx.ExecContext(ctx, "UPDATE encampments SET name = $1 WHERE id = $2", newName, campID)
 	if err != nil {
-		return c.Send("⚠️ Error writing new outpost name.")
+		return c.Send("⚠️ Error writing new outpost name.", keyboards.MainNavigation())
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing outpost rename: %v", err)
-		return c.Send("⚠️ Error saving changes.")
+		return c.Send("⚠️ Error saving changes.", keyboards.MainNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName))
+	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName), keyboards.MainNavigation())
 }
 
 // HandleGuide (/guide) re-sends the game briefing and getting-started

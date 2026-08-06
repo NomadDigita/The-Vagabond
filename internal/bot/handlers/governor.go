@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/governor"
 	"gopkg.in/telebot.v3"
 )
@@ -68,13 +69,13 @@ func (h *GovernorHandler) HandleGovernor(c telebot.Context) error {
 	ctx := context.Background()
 	text, keyboard, err := h.renderGovernorReport(ctx, sender.ID)
 	if errors.Is(err, governor.ErrNoEncampment) {
-		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
+		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.", keyboards.AdvisorsNavigation())
 	}
 	if err != nil {
-		return c.Send("⚠️ The AI Planet Governor is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Planet Governor is temporarily unavailable: "+err.Error(), keyboards.AdvisorsNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
 // ── callback: gov_refresh ────────────────────────────────────────────
@@ -159,19 +160,19 @@ func (h *GovernorHandler) HandleGovernorAutopilot(c telebot.Context) error {
 			state = "ON"
 		}
 		if err != nil && !errors.Is(err, governor.ErrNoEncampment) {
-			return c.Send("⚠️ Could not read your current preference: " + err.Error())
+			return c.Send("⚠️ Could not read your current preference: "+err.Error(), keyboards.AdvisorsNavigation())
 		}
 		return c.Send("Your autopilot preference is currently: "+state+"\nUsage: /governor_autopilot <on|off>\n\n"+
 			"Note: autopilot execution is not implemented yet — the Governor is advisory-only for every player regardless of this setting. This just records your preference for when execution ships.",
-			h.buildGovernorKeyboard(ctx, sender.ID))
+			h.buildGovernorKeyboard(ctx, sender.ID), keyboards.AdvisorsNavigation())
 	}
 
 	enabled := payload == "on"
 	if err := h.Governor.SetAutopilot(ctx, sender.ID, enabled); err != nil {
 		if errors.Is(err, governor.ErrNoEncampment) {
-			return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
+			return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.", keyboards.AdvisorsNavigation())
 		}
-		return c.Send("⚠️ Failed to save preference: " + err.Error())
+		return c.Send("⚠️ Failed to save preference: "+err.Error(), keyboards.AdvisorsNavigation())
 	}
 
 	stateWord := "OFF"
@@ -180,5 +181,5 @@ func (h *GovernorHandler) HandleGovernorAutopilot(c telebot.Context) error {
 	}
 	return c.Send("✅ Autopilot preference saved as "+stateWord+".\n\n"+
 		"Reminder: autopilot execution is not implemented yet (tracked in PROJECT_MASTER_PLAN.md) — /governor remains advisory-only for now regardless of this setting.",
-		h.buildGovernorKeyboard(ctx, sender.ID))
+		h.buildGovernorKeyboard(ctx, sender.ID), keyboards.AdvisorsNavigation())
 }

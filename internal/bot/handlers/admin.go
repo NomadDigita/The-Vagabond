@@ -347,13 +347,13 @@ func (h *AdminHandler) HandleAdminTick(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	_ = c.Notify(telebot.Typing)
 	h.TickEngine.ProcessTick()
 
-	return c.Send("⚡ "+htmlBold("ADMIN SYSTEM OVERRIDE")+": Master game tick successfully triggered.", telebot.ModeHTML)
+	return c.Send("⚡ "+htmlBold("ADMIN SYSTEM OVERRIDE")+": Master game tick successfully triggered.", telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
@@ -363,11 +363,11 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doDBReset(context.Background())
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doDBReset is the single source of truth for the destructive database
@@ -506,22 +506,22 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	payload := c.Message().Payload
 	args := strings.Split(payload, " ")
 	if len(args) < 2 {
-		return c.Send("⚠️ Syntax Error: Use `/admin_gift_premium [username] [days]`")
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_premium [username] [days]`", keyboards.AdminNavigation())
 	}
 
 	days, err := strconv.Atoi(args[1])
 	if err != nil {
-		return c.Send("⚠️ Days parameter must be a valid integer.")
+		return c.Send("⚠️ Days parameter must be a valid integer.", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doGiftPremium(context.Background(), args[0], days)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doGiftPremium is the single source of truth for granting Premium,
@@ -559,22 +559,22 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	payload := c.Message().Payload
 	args := strings.Split(payload, " ")
 	if len(args) < 3 {
-		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [resource_type] [amount]`\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores")
+		return c.Send("⚠️ Syntax Error: Use `/admin_gift_resources [username] [resource_type] [amount]`\nTypes: scrap, rations, electricity, metal, crystal, hydrogen, dollars, neuro_cores", keyboards.AdminNavigation())
 	}
 
 	amount, err := strconv.ParseFloat(args[2], 64)
 	if err != nil {
-		return c.Send("⚠️ Amount must be a valid float value.")
+		return c.Send("⚠️ Amount must be a valid float value.", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doGiftResources(context.Background(), args[0], args[1], amount)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doGiftResources is the single source of truth for gifting a resource
@@ -623,11 +623,11 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doInjectSelf(context.Background(), sender.ID)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doInjectSelf is the single source of truth for injecting 5,000 of
@@ -666,21 +666,21 @@ func (h *AdminHandler) HandleAdminSetTaxRate(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	args := c.Args()
 	if len(args) < 1 {
-		return c.Send("⚠️ Usage: /settaxrate [0-10]")
+		return c.Send("⚠️ Usage: /settaxrate [0-10]", keyboards.AdminNavigation())
 	}
 
 	rate, err := strconv.Atoi(args[0])
 	if err != nil || rate < 0 || rate > 10 {
-		return c.Send("⚠️ Tax rate must be a whole number between 0 and 10 (percent).")
+		return c.Send("⚠️ Tax rate must be a whole number between 0 and 10 (percent).", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doSetTaxRate(context.Background(), rate)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doSetTaxRate is the single source of truth for the daily tax rate,
@@ -718,15 +718,15 @@ func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	targetFaction := c.Message().Payload
 	if targetFaction != "steel_vanguard" && targetFaction != "rust_nomads" {
-		return c.Send("⚠️ Syntax Error: Use `/admin_faction steel_vanguard` or `/admin_faction rust_nomads`")
+		return c.Send("⚠️ Syntax Error: Use `/admin_faction steel_vanguard` or `/admin_faction rust_nomads`", keyboards.AdminNavigation())
 	}
 	result, _ := h.doFactionChange(context.Background(), sender.ID, targetFaction)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doFactionChange is the single source of truth for an admin's own
@@ -758,16 +758,16 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 	}
 
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	broadcastMsg := c.Message().Payload
 	if broadcastMsg == "" {
-		return c.Send("⚠️ Broadcast Failed: Payload empty. Syntax: `/admin_broadcast [message]`")
+		return c.Send("⚠️ Broadcast Failed: Payload empty. Syntax: `/admin_broadcast [message]`", keyboards.AdminNavigation())
 	}
 
 	result, _ := h.doBroadcast(context.Background(), broadcastMsg)
-	return c.Send(result, telebot.ModeHTML)
+	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
 // doBroadcast is the single source of truth for a system-wide broadcast,

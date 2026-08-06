@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
 	"gopkg.in/telebot.v3"
 )
@@ -57,13 +58,13 @@ func (h *BattleAnalystHandler) HandleBattleAnalyst(c telebot.Context) error {
 	ctx := context.Background()
 	text, keyboard, err := h.renderBattleAnalystReport(ctx, sender.ID)
 	if errors.Is(err, battleanalyst.ErrNoEncampment) {
-		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
+		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.", keyboards.AdvisorsNavigation())
 	}
 	if err != nil {
-		return c.Send("⚠️ The AI Battle Analyst is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Battle Analyst is temporarily unavailable: "+err.Error(), keyboards.AdvisorsNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
 // ── callback: battle_analyst_refresh ─────────────────────────────────

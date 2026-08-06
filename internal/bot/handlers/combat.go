@@ -51,7 +51,43 @@ func (h *CombatHandler) HandleTargetMatrix(c telebot.Context) error {
 	return h.HandleRaidBoard(c)
 }
 
+// raidBoardPageSize caps how many scouted targets the Tactical Target
+// Matrix shows per page. Fixed at 5 to match Doc-ID's discoveries
+// remaining meaning at every dashboard.
+const raidBoardPageSize = 5
+
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
+	_ = c.Send("⚔️ Syncing tactical coordinate systems...", keyboards.CombatNavigation())
+	return h.sendRaidBoardPage(c, 0, false)
+}
+
+// HandleRaidBoardPageCallback fires when a player taps "▶️ More" or
+// "◀️ Back" on the Tactical Target Matrix. 2026-08-06 fix: the matrix
+// used to hardcode `ORDER BY d.last_seen_at DESC LIMIT 5`, so a player
+// who had scouted more than 5 targets could never see anything past
+// their 5 most-recently-seen ones - older-but-still-valid discoveries
+// just silently vanished from the board with no way to reach them. This
+// paginates instead of truncating: page is carried in callback_data (see
+// cmd/bot/main.go's "\fraid_board_page" registration) and every older
+// discovery stays reachable via ◀️/▶️.
+func (h *CombatHandler) HandleRaidBoardPageCallback(c telebot.Context) error {
+	if len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid page."})
+	}
+	page, err := strconv.Atoi(c.Args()[0])
+	if err != nil || page < 0 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid page."})
+	}
+	_ = c.Respond()
+	return h.sendRaidBoardPage(c, page, true)
+}
+
+// sendRaidBoardPage renders one page of the Tactical Target Matrix.
+// edit controls whether the result replaces the message the callback
+// came from (page nav) or is sent fresh (initial /raid open) - matches
+// the c.Edit vs c.Send split used by every other paginated panel's
+// callback in this codebase.
+func (h *CombatHandler) sendRaidBoardPage(c telebot.Context, page int, edit bool) error {
 	_ = c.Notify(telebot.FindingLocation)
 
 	sender := c.Sender()
@@ -77,7 +113,21 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
-	_ = c.Send("⚔️ Syncing tactical coordinate systems...", keyboards.CombatNavigation())
+	var totalTargets int
+	_ = h.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM encampment_discoveries d
+		WHERE d.observer_encampment_id = $1 AND d.target_encampment_id IS NOT NULL`, myCampID).Scan(&totalTargets)
+
+	totalPages := 1
+	if totalTargets > 0 {
+		totalPages = (totalTargets + raidBoardPageSize - 1) / raidBoardPageSize
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	if page < 0 {
+		page = 0
+	}
 
 	queryTargets := `
 		SELECT e.id, e.name, u.first_name, c.x, c.y, c.region,
@@ -89,9 +139,9 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 		WHERE d.observer_encampment_id = $1
 		  AND d.target_encampment_id IS NOT NULL
 		ORDER BY d.last_seen_at DESC
-		LIMIT 5`
+		LIMIT $2 OFFSET $3`
 
-	rows, err := h.DB.QueryContext(ctx, queryTargets, myCampID)
+	rows, err := h.DB.QueryContext(ctx, queryTargets, myCampID, raidBoardPageSize, page*raidBoardPageSize)
 	if err != nil {
 		log.Printf("Failed scanning target outposts: %v", err)
 		return c.Send("⚠️ Failed to load target database matrix.", keyboards.CombatNavigation())
@@ -139,74 +189,97 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 				marchTimeStr = fmt.Sprintf("%.1fh", marchingMinutes/60.0)
 			}
 
+			slot := page*raidBoardPageSize + i + 1
 			dashboard += fmt.Sprintf("🎯 [%d] Outpost: %s %s\n    👤 Commander: %s\n    🚶 Travel: %s | ⏱️ March Time: %s\n    💰 Estimated Loot: %s\n\n",
-				i+1, htmlBold(htmlEscape(t.name)), htmlCode("("+t.region+" Territory)"), htmlEscape(t.owner),
+				slot, htmlBold(htmlEscape(t.name)), htmlCode("("+t.region+" Territory)"), htmlEscape(t.owner),
 				htmlCode(fmt.Sprintf("%.0f steps", steps)), htmlCode(marchTimeStr), htmlCode(fmt.Sprintf("%.1f Scrap", t.lootable)))
-			btnRaid := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", i+1), "launch_raid", t.id)
-			btnSpy := selector.Data(fmt.Sprintf("🛰️ Spy [%d]", i+1), "spy_action", t.id)
-			btnCoop := selector.Data(fmt.Sprintf("🤝 Co-Op [%d]", i+1), "stage_coop", t.id)
+			btnRaid := selector.Data(fmt.Sprintf("⚔️ Raid [%d]", slot), "launch_raid", t.id)
+			btnSpy := selector.Data(fmt.Sprintf("🛰️ Spy [%d]", slot), "spy_action", t.id)
+			btnCoop := selector.Data(fmt.Sprintf("🤝 Co-Op [%d]", slot), "stage_coop", t.id)
 			buttons = append(buttons, selector.Row(btnRaid, btnSpy), selector.Row(btnCoop))
 		}
 	}
 
-	queryCoops := `
+	if totalTargets > raidBoardPageSize {
+		dashboard += fmt.Sprintf("📄 %s\n\n", htmlItalic(fmt.Sprintf("Page %d/%d - %d known target(s) scouted total.", page+1, totalPages, totalTargets)))
+		var navRow []telebot.Btn
+		if page > 0 {
+			navRow = append(navRow, selector.Data(fmt.Sprintf("◀️ Back (%d/%d)", page, totalPages), "raid_board_page", fmt.Sprintf("%d", page-1)))
+		}
+		if page < totalPages-1 {
+			navRow = append(navRow, selector.Data(fmt.Sprintf("▶️ More (%d/%d)", page+2, totalPages), "raid_board_page", fmt.Sprintf("%d", page+1)))
+		}
+		if len(navRow) > 0 {
+			buttons = append(buttons, navRow)
+		}
+	}
+
+	// Co-Op lobbies and world-contact sections are page-1-only - they
+	// aren't part of the paginated discovery list and would otherwise
+	// repeat identically on every page.
+	if page == 0 {
+		queryCoops := `
 		SELECT r.id, ea.name, ed.name, r.resolve_time 
 		FROM raids r
 		JOIN encampments ea ON ea.id = r.attacker_id
 		JOIN encampments ed ON ed.id = r.defender_id
 		WHERE r.state = 'staged' AND r.attacker_id != $1`
 
-	rowsCoop, err := h.DB.QueryContext(ctx, queryCoops, myCampID)
-	if err == nil {
-		defer rowsCoop.Close()
-		hasCoops := false
-		for rowsCoop.Next() {
-			var rID, aName, dName string
-			var resTime time.Time
-			if err := rowsCoop.Scan(&rID, &aName, &dName, &resTime); err == nil {
-				if !hasCoops {
-					dashboard += "🤝 " + htmlBold("ACTIVE CO-OP RECRUITMENT LOBBIES") + "\n"
-					hasCoops = true
+		rowsCoop, err := h.DB.QueryContext(ctx, queryCoops, myCampID)
+		if err == nil {
+			defer rowsCoop.Close()
+			hasCoops := false
+			for rowsCoop.Next() {
+				var rID, aName, dName string
+				var resTime time.Time
+				if err := rowsCoop.Scan(&rID, &aName, &dName, &resTime); err == nil {
+					if !hasCoops {
+						dashboard += "🤝 " + htmlBold("ACTIVE CO-OP RECRUITMENT LOBBIES") + "\n"
+						hasCoops = true
+					}
+					timeLeft := resTime.UTC().Sub(time.Now().UTC())
+					if timeLeft < 0 {
+						timeLeft = 0
+					}
+					dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  ⏳ Departure window expires in: %s\n\n", htmlEscape(aName), htmlEscape(dName), htmlCode(formatDuration(timeLeft)))
+					btnJoin := selector.Data(fmt.Sprintf("🤝 Join %s", aName), "join_coop", rID)
+					buttons = append(buttons, selector.Row(btnJoin))
 				}
-				timeLeft := resTime.UTC().Sub(time.Now().UTC())
-				if timeLeft < 0 {
-					timeLeft = 0
-				}
-				dashboard += fmt.Sprintf("• %s is recruiting to raid Outpost %s!\n  ⏳ Departure window expires in: %s\n\n", htmlEscape(aName), htmlEscape(dName), htmlCode(formatDuration(timeLeft)))
-				btnJoin := selector.Data(fmt.Sprintf("🤝 Join %s", aName), "join_coop", rID)
-				buttons = append(buttons, selector.Row(btnJoin))
 			}
 		}
-	}
 
-	var knowsRogueNest bool
-	_ = h.DB.QueryRowContext(ctx, `
+		var knowsRogueNest bool
+		_ = h.DB.QueryRowContext(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM encampment_discoveries
 			WHERE observer_encampment_id = $1 AND target_key = $2
 		)`, myCampID, worldintel.RogueDroneNestKey).Scan(&knowsRogueNest)
-	if knowsRogueNest {
-		// The Rogue Drone Nest has no real encampments row and no real
-		// coordinate (see worldintel.RogueDroneNestKey's doc comment) -
-		// this used to hardcode a fake "(Sector 1,1)" here regardless of
-		// the player's actual position, which was just wrong information
-		// dressed up as a coordinate. Say what it actually is instead.
-		dashboard += "🤖 " + htmlBold("DISCOVERED AI CONTACT") + "\n" +
-			"👹 " + htmlBold("Rogue Drone Nest") + " " + htmlItalic("(a roaming threat, not a fixed outpost - no coordinates to report)") + "\n" +
-			"    💰 Loot Yield: Metal/Crystal/Scrap | ⏱️ Journey Time: Dynamic\n" +
-			"    🔍 " + htmlItalic("Recon first to see exactly what you're facing!") + "\n\n"
+		if knowsRogueNest {
+			// The Rogue Drone Nest has no real encampments row and no real
+			// coordinate (see worldintel.RogueDroneNestKey's doc comment) -
+			// this used to hardcode a fake "(Sector 1,1)" here regardless of
+			// the player's actual position, which was just wrong information
+			// dressed up as a coordinate. Say what it actually is instead.
+			dashboard += "🤖 " + htmlBold("DISCOVERED AI CONTACT") + "\n" +
+				"👹 " + htmlBold("Rogue Drone Nest") + " " + htmlItalic("(a roaming threat, not a fixed outpost - no coordinates to report)") + "\n" +
+				"    💰 Loot Yield: Metal/Crystal/Scrap | ⏱️ Journey Time: Dynamic\n" +
+				"    🔍 " + htmlItalic("Recon first to see exactly what you're facing!") + "\n\n"
 
-		btnReconAI := selector.Data("🔍 Recon Rogue Drone Nest", "recon_ai", worldintel.RogueDroneNestKey)
-		btnAI := selector.Data("🤖 Skirmish Rogue Drones", "launch_raid", worldintel.RogueDroneNestKey)
-		buttons = append(buttons, selector.Row(btnReconAI), selector.Row(btnAI))
-	} else {
-		dashboard += "🧭 " + htmlBold("UNKNOWN WORLD CONTACTS") + "\n" +
-			htmlItalic("No AI or rival outposts are targetable yet. Complete /explore expeditions to establish first contact.") + "\n\n"
+			btnReconAI := selector.Data("🔍 Recon Rogue Drone Nest", "recon_ai", worldintel.RogueDroneNestKey)
+			btnAI := selector.Data("🤖 Skirmish Rogue Drones", "launch_raid", worldintel.RogueDroneNestKey)
+			buttons = append(buttons, selector.Row(btnReconAI), selector.Row(btnAI))
+		} else {
+			dashboard += "🧭 " + htmlBold("UNKNOWN WORLD CONTACTS") + "\n" +
+				htmlItalic("No AI or rival outposts are targetable yet. Complete /explore expeditions to establish first contact.") + "\n\n"
+		}
 	}
 
 	dashboard += divider
 
 	selector.Inline(buttons...)
+	if edit {
+		return c.Edit(dashboard, telebot.ModeHTML, selector)
+	}
 	return c.Send(dashboard, telebot.ModeHTML, selector)
 }
 
@@ -652,19 +725,19 @@ func (h *CombatHandler) HandleAutoScanToggle(c telebot.Context) error {
 	var currentlyEnabled bool
 	err := h.DB.QueryRowContext(ctx, "SELECT id, auto_scan_enabled FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &currentlyEnabled)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.CombatNavigation())
 	}
 
 	newState := !currentlyEnabled
 	_, err = h.DB.ExecContext(ctx, "UPDATE encampments SET auto_scan_enabled = $1 WHERE id = $2", newState, campID)
 	if err != nil {
-		return c.Send("⚠️ Error updating Automatic Scan job.")
+		return c.Send("⚠️ Error updating Automatic Scan job.", keyboards.CombatNavigation())
 	}
 
 	if newState {
-		return c.Send("📡✅ AUTOMATIC SCAN ENGAGED: Your Radar will now periodically sweep the Wasteland and report on nearby rivals automatically.")
+		return c.Send("📡✅ AUTOMATIC SCAN ENGAGED: Your Radar will now periodically sweep the Wasteland and report on nearby rivals automatically.", keyboards.CombatNavigation())
 	}
-	return c.Send("📡❌ AUTOMATIC SCAN DISENGAGED: Radar sweeps paused. Run /autoscan again to re-enable.")
+	return c.Send("📡❌ AUTOMATIC SCAN DISENGAGED: Radar sweeps paused. Run /autoscan again to re-enable.", keyboards.CombatNavigation())
 }
 
 func (h *CombatHandler) HandleScout(c telebot.Context) error {

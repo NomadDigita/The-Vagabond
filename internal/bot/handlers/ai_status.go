@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"gopkg.in/telebot.v3"
 )
 
@@ -51,7 +52,7 @@ func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.isAdmin(sender.ID) {
-		return c.Send("⛔ Administrator access required.")
+		return c.Send("⛔ Administrator access required.", keyboards.AdvisorsNavigation())
 	}
 
 	ctx := context.Background()
@@ -99,7 +100,7 @@ func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 	// re-derive that gap from scratch.
 	b.WriteString("\n\nRun /ai_probe for a live test call to each provider above — it will show the exact error (quota, auth, model access, etc.) if one is silently falling back to mock.")
 
-	return c.Send(b.String())
+	return c.Send(b.String(), keyboards.AdvisorsNavigation())
 }
 
 // ── /ai_probe (admin only) ──────────────────────────────────────────
@@ -120,10 +121,10 @@ func (h *AIStatusHandler) HandleAIProbe(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.isAdmin(sender.ID) {
-		return c.Send("⛔ Administrator access required.")
+		return c.Send("⛔ Administrator access required.", keyboards.AdvisorsNavigation())
 	}
 
-	_ = c.Send("🔬 Probing every configured AI provider with a live test call — this takes a few seconds…")
+	_ = c.Send("🔬 Probing every configured AI provider with a live test call — this takes a few seconds…", keyboards.AdvisorsNavigation())
 
 	ctx := context.Background()
 	results := h.Service.ProbeAllProviders(ctx)
@@ -142,7 +143,7 @@ func (h *AIStatusHandler) HandleAIProbe(c telebot.Context) error {
 	}
 	b.WriteString("\nA ❌ here (not \"not configured\") means the key is set but the provider itself is rejecting the request — quota exhausted, model not activated on the account, bad key, etc. That exact reason is above; this is the same text a fix would otherwise require Render log access to see.")
 
-	return c.Send(b.String())
+	return c.Send(b.String(), keyboards.AdvisorsNavigation())
 }
 
 // ── /ai_status_toggle (admin only, callback-free simple command) ───
@@ -155,23 +156,23 @@ func (h *AIStatusHandler) HandleAIStatusToggle(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.isAdmin(sender.ID) {
-		return c.Send("⛔ Administrator access required.")
+		return c.Send("⛔ Administrator access required.", keyboards.AdvisorsNavigation())
 	}
 
 	parts := strings.Fields(c.Message().Payload)
 	if len(parts) != 2 {
-		return c.Send("Usage: /ai_status_toggle <feature> <on|off>\nSee /ai_status for valid feature names.")
+		return c.Send("Usage: /ai_status_toggle <feature> <on|off>\nSee /ai_status for valid feature names.", keyboards.AdvisorsNavigation())
 	}
 	feature := ai.Feature(parts[0])
 	enabled := strings.EqualFold(parts[1], "on")
 
 	if h.Service.Permissions == nil {
-		return c.Send("⚠️ Permission subsystem unavailable.")
+		return c.Send("⚠️ Permission subsystem unavailable.", keyboards.AdvisorsNavigation())
 	}
 	if err := h.Service.Permissions.SetGlobalFlag(context.Background(), feature, enabled); err != nil {
-		return c.Send(fmt.Sprintf("⚠️ Failed to update flag: %v", err))
+		return c.Send(fmt.Sprintf("⚠️ Failed to update flag: %v", err), keyboards.AdvisorsNavigation())
 	}
-	return c.Send(fmt.Sprintf("✅ %s is now %s globally.", feature, map[bool]string{true: "ENABLED", false: "DISABLED"}[enabled]))
+	return c.Send(fmt.Sprintf("✅ %s is now %s globally.", feature, map[bool]string{true: "ENABLED", false: "DISABLED"}[enabled]), keyboards.AdvisorsNavigation())
 }
 
 // ── /ai_settings (any player) ───────────────────────────────────────
@@ -196,12 +197,12 @@ func (h *AIStatusHandler) HandleAISettings(c telebot.Context) error {
 		for _, f := range ai.AllFeatures() {
 			b.WriteString(fmt.Sprintf("  • %s\n", f))
 		}
-		return c.Send(b.String())
+		return c.Send(b.String(), keyboards.AdvisorsNavigation())
 	}
 
 	parts := strings.Fields(payload)
 	if len(parts) != 2 {
-		return c.Send("Usage: /ai_settings <feature> <on|off>")
+		return c.Send("Usage: /ai_settings <feature> <on|off>", keyboards.AdvisorsNavigation())
 	}
 	feature := ai.Feature(parts[0])
 	valid := false
@@ -212,15 +213,15 @@ func (h *AIStatusHandler) HandleAISettings(c telebot.Context) error {
 		}
 	}
 	if !valid {
-		return c.Send("❌ Unknown feature name. Run /ai_settings with no arguments to see the list.")
+		return c.Send("❌ Unknown feature name. Run /ai_settings with no arguments to see the list.", keyboards.AdvisorsNavigation())
 	}
 	enabled := strings.EqualFold(parts[1], "on")
 
 	if h.Service.Permissions == nil {
-		return c.Send("⚠️ Permission subsystem unavailable.")
+		return c.Send("⚠️ Permission subsystem unavailable.", keyboards.AdvisorsNavigation())
 	}
 	if err := h.Service.Permissions.SetUserPreference(ctx, sender.ID, feature, enabled); err != nil {
-		return c.Send(fmt.Sprintf("⚠️ Failed to save preference: %v", err))
+		return c.Send(fmt.Sprintf("⚠️ Failed to save preference: %v", err), keyboards.AdvisorsNavigation())
 	}
-	return c.Send(fmt.Sprintf("✅ %s is now %s for you.", feature, map[bool]string{true: "ON", false: "OFF"}[enabled]))
+	return c.Send(fmt.Sprintf("✅ %s is now %s for you.", feature, map[bool]string{true: "ON", false: "OFF"}[enabled]), keyboards.AdvisorsNavigation())
 }

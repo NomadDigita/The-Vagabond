@@ -181,12 +181,18 @@ func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
 	}
 
+	var muteScoutStatus bool
+	_ = h.DB.QueryRowContext(ctx, "SELECT mute_scout_status FROM notification_preferences WHERE user_id = $1", sender.ID).Scan(&muteScoutStatus)
+	muteBtn := scoutMuteToggleButton(muteScoutStatus)
+
 	statusText, activeCount, err := h.renderScoutStatus(ctx, campID)
 	if err != nil {
 		return c.Send("⚠️ Error checking scout status.", keyboards.CombatNavigation())
 	}
 	if activeCount >= maxConcurrentScoutMissions {
-		return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), statusText, nil)
+		selector := &telebot.ReplyMarkup{}
+		selector.Inline(selector.Row(muteBtn))
+		return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), statusText, selector)
 	}
 
 	panelText := statusText + "\n\n" +
@@ -209,12 +215,48 @@ func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 	if availableScouts > 0 {
 		rows = append(rows, selector.Row(selector.Data("🔭 All Available", "scout_dispatch", fmt.Sprintf("%d", availableScouts))))
 	}
-	if len(rows) == 0 {
+	rows = append(rows, selector.Row(muteBtn))
+	if len(rows) == 1 {
+		// Only the mute toggle made it in - no scouts to dispatch.
 		panelText += "\n\n" + htmlItalic("No Scout Walkers available - recruit some at the Heavy Workshop first.")
-		return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, nil)
 	}
 	selector.Inline(rows...)
 	return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
+}
+
+// scoutMuteToggleButton renders the Scout panel's one-tap notification
+// toggle - 2026-08-06 direct request for a way to mute/unmute long-range
+// scouting pings "directly without any other things", i.e. right here on
+// the panel a player is already looking at, not buried three taps deep in
+// /settings (that toggle still exists too, for anyone who prefers it -
+// see HandleSettings - both read/write the same mute_scout_status column).
+func scoutMuteToggleButton(muted bool) telebot.Btn {
+	selector := &telebot.ReplyMarkup{}
+	if muted {
+		return selector.Data("🔔 Unmute Scouting Pings", "scout_mute_toggle")
+	}
+	return selector.Data("🔕 Mute Scouting Pings", "scout_mute_toggle")
+}
+
+// HandleScoutMuteToggleCallback flips mute_scout_status for the tapping
+// player and re-renders the Scout panel in place so the button label
+// (🔔 Unmute / 🔕 Mute) immediately reflects the new state.
+func (h *ScoutMissionsHandler) HandleScoutMuteToggleCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid sender."})
+	}
+	_, err := h.DB.ExecContext(ctx, `
+		INSERT INTO notification_preferences (user_id, mute_scout_status, updated_at)
+		VALUES ($1, TRUE, CURRENT_TIMESTAMP)
+		ON CONFLICT (user_id) DO UPDATE SET mute_scout_status = NOT notification_preferences.mute_scout_status, updated_at = CURRENT_TIMESTAMP`,
+		sender.ID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error updating setting."})
+	}
+	_ = c.Respond(&telebot.CallbackResponse{Text: "✅ Scouting ping preference updated!"})
+	return h.HandleScoutPanel(c)
 }
 
 // renderScoutStatus builds the beautified status block shared by
@@ -291,12 +333,12 @@ func (h *ScoutMissionsHandler) HandleScoutStatus(c telebot.Context) error {
 
 	campID, err := h.myScoutCamp(ctx, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.CombatNavigation())
 	}
 
 	statusText, _, err := h.renderScoutStatus(ctx, campID)
 	if err != nil {
-		return c.Send("⚠️ Error checking scout status.")
+		return c.Send("⚠️ Error checking scout status.", keyboards.CombatNavigation())
 	}
-	return c.Send(statusText, telebot.ModeHTML)
+	return c.Send(statusText, telebot.ModeHTML, keyboards.CombatNavigation())
 }

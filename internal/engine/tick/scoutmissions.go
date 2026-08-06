@@ -124,7 +124,7 @@ func (e *Engine) processSearchingScoutMissions(ctx context.Context, tx *sql.Tx) 
 			continue
 		}
 		if isRealPlayer(m.userID) {
-			if err := notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "route_status"); err != nil {
+			if err := notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "scout_status"); err != nil {
 				log.Printf("Failed queuing scout mission %s status ping: %v", m.id, err)
 			}
 		}
@@ -163,7 +163,7 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 			return execErr
 		}
 		if isRealPlayer(m.userID) {
-			return notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "route_status")
+			return notifications.Queue(ctx, tx, m.userID, "🔭 "+htmlBoldTick("SCOUTING UPDATE")+": your Scout Walkers continue searching the wasteland - no contact yet.", "scout_status")
 		}
 		return nil
 	}
@@ -211,14 +211,15 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 	}
 
 	if isRealPlayer(m.userID) {
-		// "general" (non-mutable), not "route_status": the periodic
+		// "general" (non-mutable), not "scout_status": the periodic
 		// "still searching" ping above is routine chatter and fine to
 		// mute, but this is the actual discovery event - the entire
 		// payoff of the mission - and MutableCategories' own contract
 		// (notifications/preferences.go) is explicit that discovery
 		// alerts must never be suppressible. This was previously tagged
-		// "route_status" by mistake, meaning a player who'd muted the
-		// routine pings would silently lose this one too.
+		// "route_status" by mistake (before scouting got its own
+		// mutable category), meaning a player who'd muted the routine
+		// pings would silently lose this one too.
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf(
 			"🎯 %s\n\nYour Scout Walkers located Outpost %s. Its position is now locked in your intel and marked in your Tactical Target Matrix.\n\n🚶 Beginning the journey home - ETA %s.",
 			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(formatDurationTick(time.Duration(marchingMinutes*float64(time.Minute))))), "general"); err != nil {
@@ -315,7 +316,7 @@ func (e *Engine) completeReturnedScoutMissions(ctx context.Context, tx *sql.Tx) 
 		if m.bonusName.Valid {
 			message += fmt.Sprintf("\n\n🎯 Along the way home, they also spotted Outpost %s - added to your Tactical Target Matrix.", htmlBoldTick(htmlEscapeTick(m.bonusName.String)))
 		}
-		if err := notifications.Queue(ctx, tx, m.userID, message, "route_status"); err != nil {
+		if err := notifications.Queue(ctx, tx, m.userID, message, "scout_status"); err != nil {
 			log.Printf("Failed queuing scout mission %s completion notification: %v", m.id, err)
 		}
 	}
@@ -390,7 +391,7 @@ func (e *Engine) pingInTransitScoutMissions(ctx context.Context, tx *sql.Tx) err
 			remaining = 0
 		}
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf("🚶 %s: your Scout Walkers are en route home. ETA: %s.",
-			htmlBoldTick("EN ROUTE"), htmlCodeTick(formatDurationTick(remaining))), "route_status"); err != nil {
+			htmlBoldTick("EN ROUTE"), htmlCodeTick(formatDurationTick(remaining))), "scout_status"); err != nil {
 			log.Printf("Failed queuing scout mission %s en-route ping: %v", m.id, err)
 		}
 	}

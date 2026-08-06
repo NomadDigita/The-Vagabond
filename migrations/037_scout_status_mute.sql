@@ -1,0 +1,25 @@
+-- ==============================================================================
+-- THE VAGABOND - SCOUT STATUS MUTE CATEGORY
+-- (037_scout_status_mute.sql)
+-- DB Engine: PostgreSQL (Supabase)
+--
+-- 2026-08-06 direct project-owner request: "we should be able to mute
+-- and unmute long range scouting notifications directly without any
+-- other things." Long-range scouting's periodic pings ("still
+-- searching", "en route home", "party returned" - see
+-- internal/engine/tick/scoutmissions.go) were previously tagged with
+-- the single 'route_status' mutable category (035), which also covers
+-- unrelated road-encounter/convoy chatter. That meant a player couldn't
+-- mute one without muting the other.
+--
+-- This adds a second, independent mutable column so scouting has its
+-- own toggle - both a one-tap button right on the Scout panel itself
+-- (HandleScoutMuteToggleCallback) and the existing /settings panel.
+-- "CONTACT!" (target found) and "SPOTTED" (being found by a scout) stay
+-- tagged 'general' either way - see notifications/preferences.go's
+-- MutableCategories doc comment: discovery events must never be
+-- suppressible, matching the same guarantee 035 already made for
+-- combat/discovery/supply-loss alerts.
+-- ==============================================================================
+
+ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS mute_scout_status BOOLEAN NOT NULL DEFAULT FALSE;

@@ -75,7 +75,7 @@ func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
 
 	n, convErr := strconv.Atoi(args[0])
 	if convErr != nil || n <= 0 {
-		return c.Send("⚠️ Amount must be a positive whole number, e.g. /deconstruct 20 mechs")
+		return c.Send("⚠️ Amount must be a positive whole number, e.g. /deconstruct 20 mechs", keyboards.CampNavigation())
 	}
 
 	unitArg := strings.ToLower(strings.TrimSuffix(args[1], "s"))
@@ -99,25 +99,25 @@ func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
 		}
 	}
 	if target == nil {
-		return c.Send("⚠️ Unrecognized unit type for deconstruction.")
+		return c.Send("⚠️ Unrecognized unit type for deconstruction.", keyboards.CampNavigation())
 	}
 
 	var campID string
 	_ = h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if campID == "" {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.CampNavigation())
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Deconstruction failed.")
+		return c.Send("⚠️ Deconstruction failed.", keyboards.CampNavigation())
 	}
 	defer tx.Rollback()
 
 	var count int
 	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s, 0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", target.column), campID).Scan(&count)
 	if count <= 0 {
-		return c.Send(fmt.Sprintf("❌ You don't have any %s to deconstruct.", target.title))
+		return c.Send(fmt.Sprintf("❌ You don't have any %s to deconstruct.", target.title), keyboards.CampNavigation())
 	}
 
 	scrapped := n
@@ -136,14 +136,14 @@ func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing bulk deconstruct transaction: %v", err)
-		return c.Send("⚠️ Error writing inventory data.")
+		return c.Send("⚠️ Error writing inventory data.", keyboards.CampNavigation())
 	}
 
 	note := ""
 	if scrapped < n {
 		note = fmt.Sprintf(" (only had %d available)", scrapped)
 	}
-	return c.Send(fmt.Sprintf("♻️ Scrapped %d %s%s! Recovered: %s", scrapped, target.title, note, refundSummary))
+	return c.Send(fmt.Sprintf("♻️ Scrapped %d %s%s! Recovered: %s", scrapped, target.title, note, refundSummary), keyboards.CampNavigation())
 }
 
 func (h *DeconstructHandler) HandleDeconstructPanel(c telebot.Context) error {

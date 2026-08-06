@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/guildassistant"
 	"gopkg.in/telebot.v3"
 )
@@ -79,10 +80,10 @@ func (h *GuildAssistantHandler) HandleGuildAssistant(c telebot.Context) error {
 	ctx := context.Background()
 	text, keyboard, err := h.renderGuildAssistantReport(ctx, sender.ID)
 	if err != nil {
-		return c.Send(errorMessageForGuildAssistant(err))
+		return c.Send(errorMessageForGuildAssistant(err), keyboards.AdvisorsNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
 // ── callback: guild_assistant_refresh ────────────────────────────────

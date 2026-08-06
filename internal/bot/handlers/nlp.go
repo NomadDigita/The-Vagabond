@@ -350,13 +350,36 @@ func (h *NLPHandler) confirmDispatchScoutMission(c telebot.Context, cmd nlpcomma
 	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
 }
 
+// nlpCardOutcome edits the original Confirm/Cancel card in place so its
+// buttons stop being tappable the instant an outcome is known - fixes
+// the 2026-08-06 report of Cancel leaving the card (and its still-live
+// Confirm button) on screen, so a second tap after "Cancelled" silently
+// re-ran the action anyway. Every other Confirm/Cancel flow in this
+// codebase (see sendCancelledCard/HandleHyperSpeedConfirmCallback in
+// jobs.go) already edits the card on both outcomes; this brings the
+// AI-parsed-command cards in line with that pattern instead of leaving
+// them as a standing toast-only exception.
+//
+// The full-length result also lands in the edited card text (Telegram
+// allows up to 4096 chars there) rather than only in the small toast
+// popup fired by c.Respond, which Telegram visually clips after a short
+// run of characters - the second reported bug ("notification reply is
+// truncated"). The toast still fires too, as a quick non-blocking ack,
+// but callers no longer have to cram the whole explanation into it.
+func nlpCardOutcome(c telebot.Context, cardText, toastText string) error {
+	_ = c.Respond(&telebot.CallbackResponse{Text: toastText})
+	return c.Edit(cardText, telebot.ModeHTML)
+}
+
 // HandleNLPConfirmCallback fires when a player taps the green Confirm
 // button on an AI-parsed command's card. It re-derives the caller's
 // encampment server-side (never trusts a campID from callback_data)
 // and executes through the exact same core function the button-driven
 // UI uses - doPostListing / doDispatchScoutMission - so a
 // natural-language "list 300k scrap for $500" enforces identical
-// validation to tapping the Exchange panel's own buttons.
+// validation to tapping the Exchange panel's own buttons. Every branch
+// ends by editing the card via nlpCardOutcome (see its doc comment) so
+// the Confirm/Cancel buttons can never be tapped a second time.
 func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -367,67 +390,75 @@ func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 	switch c.Args()[0] {
 	case "mkt":
 		if h.Exchange == nil || len(c.Args()) < 5 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing."})
+			return nlpCardOutcome(c, "❌ Invalid listing.", "❌ Invalid listing.")
 		}
 		resource := c.Args()[1]
 		qty, qtyErr := strconv.Atoi(c.Args()[2])
 		askType := c.Args()[3]
 		askQty, askQtyErr := strconv.ParseFloat(c.Args()[4], 64)
 		if qtyErr != nil || askQtyErr != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid listing details."})
+			return nlpCardOutcome(c, "❌ Invalid listing details.", "❌ Invalid listing details.")
 		}
 
 		var campID string
 		if err := h.Exchange.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+			return nlpCardOutcome(c, "⚠️ Create your outpost camp first using /start", "⚠️ No outpost found")
 		}
 
 		if _, err := h.Exchange.doPostListing(ctx, campID, resource, qty, askType, askQty); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Could not list - see the panel for details."})
+			return nlpCardOutcome(c, "❌ Could not list - see the Exchange panel for details.", "❌ Could not list")
 		}
-		_ = c.Respond(&telebot.CallbackResponse{Text: "💱 Listing posted!"})
+		if err := nlpCardOutcome(c, "💱 Listing posted!", "💱 Listing posted!"); err != nil {
+			return err
+		}
 		return h.Exchange.HandleExchangePanel(c)
 
 	case "buy":
 		if h.Exchange == nil || len(c.Args()) < 4 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid purchase request."})
+			return nlpCardOutcome(c, "❌ Invalid purchase request.", "❌ Invalid purchase request.")
 		}
 		resource := c.Args()[1]
 		minQty, qtyErr := strconv.Atoi(c.Args()[2])
 		maxDollars, dollarsErr := strconv.ParseFloat(c.Args()[3], 64)
 		if qtyErr != nil || dollarsErr != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid purchase details."})
+			return nlpCardOutcome(c, "❌ Invalid purchase details.", "❌ Invalid purchase details.")
 		}
 
 		var campID string
 		if err := h.Exchange.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+			return nlpCardOutcome(c, "⚠️ Create your outpost camp first using /start", "⚠️ No outpost found")
 		}
 
 		if _, err := h.Exchange.doBuyMarketItem(ctx, campID, resource, minQty, maxDollars); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ No matching listing was found within that budget - check the Exchange panel to see what's actually available."})
+			return nlpCardOutcome(c,
+				"❌ No matching listing was found within that budget.\nCheck the Exchange panel to see what's actually available.",
+				"❌ No matching listing found")
 		}
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🛍️ Purchase complete!"})
+		if err := nlpCardOutcome(c, "🛍️ Purchase complete!", "🛍️ Purchase complete!"); err != nil {
+			return err
+		}
 		return h.Exchange.HandleExchangePanel(c)
 
 	case "sct":
 		if h.ScoutMissions == nil || len(c.Args()) < 2 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid scout dispatch."})
+			return nlpCardOutcome(c, "❌ Invalid scout dispatch.", "❌ Invalid scout dispatch.")
 		}
 		count, err := strconv.Atoi(c.Args()[1])
 		if err != nil || count <= 0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid scout count."})
+			return nlpCardOutcome(c, "❌ Invalid scout count.", "❌ Invalid scout count.")
 		}
 
 		campID, err := h.ScoutMissions.myScoutCamp(ctx, sender.ID)
 		if err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+			return nlpCardOutcome(c, "⚠️ Create your outpost camp first using /start", "⚠️ No outpost found")
 		}
 
 		if _, err := h.ScoutMissions.doDispatchScoutMission(ctx, campID, count); err != nil {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Could not dispatch - see the panel for details."})
+			return nlpCardOutcome(c, "❌ Could not dispatch - see the Scout panel for details.", "❌ Could not dispatch")
 		}
-		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🔭 %d Scout Walkers dispatched!", count)})
+		if err := nlpCardOutcome(c, fmt.Sprintf("🔭 %d Scout Walkers dispatched!", count), fmt.Sprintf("🔭 %d dispatched!", count)); err != nil {
+			return err
+		}
 		return h.ScoutMissions.HandleScoutPanel(c)
 
 	default:
@@ -437,7 +468,10 @@ func (h *NLPHandler) HandleNLPConfirmCallback(c telebot.Context) error {
 
 // HandleNLPCancelCallback fires when a player taps the red Cancel
 // button on an AI-parsed command's card. Nothing was ever committed
-// before this point, so cancelling is just a toast acknowledgment.
+// before this point, so this just closes out the card - critically,
+// via nlpCardOutcome's c.Edit, not a bare toast, so the Confirm button
+// actually goes away instead of staying live for a stray follow-up tap
+// (see nlpCardOutcome's doc comment for the full 2026-08-06 bug report).
 func (h *NLPHandler) HandleNLPCancelCallback(c telebot.Context) error {
-	return c.Respond(&telebot.CallbackResponse{Text: "❌ Cancelled - nothing was changed."})
+	return nlpCardOutcome(c, "❌ Cancelled - nothing was changed.", "❌ Cancelled")
 }

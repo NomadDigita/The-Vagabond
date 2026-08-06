@@ -83,7 +83,7 @@ func (h *ProfileHandler) HandleDescription(c telebot.Context) error {
 		} else {
 			current = htmlQuote(htmlEscape(current))
 		}
-		return c.Send(fmt.Sprintf("📝 %s\n%s\n\n%s", htmlBold("YOUR DESCRIPTION"), current, htmlItalic("Usage: /description [text] (max 200 characters)")), telebot.ModeHTML)
+		return c.Send(fmt.Sprintf("📝 %s\n%s\n\n%s", htmlBold("YOUR DESCRIPTION"), current, htmlItalic("Usage: /description [text] (max 200 characters)")), telebot.ModeHTML, keyboards.ProfileNavigation())
 	}
 
 	if len(desc) > 200 {
@@ -94,7 +94,7 @@ func (h *ProfileHandler) HandleDescription(c telebot.Context) error {
 	if err != nil {
 		return c.Send("⚠️ Error saving description.")
 	}
-	return c.Send("✅ Description updated!")
+	return c.Send("✅ Description updated!", keyboards.ProfileNavigation())
 }
 
 // ── /settings ─────────────────────────────────────────────────────────
@@ -109,8 +109,8 @@ func (h *ProfileHandler) HandleSettings(c telebot.Context) error {
 	var notifyRaid, notifyStorage bool
 	_ = h.DB.QueryRowContext(ctx, "SELECT notify_on_raid, notify_on_storage_full FROM users WHERE telegram_id = $1", sender.ID).Scan(&notifyRaid, &notifyStorage)
 
-	var muteRouteStatus bool
-	_ = h.DB.QueryRowContext(ctx, "SELECT mute_route_status FROM notification_preferences WHERE user_id = $1", sender.ID).Scan(&muteRouteStatus)
+	var muteRouteStatus, muteScoutStatus bool
+	_ = h.DB.QueryRowContext(ctx, "SELECT mute_route_status, mute_scout_status FROM notification_preferences WHERE user_id = $1", sender.ID).Scan(&muteRouteStatus, &muteScoutStatus)
 
 	panelText := fmt.Sprintf(
 		"⚙️━━━━━━━━━━━━━━━━━━━━━━⚙️\n"+
@@ -120,15 +120,18 @@ func (h *ProfileHandler) HandleSettings(c telebot.Context) error {
 			"📦 Storage Full Alerts: %s\n"+
 			"🛣️ Route Status Pings (peaceful road passes,\n"+
 			"   weather clears, convoy arrivals): %s\n"+
+			"🔭 Long-Range Scouting Pings (still searching,\n"+
+			"   en route home, party returned): %s\n"+
 			"⚙️━━━━━━━━━━━━━━━━━━━━━━⚙️",
-		onOff(notifyRaid), onOff(notifyStorage), onOff(!muteRouteStatus),
+		onOff(notifyRaid), onOff(notifyStorage), onOff(!muteRouteStatus), onOff(!muteScoutStatus),
 	)
 
 	selector := &telebot.ReplyMarkup{}
 	btnRaid := selector.Data("🚨 Toggle Raid Alerts", "settings_toggle", "raid")
 	btnStorage := selector.Data("📦 Toggle Storage Alerts", "settings_toggle", "storage")
 	btnRouteStatus := selector.Data("🛣️ Toggle Route Status Pings", "settings_toggle", "route_status")
-	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage), selector.Row(btnRouteStatus))
+	btnScoutStatus := selector.Data("🔭 Toggle Scouting Pings", "settings_toggle", "scout_status")
+	selector.Inline(selector.Row(btnRaid), selector.Row(btnStorage), selector.Row(btnRouteStatus), selector.Row(btnScoutStatus))
 
 	return sendPanelWithNav(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
@@ -145,17 +148,29 @@ func (h *ProfileHandler) HandleSettingsToggleCallback(c telebot.Context) error {
 	sender := c.Sender()
 	setting := c.Args()[0]
 
-	// route_status lives in notification_preferences, not users - see
-	// MMO_WORLD_EVOLUTION_PLAN.md Phase 7 milestone 2 / internal/engine/
-	// notifications/preferences.go's MutableCategories. This is
-	// deliberately the ONLY notification category a player can mute here;
-	// combat, discovery, and supply-loss alerts stay on users.notify_on_*
-	// or aren't gated at all, by design.
+	// route_status/scout_status live in notification_preferences, not
+	// users - see MMO_WORLD_EVOLUTION_PLAN.md Phase 7 milestone 2 /
+	// internal/engine/notifications/preferences.go's MutableCategories.
+	// These are deliberately the ONLY notification categories a player
+	// can mute here; combat, discovery, and supply-loss alerts stay on
+	// users.notify_on_* or aren't gated at all, by design.
 	if setting == "route_status" {
 		_, err := h.DB.ExecContext(ctx, `
 			INSERT INTO notification_preferences (user_id, mute_route_status, updated_at)
 			VALUES ($1, TRUE, CURRENT_TIMESTAMP)
 			ON CONFLICT (user_id) DO UPDATE SET mute_route_status = NOT notification_preferences.mute_route_status, updated_at = CURRENT_TIMESTAMP`,
+			sender.ID)
+		if err != nil {
+			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error updating setting."})
+		}
+		_ = c.Respond(&telebot.CallbackResponse{Text: "✅ Setting updated!"})
+		return h.HandleSettings(c)
+	}
+	if setting == "scout_status" {
+		_, err := h.DB.ExecContext(ctx, `
+			INSERT INTO notification_preferences (user_id, mute_scout_status, updated_at)
+			VALUES ($1, TRUE, CURRENT_TIMESTAMP)
+			ON CONFLICT (user_id) DO UPDATE SET mute_scout_status = NOT notification_preferences.mute_scout_status, updated_at = CURRENT_TIMESTAMP`,
 			sender.ID)
 		if err != nil {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error updating setting."})
@@ -283,7 +298,7 @@ func (h *ProfileHandler) HandleRefer(c telebot.Context) error {
 
 	b.WriteString("🎁━━━━━━━━━━━━━━━━━━━━━━🎁")
 
-	return c.Send(b.String(), telebot.ModeHTML)
+	return c.Send(b.String(), telebot.ModeHTML, keyboards.ProfileNavigation())
 }
 
 // feedbackSenderLabel builds "First Name (@username)" for the admin
@@ -329,13 +344,13 @@ func (h *ProfileHandler) HandleFeedback(c telebot.Context) error {
 
 	msg := strings.TrimSpace(c.Message().Payload)
 	if msg == "" {
-		return c.Send("⚠️ Usage: /feedback [your message]\n\nYour feedback goes straight to the development team. Or tap 💬 Send Feedback to be prompted instead.")
+		return c.Send("⚠️ Usage: /feedback [your message]\n\nYour feedback goes straight to the development team. Or tap 💬 Send Feedback to be prompted instead.", keyboards.ProfileNavigation())
 	}
 
 	if err := h.doSubmitFeedback(ctx, sender.ID, feedbackSenderLabel(sender), msg); err != nil {
-		return c.Send("⚠️ Error submitting feedback.")
+		return c.Send("⚠️ Error submitting feedback.", keyboards.ProfileNavigation())
 	}
-	return c.Send("📨 Feedback received - thank you for helping improve The Vagabond!")
+	return c.Send("📨 Feedback received - thank you for helping improve The Vagabond!", keyboards.ProfileNavigation())
 }
 
 // HandleFeedbackButton starts the pending-input flow: the player's next
@@ -403,7 +418,7 @@ const feedbackInboxPageSize = 5
 func (h *ProfileHandler) HandleFeedbackInbox(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil || !h.IsAdmin(sender.ID) {
-		return c.Send("⛔ Admin access required.")
+		return c.Send("⛔ Admin access required.", keyboards.ProfileNavigation())
 	}
 
 	ctx := context.Background()
@@ -414,7 +429,7 @@ func (h *ProfileHandler) HandleFeedbackInbox(c telebot.Context) error {
 		ORDER BY f.created_at DESC
 		LIMIT $1`, feedbackInboxPageSize)
 	if err != nil {
-		return c.Send("⚠️ Error loading feedback inbox.")
+		return c.Send("⚠️ Error loading feedback inbox.", keyboards.ProfileNavigation())
 	}
 	defer rows.Close()
 
@@ -436,7 +451,7 @@ func (h *ProfileHandler) HandleFeedbackInbox(c telebot.Context) error {
 		text += "\n" + htmlItalic("No feedback submitted yet.")
 	}
 	text += "\n" + divider
-	return c.Send(text, telebot.ModeHTML)
+	return c.Send(text, telebot.ModeHTML, keyboards.ProfileNavigation())
 }
 
 // ── /msg ──────────────────────────────────────────────────────────────
@@ -450,7 +465,7 @@ func (h *ProfileHandler) HandleMsg(c telebot.Context) error {
 
 	parts := strings.SplitN(strings.TrimSpace(c.Message().Payload), " ", 2)
 	if len(parts) < 2 {
-		return c.Send("⚠️ Usage: /msg [username] [message]")
+		return c.Send("⚠️ Usage: /msg [username] [message]", keyboards.ProfileNavigation())
 	}
 	targetUsername := strings.TrimPrefix(parts[0], "@")
 	messageText := parts[1]
@@ -458,22 +473,22 @@ func (h *ProfileHandler) HandleMsg(c telebot.Context) error {
 	var targetID int64
 	err := h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", targetUsername).Scan(&targetID)
 	if err != nil {
-		return c.Send("❌ Player not found.")
+		return c.Send("❌ Player not found.", keyboards.ProfileNavigation())
 	}
 
 	var isMuted bool
 	_ = h.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_mutes WHERE muter_id = $1 AND muted_id = $2)", targetID, sender.ID).Scan(&isMuted)
 	if isMuted {
-		return c.Send("🔇 This player has muted you - your message wasn't delivered.")
+		return c.Send("🔇 This player has muted you - your message wasn't delivered.", keyboards.ProfileNavigation())
 	}
 
 	alertMsg := fmt.Sprintf("💬 %s %s:\n\n%s", htmlBold("MESSAGE from"), htmlCode(htmlEscape(sender.FirstName)), htmlEscape(messageText))
 	_, err = h.DB.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetID, alertMsg)
 	if err != nil {
-		return c.Send("⚠️ Error sending message.")
+		return c.Send("⚠️ Error sending message.", keyboards.ProfileNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("✅ Message sent to %s!", targetUsername))
+	return c.Send(fmt.Sprintf("✅ Message sent to %s!", targetUsername), keyboards.ProfileNavigation())
 }
 
 // ── /mute, /unmute, /mutes ──────────────────────────────────────────────
@@ -525,7 +540,7 @@ func (h *ProfileHandler) HandleMutesList(c telebot.Context) error {
 
 	rows, err := h.DB.QueryContext(ctx, "SELECT u.username FROM user_mutes um JOIN users u ON u.telegram_id = um.muted_id WHERE um.muter_id = $1", sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Error loading muted players.")
+		return c.Send("⚠️ Error loading muted players.", keyboards.ProfileNavigation())
 	}
 	defer rows.Close()
 
@@ -542,7 +557,7 @@ func (h *ProfileHandler) HandleMutesList(c telebot.Context) error {
 		panelText += "(none)"
 	}
 
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.ProfileNavigation())
 }
 
 // ── /log ──────────────────────────────────────────────────────────────
@@ -552,7 +567,7 @@ func (h *ProfileHandler) HandleLog(c telebot.Context) error {
 
 	rows, err := h.DB.QueryContext(ctx, "SELECT message, created_at FROM event_log ORDER BY created_at DESC LIMIT 15")
 	if err != nil {
-		return c.Send("⚠️ Unable to reach the event log.")
+		return c.Send("⚠️ Unable to reach the event log.", keyboards.ProfileNavigation())
 	}
 	defer rows.Close()
 
@@ -574,7 +589,7 @@ func (h *ProfileHandler) HandleLog(c telebot.Context) error {
 	}
 	panelText += "📜━━━━━━━━━━━━━━━━━━━━━━📜"
 
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.ProfileNavigation())
 }
 
 // ── /stats ────────────────────────────────────────────────────────────
@@ -613,7 +628,7 @@ func (h *ProfileHandler) HandleStats(c telebot.Context) error {
 		htmlCode(fmt.Sprintf("%.0f", totalScrap)),
 	)
 
-	return c.Send(panelText, telebot.ModeHTML)
+	return c.Send(panelText, telebot.ModeHTML, keyboards.ProfileNavigation())
 }
 
 // ── /missions ─────────────────────────────────────────────────────────
@@ -630,7 +645,7 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.ProfileNavigation())
 	}
 
 	panelText := "🚀 " + htmlBold("YOUR ACTIVE MISSIONS") + " 🚀\n" + divider + "\n\n"
@@ -693,7 +708,7 @@ func (h *ProfileHandler) HandleMissions(c telebot.Context) error {
 	}
 
 	panelText += divider
-	return c.Send(panelText, telebot.ModeHTML)
+	return c.Send(panelText, telebot.ModeHTML, keyboards.ProfileNavigation())
 }
 
 // ── /destinations ─────────────────────────────────────────────────────
@@ -712,7 +727,7 @@ func (h *ProfileHandler) HandleDestinations(c telebot.Context) error {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.ProfileNavigation())
 	}
 
 	panelText := "🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️\n" +
@@ -745,7 +760,7 @@ func (h *ProfileHandler) HandleDestinations(c telebot.Context) error {
 	}
 
 	panelText += "🗺️━━━━━━━━━━━━━━━━━━━━━━🗺️"
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.ProfileNavigation())
 }
 
 // ── /units ────────────────────────────────────────────────────────────
@@ -760,7 +775,7 @@ func (h *ProfileHandler) HandleUnits(c telebot.Context) error {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
 	if err != nil {
-		return c.Send("⚠️ Create your outpost camp first using /start")
+		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.ProfileNavigation())
 	}
 
 	var soldiers, drones, mechs, nukes, buggies, ships, jets, haulers, tankers, rigs, destroyers, bombers, scouts, battlecruisers, deathstars int
@@ -805,5 +820,5 @@ func (h *ProfileHandler) HandleUnits(c telebot.Context) error {
 		buggies, ships, jets, haulers, tankers, rigs, cargoMk1, cargoMk2, cargoMk3, marchingCount,
 	)
 
-	return c.Send(panelText)
+	return c.Send(panelText, keyboards.ProfileNavigation())
 }

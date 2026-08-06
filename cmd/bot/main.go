@@ -710,6 +710,7 @@ func main() {
 	})
 
 	bot.Handle("\fupgrade_mod", camp.HandleUpgradeCallback)
+	bot.Handle("\fraid_board_page", combat.HandleRaidBoardPageCallback)
 	bot.Handle("\flaunch_raid", combat.HandleLaunchRaidCallback)
 	bot.Handle("\ftoggle_agent", agentH.HandleToggleAgentCallback)
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
@@ -740,6 +741,7 @@ func main() {
 	bot.Handle("\fview_manual", onboarding.HandleHelp)
 	bot.Handle("\fexplore_dispatch", exploration.HandleDispatchExpeditionCallback)
 	bot.Handle("\fscout_dispatch", scoutMissions.HandleScoutDispatchCallback)
+	bot.Handle("\fscout_mute_toggle", scoutMissions.HandleScoutMuteToggleCallback)
 	bot.Handle("\fdiplo_respond", diplomacy.HandleDiplomacyRespondCallback)
 	bot.Handle("\fclan_apply", clan.HandleApplyToClanCallback)
 	bot.Handle("\fclan_apps", clan.HandleApplicationsInboxCallback)

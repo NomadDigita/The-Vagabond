@@ -558,7 +558,7 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 	var clanID, clanName string
 	err := h.DB.QueryRowContext(ctx, "SELECT c.id, c.name FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &clanName)
 	if err != nil {
-		return c.Send("⚠️ You're not in a Clan. Use /clans to browse or /clan_create [name] to found one.")
+		return c.Send("⚠️ You're not in a Clan. Use /clans to browse or /clan_create [name] to found one.", keyboards.MainNavigation())
 	}
 
 	panelText := fmt.Sprintf(
@@ -593,7 +593,7 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 	}
 
 	panelText += divider
-	return c.Send(panelText, telebot.ModeHTML)
+	return c.Send(panelText, telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // HandleGuildMsg (/guildmsg [message]) broadcasts to every clan member.
@@ -606,20 +606,20 @@ func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
 
 	msg := c.Message().Payload
 	if msg == "" {
-		return c.Send("⚠️ Usage: /guildmsg [message]")
+		return c.Send("⚠️ Usage: /guildmsg [message]", keyboards.MainNavigation())
 	}
 
 	var clanID, clanName string
 	err := h.DB.QueryRowContext(ctx, "SELECT c.id, c.name FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &clanName)
 	if err != nil {
-		return c.Send("⚠️ You're not in a Clan.")
+		return c.Send("⚠️ You're not in a Clan.", keyboards.MainNavigation())
 	}
 
 	broadcast := fmt.Sprintf("📢 %s\n\n%s", htmlBold(fmt.Sprintf("%s [%s]:", htmlEscape(clanName), htmlEscape(sender.FirstName))), htmlEscape(msg))
 
 	rows, err := h.DB.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1 AND user_id != $2", clanID, sender.ID)
 	if err != nil {
-		return c.Send("⚠️ Error broadcasting message.")
+		return c.Send("⚠️ Error broadcasting message.", keyboards.MainNavigation())
 	}
 	defer rows.Close()
 
@@ -632,7 +632,7 @@ func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
 		}
 	}
 
-	return c.Send(fmt.Sprintf("📢 Message broadcast to %d Clan member(s)!", count))
+	return c.Send(fmt.Sprintf("📢 Message broadcast to %d Clan member(s)!", count), keyboards.MainNavigation())
 }
 
 // HandleGuildIcon (/guild_icon) randomly changes the clan's icon.
@@ -646,19 +646,19 @@ func (h *ClanHandler) HandleGuildIcon(c telebot.Context) error {
 	var clanID, role string
 	err := h.DB.QueryRowContext(ctx, "SELECT c.id, uc.role FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &role)
 	if err != nil {
-		return c.Send("⚠️ You're not in a Clan.")
+		return c.Send("⚠️ You're not in a Clan.", keyboards.MainNavigation())
 	}
 	if !canManageClan(role) {
-		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can change the icon.")
+		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can change the icon.", keyboards.MainNavigation())
 	}
 
 	newIcon := randomAnimalIcons[int(sender.ID+time.Now().Unix())%len(randomAnimalIcons)]
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET icon = $1 WHERE id = $2", newIcon, clanID)
 	if err != nil {
-		return c.Send("⚠️ Error updating icon.")
+		return c.Send("⚠️ Error updating icon.", keyboards.MainNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("%s Your Clan's icon is now %s!", newIcon, newIcon))
+	return c.Send(fmt.Sprintf("%s Your Clan's icon is now %s!", newIcon, newIcon), keyboards.MainNavigation())
 }
 
 // HandleGuildDescription (/guild_description [text]) sets the clan's
@@ -672,27 +672,27 @@ func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
 
 	desc := c.Message().Payload
 	if desc == "" {
-		return c.Send("⚠️ Usage: /guild_description [text] (max 200 characters)")
+		return c.Send("⚠️ Usage: /guild_description [text] (max 200 characters)", keyboards.MainNavigation())
 	}
 	if len(desc) > 200 {
-		return c.Send("❌ Too Long: Max 200 characters.")
+		return c.Send("❌ Too Long: Max 200 characters.", keyboards.MainNavigation())
 	}
 
 	var clanID, role string
 	err := h.DB.QueryRowContext(ctx, "SELECT c.id, uc.role FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &role)
 	if err != nil {
-		return c.Send("⚠️ You're not in a Clan.")
+		return c.Send("⚠️ You're not in a Clan.", keyboards.MainNavigation())
 	}
 	if !canManageClan(role) {
-		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can set the description.")
+		return c.Send("❌ Access Denied: Only the Clan Leader or a Co-Leader can set the description.", keyboards.MainNavigation())
 	}
 
 	_, err = h.DB.ExecContext(ctx, "UPDATE clans SET description = $1 WHERE id = $2", desc, clanID)
 	if err != nil {
-		return c.Send("⚠️ Error updating description.")
+		return c.Send("⚠️ Error updating description.", keyboards.MainNavigation())
 	}
 
-	return c.Send("✅ Clan description updated!")
+	return c.Send("✅ Clan description updated!", keyboards.MainNavigation())
 }
 
 // HandleBoard (/board) is the recruitment post board - clans currently
@@ -754,41 +754,41 @@ func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 
 	name := c.Message().Payload
 	if name == "" {
-		return c.Send("⚠️ Usage: /clan_create [name]\n📏 3-24 characters.")
+		return c.Send("⚠️ Usage: /clan_create [name]\n📏 3-24 characters.", keyboards.MainNavigation())
 	}
 	if len(name) < 3 || len(name) > 24 {
-		return c.Send("❌ Invalid Length: Clan name must be 3-24 characters.")
+		return c.Send("❌ Invalid Length: Clan name must be 3-24 characters.", keyboards.MainNavigation())
 	}
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Alliance transaction failed.")
+		return c.Send("⚠️ Alliance transaction failed.", keyboards.MainNavigation())
 	}
 	defer tx.Rollback()
 
 	var exists bool
 	_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", sender.ID).Scan(&exists)
 	if exists {
-		return c.Send("❌ Already in an active Clan! Leave it first with /clan.")
+		return c.Send("❌ Already in an active Clan! Leave it first with /clan.", keyboards.MainNavigation())
 	}
 
 	var clanID string
 	err = tx.QueryRowContext(ctx, "INSERT INTO clans (name, leader_id) VALUES ($1, $2) RETURNING id", name, sender.ID).Scan(&clanID)
 	if err != nil {
-		return c.Send("❌ Name Taken: A Clan with that name already exists.")
+		return c.Send("❌ Name Taken: A Clan with that name already exists.", keyboards.MainNavigation())
 	}
 
 	_, err = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Leader')", sender.ID, clanID)
 	if err != nil {
-		return c.Send("⚠️ Error writing alliance membership.")
+		return c.Send("⚠️ Error writing alliance membership.", keyboards.MainNavigation())
 	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing clan creation: %v", err)
-		return c.Send("⚠️ Error establishing Clan.")
+		return c.Send("⚠️ Error establishing Clan.", keyboards.MainNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // HandleRenameClanCommand lets a Leader rename their clan for a real cost.
@@ -801,19 +801,19 @@ func (h *ClanHandler) HandleRenameClanCommand(c telebot.Context) error {
 
 	newName := c.Message().Payload
 	if newName == "" {
-		return c.Send(fmt.Sprintf("⚠️ Usage: /clan_rename [new name]\n💰 Cost: %.0f Crystal\n📏 3-24 characters.", clanRenameCost))
+		return c.Send(fmt.Sprintf("⚠️ Usage: /clan_rename [new name]\n💰 Cost: %.0f Crystal\n📏 3-24 characters.", clanRenameCost), keyboards.MainNavigation())
 	}
 	if len(newName) < 3 || len(newName) > 24 {
-		return c.Send("❌ Invalid Length: Clan name must be 3-24 characters.")
+		return c.Send("❌ Invalid Length: Clan name must be 3-24 characters.", keyboards.MainNavigation())
 	}
 
 	var clanID, role string
 	err := h.DB.QueryRowContext(ctx, "SELECT c.id, uc.role FROM clans c JOIN user_clans uc ON uc.clan_id = c.id WHERE uc.user_id = $1", sender.ID).Scan(&clanID, &role)
 	if err != nil {
-		return c.Send("⚠️ You're not in a Clan.")
+		return c.Send("⚠️ You're not in a Clan.", keyboards.MainNavigation())
 	}
 	if role != "Leader" {
-		return c.Send("❌ Access Denied: Only the Clan Leader can rename it.")
+		return c.Send("❌ Access Denied: Only the Clan Leader can rename it.", keyboards.MainNavigation())
 	}
 
 	var campID string
@@ -821,27 +821,27 @@ func (h *ClanHandler) HandleRenameClanCommand(c telebot.Context) error {
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Send("⚠️ Rename transaction failed.")
+		return c.Send("⚠️ Rename transaction failed.", keyboards.MainNavigation())
 	}
 	defer tx.Rollback()
 
 	var crystal float64
 	_ = tx.QueryRowContext(ctx, "SELECT crystal FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&crystal)
 	if crystal < clanRenameCost {
-		return c.Send(fmt.Sprintf("❌ Insufficient Crystal: Need %.0f, you have %.0f.", clanRenameCost, crystal))
+		return c.Send(fmt.Sprintf("❌ Insufficient Crystal: Need %.0f, you have %.0f.", clanRenameCost, crystal), keyboards.MainNavigation())
 	}
 
 	_, err = tx.ExecContext(ctx, "UPDATE clans SET name = $1 WHERE id = $2", newName, clanID)
 	if err != nil {
-		return c.Send("❌ Name Taken: Another Clan already uses that name.")
+		return c.Send("❌ Name Taken: Another Clan already uses that name.", keyboards.MainNavigation())
 	}
 	_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = crystal - $1 WHERE encampment_id = $2", clanRenameCost, campID)
 
 	if err := tx.Commit(); err != nil {
-		return c.Send("⚠️ Error saving new name.")
+		return c.Send("⚠️ Error saving new name.", keyboards.MainNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("✅ <b>CLAN RENAMED</b>: Now known as \"%s\"! 🎉", htmlEscape(newName)), telebot.ModeHTML)
+	return c.Send(fmt.Sprintf("✅ <b>CLAN RENAMED</b>: Now known as \"%s\"! 🎉", htmlEscape(newName)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // HandleLeaveClanCallback removes the member (or dissolves if Leader)

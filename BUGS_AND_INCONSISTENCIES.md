@@ -1940,3 +1940,96 @@ real Postgres instance in this sandbox; each is a direct, logic-
 unchanged move of code that worked before this session, just relocated
 behind a confirm callback. A manual live test of all five Confirm/Cancel
 flows is recommended before considering this fully closed.
+
+## Player-reported bug batch (2026-08-06) — dead Confirm/Cancel buttons, target matrix truncation, scout mute, HyperSpeed scope, missing keyboards
+
+Six items reported together with screenshots; tackled as one batch.
+
+**1. NLP Confirm/Cancel cards (screenshots: Cancel toast fires, but
+Confirm still works afterward).** Root cause: `nlp.go`'s
+`HandleNLPConfirmCallback`/`HandleNLPCancelCallback` (market
+buy/list, scout dispatch parsed from natural language) only ever
+answered the tap with a toast (`c.Respond`) - they never edited the
+card itself, so its buttons stayed live indefinitely. Every other
+Confirm/Cancel flow in the codebase (see the two entries above this
+one) edits the card away on both outcomes; this was the one remaining
+exception. Fixed via a new `nlpCardOutcome` helper that both
+edits the card and fires a toast, on every branch of both handlers.
+
+**2. Truncated notification text (same screenshots).** The purchase-
+flow error message ("No matching listing was found within that
+budget...") was long enough to get visually clipped in Telegram's
+small toast popup. Now the full text lives in the edited card
+(4096-char budget) instead of being crammed into the toast. Did NOT do
+a blanket audit of all ~200 other `c.Respond(&telebot.CallbackResponse{...})`
+call sites in the codebase for length - most are short and fine;
+flagging as a follow-up if a broader sweep is wanted.
+
+**3. Tactical Target Matrix hard-capped at 5 targets
+(screenshot: known targets from `/scout` missing from `/raid`).** Root
+cause: `queryTargets` hardcoded `ORDER BY last_seen_at DESC LIMIT 5`
+with no way to see anything past the 5 most-recently-seen discoveries -
+older ones just silently disappeared. Replaced with real pagination:
+`◀️ Back (n/total)` / `▶️ More (n/total)` buttons plus a
+"Page X/Y - N known targets total" line, backed by a new
+`raid_board_page` callback (`combat.go`'s `sendRaidBoardPage`,
+`HandleRaidBoardPageCallback`). Co-Op lobby / AI-contact sections stay
+page-1-only so they don't repeat on every page.
+
+**4. No way to mute scouting notifications independently.** All of
+scout missions' periodic pings ("still searching", "en route home",
+"party returned") were tagged with the shared `route_status` mute
+category, alongside unrelated road/convoy chatter - muting one muted
+both. Added a dedicated `scout_status` mutable category
+(`mute_scout_status` column, migration `037_scout_status_mute.sql`),
+wired into `MutableCategories`/`IsCategoryMuted`
+(`notifications/preferences.go`), retagged the 3 scout-status ping
+sites in `tick/scoutmissions.go`, and added a one-tap 🔔/🔕 toggle
+button directly on the Scout panel itself (`scoutMuteToggleButton`,
+`HandleScoutMuteToggleCallback`) as requested ("directly without any
+other things") - the existing `/settings` panel also gained a matching
+toggle row for anyone who prefers that route. "CONTACT!"/"SPOTTED"
+discovery events were deliberately left on `general` (non-mutable) -
+those are the actual payoff of a scout mission, not routine chatter.
+
+**5. HyperSpeed couldn't accelerate a returning scout party.**
+`doHyperSpeed` only ever looked at the `raids` table, so a player with
+scouts inbound but no active raid had nothing to accelerate.
+Generalized into `findHyperSpeedTarget`, which now checks both
+`raids` (any active state) and `scout_missions` (`phase='returning'`
+only - a mission still in its open-ended search phase has no fixed ETA
+to halve) and picks whichever resolves soonest; `doHyperSpeed` updates
+whichever table that turned out to be.
+
+**6. Missing keyboards across commands.** Static-audited all 105
+top-level slash commands registered in `main.go` for handler bodies
+with zero `keyboards.*`/`ReplyMarkup`/inline-selector reference
+anywhere in their body - 65 candidates came back. Attached the
+context-appropriate persistent nav keyboard
+(`ProfileNavigation`/`CombatNavigation`/`EconomyNavigation`/
+`JobsNavigation`/`AdvisorsNavigation`/`AdminNavigation`/etc., matching
+each file's existing dominant convention) to every `c.Send` call in
+those 65 functions that didn't already carry one. 10 of those files
+(`ai_status.go`, `governor.go`, `fleet_commander.go`,
+`economy_advisor.go`, `research_planner.go`, `battle_analyst.go`,
+`guild_assistant.go`, `galaxy_advisor.go`, `npc_intel.go`,
+`dev_console.go`) needed the `keyboards` import added for the first
+time. Scripted via paren-balanced call-site detection (not blind
+regex) to avoid corrupting multi-line `fmt.Sprintf` calls; every edit
+verified by full rebuild afterward.
+
+**Not done this session (flagging honestly rather than claiming
+completion):** interface "beautification" pass and researching/adding
+newer Telegram bot features (custom emoji, etc.) - out of scope for
+this batch given its size, left for a dedicated follow-up.
+
+Verified: `go build ./...`, `go vet ./...`, `go test ./...` all clean
+across the full repo (temporary telebot.v3 replace-directive method,
+`go.mod`/`go.sum` diff confirmed empty before commit). `gofmt -l`
+clean on every one of the 25 touched files. Could not exercise any of
+this against a live Telegram session or real Postgres instance in this
+sandbox (same limitation noted in the two entries above) - recommend a
+manual live test of: the NLP Confirm/Cancel cards actually disabling
+after one tap, target-matrix pagination with >5 scouted targets, the
+Scout panel's mute toggle round-tripping correctly, and HyperSpeed
+picking up a returning scout mission when no raid is active.

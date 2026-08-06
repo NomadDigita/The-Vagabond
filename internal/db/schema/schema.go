@@ -1140,5 +1140,16 @@ func Statements() []string {
 			read_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, entry_id)
 		);`,
+
+		// See migrations/037_scout_status_mute.sql for the annotated
+		// version. 2026-08-06 direct request: long-range scouting's
+		// "still searching"/"en route home"/"party returned" pings were
+		// sharing the single "route_status" mute toggle with unrelated
+		// road/convoy chatter, so a player couldn't silence one without
+		// silencing the other. Splits scouting into its own mutable
+		// category, toggleable straight from the Scout panel (see
+		// HandleScoutMuteToggleCallback) - "CONTACT!"/"SPOTTED" discovery
+		// events stay on "general" and are never affected either way.
+		`ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS mute_scout_status BOOLEAN NOT NULL DEFAULT FALSE;`,
 	}
 }

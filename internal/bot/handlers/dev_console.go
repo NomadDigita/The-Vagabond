@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/devconsole"
 	"gopkg.in/telebot.v3"
 )
@@ -73,7 +74,7 @@ func (h *DevConsoleHandler) HandleWeeklyReport(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 	_ = c.Notify(telebot.Typing)
 
@@ -87,10 +88,10 @@ func (h *DevConsoleHandler) HandleWeeklyReport(c telebot.Context) error {
 	ctx := context.Background()
 	text, keyboard, err := h.renderReport(ctx, sender.ID, windowDays)
 	if err != nil {
-		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: "+err.Error(), keyboards.AdminNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdminNavigation())
 }
 
 // ── callback: dev_console_refresh ────────────────────────────────────
@@ -136,12 +137,12 @@ func (h *DevConsoleHandler) HandleAdminAsk(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 
 	question := strings.TrimSpace(c.Message().Payload)
 	if question == "" {
-		return c.Send("Usage: /admin_ask <question>\n\nExamples:\n  /admin_ask how many new players this week?\n  /admin_ask who are the top 10 players right now?\n  /admin_ask is anything unusual happening with the economy?")
+		return c.Send("Usage: /admin_ask <question>\n\nExamples:\n  /admin_ask how many new players this week?\n  /admin_ask who are the top 10 players right now?\n  /admin_ask is anything unusual happening with the economy?", keyboards.AdminNavigation())
 	}
 
 	_ = c.Notify(telebot.Typing)
@@ -149,10 +150,10 @@ func (h *DevConsoleHandler) HandleAdminAsk(c telebot.Context) error {
 
 	rec, err := h.Console.Ask(ctx, sender.ID, question)
 	if err != nil {
-		return c.Send("⚠️ The AI Developer Console couldn't answer that: " + err.Error())
+		return c.Send("⚠️ The AI Developer Console couldn't answer that: "+err.Error(), keyboards.AdminNavigation())
 	}
 
-	return c.Send(devconsole.FormatAnswerForTelegram(rec))
+	return c.Send(devconsole.FormatAnswerForTelegram(rec), keyboards.AdminNavigation())
 }
 
 // ── /balance_report [days] ───────────────────────────────────────────
@@ -166,7 +167,7 @@ func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
 		return errors.New("invalid sender context")
 	}
 	if !h.IsAdmin(sender.ID) {
-		return c.Send("❌ Access Denied: Authorized administrators only.")
+		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.AdminNavigation())
 	}
 	_ = c.Notify(telebot.Typing)
 
@@ -180,10 +181,10 @@ func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
 	ctx := context.Background()
 	rec, err := h.Console.RecommendBalance(ctx, sender.ID, windowDays)
 	if err != nil {
-		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Developer Console is temporarily unavailable: "+err.Error(), keyboards.AdminNavigation())
 	}
 
-	return c.Send(devconsole.FormatBalanceForTelegram(rec), telebot.ModeHTML, buildBalanceKeyboard(windowDays))
+	return c.Send(devconsole.FormatBalanceForTelegram(rec), telebot.ModeHTML, buildBalanceKeyboard(windowDays), keyboards.AdminNavigation())
 }
 
 // ── callback: balance_report_refresh ─────────────────────────────────

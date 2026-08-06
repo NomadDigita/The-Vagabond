@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/fleetcommander"
 	"gopkg.in/telebot.v3"
 )
@@ -53,13 +54,13 @@ func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 	ctx := context.Background()
 	text, keyboard, err := h.renderReport(ctx, sender.ID)
 	if errors.Is(err, fleetcommander.ErrNoEncampment) {
-		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.")
+		return c.Send("❌ You don't have an outpost yet. Use /start to establish one first.", keyboards.AdvisorsNavigation())
 	}
 	if err != nil {
-		return c.Send("⚠️ The AI Fleet Commander is temporarily unavailable: " + err.Error())
+		return c.Send("⚠️ The AI Fleet Commander is temporarily unavailable: "+err.Error(), keyboards.AdvisorsNavigation())
 	}
 
-	return c.Send(text, telebot.ModeHTML, keyboard)
+	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
 // ── callback: fleet_refresh ──────────────────────────────────────────
