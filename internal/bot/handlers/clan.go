@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
+	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
 
@@ -137,6 +139,7 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	if pendingApps > 0 {
 		panelText += fmt.Sprintf("\n📬 %s pending application(s) - review them below!\n", htmlCode(fmt.Sprintf("%d", pendingApps)))
 	}
+	panelText += fmt.Sprintf("\n🎁 Short on something? Send resources to a clanmate: %s\n", htmlCode("/clan_donate [resource] [amount] [@username]"))
 	panelText += divider
 
 	var buttons []telebot.Row
@@ -930,4 +933,195 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	}
 
 	return nil
+}
+
+// clanDonateMaxLen bounds /clan_donate's @username argument length
+// purely as a sanity check before it ever reaches a query - Telegram
+// usernames are capped at 32 characters, so anything longer is
+// certainly a typo/garbage, not a real target.
+const clanDonateMaxLen = 32
+
+// HandleClanDonateCommand (/clan_donate <resource> <amount> <@username>)
+// shows a Confirm/Cancel preview before transferring resources from the
+// caller's own stockpile to a fellow clan member's - 2026-08-05
+// addition, closing a real gap flagged by the project owner ("there's
+// no way to transport resources to clan"). Deliberately a direct
+// peer-to-peer transfer between two members' existing `resources` rows
+// rather than a new clan-wide treasury/vault concept - the latter would
+// need a new table, a withdrawal-authority model (who can spend from
+// it, and how that interacts with Leader/Co-Leader/Soldier roles), and
+// its own audit trail, which is a materially bigger design than "let me
+// help a clanmate who's short on Crystal right now." Nothing here
+// touches the database - the actual transfer only happens if the
+// player taps Confirm, via HandleClanDonateConfirmCallback calling
+// doClanDonate.
+func (h *ClanHandler) HandleClanDonateCommand(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	args := strings.Fields(c.Message().Payload)
+	if len(args) != 3 {
+		return c.Send("⚠️ Usage: /clan_donate [resource] [amount] [@username]\nExample: /clan_donate metal 5000 @Bob\nTradeable resources: Metal, Crystal, Scrap.")
+	}
+	resource := strings.ToLower(args[0])
+	amount, amtErr := strconv.ParseFloat(args[1], 64)
+	targetUsername := strings.TrimPrefix(strings.TrimSpace(args[2]), "@")
+
+	if _, ok := marketResourceColumn(resource); !ok {
+		return c.Send(fmt.Sprintf("❌ %s can't be donated - try Metal, Crystal, or Scrap.", htmlEscape(capitalizeWord(resource))))
+	}
+	if amtErr != nil || amount <= 0 {
+		return c.Send("❌ Donation amount must be a positive number.")
+	}
+	if targetUsername == "" || len(targetUsername) > clanDonateMaxLen {
+		return c.Send("❌ Provide the recipient as @username.")
+	}
+
+	var myClanID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&myClanID); err != nil {
+		return c.Send("⚠️ You're not in a Clan. Join or create one first via /clans.")
+	}
+
+	var targetID int64
+	var targetFirstName string
+	err := h.DB.QueryRowContext(ctx,
+		`SELECT u.telegram_id, u.first_name FROM users u
+		 JOIN user_clans uc ON uc.user_id = u.telegram_id
+		 WHERE lower(u.username) = lower($1) AND uc.clan_id = $2`,
+		targetUsername, myClanID).Scan(&targetID, &targetFirstName)
+	if err != nil {
+		return c.Send(fmt.Sprintf("❌ @%s isn't a member of your Clan.", htmlEscape(targetUsername)), telebot.ModeHTML)
+	}
+	if targetID == sender.ID {
+		return c.Send("❌ You can't donate to yourself.")
+	}
+
+	var myScrap, myMetal, myCrystal float64
+	_ = h.DB.QueryRowContext(ctx, "SELECT scrap, metal, crystal FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1", sender.ID).Scan(&myScrap, &myMetal, &myCrystal)
+	balances := map[string]float64{"scrap": myScrap, "metal": myMetal, "crystal": myCrystal}
+	if balances[resource] < amount {
+		return c.Send(fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient "+capitalizeWord(resource)+"!"), htmlCode(fmt.Sprintf("%.0f", amount)), htmlCode(fmt.Sprintf("%.0f", balances[resource]))), telebot.ModeHTML)
+	}
+
+	cardText := "🎁 " + htmlBold("CONFIRM DONATION") + "\n" + divider + "\n" +
+		fmt.Sprintf("Send %s %s to %s (@%s), a fellow Clan member?\n", htmlCode(fmt.Sprintf("%.0f", amount)), htmlEscape(capitalizeWord(resource)), htmlEscape(targetFirstName), htmlEscape(targetUsername)) +
+		htmlItalic("This leaves your own stockpile immediately and cannot be undone or recalled once sent.") + "\n" +
+		divider
+
+	selector := &telebot.ReplyMarkup{}
+	btnConfirm := keyboards.Styled(selector.Data("✅ Confirm Donation", "clandonate_c", resource, fmt.Sprintf("%.4f", amount), strconv.FormatInt(targetID, 10)), keyboards.StyleSuccess)
+	btnCancel := keyboards.Styled(selector.Data("❌ Cancel", "clandonate_x", ""), keyboards.StyleDanger)
+	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
+}
+
+// HandleClanDonateConfirmCallback fires when a player taps "✅ Confirm
+// Donation" on the card HandleClanDonateCommand rendered. Re-derives
+// the caller's own clan/balance server-side rather than trusting
+// anything about the sender from callback_data (only the resource,
+// amount, and target ID are read from it - all revalidated fresh
+// inside doClanDonate).
+func (h *ClanHandler) HandleClanDonateConfirmCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 3 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid donation."})
+	}
+	resource := c.Args()[0]
+	amount, amtErr := strconv.ParseFloat(c.Args()[1], 64)
+	targetID, idErr := strconv.ParseInt(c.Args()[2], 10, 64)
+	if amtErr != nil || idErr != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid donation details."})
+	}
+
+	message, err := h.doClanDonate(ctx, sender.ID, targetID, resource, amount)
+	if err != nil {
+		return c.Edit(message)
+	}
+	return c.Edit(message, telebot.ModeHTML)
+}
+
+// HandleClanDonateCancelCallback fires when a player taps "❌ Cancel" -
+// nothing was ever transferred, so this just closes out the card.
+func (h *ClanHandler) HandleClanDonateCancelCallback(c telebot.Context) error {
+	return sendCancelledCard(c, "🎁 Donation")
+}
+
+// doClanDonate is the testable core of HandleClanDonateConfirmCallback:
+// transfers amount of resource from senderUserID's stockpile to
+// targetUserID's, revalidating from scratch that both are still real
+// clanmates in the SAME clan (membership could have changed between the
+// card being shown and Confirm being tapped) and that senderUserID
+// still has enough of resource. Storage-cap clamps the recipient's gain
+// the same way every other resource-gain path in this codebase does
+// (see storagecap.Clamp's callers in exchange.go).
+func (h *ClanHandler) doClanDonate(ctx context.Context, senderUserID, targetUserID int64, resource string, amount float64) (string, error) {
+	column, ok := marketResourceColumn(resource)
+	if !ok {
+		return fmt.Sprintf("❌ %s can't be donated.", htmlEscape(capitalizeWord(resource))), errors.New("unsupported resource")
+	}
+	if amount <= 0 {
+		return "❌ Donation amount must be positive.", errors.New("invalid amount")
+	}
+	if senderUserID == targetUserID {
+		return "❌ You can't donate to yourself.", errors.New("self donation")
+	}
+
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "⚠️ Donation failed.", err
+	}
+	defer tx.Rollback()
+
+	var senderClanID, targetClanID string
+	_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", senderUserID).Scan(&senderClanID)
+	_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", targetUserID).Scan(&targetClanID)
+	if senderClanID == "" || senderClanID != targetClanID {
+		return "❌ That commander is no longer a member of your Clan.", errors.New("not clanmates")
+	}
+
+	var senderCampID string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", senderUserID).Scan(&senderCampID); err != nil {
+		return "⚠️ Could not find your outpost.", err
+	}
+	var targetCampID string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", targetUserID).Scan(&targetCampID); err != nil {
+		return "⚠️ Could not find the recipient's outpost.", err
+	}
+
+	var senderBalance float64
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", column), senderCampID).Scan(&senderBalance); err != nil {
+		return "⚠️ Error reading your resources.", err
+	}
+	if senderBalance < amount {
+		return fmt.Sprintf("❌ %s Need %s, you have %s.", htmlBold("Insufficient "+capitalizeWord(column)+"!"), htmlCode(fmt.Sprintf("%.0f", amount)), htmlCode(fmt.Sprintf("%.0f", senderBalance))), errors.New("insufficient resources")
+	}
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s - $1 WHERE encampment_id = $2", column, column), amount, senderCampID); err != nil {
+		return "⚠️ Error deducting your donation.", err
+	}
+
+	var targetCurrent float64
+	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", column), targetCampID).Scan(&targetCurrent)
+	targetCap := storagecap.CapFor(ctx, tx, targetCampID)
+	newTargetVal, discarded := storagecap.Clamp(targetCurrent, amount, targetCap)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", column), newTargetVal, targetCampID); err != nil {
+		return "⚠️ Error delivering your donation.", err
+	}
+
+	var senderFirstName string
+	_ = tx.QueryRowContext(ctx, "SELECT first_name FROM users WHERE telegram_id = $1", senderUserID).Scan(&senderFirstName)
+	alertMsg := fmt.Sprintf("🎁 %s: %s sent you %s %s from the Clan!", htmlBold("DONATION RECEIVED"), htmlEscape(senderFirstName), htmlCode(fmt.Sprintf("%.0f", amount)), htmlEscape(capitalizeWord(column)))
+	if discarded > 0 {
+		alertMsg += " (some was lost over your storage cap - consider upgrading storage soon.)"
+	}
+	_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", targetUserID, alertMsg)
+
+	if err := tx.Commit(); err != nil {
+		return "⚠️ Error completing donation.", err
+	}
+
+	return fmt.Sprintf("🎁✅ %s Sent %s %s to your clanmate.", htmlBold("DONATION COMPLETE!"), htmlCode(fmt.Sprintf("%.0f", amount)), htmlEscape(capitalizeWord(column))), nil
 }

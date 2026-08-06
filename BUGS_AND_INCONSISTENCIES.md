@@ -2077,3 +2077,55 @@ against a live Telegram client in this sandbox - the HTML is
 byte-identical to the already-proven `battlereport.go`/`devconsole`
 usage of the same helper, so it's the same trusted code path, not new
 untested markup.
+## Clan resource donation (2026-08-05, same day as combat-balance/confirm-button/NLP-buy work) — closing the last gap from the original feature request
+
+Adds `/clan_donate [resource] [amount] [@username]`
+(`internal/bot/handlers/clan.go`), by explicit project-owner request
+("there's no way to transport resources to clan"). Clan wars and
+co-op battle support were both already verified working earlier this
+session (see the combat-balance entry above) - resource donation was
+the one genuine gap.
+
+**Design choice, worth being explicit about:** this is a direct
+peer-to-peer transfer between two clan members' existing `resources`
+rows, NOT a new clan-wide treasury/vault. A shared vault would need a
+new table, a withdrawal-authority model (who can spend from it and how
+that interacts with the existing Leader/Co-Leader/Soldier role system),
+and its own audit trail - a materially bigger design than "let me send
+a clanmate some Crystal right now," and not what was actually asked
+for. If a shared-vault model is wanted later, that's a distinct,
+larger feature to scope separately.
+
+Shows the same cost-preview Confirm/Cancel card every other
+resource-spending action added today does (reusing
+`sendConfirmCard`/`sendCancelledCard` from the Teleport/Ghost Protocol/
+job-confirmation work earlier today), re-validates clan membership and
+balance fresh at confirm time (not just at card-render time - either
+side could have left the clan or spent the resource in between), and
+storage-cap-clamps the recipient's gain the same way the market buy
+path already does, notifying them if any was lost over cap. Surfaced
+in the Clan HUD panel text so it's actually discoverable, not just a
+hidden slash command nobody would find.
+
+Verified: `go build`/`go vet` clean across the full repo (temporary
+telebot.v3 replace-directive method, reverted before commit; caught and
+fixed one real bug during this check - `storagecap.Clamp`'s second
+return value is the discarded amount, not a bool, and the first draft
+of this code treated it as one). `gofmt -l` clean. `go test` clean on
+`internal/bot/keyboards/...` (button-collision test passes with the two
+new inline callback routes), `internal/game/nlpcommand/...`, and
+`internal/game/combatmath/...` (both unaffected). `doClanDonate` itself
+could not be exercised against a real Postgres in this sandbox (same
+limitation noted throughout today's session) - it follows this file's
+and exchange.go's existing transaction conventions
+(`BeginTx`/`FOR UPDATE`/`storagecap.Clamp`/commit) closely. A manual
+live test (donate to a real clanmate, confirm both balances update
+correctly and the recipient gets notified) is recommended before
+considering this closed.
+
+This closes every item from the original combat-balance/confirm-button/
+NLP-typing/clan-features request except `launch_raid` by text, which
+remains deliberately deferred - it needs its own design pass given the
+existing target-selection/draft-composition UI it would have to either
+replace or drive programmatically, not a quick addition like the four
+items shipped today.
