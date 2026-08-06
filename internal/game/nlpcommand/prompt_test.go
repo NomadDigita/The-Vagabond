@@ -6,10 +6,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-func TestToolDefinitions_FiveActionsMatchAllowList(t *testing.T) {
+func TestToolDefinitions_SixActionsMatchAllowList(t *testing.T) {
 	defs := ToolDefinitions()
-	if len(defs) != 5 {
-		t.Fatalf("expected 5 tool definitions, got %d", len(defs))
+	if len(defs) != 6 {
+		t.Fatalf("expected 6 tool definitions, got %d", len(defs))
 	}
 	for _, d := range defs {
 		if !Action(d.Name).Valid() {
@@ -19,7 +19,7 @@ func TestToolDefinitions_FiveActionsMatchAllowList(t *testing.T) {
 }
 
 func TestActionValid(t *testing.T) {
-	valid := []Action{ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus}
+	valid := []Action{ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus, ActionLaunchRaid}
 	for _, a := range valid {
 		if !a.Valid() {
 			t.Errorf("expected %q to be Valid()", a)
@@ -40,7 +40,7 @@ func TestActionRequiresConfirmation(t *testing.T) {
 			t.Errorf("expected %q to require confirmation", a)
 		}
 	}
-	readOnly := []Action{ActionCheckResources, ActionCheckScoutStatus}
+	readOnly := []Action{ActionCheckResources, ActionCheckScoutStatus, ActionLaunchRaid}
 	for _, a := range readOnly {
 		if a.RequiresConfirmation() {
 			t.Errorf("expected %q to NOT require confirmation", a)
@@ -122,6 +122,32 @@ func TestParseResponse_BuyMarketItem(t *testing.T) {
 	}
 	if got := result.Command.ArgFloat("max_dollars"); got != 500.0 {
 		t.Errorf("expected max_dollars 500.0, got %v", got)
+	}
+}
+
+// TestParseResponse_LaunchRaid covers the 2026-08-05 addition:
+// "raid Lotus Dominion" should parse to ActionLaunchRaid with
+// target_name, and must NOT require confirmation - the card/confirm
+// step lives inside the existing draft-board UI this jumps to, not
+// here (see ActionLaunchRaid's doc comment in prompt.go).
+func TestParseResponse_LaunchRaid(t *testing.T) {
+	resp := &ai.CompletionResponse{
+		ToolCalls: []ai.ToolCall{
+			{Name: "launch_raid", Input: map[string]any{"target_name": "Lotus Dominion"}},
+		},
+	}
+	result := ParseResponse(resp)
+	if !result.Matched {
+		t.Fatal("expected Matched=true")
+	}
+	if result.Command.Action != ActionLaunchRaid {
+		t.Errorf("expected action %q, got %q", ActionLaunchRaid, result.Command.Action)
+	}
+	if got := result.Command.ArgString("target_name"); got != "Lotus Dominion" {
+		t.Errorf("expected target_name %q, got %q", "Lotus Dominion", got)
+	}
+	if result.Command.Action.RequiresConfirmation() {
+		t.Error("expected launch_raid to NOT require its own confirmation card")
 	}
 }
 

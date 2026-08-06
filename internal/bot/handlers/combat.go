@@ -1153,12 +1153,28 @@ func (h *CombatHandler) HandleJoinCoopCallback(c telebot.Context) error {
 }
 
 func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
-	ctx := context.Background()
 	sender := c.Sender()
 	if sender == nil || len(c.Args()) < 1 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid target selection."})
 	}
-	defenderCampID := c.Args()[0]
+	return h.startRaidDraft(c, sender.ID, c.Args()[0])
+}
+
+// startRaidDraft is the shared core behind both HandleLaunchRaidCallback
+// (a player tapping a target in the /raid matrix) and
+// HandleNLPLaunchRaid below (a player typing "raid <name>") - 2026-08-05
+// extraction, so a natural-language launch opens the exact same,
+// already-proven draft/launch-style picker a manual tap does, rather
+// than duplicating this discovery-check-and-draft-reset logic. Nothing
+// is actually committed here: this only resets campaign_drafts'
+// composition to 0 for the given target and shows the customizer HUD -
+// the player still has to choose their own force composition and tap
+// one of the three Launch buttons (which go through the unmodified,
+// unchanged HandleConfirmHangarLaunchCallback) to actually send anyone
+// anywhere. That's the real confirmation step for this whole flow, by
+// design - deliberately not touched or reimplemented by this addition.
+func (h *CombatHandler) startRaidDraft(c telebot.Context, senderID int64, defenderCampID string) error {
+	ctx := context.Background()
 
 	var myCampID string
 	var myRegion string
@@ -1168,9 +1184,9 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 		FROM encampments e 
 		JOIN coordinates c ON c.id = e.coordinate_id 
 		WHERE e.user_id = $1`
-	err := h.DB.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myRegion, &myX, &myY)
+	err := h.DB.QueryRowContext(ctx, queryMe, senderID).Scan(&myCampID, &myRegion, &myX, &myY)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Outpost core not found. Choose faction first."})
+		return c.Send("⚠️ Outpost core not found. Choose faction first.")
 	}
 
 	var discovered bool
@@ -1188,17 +1204,94 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 			)`, myCampID, defenderCampID).Scan(&discovered)
 	}
 	if !discovered {
-		return c.Respond(&telebot.CallbackResponse{Text: "🧭 Discovery required: complete /explore or encounter this target on a route before you can stage an attack."})
+		return c.Send("🧭 Discovery required: complete /explore or encounter this target on a route before you can stage an attack.")
 	}
 
 	_, _ = h.DB.ExecContext(ctx, `
 		INSERT INTO campaign_drafts (user_id, target_id) 
 		VALUES ($1, $2) 
 		ON CONFLICT (user_id) DO UPDATE SET target_id = $2, soldiers = 0, mechs = 0, buggies = 0, ships = 0, jets = 0, nukes = 0, destroyers = 0, bombers = 0, battlecruisers = 0, deathstars = 0, liberators = 0, wraiths = 0, haulers = 0, tankers = 0, cargo_mk1 = 0, cargo_mk2 = 0, cargo_mk3 = 0`,
-		sender.ID, defenderCampID,
+		senderID, defenderCampID,
 	)
 
-	return h.renderDraftCustomizerHUD(c, sender.ID, defenderCampID, myRegion)
+	return h.renderDraftCustomizerHUD(c, senderID, defenderCampID, myRegion)
+}
+
+// resolveRaidTargetByName searches the caller's OWN discovered targets
+// (never the global encampment table - see the same
+// encampment_discoveries scoping startRaidDraft re-checks below) for an
+// outpost name or commander first name matching a case-insensitive
+// partial match of name, for the natural-language "raid <name>"
+// command. Returns the matched target's encampment ID and a
+// human-readable label. If zero or more than one target matches, an
+// error is returned instead of guessing - raiding is a real commitment
+// of a player's own forces, so an ambiguous or unmatched name should
+// never silently resolve to some target the player didn't actually
+// mean.
+func (h *CombatHandler) resolveRaidTargetByName(ctx context.Context, myCampID, name string) (targetCampID, label string, err error) {
+	rows, err := h.DB.QueryContext(ctx, `
+		SELECT e.id, e.name, u.first_name
+		FROM encampment_discoveries d
+		JOIN encampments e ON e.id = d.target_encampment_id
+		JOIN users u ON u.telegram_id = e.user_id
+		WHERE d.observer_encampment_id = $1
+		  AND d.target_encampment_id IS NOT NULL
+		  AND (e.name ILIKE '%' || $2 || '%' OR u.first_name ILIKE '%' || $2 || '%')`,
+		myCampID, name)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+
+	var matches []struct{ id, outpostName, owner string }
+	for rows.Next() {
+		var m struct{ id, outpostName, owner string }
+		if scanErr := rows.Scan(&m.id, &m.outpostName, &m.owner); scanErr == nil {
+			matches = append(matches, m)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", "", fmt.Errorf("no discovered target matches %q", name)
+	case 1:
+		return matches[0].id, fmt.Sprintf("%s (%s)", matches[0].outpostName, matches[0].owner), nil
+	default:
+		return "", "", fmt.Errorf("%d discovered targets match %q, ambiguous", len(matches), name)
+	}
+}
+
+// HandleNLPLaunchRaid is nlpcommand.ActionLaunchRaid's execution
+// (2026-08-05 addition, by explicit project-owner request - "launching
+// raids on this particular person"). No Confirm/Cancel card, matching
+// the existing manual flow's own UX exactly: tapping a target in the
+// /raid matrix has never itself required a confirmation, because
+// nothing is committed by opening the draft board - see
+// startRaidDraft's doc comment for why the real confirmation is the
+// mandatory next step (choosing a composition and tapping Launch),
+// which this does not skip or shortcut.
+func (h *CombatHandler) HandleNLPLaunchRaid(c telebot.Context, targetName string) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+	if strings.TrimSpace(targetName) == "" {
+		return c.Send("🤖 Which target? Try naming them, e.g. \"raid Lotus Dominion\" - or use /raid to browse everyone you've discovered.")
+	}
+
+	var myCampID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&myCampID); err != nil {
+		return c.Send("⚠️ Create your outpost camp first using /start")
+	}
+
+	targetCampID, label, err := h.resolveRaidTargetByName(ctx, myCampID, targetName)
+	if err != nil {
+		return c.Send(fmt.Sprintf("🤖 I couldn't find exactly one discovered target matching \"%s\" - use /raid to browse and pick precisely from everyone you've scouted or explored.", htmlEscape(targetName)), telebot.ModeHTML)
+	}
+
+	_ = c.Send(fmt.Sprintf("🎯 Opening the launch board for %s...", htmlEscape(label)), telebot.ModeHTML)
+	return h.startRaidDraft(c, sender.ID, targetCampID)
 }
 
 func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64, targetCampID string, _ string) error {

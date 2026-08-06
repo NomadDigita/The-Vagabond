@@ -249,6 +249,11 @@ func (h *NLPHandler) dispatchParsedCommand(c telebot.Context, cmd nlpcommand.Par
 		return h.confirmBuyMarketItem(c, cmd)
 	case nlpcommand.ActionDispatchScoutMission:
 		return h.confirmDispatchScoutMission(c, cmd)
+	case nlpcommand.ActionLaunchRaid:
+		if h.Combat == nil {
+			return c.Send(fallbackNotRecognizedMsg)
+		}
+		return h.Combat.HandleNLPLaunchRaid(c, cmd.ArgString("target_name"))
 	default:
 		return c.Send(fallbackNotRecognizedMsg)
 	}

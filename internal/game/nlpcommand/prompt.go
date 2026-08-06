@@ -65,14 +65,28 @@ const (
 	// ActionCheckScoutStatus reports on the player's currently
 	// active scout missions. Read-only - no confirmation needed.
 	ActionCheckScoutStatus Action = "check_scout_status"
+	// ActionLaunchRaid opens the existing draft/launch-style picker
+	// for a named, already-discovered target. 2026-08-05 addition -
+	// deliberately does NOT itself commit any forces or spend
+	// anything: it only jumps the player to the same
+	// composition-and-launch-style screen a manual tap on the /raid
+	// target matrix opens, matching that flow's own UX exactly (no
+	// confirm card there either, since the real commitment point is
+	// the player choosing a composition and tapping one of the three
+	// Launch buttons themselves - see
+	// CombatHandler.startRaidDraft's doc comment). Not a "call an
+	// AI to send my army" shortcut - it's a "skip searching the
+	// target matrix by hand" shortcut, and the actual send-forces
+	// decision stays exactly where it already was.
+	ActionLaunchRaid Action = "launch_raid"
 )
 
-// Valid reports whether a is one of the five actions this milestone
+// Valid reports whether a is one of the six actions this milestone
 // actually implements - anything else (e.g. a hallucinated tool name)
 // is rejected rather than dispatched.
 func (a Action) Valid() bool {
 	switch a {
-	case ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus:
+	case ActionListMarketItem, ActionBuyMarketItem, ActionCheckResources, ActionDispatchScoutMission, ActionCheckScoutStatus, ActionLaunchRaid:
 		return true
 	default:
 		return false
@@ -82,6 +96,9 @@ func (a Action) Valid() bool {
 // RequiresConfirmation reports whether a spends a resource or commits
 // forces and therefore must be shown as a Confirm/Cancel card rather
 // than executed immediately - see the plan doc's safety rule #2.
+// ActionLaunchRaid is deliberately NOT here - see its doc comment for
+// why opening the draft/launch-style picker is not itself a commitment
+// of anything.
 func (a Action) RequiresConfirmation() bool {
 	switch a {
 	case ActionListMarketItem, ActionBuyMarketItem, ActionDispatchScoutMission:
@@ -217,6 +234,20 @@ func ToolDefinitions() []ai.ToolDefinition {
 					},
 				},
 				"required": []string{"resource", "min_quantity", "max_dollars"},
+			},
+		},
+		{
+			Name:        string(ActionLaunchRaid),
+			Description: "Open the raid draft/launch screen for a specific, named target the player has already discovered or scouted (e.g. 'raid Lotus Dominion', 'attack Bob's base', 'launch on the outpost near Wrenfield'). This does NOT itself send any forces or spend anything - it only opens the same composition-and-launch-style picker a manual tap on the target matrix opens; the player still chooses their force composition and taps Launch themselves. Only call this when the player names a SPECIFIC target - if they ask to raid 'someone' or 'anyone' with no name given, do not call this tool; ask them to name a target instead.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target_name": map[string]any{
+						"type":        "string",
+						"description": "The outpost name or commander's name the player wants to raid, exactly as they referred to it.",
+					},
+				},
+				"required": []string{"target_name"},
 			},
 		},
 		{

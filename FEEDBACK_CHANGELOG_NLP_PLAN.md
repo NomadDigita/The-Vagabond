@@ -364,3 +364,65 @@ raid currently goes through a whole target-selection/draft-composition
 UI for good reason, and collapsing that into one text command safely
 needs its own design pass, not a quick addition like this one), and the
 clan resource-donation feature (still a genuine gap, not started).
+
+---
+
+## Post-Milestone-3 addition (2026-08-05, continued): `launch_raid`
+
+This is the action deliberately deferred in the `buy_market_item` entry
+above ("needs its own design pass, not a quick addition"). Implemented
+now with a specific, narrow scope chosen precisely to avoid the risk
+that deferral was about.
+
+**What this does NOT do, on purpose:** it does not send anyone's
+forces anywhere, does not pick a target automatically for a vague
+request ("raid someone"), and does not touch
+`HandleConfirmHangarLaunchCallback` - the ~150-line transaction that
+actually commits forces, applies weather/hero effects, and resolves
+the raid. That function is the single most consequential piece of
+combat code in the game and is completely unmodified by this change.
+
+**What it actually does:** "raid <name>" (e.g. "raid Lotus Dominion")
+resolves the named target against the player's OWN
+`encampment_discoveries` (never the global roster - same scoping every
+other raid-adjacent query already uses), and if exactly one match is
+found, jumps straight to the same draft/launch-style picker a manual
+tap on the `/raid` target matrix already opens - `startRaidDraft`,
+extracted out of `HandleLaunchRaidCallback`'s body (unchanged logic,
+same `doX`-extraction pattern used throughout today) so both the
+button-driven and text-driven entry points share it exactly. The
+player still has to choose their own force composition and tap one of
+the three existing Launch buttons - untouched - to commit anything.
+Zero or multiple name matches return a plain "couldn't find exactly one
+match, use /raid to browse" message rather than guessing.
+
+**No confirmation card**, unlike every other mutating NLP action added
+today - deliberately, because this mirrors the *existing* manual UX
+exactly: tapping a target in the matrix has never itself shown a
+confirm card either, since nothing is committed by opening the draft
+board (it only resets a `campaign_drafts` row's composition to 0). The
+real confirmation is the mandatory next step this doesn't skip.
+
+Tests: `internal/game/nlpcommand/prompt_test.go` covers the new tool
+definition/allow-list entry, that `RequiresConfirmation()` is correctly
+`false` for it (explicitly asserted, since getting this wrong in either
+direction would be a real problem - true would be redundant with the
+existing draft-board flow, false-when-it-should-be-true would be a
+safety regression), and `ParseResponse` matching `launch_raid` - all
+pure, no I/O. `startRaidDraft`/`resolveRaidTargetByName` could NOT be
+exercised against a real Postgres in this sandbox (same limitation
+noted throughout today) - `startRaidDraft` is a direct, logic-unchanged
+extraction from the already-working `HandleLaunchRaidCallback`;
+`resolveRaidTargetByName` is a new read-only query following this
+file's existing `encampment_discoveries`-scoped conventions closely
+(see `sendRaidBoardPage`'s near-identical query). Given this is the
+riskiest addition of the day by a wide margin (it's adjacent to, even
+if it doesn't touch, the core combat-commitment path), a manual live
+test - typing "raid <a real discovered target's name>" and confirming
+it opens the correct draft board, an ambiguous/unknown name is rejected
+cleanly, and the existing manual /raid → tap-a-target flow still works
+identically - is strongly recommended before this is trusted, more so
+than any other change today.
+
+This closes every remaining item from the original combat-balance/
+confirm-button/NLP-typing/clan-features request.
