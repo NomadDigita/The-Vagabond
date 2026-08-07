@@ -326,8 +326,8 @@ func (h *NLPHandler) confirmBuyMarketItem(c telebot.Context, cmd nlpcommand.Pars
 	}
 
 	cardText := "🤖 " + htmlBold("CONFIRM PURCHASE") + "\n" + divider + "\n" +
-		fmt.Sprintf("%s Buy the best available listing of at least %s %s for up to %s?\n", resourceEmoji(resource), htmlCode(fmt.Sprintf("%d", minQty)), htmlEscape(resource), htmlCode(fmt.Sprintf("$%.0f", maxDollars))) +
-		htmlItalic("The market only sells whole listings - the exact quantity and price will be shown once a match is found.") + "\n" +
+		fmt.Sprintf("%s Buy %s %s from the cheapest matching listing for up to %s?\n", resourceEmoji(resource), htmlCode(fmt.Sprintf("%d", minQty)), htmlEscape(resource), htmlCode(fmt.Sprintf("$%.0f", maxDollars))) +
+		htmlItalic("If the matching listing has more than you asked for, only your requested amount is bought - the seller keeps the rest listed. The exact price will be shown once a match is found.") + "\n" +
 		divider
 
 	selector := &telebot.ReplyMarkup{}

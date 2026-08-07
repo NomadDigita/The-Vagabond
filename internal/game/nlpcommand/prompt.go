@@ -215,7 +215,7 @@ func ToolDefinitions() []ai.ToolDefinition {
 		},
 		{
 			Name:        string(ActionBuyMarketItem),
-			Description: "Search the player auction market exchange for an existing listing of a resource and buy it, paying cash. Only call this when the player clearly wants to buy something right now from the market (e.g. 'buy 200 metal for 500 dollars', 'buy any crystal listing under $1000'). This only ever buys a whole existing listing as posted by its seller - it cannot create a custom listing to order, so the quantity actually bought may be somewhat more than asked if that's what the best matching listing contains; the executor will show the real quantity and price before anything is charged.",
+			Description: "Search the player auction market exchange for an existing listing of a resource and buy it, paying cash. Only call this when the player clearly wants to buy something right now from the market (e.g. 'buy 200 metal for 500 dollars', 'buy any crystal listing under $1000'). Buys exactly the requested quantity - if the best matching listing has more than that available (e.g. wanting 500 metal from an 800-metal listing), only the requested amount is bought and the seller keeps the remainder listed; the executor will show the real quantity and price before anything is charged.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
