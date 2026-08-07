@@ -2034,6 +2034,68 @@ after one tap, target-matrix pagination with >5 scouted targets, the
 Scout panel's mute toggle round-tripping correctly, and HyperSpeed
 picking up a returning scout mission when no raid is active.
 
+## Message-effect (message_effect_id) support (2026-08-06, same day, follow-up)
+
+Previously flagged as skipped ("not supported by this project's
+vendored telebot.v3 fork, so didn't force it in with raw HTTP hacks")
+- brought in properly on direct request rather than left skipped.
+
+Telebot.v3 v3.3.8's `SendOptions` has no field for Bot API 7.10's
+`message_effect_id` (the small one-shot animation Telegram plays for a
+recipient, same as long-pressing a message and picking one from the
+client's own effect picker). Rather than vendoring a patched copy of
+the library, went through `Bot.Raw` - telebot's own documented escape
+hatch for exactly this situation (its own doc comment: "Raw lets you
+call any method of Bot API manually... handles API errors").
+
+- `internal/bot/handlers/effects.go`: `sendWithEffect` for synchronous
+  handler sends (`c.Chat()`/`c.Bot()` from `telebot.Context`, which
+  already exposes everything needed with zero handler-struct changes).
+  Fails open to a plain `c.Send` if the raw call errors, so a bad/
+  rejected effect ID can never cost the actual message.
+- `internal/engine/notifications`: added an `effect_id TEXT` column
+  (`migrations/038_notification_effect_id.sql`) since the single
+  best-fitting use case - combat/war/arena outcomes - all resolve
+  asynchronously in the tick engine and get delivered later by
+  `Dispatcher.drainQueue`, which a bot-handler-only helper has no reach
+  into. `Queue()` gained an optional variadic `effectID` param
+  (backward compatible - all ~50 existing call sites needed zero
+  changes); `drainQueue` uses `Bot.Raw` when one is set, same fail-open
+  fallback to `Bot.Send`.
+- Only implemented the 6 message-effect IDs Telegram exposes for free
+  to every bot (fire/thumbs-up/thumbs-down/heart/celebration/poop) -
+  cross-checked against a community-maintained reference
+  (gist.github.com/wiz0u/2a6d40c8f635687be363d72251a264da) against the
+  six Telegram's own client UI has offered since message effects
+  launched. That reference lists a much larger set of additional
+  numeric IDs, but those accompany Telegram Premium's separate
+  emoji-status picker, not the message-effect picker - deliberately
+  excluded since they aren't valid `message_effect_id` values and this
+  project has no way to verify that against a live Bot API instance
+  from this sandbox; sending an invalid one risks Telegram rejecting
+  the whole message.
+- Wired into: raid outcomes (previously the exact same report text
+  went to attacker and defender with zero distinction - now the winner
+  gets 🎉, the loser gets 💩, tied to `battlereport.Round.Outcome`),
+  World Boss slain, Clan War win/loss, Arena team win/loss, Clan
+  founded, Federation founded.
+
+Did NOT implement Bot API 10.1's Rich Messages (`sendRichMessage`,
+June 2026) - that's a different send method entirely, not an optional
+parameter on the existing one, and deserves its own scoped design pass
+rather than being bolted onto this one.
+
+Verified: `go build`, `go vet`, `go test ./...` all clean (temporary
+telebot.v3 replace-directive method). `gofmt -l` clean on every
+touched file. `go.mod`/`go.sum` diff confirmed empty before commit.
+Rebased cleanly onto a same-day collision (`476b71c`, NLP raid command
+- no file overlap) before pushing. Could not verify the actual
+animation renders correctly in a live Telegram client from this
+sandbox - the JSON payload shape (`chat_id`/`text`/`parse_mode`/
+`reply_markup`/`message_effect_id`) matches the documented Bot API
+`sendMessage` schema exactly, but a manual live test sending each of
+the 6 effect IDs is recommended before considering this fully closed.
+
 ## Interface polish pass (2026-08-06, same batch, continued) — expandable blockquotes on AI advisor raw-fallback text
 
 Follow-up to the bug batch above: researched current Telegram Bot API
