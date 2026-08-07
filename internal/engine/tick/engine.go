@@ -316,7 +316,7 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 		if discoveryNote != "" {
 			message += "\n\n" + discoveryNote
 		}
-		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", d.userID, message)
+		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", d.userID, message, notifications.EffectCelebration)
 	}
 	return nil
 }

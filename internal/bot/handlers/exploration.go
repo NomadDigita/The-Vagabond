@@ -148,18 +148,32 @@ func (h *ExplorationHandler) HandleExplorePanel(c telebot.Context) error {
 		if remaining < 0 {
 			remaining = 0
 		}
+		// 2026-08-06: the reward line used to spell out the exact
+		// amount and resource in plain text the instant a player
+		// dispatched - which flatly contradicted the panel's own
+		// pitch two screens back ("has a real chance of making first
+		// contact... every expedition returns with a resource haul")
+		// by resolving all the suspense before the expedition had even
+		// left. Now hidden behind Telegram's tap-to-reveal spoiler
+		// (htmlSpoiler, render.go) while the expedition's still en
+		// route - the actual haul lands, unhidden, in the completion
+		// notification once it's genuinely earned (see engine.go's
+		// resolveExplorationDispatches). A curious player can still
+		// tap to peek early; this isn't a hard lock, just a real
+		// choice between spoiling it themselves or waiting for the
+		// reveal - which is what a spoiler tag is actually for.
 		panelText := fmt.Sprintf(
 			"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\n"+
 				"🧭 WORLD EXPLORATION: EXPEDITION EN ROUTE\n"+
 				"🧭━━━━━━━━━━━━━━━━━━━━━━🧭\n"+
 				"Target: %s\n"+
-				"Expected reward: %s %.0f %s\n"+
+				"Expected reward: %s\n"+
 				"ETA: %d min\n"+
 				"🧭━━━━━━━━━━━━━━━━━━━━━━🧭",
-			siteName, rewardEmoji(siteRewardType), siteRewardAmount, siteRewardType,
+			htmlEscape(siteName), htmlSpoiler(fmt.Sprintf("%s %.0f %s", rewardEmoji(siteRewardType), siteRewardAmount, htmlEscape(siteRewardType))),
 			int(remaining.Minutes())+1,
 		)
-		return c.Send(panelText, keyboards.CombatNavigation())
+		return c.Send(panelText, telebot.ModeHTML, keyboards.CombatNavigation())
 	}
 
 	panelText := fmt.Sprintf(

@@ -2191,3 +2191,61 @@ remains deliberately deferred - it needs its own design pass given the
 existing target-selection/draft-composition UI it would have to either
 replace or drive programmatically, not a quick addition like the four
 items shipped today.
+
+## Rich Messages (sendRichMessage) and a real htmlSpoiler use (2026-08-06, same day, follow-up)
+
+Both previously flagged and deliberately deferred - Rich Messages as
+"a distinct send method... deserves its own scoped pass rather than
+being crammed in", `htmlSpoiler` as "left it alone rather than
+inventing a mystery-loot mechanic just to give it a home" - brought in
+on direct request.
+
+**Rich Messages.** Same `Bot.Raw` approach as message effects (see
+above): telebot.v3 v3.3.8 predates Bot API 10.1 (June 2026) entirely,
+so `sendRichMessage(c, htmlContent, opts...)`
+(`internal/bot/handlers/effects.go`) builds the `rich_message: {html:
+...}` payload by hand and calls `Bot.Raw("sendRichMessage", ...)`.
+Confirmed via a community-maintained Rich Messages spec reference
+(github.com/serejaris/telegram-skills) that Rich HTML style is a
+near-superset of plain ModeHTML - every tag this codebase's
+htmlBold/htmlItalic/htmlCode/htmlQuote/htmlSpoiler/htmlUnderline
+helpers already emit still works unchanged, so no rendering helper
+needed rewriting. Falls back to a normal ModeHTML `c.Send` with the
+identical content if the raw call fails - same fail-open reasoning as
+`sendWithEffect`, and safe specifically because that superset
+relationship means the fallback still renders correctly (just without
+native tables/details/headings).
+
+Added `sendPanelWithNavRich` (navhelper.go) alongside the existing
+`sendPanelWithNav`/`sendPanelWithNavHTML` pair for call sites that want
+it. First real use: `exchange.go`'s Market Exchange panel now renders
+2+ live listings as an actual `<table bordered striped>` (real
+columns, not the emoji-and-manual-padding approximation every other
+listing-style panel in this codebase still uses because plain
+ModeHTML has no table primitive) - a single listing still falls back
+to the old card rendering, since a one-row table has no alignment
+benefit over a card.
+
+**htmlSpoiler.** Found a genuine, pre-existing fit rather than
+inventing new game content: the World Exploration panel's "expedition
+en route" screen was spelling out the exact reward type and amount in
+plain text the instant a player dispatched - directly contradicting
+the same panel's own pitch two screens earlier ("has a real chance of
+making first contact... every expedition returns with a resource
+haul"), since there was zero suspense left by the time the expedition
+actually resolved. Now the reward line is wrapped in `htmlSpoiler`
+while the expedition's in flight (tap-to-reveal, so a curious player
+can still peek early - this isn't a hard lock, just an actual choice);
+the completion notification (`resolveExplorationDispatches`,
+engine.go) already revealed the reward unspoilered once it was
+genuinely earned, so that side needed no change - just gained a 🎉
+message effect alongside it while touching that code path.
+
+Verified: `go build`, `go vet`, `go test ./...` all clean, `gofmt -l`
+clean on every touched file, `go.mod`/`go.sum` diff confirmed empty
+before commit. Could not verify either the rendered `<table>` or the
+spoiler's tap-to-reveal behavior against a live Telegram client from
+this sandbox - the JSON payload shapes match their respective
+documented schemas exactly, but a manual live test of the Exchange
+panel (with 2+ listings live) and a dispatched expedition's "en route"
+screen is recommended before considering this fully closed.

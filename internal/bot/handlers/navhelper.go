@@ -52,6 +52,20 @@ func sendPanelWithNavHTML(c telebot.Context, navCaption string, nav *telebot.Rep
 	return c.Send(text, telebot.ModeHTML, selector)
 }
 
+// sendPanelWithNavRich is sendPanelWithNavHTML's Rich-Message
+// counterpart (see sendRichMessage in effects.go) - use at a call site
+// that wants native <table>/<details>/<h1-6> rendering, not just plain
+// ModeHTML's tag set. Same two-message nav-then-panel structure and
+// same htmlBold/htmlItalic/htmlCode/htmlEscape escaping discipline
+// applies to `text` here as sendPanelWithNavHTML - Rich HTML style is
+// a superset of plain ModeHTML, not a different escaping scheme.
+func sendPanelWithNavRich(c telebot.Context, navCaption string, nav *telebot.ReplyMarkup, text string, selector *telebot.ReplyMarkup) error {
+	if _, err := c.Bot().Send(c.Recipient(), navCaption, nav); err != nil {
+		return err
+	}
+	return sendRichMessage(c, text, selector)
+}
+
 // weatherLine gives the Wasteland Radio feed's one-line-per-continent
 // description for a given active event type ("" or "nominal" for clear
 // conditions). See internal/engine/world/weather.go's eventHeadline for

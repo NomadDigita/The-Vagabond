@@ -49,27 +49,57 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	var buttons []telebot.Row
 	selector := &telebot.ReplyMarkup{}
 
+	// 2026-08-06: render 2+ listings as a native Rich Message <table>
+	// (Bot API 10.1) instead of hand-padded card-style text - real
+	// columns that actually line up, rather than the emoji+label
+	// approximation every other panel in this codebase still uses
+	// because plain ModeHTML has no table primitive at all. A single
+	// listing (or zero) falls through to the old card rendering below -
+	// a one-row table has no alignment benefit over a card and would
+	// just be a table-shaped waste of vertical space.
+	type listingRow struct {
+		id, sellerName, itemType, askType string
+		qty                               int
+		askQty                            float64
+	}
+	var listings []listingRow
+
 	if err != nil {
 		log.Printf("Failed scanning exchange listings: %v", err)
 		listingsText = "📡 " + htmlItalic("Static: Connection interrupted.")
 	} else {
 		defer rows.Close()
-		index := 1
 		for rows.Next() {
-			var listID, sellerName, itemType, askType string
-			var qty int
-			var askQty float64
-			if err := rows.Scan(&listID, &sellerName, &itemType, &qty, &askType, &askQty); err == nil {
-				listingsText += fmt.Sprintf("🏷️ [%d] Outpost: %s\n    %s %s | %s Asking: %s\n\n",
-					index, htmlBold(htmlEscape(sellerName)), resourceEmoji(itemType), htmlCode(fmt.Sprintf("%d %s", qty, itemType)),
-					askEmoji(askType), htmlCode(formatAsk(askType, askQty)))
-				btnBuy := selector.Data(fmt.Sprintf("🛍️ Buy [%d]", index), "buy_listing", listID)
-				buttons = append(buttons, selector.Row(btnBuy))
-				index++
+			var l listingRow
+			if err := rows.Scan(&l.id, &l.sellerName, &l.itemType, &l.qty, &l.askType, &l.askQty); err == nil {
+				listings = append(listings, l)
 			}
 		}
-		if listingsText == "" {
-			listingsText = "📋 " + htmlItalic("Board Clean: No active player listings currently on exchange.") + "\n\n"
+
+		if len(listings) >= 2 {
+			var table strings.Builder
+			table.WriteString("<table bordered striped>\n<tr><th>Outpost</th><th>Selling</th><th>Asking</th></tr>\n")
+			for i, l := range listings {
+				table.WriteString(fmt.Sprintf("<tr><td>[%d] %s</td><td>%s %s</td><td>%s %s</td></tr>\n",
+					i+1, htmlEscape(l.sellerName),
+					resourceEmoji(l.itemType), htmlEscape(fmt.Sprintf("%d %s", l.qty, l.itemType)),
+					askEmoji(l.askType), htmlEscape(formatAsk(l.askType, l.askQty))))
+				btnBuy := selector.Data(fmt.Sprintf("🛍️ Buy [%d]", i+1), "buy_listing", l.id)
+				buttons = append(buttons, selector.Row(btnBuy))
+			}
+			table.WriteString("</table>")
+			listingsText = table.String() + "\n\n"
+		} else {
+			for i, l := range listings {
+				listingsText += fmt.Sprintf("🏷️ [%d] Outpost: %s\n    %s %s | %s Asking: %s\n\n",
+					i+1, htmlBold(htmlEscape(l.sellerName)), resourceEmoji(l.itemType), htmlCode(fmt.Sprintf("%d %s", l.qty, l.itemType)),
+					askEmoji(l.askType), htmlCode(formatAsk(l.askType, l.askQty)))
+				btnBuy := selector.Data(fmt.Sprintf("🛍️ Buy [%d]", i+1), "buy_listing", l.id)
+				buttons = append(buttons, selector.Row(btnBuy))
+			}
+			if listingsText == "" {
+				listingsText = "📋 " + htmlItalic("Board Clean: No active player listings currently on exchange.") + "\n\n"
+			}
 		}
 	}
 
@@ -95,6 +125,9 @@ func (h *ExchangeHandler) HandleExchangePanel(c telebot.Context) error {
 	buttons = append(buttons, selector.Row(btnPostSteel, btnPostUranium))
 	selector.Inline(buttons...)
 
+	if len(listings) >= 2 {
+		return sendPanelWithNavRich(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
+	}
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 

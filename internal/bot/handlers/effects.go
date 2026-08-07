@@ -38,6 +38,76 @@ const (
 	EffectPoop        = notifications.EffectPoop
 )
 
+// sendRichMessage sends htmlContent as a Telegram Rich Message (Bot API
+// 10.1, June 2026 - method sendRichMessage) instead of a plain
+// sendMessage. Not exposed by this project's vendored telebot.v3 fork
+// (v3.3.8, which predates Bot API 10.1 entirely), so - same reasoning
+// as sendWithEffect above - this goes through Bot.Raw rather than a
+// hand-rolled bypass or a vendored library patch.
+//
+// htmlContent is parsed as Rich HTML style (InputRichMessage.html),
+// which is a near-superset of the plain ModeHTML this codebase already
+// uses everywhere: every tag htmlBold/htmlItalic/htmlCode/htmlQuote/
+// htmlSpoiler/htmlUnderline already emit (<b>, <i>, <code>,
+// <blockquote>, <tg-spoiler>, <u>) still works unchanged, PLUS
+// <table>, <details>, <h1>-<h6>, <hr/>, <aside> pull-quotes, and more
+// that plain sendMessage's HTML parse mode has no equivalent for at
+// all. This makes it safe to reuse this codebase's existing html*
+// helpers verbatim when building rich content - see exchange.go's
+// listings table for the first real use.
+//
+// Falls back to a normal c.Send (plain ModeHTML, same content) if the
+// raw sendRichMessage call fails for any reason - same fail-open
+// reasoning as sendWithEffect: a nicer-looking table is never worth
+// losing the underlying message over, whether that's an older client,
+// a future Bot API change, or Telegram rejecting something about the
+// markup. Since Rich HTML style is a superset of plain ModeHTML for
+// every tag this codebase's helpers produce, the fallback renders
+// correctly (just without native tables/details/headings) rather than
+// failing outright.
+func sendRichMessage(c telebot.Context, htmlContent string, opts ...interface{}) error {
+	chat := c.Chat()
+	if chat == nil {
+		return errors.New("no chat in context")
+	}
+	bot := c.Bot()
+	if bot == nil {
+		return errors.New("no bot in context")
+	}
+
+	payload := map[string]interface{}{
+		"chat_id":      chat.ID,
+		"rich_message": map[string]interface{}{"html": htmlContent},
+	}
+	for _, opt := range opts {
+		if v, ok := opt.(*telebot.ReplyMarkup); ok && v != nil {
+			payload["reply_markup"] = v
+		}
+	}
+
+	if _, err := bot.Raw("sendRichMessage", payload); err != nil {
+		fallbackOpts := append([]interface{}{telebot.ModeHTML}, filterReplyMarkup(opts)...)
+		return c.Send(htmlContent, fallbackOpts...)
+	}
+	return nil
+}
+
+// filterReplyMarkup drops anything from opts that sendRichMessage
+// doesn't also accept (it has no text/parse_mode parameter of its own -
+// content lives entirely in rich_message), so sendRichMessage's
+// fallback path can reuse whatever *telebot.ReplyMarkup a caller passed
+// without also re-passing a stray telebot.ParseMode a caller might have
+// included out of habit.
+func filterReplyMarkup(opts []interface{}) []interface{} {
+	var out []interface{}
+	for _, opt := range opts {
+		if v, ok := opt.(*telebot.ReplyMarkup); ok && v != nil {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // sendWithEffect sends text to the chat behind c with a message effect
 // attached, otherwise behaving like c.Send(text, opts...) - the same
 // telebot.ModeHTML/*telebot.ReplyMarkup option values already used
