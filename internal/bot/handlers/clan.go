@@ -791,7 +791,7 @@ func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 		return c.Send("⚠️ Error establishing Clan.", keyboards.MainNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML, keyboards.MainNavigation())
+	return sendWithEffect(c, EffectCelebration, fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
 // HandleRenameClanCommand lets a Leader rename their clan for a real cost.

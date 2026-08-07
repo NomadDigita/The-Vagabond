@@ -196,7 +196,7 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 		return c.Send("⚠️ Error founding Federation.", keyboards.EconomyNavigation())
 	}
 
-	return c.Send(fmt.Sprintf("🌐🎉 %s: \"%s\"! Other Clan Leaders can now join with %s",
+	return sendWithEffect(c, EffectCelebration, fmt.Sprintf("🌐🎉 %s: \"%s\"! Other Clan Leaders can now join with %s",
 		htmlBold("FEDERATION FOUNDED"), htmlEscape(name), htmlCode(fmt.Sprintf("/fed_join %s", htmlEscape(name)))), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 

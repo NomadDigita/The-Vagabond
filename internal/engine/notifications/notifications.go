@@ -11,6 +11,34 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
+// The six message-effect IDs Telegram exposes for free to every bot via
+// the message_effect_id parameter (Bot API 7.10+) - identical to what a
+// human sees in the official client's own long-press effect picker.
+// There is a much larger set of numeric IDs floating around various
+// community-maintained lists (accompanying Telegram Premium's
+// emoji-status picker, not the message-effect picker), but those
+// aren't valid values for message_effect_id and were deliberately
+// excluded here - sending an unrecognized ID risks Telegram rejecting
+// the whole message outright, and this project has no way to verify a
+// wider list against a live Bot API instance from this sandbox.
+// Cross-checked (2026-08-06) against a community-maintained ID
+// reference against the six effects Telegram's own client UI has
+// offered since message effects launched - see
+// BUGS_AND_INCONSISTENCIES.md's 2026-08-06 entry for the source.
+//
+// Defined in this package, not handlers, so both the synchronous
+// bot-handler path (internal/bot/handlers/effects.go) and the async
+// tick-engine queuing path (drainQueue below) share one source of
+// truth instead of two copies drifting out of sync.
+const (
+	EffectFire        = "5104841245755180586" // 🔥
+	EffectThumbsUp    = "5107584321108051014" // 👍
+	EffectThumbsDown  = "5104858069142078462" // 👎
+	EffectHeart       = "5159385139981059251" // ❤️
+	EffectCelebration = "5046509860389126442" // 🎉
+	EffectPoop        = "5046589136895476101" // 💩
+)
+
 type Dispatcher struct {
 	DB       *sql.DB
 	Bot      *telebot.Bot
@@ -126,7 +154,7 @@ func (d *Dispatcher) drainQueue() {
 
 	// Select unsent notifications
 	query := `
-		SELECT id, user_id, message, failed_attempts 
+		SELECT id, user_id, message, failed_attempts, COALESCE(effect_id, '')
 		FROM notifications 
 		WHERE is_sent = FALSE AND user_id > 0
 		ORDER BY queued_at ASC 
@@ -144,12 +172,13 @@ func (d *Dispatcher) drainQueue() {
 		userID         int64
 		message        string
 		failedAttempts int
+		effectID       string
 	}
 
 	var queue []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.userID, &p.message, &p.failedAttempts); err == nil {
+		if err := rows.Scan(&p.id, &p.userID, &p.message, &p.failedAttempts, &p.effectID); err == nil {
 			queue = append(queue, p)
 		}
 	}
@@ -164,16 +193,23 @@ func (d *Dispatcher) drainQueue() {
 	// this batch, and mark every duplicate row sent alongside it. This
 	// only merges rows that are byte-identical, so it can never conflate
 	// two different alerts that happen to arrive close together.
+	//
+	// effectID rides along on the first row seen for a given dedup key -
+	// every duplicate of the same (user, text) pair should carry the
+	// same effect anyway since they're the same event, so which one
+	// "wins" doesn't matter in practice.
 	type dedupKey struct {
 		userID  int64
 		message string
 	}
 	groups := make(map[dedupKey][]string) // -> notification ids
+	effects := make(map[dedupKey]string)
 	order := make([]dedupKey, 0, len(queue))
 	for _, p := range queue {
 		k := dedupKey{p.userID, p.message}
 		if _, seen := groups[k]; !seen {
 			order = append(order, k)
+			effects[k] = p.effectID
 		}
 		groups[k] = append(groups[k], p.id)
 	}
@@ -192,11 +228,37 @@ func (d *Dispatcher) drainQueue() {
 		// A message that was actually built with the render helpers will
 		// contain one of these tags; anything else is sent exactly as
 		// before (plain text, zero behavior change).
+		isHTML := looksLikeHTML(k.message)
 		opts := []interface{}{}
-		if looksLikeHTML(k.message) {
+		if isHTML {
 			opts = append(opts, telebot.ModeHTML)
 		}
-		_, err := d.Bot.Send(targetUser, k.message, opts...)
+
+		var err error
+		if effectID := effects[k]; effectID != "" {
+			// message_effect_id isn't in this project's vendored
+			// telebot.v3 fork's typed SendOptions, so this goes through
+			// Bot.Raw exactly like effects.go's sendWithEffect does for
+			// the synchronous path - see that file's doc comment for
+			// why Raw (telebot's own sanctioned escape hatch for Bot
+			// API fields the wrapper hasn't caught up to) rather than a
+			// hand-rolled bypass. Falls back to a normal Bot.Send below
+			// if the raw call fails, so a rejected/stale effect ID can
+			// never cost a player the actual notification.
+			payload := map[string]interface{}{
+				"chat_id":           k.userID,
+				"text":              k.message,
+				"message_effect_id": effectID,
+			}
+			if isHTML {
+				payload["parse_mode"] = telebot.ModeHTML
+			}
+			if _, rawErr := d.Bot.Raw("sendMessage", payload); rawErr != nil {
+				_, err = d.Bot.Send(targetUser, k.message, opts...)
+			}
+		} else {
+			_, err = d.Bot.Send(targetUser, k.message, opts...)
+		}
 		if err != nil {
 			log.Printf("Dispatcher failed to deliver notification to %d: %v", k.userID, err)
 			// A permanently-undeliverable message (blocked bot, malformed

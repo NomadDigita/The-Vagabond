@@ -1151,5 +1151,14 @@ func Statements() []string {
 		// HandleScoutMuteToggleCallback) - "CONTACT!"/"SPOTTED" discovery
 		// events stay on "general" and are never affected either way.
 		`ALTER TABLE notification_preferences ADD COLUMN IF NOT EXISTS mute_scout_status BOOLEAN NOT NULL DEFAULT FALSE;`,
+
+		// See migrations/038_notification_effect_id.sql for the annotated
+		// version. 2026-08-06 direct request to actually add Telegram's
+		// message_effect_id (send-time animation) support rather than
+		// skip it - queued notifications (raid/clan-war/arena outcomes,
+		// which resolve async in the tick engine, not synchronously from
+		// a bot handler) need a way to carry an optional effect through
+		// to delivery time; see notifications.Dispatcher.drainQueue.
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS effect_id TEXT;`,
 	}
 }

@@ -1,0 +1,28 @@
+-- ==============================================================================
+-- THE VAGABOND - NOTIFICATION MESSAGE EFFECTS
+-- (038_notification_effect_id.sql)
+-- DB Engine: PostgreSQL (Supabase)
+--
+-- 2026-08-06 direct request to actually implement Telegram's
+-- message_effect_id (Bot API 7.10+ send-time animation) rather than
+-- skip it because this project's vendored telebot.v3 fork
+-- (go-telebot/telebot v3.3.8) has no typed field for it - see
+-- internal/bot/handlers/effects.go's sendWithEffect for the synchronous
+-- (bot-handler) half of this, which goes through Bot.Raw instead.
+--
+-- Combat/war/arena outcomes are the most fitting use case for an
+-- effect (🎉 on a win, 💩/👎 on a loss), but those all resolve
+-- asynchronously in the tick engine (internal/engine/tick/engine.go)
+-- and get written straight into the notifications table, to be
+-- delivered later by notifications.Dispatcher.drainQueue - a plain
+-- bot-handler helper has no reach there. This column lets a queuing
+-- call site optionally carry one of the six free effect IDs (see
+-- effects.go's EffectFire/EffectCelebration/etc. constants) through to
+-- delivery time, where drainQueue uses Bot.Raw instead of the normal
+-- Bot.Send when it's set - see notifications.go's updated drainQueue.
+-- NULL (the default) behaves exactly as before this migration: a plain
+-- send, no animation, zero behavior change for the ~50 existing
+-- notification call sites that don't set it.
+-- ==============================================================================
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS effect_id TEXT;

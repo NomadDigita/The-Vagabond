@@ -636,7 +636,7 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 			newDollars, _ := storagecap.Clamp(curDollars, share, ctCap)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, ct.campID)
 			alertMsg := fmt.Sprintf("☠️🎉 <b>BOSS SLAIN: %s</b>\n\nYour cumulative <code>%.0f damage</code> earned you 💵 <code>$%.2f</code> from the loot pool.", htmlEscapeTick(bossName), ct.damage, share)
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ct.userID, alertMsg)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", ct.userID, alertMsg, notifications.EffectCelebration)
 		}
 	}
 
@@ -764,28 +764,32 @@ func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 			winMsg := fmt.Sprintf("🏆⚔️ %s\n\nYour Clan defeated %s! Final score: <code>%.0f - %.0f</code>.\n💵 Your share of the spoils: <code>$%.2f</code>",
 				htmlBoldTick("CLAN WAR VICTORY!"), htmlBoldTick(htmlEscapeTick(loserName)), winnerScore, loserScore, share)
 			for _, uid := range winnerMembers {
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, winMsg)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", uid, winMsg, notifications.EffectCelebration)
 			}
 		}
 
 		loseMsg := fmt.Sprintf("💀⚔️ %s\n\nYour Clan lost to %s. Final score: <code>%.0f - %.0f</code>.",
 			htmlBoldTick("CLAN WAR DEFEAT"), htmlBoldTick(htmlEscapeTick(winnerName)), winnerScore, loserScore)
-		e.notifyClanMembers(ctx, tx, loserClanID, loseMsg)
+		e.notifyClanMembers(ctx, tx, loserClanID, loseMsg, notifications.EffectPoop)
 	}
 
 	return nil
 }
 
-func (e *Engine) notifyClanMembers(ctx context.Context, tx *sql.Tx, clanID, message string) {
+func (e *Engine) notifyClanMembers(ctx context.Context, tx *sql.Tx, clanID, message string, effectID ...string) {
 	rows, err := tx.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1", clanID)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
+	var effect string
+	if len(effectID) > 0 {
+		effect = effectID[0]
+	}
 	for rows.Next() {
 		var uid int64
 		if rows.Scan(&uid) == nil {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, message)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, NULLIF($3, ''))", uid, message, effect)
 		}
 	}
 }
@@ -1562,12 +1566,12 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, wCampID)
 
 				winAlert := fmt.Sprintf("🏟️ %s\n\nYou won the %s team clash! 🎉\n🏆 Reward: <code>+$%.0f Cash</code> credited.", htmlBoldTick("ARENA REPORT: TEAM VICTORY!"), b, lootWon)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", w.userID, winAlert)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", w.userID, winAlert, notifications.EffectCelebration)
 			}
 
 			for _, l := range losers {
 				loseAlert := fmt.Sprintf("🏟️ %s\n\nYou lost the %s team clash. Keep training commander! 💪", htmlBoldTick("ARENA REPORT: TEAM DEFEAT"), b)
-				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", l.userID, loseAlert)
+				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", l.userID, loseAlert, notifications.EffectThumbsDown)
 			}
 
 			var winnerNames []string
@@ -4369,11 +4373,27 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			reportText += economicCollapseWarning(remainingTotal)
 		}
 
+		// Attacker and defender see the identical report text, but
+		// should feel opposite things about it - 2026-08-06: give each
+		// recipient their own message-effect animation based on which
+		// side of report.Outcome they're on, rather than either no
+		// effect or (worse) the same one for the winner and the loser.
+		// Multi-round battles still ongoing (OutcomeOngoing/OutcomeDraw)
+		// deliberately get no effect - the fight isn't over, so neither
+		// "win" nor "lose" framing is warranted yet.
+		var attackerEffect, defenderEffect string
+		switch report.Outcome {
+		case battlereport.OutcomeAttackerWon:
+			attackerEffect, defenderEffect = notifications.EffectCelebration, notifications.EffectPoop
+		case battlereport.OutcomeDefenderWon:
+			attackerEffect, defenderEffect = notifications.EffectPoop, notifications.EffectCelebration
+		}
+
 		if isRealPlayer(r.attackerUserID) {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.attackerUserID, reportText)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, NULLIF($3, ''))", r.attackerUserID, reportText, attackerEffect)
 		}
 		if r.defenderID.Valid && isRealPlayer(r.defenderUserID) {
-			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", r.defenderUserID, reportText)
+			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, NULLIF($3, ''))", r.defenderUserID, reportText, defenderEffect)
 		}
 
 		if !attackerStillStanding {

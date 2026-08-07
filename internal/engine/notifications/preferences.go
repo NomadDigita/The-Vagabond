@@ -62,10 +62,21 @@ func IsCategoryMuted(ctx context.Context, q querier, userID int64, category stri
 // has muted that category. Combat/discovery/supply-loss call sites should
 // keep using category "general" (or call Queue with a category that isn't
 // in MutableCategories) so they're never subject to muting at all.
-func Queue(ctx context.Context, q querier, userID int64, message, category string) error {
+//
+// effectID is optional and variadic purely so every one of this
+// codebase's ~50 existing call sites keeps compiling unchanged - pass
+// one of the Effect* constants (notifications.go) to have
+// Dispatcher.drainQueue deliver this notification with a Telegram
+// message-effect animation attached; pass nothing (or "") for the
+// pre-2026-08-06 behavior. Only the first variadic value is used.
+func Queue(ctx context.Context, q querier, userID int64, message, category string, effectID ...string) error {
 	if IsCategoryMuted(ctx, q, userID, category) {
 		return nil
 	}
-	_, err := q.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, category) VALUES ($1, $2, FALSE, $3)", userID, message, category)
+	var effect string
+	if len(effectID) > 0 {
+		effect = effectID[0]
+	}
+	_, err := q.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, category, effect_id) VALUES ($1, $2, FALSE, $3, NULLIF($4, ''))", userID, message, category, effect)
 	return err
 }
