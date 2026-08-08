@@ -335,8 +335,10 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 	}
 
 	var targetCampID, targetName, targetOwner string
+	var targetIsDefeated bool
+	var targetEpitaph sql.NullString
 	err := tx.QueryRowContext(ctx, `
-		SELECT e.id, e.name, u.first_name
+		SELECT e.id, e.name, u.first_name, e.is_defeated, e.epitaph
 		FROM encampments e
 		JOIN users u ON u.telegram_id = e.user_id
 		JOIN coordinates c ON c.id = e.coordinate_id
@@ -347,7 +349,7 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 				WHERE d.observer_encampment_id = $1 AND d.target_encampment_id = e.id
 			)
 		ORDER BY c.danger_level ASC, e.established_at ASC
-		LIMIT 1`, observerCampID, continent).Scan(&targetCampID, &targetName, &targetOwner)
+		LIMIT 1`, observerCampID, continent).Scan(&targetCampID, &targetName, &targetOwner, &targetIsDefeated, &targetEpitaph)
 	if err == nil {
 		result, err := tx.ExecContext(ctx, `
 			INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method)
@@ -356,6 +358,20 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 			return "", fmt.Errorf("recording discovered encampment: %w", err)
 		}
 		if affected, _ := result.RowsAffected(); affected > 0 {
+			// RARE_WORLD_FEATURES_PLAN.md Phase 3.5: stumbling onto a
+			// permanently-defeated AI faction's old territory is its
+			// own small narrative moment - the epitaph generated when
+			// it fell (see factiondefeat.go's checkForFactionDefeat)
+			// gets appended here instead of the ordinary "now
+			// available in the Tactical Target Matrix" framing, since
+			// there's no target left to raid.
+			if targetIsDefeated {
+				epitaphText := "Nothing more is known of its fall."
+				if targetEpitaph.Valid && targetEpitaph.String != "" {
+					epitaphText = targetEpitaph.String
+				}
+				return fmt.Sprintf("🪦 RUINS DISCOVERED: Your survey team finds only the fallen remains of %s. %s", targetName, epitaphText), nil
+			}
 			return fmt.Sprintf("📡 FIRST CONTACT: Your survey team discovered Outpost [%s], commanded by %s. It is now available in the Tactical Target Matrix.", targetName, targetOwner), nil
 		}
 		return "", nil
@@ -840,6 +856,7 @@ func (e *Engine) ProcessTick() {
 		{"staged_raid_departures", e.autoLaunchExpiredStagedRaids},
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
+		{"faction_defeat_check", e.checkForFactionDefeat},
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
 		{"relic_convoy_spawn", e.relicConvoySpawn},
 		{"relic_convoy_expire", e.relicConvoyExpire},
@@ -2766,7 +2783,7 @@ func isRealPlayer(userID int64) bool {
 // player who raids it periodically can keep it suppressed, which is the
 // intended emergent dynamic rather than an ever-escalating unkillable base.
 func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id, level, user_id, name FROM encampments WHERE is_ai_faction = TRUE")
+	rows, err := tx.QueryContext(ctx, "SELECT id, level, user_id, name FROM encampments WHERE is_ai_faction = TRUE AND is_defeated = FALSE")
 	if err != nil {
 		return fmt.Errorf("querying AI civilizations: %w", err)
 	}

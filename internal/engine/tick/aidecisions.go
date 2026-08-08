@@ -106,7 +106,7 @@ func (e *Engine) decideAIFactionActions(ctx context.Context, tx *sql.Tx) error {
 		SELECT e.id, e.level, c.region
 		FROM encampments e
 		JOIN coordinates c ON c.id = e.coordinate_id
-		WHERE e.is_ai_faction = TRUE
+		WHERE e.is_ai_faction = TRUE AND e.is_defeated = FALSE
 		  AND (e.ai_last_decision_at IS NULL OR e.ai_last_decision_at <= CURRENT_TIMESTAMP - ($1 * INTERVAL '1 minute'))
 		FOR UPDATE OF e`, aiDecisionCadence.Minutes())
 	if err != nil {

@@ -219,7 +219,8 @@ the same pass.
 
 ## Phase 3: Legacy Epitaphs
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `internal/engine/tick/factiondefeat.go`,
+`encampments.is_defeated`/`epitaph`/`defeated_at`, `/legacy` command).
 
 The game's first permanent-defeat state - deliberately scoped to **AI
 factions only** (see design principle 3 above). When an AI faction is
@@ -282,20 +283,25 @@ On trigger:
 
 ### 3.4 Pool exclusion
 
-`aidecisions.go`, `aijobs.go`, `engine.go`'s `growAICivilizations`, and
-`aispawning.go`'s respawn-replacement logic all gain `AND
+`aidecisions.go`'s `decideAIFactionActions`, `aijobs.go`'s
+`runAIJobs`, and `engine.go`'s `growAICivilizations` all gain `AND
 is_defeated = FALSE` alongside their existing `is_ai_faction = TRUE`
 filter - a defeated faction stops scouting, raiding, growing, and
 running jobs, but its row (and ruin) persists permanently rather than
 being deleted, so 3.5's discovery flavor and the Hall of the Fallen
-panel keep working indefinitely.
+panel keep working indefinitely. (`aispawning.go`'s continuous-growth
+spawner turned out not to need a change at all - it spawns purely on a
+fixed time interval, with no count-based cap that a defeated faction's
+row would incorrectly count toward.)
 
 ### 3.5 Discovery flavor
 
-`resolveExplorationDiscovery`/scouting result text (already the place
-that names a newly-discovered target) appends the epitaph, in italics,
-when the discovered target is a defeated faction - "🪦 *You find only
-ruins here.* {epitaph}" - so stumbling onto a fallen faction's old
+`engine.go`'s `resolveExplorationDiscovery` (already the place that
+names a newly-discovered target) checks whether the discovered target
+is a defeated faction and, if so, returns "🪦 RUINS DISCOVERED: Your
+survey team finds only the fallen remains of {name}. {epitaph}"
+instead of the ordinary "now available in the Tactical Target Matrix"
+first-contact framing - so stumbling onto a fallen faction's old
 territory is its own small narrative moment instead of an ordinary
 discovery.
 
@@ -308,12 +314,18 @@ pattern.
 
 ### 3.7 Tests
 
-`factiondefeat_test.go`: a faction at zero resources/garrison gets
-marked defeated exactly once (idempotent on a second tick pass); a
-faction that's merely poor OR merely ungarrisoned (not both) is left
-alone; the finishing-attacker lookup correctly falls back to flavor text
-with no raid history; pool-exclusion queries never return a defeated
-faction.
+`factiondefeat_test.go` (8 tests): a faction at zero resources/garrison
+gets marked defeated with a generated epitaph; a faction that's merely
+poor OR merely ungarrisoned (not both) is left alone; a second pass
+over an already-defeated faction is a no-op (idempotent, same
+epitaph); the finishing-attacker lookup correctly credits a real
+player's most recent completed raid by name and pays the conqueror
+bonus (storage-cap clamped); with no raid history at all, the epitaph
+falls back to crediting "the wasteland itself" and no bonus is paid;
+the pool-exclusion filter (`is_ai_faction = TRUE AND is_defeated =
+FALSE`) correctly excludes a defeated faction while its row still
+persists; `resolveExplorationDiscovery` reports ruins and the exact
+generated epitaph when discovering a defeated faction's old territory.
 
 ---
 

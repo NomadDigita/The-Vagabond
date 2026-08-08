@@ -26,7 +26,7 @@ import (
 // relocation mechanic risks working against Item 1's continent-balanced
 // spawn placement for no real benefit.
 func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id FROM encampments WHERE is_ai_faction = TRUE")
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM encampments WHERE is_ai_faction = TRUE AND is_defeated = FALSE")
 	if err != nil {
 		return fmt.Errorf("querying AI factions for jobs: %w", err)
 	}
