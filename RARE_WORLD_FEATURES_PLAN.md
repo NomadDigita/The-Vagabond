@@ -183,11 +183,14 @@ themselves).
 
 While a continent's active event is `bloom`, that continent's resource
 tick (`internal/engine/resource/resource.go`) applies a flat `+15%`
-multiplier to Scrap/Metal/Crystal/Rations/Electricity/Hydrogen
-generation for every real-player and AI-faction encampment in that
-region - the mirror image of Supply Crisis's existing negative multiplier
-there, reusing the exact same "read the active continent event, branch
-on event_type" call site rather than inventing a second lookup path.
+multiplier to every resource line that pass actually generates
+passively - Scrap, Rations, Electricity, Ether, Metal, and Crystal -
+for every real-player and AI-faction encampment in that region, the
+mirror image of Supply Crisis's existing negative multiplier elsewhere
+in the same pass. (Hydrogen and Dollars aren't part of this passive
+generation pass at all - they come from jobs/mining/market instead - so
+they're correctly untouched by Bloom, same as by any other weather
+event.)
 
 ### 2.4 Presentation
 
@@ -200,21 +203,23 @@ on event_type" call site rather than inventing a second lookup path.
 - `weatherLine` (`navhelper.go`, used by camp/combat panels' weather
   line): "🌸 Wasteland Bloom - all resource generation +15%."
 
-### 2.5 Tests
+### 2.6 Tests
 
-`weather_test.go`: `pickWeightedEvent` never returns bloom more than
-roughly 1-in-20 draws over a large sample (statistical, generous
-tolerance - see the test's own comment on why a hard exact-ratio
-assertion would be flaky); `resource_test.go`: bloom's +15% multiplier
-applies per-resource and stacks correctly with existing storage-cap
-clamping.
+`weather_test.go`'s `TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent`:
+over a 20,000-sample statistical draw, bloom lands well under an
+unweighted 1-in-8 share and strictly less often than each of its seven
+siblings (generous tolerance - a hard exact-ratio assertion would be
+flaky, see the test's own comment). `resource_test.go`'s
+`TestRunResourcePass_BloomBoostsPassiveGenerationBy15Percent`: an
+identical level-1 camp in a blooming region generates exactly 1.15x
+the Scrap/Metal/Crystal of a twin camp in a nominal-weather region in
+the same pass.
 
 ---
 
 ## Phase 3: Legacy Epitaphs
 
-**Status: ✅ Complete** (see `internal/engine/tick/factiondefeat.go`,
-`encampments.is_defeated`/`epitaph`/`defeated_at`, `/legacy` command).
+**Status: 🔲 Not started.**
 
 The game's first permanent-defeat state - deliberately scoped to **AI
 factions only** (see design principle 3 above). When an AI faction is
@@ -314,9 +319,7 @@ faction.
 
 ## Phase 4: The Wandering Merchant
 
-**Status: ✅ Complete** (see `internal/engine/tick/wanderingmerchant.go`,
-`merchant_offers` table, `internal/bot/handlers/merchant.go`, `/merchant`
-command).
+**Status: 🔲 Not started.**
 
 A rare, time-limited NPC vendor - not tied to any player's own listing,
 not competing with the player market exchange (Milestone from the
@@ -397,9 +400,7 @@ clamping on the resource credit; expiry clears unpurchased offers.
 
 ## Phase 5: Constellation Alliances
 
-**Status: ✅ Complete** (see `internal/db/schema/schema.go`'s
-`constellations`/`constellation_members` tables,
-`internal/bot/handlers/constellation.go`, `/constellation` command).
+**Status: 🔲 Not started.**
 
 A rare, temporary, cross-clan structure sitting *above* the existing
 pairwise `clan_diplomacy` pacts (Phase 7's alliance/NAP system) - 2-3

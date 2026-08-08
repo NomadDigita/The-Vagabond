@@ -89,6 +89,8 @@ func weatherLine(eventType string) string {
 		return "🦠 Disease Outbreak - rations consumption elevated."
 	case "sandstorm":
 		return "🌪️ Sandstorm - march times and accuracy degraded."
+	case "bloom":
+		return "🌸 Wasteland Bloom - all passive resource generation +15%."
 	default:
 		return "☀️ Nominal - no active debuffs."
 	}

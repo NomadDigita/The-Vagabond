@@ -144,3 +144,47 @@ func TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly(t *testing.T) 
 		t.Error("expected the Africa player to be notified directly that conditions cleared")
 	}
 }
+
+// TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent is
+// RARE_WORLD_FEATURES_PLAN.md Phase 2.2's direct test: bloom must draw
+// meaningfully less often than any other single event over a large
+// sample. This is inherently statistical (pickWeightedEvent is a real
+// weighted random draw, not a deterministic function), so the
+// assertion is a generous tolerance band, not an exact ratio - bloom's
+// weight (1) against every other event's weight (4) means it should
+// land close to 1-in-11 of all draws (1 / (1*1 + 4*7)); the test only
+// requires it stays well under half of a "fair" 1-in-8 share, which a
+// correctly-weighted draw will clear by a wide margin every run while
+// still catching a regression back to a flat, unweighted pool.
+func TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent(t *testing.T) {
+	const samples = 20000
+	counts := make(map[string]int)
+	for i := 0; i < samples; i++ {
+		counts[pickWeightedEvent()]++
+	}
+
+	bloomShare := float64(counts["bloom"]) / float64(samples)
+	// An unweighted flat pool of 8 events would give bloom ~12.5%
+	// (1-in-8); the weighted pool should land close to ~9% (1-in-11).
+	// Assert well under half of the flat-pool share (6.25%) as a loose
+	// but meaningful regression guard against weighting silently being
+	// dropped or inverted.
+	if bloomShare > 0.0625 {
+		t.Errorf("expected bloom to draw well under the unweighted 12.5%% share, got %.2f%% (%d/%d) - weighting may be broken", bloomShare*100, counts["bloom"], samples)
+	}
+	if counts["bloom"] == 0 {
+		t.Error("expected bloom to be drawn at least once in 20000 samples - it should never be literally unreachable")
+	}
+
+	// Every other event should individually draw more often than
+	// bloom - confirms bloom isn't just "rare because everything is
+	// rare", but specifically rarer than its 7 siblings.
+	for _, e := range eventPool {
+		if e == "bloom" {
+			continue
+		}
+		if counts[e] <= counts["bloom"] {
+			t.Errorf("expected %q to draw more often than bloom (bloom=%d, %s=%d)", e, counts["bloom"], e, counts[e])
+		}
+	}
+}

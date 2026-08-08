@@ -111,6 +111,22 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
 		electricityGenerated += 0.04 * float64(s.SolarPanelLvl) // Solar Panel: independent bonus generation
 
+		// RARE_WORLD_FEATURES_PLAN.md Phase 2: Seasonal Wasteland
+		// Blooms. The wasteland's one purely positive weather event -
+		// a flat +15% applied to every passively-generated resource
+		// line below (Scrap/Rations/Electricity/Ether/Metal/Crystal),
+		// the mirror image of Supply Crisis's negative effect
+		// elsewhere in this codebase. Computed once here so every
+		// generation line below can apply it identically rather than
+		// duplicating the "is this continent blooming" check at each
+		// site.
+		bloomMultiplier := 1.0
+		if continentWeather[s.Region] == "bloom" {
+			bloomMultiplier = 1.15
+		}
+		scrapGenerated *= bloomMultiplier
+		rationsGenerated *= bloomMultiplier
+
 		switch continentWeather[s.Region] {
 		case "solar_flare":
 			electricityGenerated *= 2.0
@@ -119,6 +135,8 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		case "emp":
 			// EMP knocks out unshielded electronics outright, per the news headline.
 			electricityGenerated = 0
+		case "bloom":
+			electricityGenerated *= bloomMultiplier
 		}
 
 		var taxDeducted float64
@@ -170,15 +188,15 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		// Ether trickles in slowly, scaled by Technology research and
 		// boosted further by the Technology Center building. Same cap
 		// rule as everything else: capped if generated passively.
-		etherGenerated := 0.02 * float64(s.ProductionTechLvl)
-		etherGenerated += 0.03 * float64(s.TechCenterLvl)
+		etherGenerated := 0.02*float64(s.ProductionTechLvl) + 0.03*float64(s.TechCenterLvl)
+		etherGenerated *= bloomMultiplier
 		newEther, _ := storagecap.Clamp(s.Ether, etherGenerated, storageCap)
 
 		// Metal Mine / Crystal Mine: passive building-based generation,
 		// distinct from (and stacking with) the active miner-queue system.
 		// Now cap-checked the same as every other passive resource gain.
-		metalGenerated := 2.0 * float64(s.MetalMineLvl)
-		crystalGenerated := 0.8 * float64(s.CrystalMineLvl)
+		metalGenerated := 2.0 * float64(s.MetalMineLvl) * bloomMultiplier
+		crystalGenerated := 0.8 * float64(s.CrystalMineLvl) * bloomMultiplier
 		newMetal, _ := storagecap.Clamp(s.Metal, metalGenerated, storageCap)
 		newCrystal, _ := storagecap.Clamp(s.Crystal, crystalGenerated, storageCap)
 

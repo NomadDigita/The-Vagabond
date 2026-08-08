@@ -28,9 +28,60 @@ var Continents = []string{"Africa", "Europe", "Asia", "Americas"}
 
 // eventPool is every non-nominal world event that can currently roll.
 // Solar Flare/Radiation Storm/Acid Rain are the original three; EMP,
-// Supply Crisis, Disease, and Sandstorm are Phase 7 item 12's additions.
+// Supply Crisis, Disease, and Sandstorm are Phase 7 item 12's additions;
+// Bloom is RARE_WORLD_FEATURES_PLAN.md Phase 2's addition - the
+// wasteland's one purely POSITIVE event, and deliberately weighted
+// rarer than the rest (see weatherPool/pickWeightedEvent below) so a
+// "rare and beautiful" moment doesn't become a routine one.
 var eventPool = []string{
-	"solar_flare", "radiation_storm", "acid_rain", "emp", "supply_crisis", "disease", "sandstorm",
+	"solar_flare", "radiation_storm", "acid_rain", "emp", "supply_crisis", "disease", "sandstorm", "bloom",
+}
+
+// weatherPoolEntry pairs an event type with its relative roll weight.
+type weatherPoolEntry struct {
+	eventType string
+	weight    int
+}
+
+// weatherPool assigns bloom a weight of 1 against every other event's
+// weight of 4 - roughly 4x rarer than any single existing event, while
+// leaving the other seven events' odds relative to EACH OTHER exactly
+// as uniform as eventPool's old flat rand.Intn(len(eventPool)) draw
+// always made them. Built from eventPool at init time (a range loop,
+// not a second hand-maintained literal) so a future addition to
+// eventPool can't silently fall out of sync with this weighting table
+// by only updating one of the two.
+var weatherPool = func() []weatherPoolEntry {
+	pool := make([]weatherPoolEntry, 0, len(eventPool))
+	for _, e := range eventPool {
+		weight := 4
+		if e == "bloom" {
+			weight = 1
+		}
+		pool = append(pool, weatherPoolEntry{eventType: e, weight: weight})
+	}
+	return pool
+}()
+
+// pickWeightedEvent draws one event type from weatherPool, respecting
+// each entry's relative weight - the weighted-draw replacement for
+// eventPool's old flat rand.Intn(len(eventPool)) selection.
+func pickWeightedEvent() string {
+	total := 0
+	for _, e := range weatherPool {
+		total += e.weight
+	}
+	roll := rand.Intn(total)
+	for _, e := range weatherPool {
+		if roll < e.weight {
+			return e.eventType
+		}
+		roll -= e.weight
+	}
+	// Unreachable given the loop above always exhausts roll < total,
+	// but keeps the function total rather than relying on that
+	// invariant silently forever.
+	return weatherPool[len(weatherPool)-1].eventType
 }
 
 const eventDuration = 2 * time.Hour
@@ -97,7 +148,7 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 			continue // this continent stays clear this pass
 		}
 
-		newEvent := eventPool[rand.Intn(len(eventPool))]
+		newEvent := pickWeightedEvent()
 		startsAt := time.Now().UTC()
 		expiresAt = startsAt.Add(eventDuration)
 		headline := eventHeadline(newEvent, continent)
@@ -165,6 +216,8 @@ func eventLabel(eventType string) string {
 		return "the Disease outbreak"
 	case "sandstorm":
 		return "the Sandstorm"
+	case "bloom":
+		return "the Wasteland Bloom"
 	default:
 		return "the anomaly"
 	}
@@ -193,6 +246,8 @@ func eventHeadline(eventType, continent string) string {
 		return fmt.Sprintf("🦠 DISEASE OUTBREAK: An unidentified pathogen is spreading through %s outposts. Rations consumption elevated as commanders divert stock to treatment.", continent)
 	case "sandstorm":
 		return fmt.Sprintf("🌪️ SANDSTORM WARNING: Visibility across %s sectors has collapsed. Scan and Scout operations report degraded intel accuracy.", continent)
+	case "bloom":
+		return fmt.Sprintf("🌸 WASTELAND BLOOM: Bioluminescent flora has erupted across %s's ruins overnight. Outpost harvesters are reporting significantly elevated yields across every resource line.", continent)
 	default:
 		return fmt.Sprintf("🌍 Unusual atmospheric readings detected over %s.", continent)
 	}
