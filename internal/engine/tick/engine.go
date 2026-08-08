@@ -841,6 +841,8 @@ func (e *Engine) ProcessTick() {
 		{"coop_rallies", e.resolveCompletedCoopRallies},
 		{"raid_combat", e.resolveRaidCombats},
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
+		{"relic_convoy_spawn", e.relicConvoySpawn},
+		{"relic_convoy_expire", e.relicConvoyExpire},
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
 		{"exploration_resolve", e.resolveExplorationDispatches},

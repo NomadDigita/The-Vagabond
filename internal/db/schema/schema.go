@@ -1160,5 +1160,93 @@ func Statements() []string {
 		// a bot handler) need a way to carry an optional effect through
 		// to delivery time; see notifications.Dispatcher.drainQueue.
 		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS effect_id TEXT;`,
+
+		// --- RARE_WORLD_FEATURES_PLAN.md Phase 1: Relic Convoys ---
+		// A vanishingly rare, server-wide race: a pre-war relic convoy
+		// surfaces at a random coordinate, broadcast to every player at
+		// once, and the first to tap Claim wins a permanent title plus
+		// a cash windfall. See internal/engine/tick/relicconvoys.go for
+		// the spawn/expire tick phases and
+		// internal/bot/handlers/relicconvoy.go for the panel/claim flow.
+		`CREATE TABLE IF NOT EXISTS relic_convoys (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			relic_name VARCHAR(255) NOT NULL,
+			coordinate_id UUID NOT NULL REFERENCES coordinates(id),
+			reward_dollars DOUBLE PRECISION NOT NULL,
+			spawned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			claimed_by UUID REFERENCES encampments(id) ON DELETE SET NULL,
+			claimed_at TIMESTAMP WITH TIME ZONE
+		);`,
+		// Partial index over exactly the "is there currently a live
+		// relic" query the spawn-gate and panel both run every tick/
+		// panel-load - keeps that check O(1) rather than a growing
+		// table scan as claimed history accumulates.
+		`CREATE INDEX IF NOT EXISTS idx_relic_convoys_active ON relic_convoys(expires_at) WHERE claimed_by IS NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_relic_convoys_claimed ON relic_convoys(claimed_at DESC) WHERE claimed_by IS NOT NULL;`,
+
+		// A relic title is permanent and never overwritten by a later
+		// relic claim (see 1.3 of the plan doc) - only the FIRST relic
+		// an encampment ever wins sets this.
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS relic_title VARCHAR(255);`,
+
+		// --- RARE_WORLD_FEATURES_PLAN.md Phase 3: Legacy Epitaphs ---
+		// The game's first permanent-defeat state, deliberately scoped
+		// to AI factions only (see the plan doc's design principle 3 -
+		// real players are never wiped by anything in this feature
+		// set). See internal/engine/tick/factiondefeat.go.
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS is_defeated BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS epitaph TEXT;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS defeated_at TIMESTAMP WITH TIME ZONE;`,
+		`CREATE INDEX IF NOT EXISTS idx_encampments_ai_undefeated ON encampments(is_ai_faction, is_defeated) WHERE is_ai_faction = TRUE;`,
+
+		// --- RARE_WORLD_FEATURES_PLAN.md Phase 4: The Wandering Merchant ---
+		// A rare, time-limited NPC vendor - deliberately its own table
+		// rather than a synthetic market_exchange seller (see the plan
+		// doc's 4.1 for why). See
+		// internal/engine/tick/wanderingmerchant.go and
+		// internal/bot/handlers/merchant.go.
+		`CREATE TABLE IF NOT EXISTS merchant_offers (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			item_type VARCHAR(50) NOT NULL,
+			quantity INT NOT NULL,
+			price_dollars DOUBLE PRECISION NOT NULL,
+			spawned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			purchased_by UUID REFERENCES encampments(id) ON DELETE SET NULL,
+			purchased_at TIMESTAMP WITH TIME ZONE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_merchant_offers_active ON merchant_offers(expires_at) WHERE purchased_by IS NULL;`,
+
+		// --- RARE_WORLD_FEATURES_PLAN.md Phase 5: Constellation Alliances ---
+		// A rare, temporary, N-ary cross-clan structure sitting above
+		// clan_diplomacy's existing pairwise pacts - see the plan doc's
+		// 5.1 for why this needed its own header+membership table pair
+		// rather than reusing clan_diplomacy's pairwise shape. See
+		// internal/bot/handlers/constellation.go and
+		// internal/engine/tick/constellations.go.
+		`CREATE TABLE IF NOT EXISTS constellations (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(255) NOT NULL,
+			banner_emoji VARCHAR(10) NOT NULL DEFAULT '✨',
+			founder_clan_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			status VARCHAR(20) NOT NULL DEFAULT 'forming',
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			activated_at TIMESTAMP WITH TIME ZONE,
+			expires_at TIMESTAMP WITH TIME ZONE,
+			last_dividend_at TIMESTAMP WITH TIME ZONE,
+			CONSTRAINT constellations_status CHECK (status IN ('forming', 'active', 'dissolved'))
+		);`,
+		`CREATE TABLE IF NOT EXISTS constellation_members (
+			constellation_id UUID NOT NULL REFERENCES constellations(id) ON DELETE CASCADE,
+			clan_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+			invited_by BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			responded_at TIMESTAMP WITH TIME ZONE,
+			PRIMARY KEY (constellation_id, clan_id),
+			CONSTRAINT constellation_members_status CHECK (status IN ('pending', 'accepted', 'rejected'))
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_constellation_members_clan ON constellation_members(clan_id, status);`,
+		`CREATE INDEX IF NOT EXISTS idx_constellations_active ON constellations(status, expires_at) WHERE status = 'active';`,
 	}
 }

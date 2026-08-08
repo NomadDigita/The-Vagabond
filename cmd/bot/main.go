@@ -385,6 +385,7 @@ func main() {
 	exploration := handlers.NewExplorationHandler(db)
 	scoutMissions := handlers.NewScoutMissionsHandler(db)
 	diplomacy := handlers.NewDiplomacyHandler(db)
+	relicConvoy := handlers.NewRelicConvoyHandler(db)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
 	// Provider-agnostic by design: register additional providers here
@@ -498,6 +499,8 @@ func main() {
 	bot.Handle("/defense", camp.HandleDefenseGridPanel)
 	bot.Handle("/infrastructure", camp.HandleInfrastructureGridPanel)
 	bot.Handle("/ranking", ranking.HandleRankingPanel)
+	bot.Handle("/relic", relicConvoy.HandleRelicPanel)
+	bot.Handle("\fclaim_relic", relicConvoy.HandleClaimRelicCallback)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("🔄 Toggle Auto-Scan", combat.HandleAutoScanToggle)
