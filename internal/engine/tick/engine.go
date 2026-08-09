@@ -2977,6 +2977,64 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
+		// Occasionally leave (or, as Leader, disband) a clan, exactly
+		// like a human via HandleLeaveClanCallback's "🚪 Leave
+		// Alliance" button - the missing half of the create/join
+		// behavior above. Without this, an AI faction that ever
+		// created or joined a clan (via the block just above) stayed
+		// there permanently for the rest of the world's life: it could
+		// never re-roll into a different clan, never dissolve a clan
+		// it founded that stopped making sense, and the "AI never
+		// leaves/disbands/rejoins" gap the project owner flagged
+		// 2026-08-09 was exactly this - the join-side existed, the
+		// leave-side never did. Mirrors HandleLeaveClanCallback's own
+		// role-based branch precisely: a Leader leaving disbands the
+		// whole clan (DELETE FROM clans CASCADEs to user_clans,
+		// clan_applications, clan_diplomacy, clan_wars, and
+		// constellation_members - the same cascade a human-triggered
+		// disband already relies on), a rank-and-file member leaving
+		// only removes their own membership row. Rolled independently
+		// and considerably rarer than the 2% join roll (0.5%) so a
+		// faction that just joined doesn't churn back out too quickly -
+		// clan membership should still feel like a real, if not
+		// permanent, commitment.
+		if rand.Float64() < 0.005 {
+			var myClanID, myRole string
+			if err := tx.QueryRowContext(ctx, "SELECT clan_id, role FROM user_clans WHERE user_id = $1", f.userID).Scan(&myClanID, &myRole); err == nil {
+				if myRole == "Leader" {
+					// Notify real human members before the cascade wipes
+					// their user_clans row out from under them - an AI
+					// Leader can preside over human members too (the
+					// human /clans "Apply" flow doesn't filter out
+					// AI-led clans the way this faction's own join-roll
+					// above filters out AI-led ones for itself), so
+					// losing their clan without warning would otherwise
+					// be a silent, confusing loss for a real player.
+					var clanName string
+					_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", myClanID).Scan(&clanName)
+					memberRows, memErr := tx.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1 AND user_id != $2", myClanID, f.userID)
+					var realMemberIDs []int64
+					if memErr == nil {
+						for memberRows.Next() {
+							var uid int64
+							if scanErr := memberRows.Scan(&uid); scanErr == nil && uid > 0 { // only real humans have positive telegram_id
+								realMemberIDs = append(realMemberIDs, uid)
+							}
+						}
+						memberRows.Close()
+					}
+					if _, err := tx.ExecContext(ctx, "DELETE FROM clans WHERE id = $1", myClanID); err == nil {
+						disbandMsg := fmt.Sprintf("💥 <b>CLAN DISBANDED</b>: %s's Leader, the AI faction <code>%s</code>, has moved on. Your Clan no longer exists - form or join a new one via <code>/clan</code>.", htmlEscapeTick(clanName), htmlEscapeTick(f.name))
+						for _, uid := range realMemberIDs {
+							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", uid, disbandMsg)
+						}
+					}
+				} else {
+					_, _ = tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1", f.userID)
+				}
+			}
+		}
+
 		// Occasionally declare a clan war, exactly like a human Leader
 		// would via the clan panel - project owner direction
 		// 2026-08-01: "every single thing a human can do." Mirrors

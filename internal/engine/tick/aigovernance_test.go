@@ -87,7 +87,7 @@ func TestGrowAICivilizationsWontDeclareWarWhenNotLeader(t *testing.T) {
 		t.Fatalf("seeding human leader: %v", err)
 	}
 	var clanID string
-	if err := db.QueryRow("INSERT INTO clans (name, leader_id) VALUES ('Human-Led Clan', 5003) RETURNING id", ).Scan(&clanID); err != nil {
+	if err := db.QueryRow("INSERT INTO clans (name, leader_id) VALUES ('Human-Led Clan', 5003) RETURNING id").Scan(&clanID); err != nil {
 		t.Fatalf("seeding clan: %v", err)
 	}
 	if _, err := db.Exec("INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Member')", factionUserID, clanID); err != nil {
@@ -210,5 +210,159 @@ func TestGrowAICivilizationsCanQueueForArena(t *testing.T) {
 	_ = db.QueryRow("SELECT bracket FROM arena_queue WHERE user_id = $1", factionUserID).Scan(&bracket)
 	if bracket != "solo" {
 		t.Errorf("expected the AI faction to queue in the 'solo' bracket, got %q", bracket)
+	}
+}
+
+// TestGrowAICivilizationsCanDisbandClanAsLeader is the direct test for
+// the AI clan leave/disband gap the project owner flagged 2026-08-09:
+// a Leader-role AI faction must eventually disband a clan it leads
+// (DELETE FROM clans, cascading to user_clans) rather than being
+// permanently stuck leading it forever.
+func TestGrowAICivilizationsCanDisbandClanAsLeader(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2030, "Faction Sigma", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 5)
+	var factionUserID int64
+	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
+		t.Fatalf("looking up faction user_id: %v", err)
+	}
+	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Sigma")
+
+	disbanded := false
+	for i := 0; i < 1500 && !disbanded; i++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		if err := e.growAICivilizations(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("growAICivilizations: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		var stillExists bool
+		_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM clans WHERE id = $1)", myClanID).Scan(&stillExists)
+		disbanded = !stillExists
+	}
+	if !disbanded {
+		t.Fatal("expected the AI clan Leader to disband its clan at least once across 1500 ticks")
+	}
+
+	var memberRowExists bool
+	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", factionUserID).Scan(&memberRowExists)
+	if memberRowExists {
+		t.Error("expected the disbanded clan's cascade to also remove the AI Leader's own user_clans row")
+	}
+}
+
+// TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers
+// confirms a real human member of an AI-led clan is notified when
+// their AI Leader disbands it - the clan disappearing out from under
+// them should never be silent.
+func TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2031, "Faction Tau", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 5)
+	var factionUserID int64
+	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
+		t.Fatalf("looking up faction user_id: %v", err)
+	}
+	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Tau")
+
+	const humanMemberID = 5004
+	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", humanMemberID); err != nil {
+		t.Fatalf("seeding human member user: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Member')", humanMemberID, myClanID); err != nil {
+		t.Fatalf("seeding human member: %v", err)
+	}
+
+	disbanded := false
+	for i := 0; i < 1500 && !disbanded; i++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		if err := e.growAICivilizations(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("growAICivilizations: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		var stillExists bool
+		_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM clans WHERE id = $1)", myClanID).Scan(&stillExists)
+		disbanded = !stillExists
+	}
+	if !disbanded {
+		t.Fatal("expected the AI clan Leader to disband its clan at least once across 1500 ticks")
+	}
+
+	var notified bool
+	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM notifications WHERE user_id = $1 AND message LIKE '%DISBANDED%')", humanMemberID).Scan(&notified)
+	if !notified {
+		t.Error("expected the real human member to be notified that their AI-led clan was disbanded")
+	}
+}
+
+// TestGrowAICivilizationsCanLeaveClanAsMember confirms a rank-and-file
+// (non-Leader) AI clan member eventually leaves without touching the
+// clan itself - the clan should survive with the human Leader still in
+// charge.
+func TestGrowAICivilizationsCanLeaveClanAsMember(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2032, "Faction Upsilon", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 5)
+	var factionUserID int64
+	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
+		t.Fatalf("looking up faction user_id: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES (5005) ON CONFLICT DO NOTHING"); err != nil {
+		t.Fatalf("seeding human leader: %v", err)
+	}
+	var clanID string
+	if err := db.QueryRow("INSERT INTO clans (name, leader_id) VALUES ('Human-Led Clan Upsilon', 5005) RETURNING id").Scan(&clanID); err != nil {
+		t.Fatalf("seeding clan: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Member')", factionUserID, clanID); err != nil {
+		t.Fatalf("seeding AI as a rank-and-file member: %v", err)
+	}
+
+	left := false
+	for i := 0; i < 1500 && !left; i++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		if err := e.growAICivilizations(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("growAICivilizations: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		var stillMember bool
+		_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", factionUserID).Scan(&stillMember)
+		left = !stillMember
+	}
+	if !left {
+		t.Fatal("expected the rank-and-file AI member to leave its clan at least once across 1500 ticks")
+	}
+
+	var clanStillExists bool
+	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM clans WHERE id = $1)", clanID).Scan(&clanStillExists)
+	if !clanStillExists {
+		t.Error("expected the clan itself to survive a rank-and-file member leaving (only the Leader leaving should disband it)")
 	}
 }
