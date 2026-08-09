@@ -331,7 +331,9 @@ generated epitaph when discovering a defeated faction's old territory.
 
 ## Phase 4: The Wandering Merchant
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `internal/engine/tick/wanderingmerchant.go`,
+`merchant_offers` table, `internal/bot/handlers/merchant.go`, `/merchant`
+command).
 
 A rare, time-limited NPC vendor - not tied to any player's own listing,
 not competing with the player market exchange (Milestone from the
@@ -404,9 +406,15 @@ button per offer, or a "the Merchant isn't in range right now" state.
 
 ### 4.7 Tests
 
-`wanderingmerchant_test.go`: spawn only when no active offers; purchase
-race-safety (two concurrent buyers, exactly one wins); storage-cap
-clamping on the resource credit; expiry clears unpurchased offers.
+`wanderingmerchant_test.go` (3 tick-engine tests) and `merchant_test.go`
+(4 handler tests): spawn only when no active offers, and never rolls
+at 0% chance; expiry deletes only unpurchased/expired offers while
+leaving purchased and still-live offers untouched; purchasing pays
+dollars and credits the resource exactly (storage-cap clamped);
+insufficient funds fails without touching any resource; a second
+purchase attempt against an already-bought offer fails cleanly
+(race-safety); an offer past its expiry can't be bought even before
+the expiry sweep runs.
 
 ---
 

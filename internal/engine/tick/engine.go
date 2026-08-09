@@ -860,6 +860,8 @@ func (e *Engine) ProcessTick() {
 		{"world_boss_attacks", e.resolveWorldBossAttacks},
 		{"relic_convoy_spawn", e.relicConvoySpawn},
 		{"relic_convoy_expire", e.relicConvoyExpire},
+		{"wandering_merchant_spawn", e.wanderingMerchantSpawn},
+		{"wandering_merchant_expire", e.wanderingMerchantExpire},
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
 		{"exploration_resolve", e.resolveExplorationDispatches},
