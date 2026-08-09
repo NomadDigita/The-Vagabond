@@ -138,11 +138,11 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	// ── Top Guilds ──────────────────────────────────────────────────
 	panelText += "🛡️ " + htmlBold("TOP GUILDS") + "\n"
 	topGuildsQuery := fmt.Sprintf(`
-		SELECT cl.name, COUNT(uc.user_id) AS members, COALESCE(SUM(%s), 0) AS total_score
+		SELECT cl.id, cl.name, COUNT(uc.user_id) AS members, COALESCE(SUM(%s), 0) AS total_score
 		FROM clans cl
 		JOIN user_clans uc ON uc.clan_id = cl.id
 		JOIN encampments e ON e.user_id = uc.user_id
-		GROUP BY cl.name
+		GROUP BY cl.id, cl.name
 		ORDER BY total_score DESC
 		LIMIT 10`, scoring.ScoreExpr)
 
@@ -151,13 +151,26 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	if err == nil {
 		rank := 1
 		for rows3.Next() {
-			var name string
+			var clanID, name string
 			var members int
 			var score float64
-			if scanErr := rows3.Scan(&name, &members, &score); scanErr == nil {
+			if scanErr := rows3.Scan(&clanID, &name, &members, &score); scanErr == nil {
+				// RARE_WORLD_FEATURES_PLAN.md Phase 5.6: a small
+				// banner-emoji suffix for any Clan currently in an
+				// ACTIVE Constellation - a visible, "arrived" flourish
+				// on the leaderboard itself, not just on /constellation.
+				var banner string
+				_ = h.DB.QueryRowContext(ctx, `
+					SELECT cst.banner_emoji FROM constellation_members cm
+					JOIN constellations cst ON cst.id = cm.constellation_id
+					WHERE cm.clan_id = $1 AND cst.status = 'active' LIMIT 1`, clanID).Scan(&banner)
+				nameCell := fmt.Sprintf("🏴 %s %s", htmlEscape(name), htmlCode(fmt.Sprintf("(%d/8)", members)))
+				if banner != "" {
+					nameCell += " " + banner
+				}
 				topGuildRows = append(topGuildRows, [3]string{
 					fmt.Sprintf("%s %d", medalFor(rank), rank),
-					fmt.Sprintf("🏴 %s %s", htmlEscape(name), htmlCode(fmt.Sprintf("(%d/8)", members))),
+					nameCell,
 					htmlCode(fmt.Sprintf("%.0f", score)),
 				})
 				rank++

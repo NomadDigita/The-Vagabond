@@ -864,6 +864,8 @@ func (e *Engine) ProcessTick() {
 		{"wandering_merchant_expire", e.wanderingMerchantExpire},
 		{"clan_wars", e.resolveClanWars},
 		{"daily_tax", e.collectDailyTax},
+		{"constellation_dividend", e.constellationDividend},
+		{"constellation_expire", e.constellationExpire},
 		{"exploration_resolve", e.resolveExplorationDispatches},
 		{"scout_missions", e.processScoutMissions},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {

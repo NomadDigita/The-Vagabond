@@ -420,7 +420,10 @@ the expiry sweep runs.
 
 ## Phase 5: Constellation Alliances
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `internal/db/schema/schema.go`'s
+`constellations`/`constellation_members` tables,
+`internal/bot/handlers/constellation.go`, `internal/engine/tick/constellations.go`,
+`/constellation` command).
 
 A rare, temporary, cross-clan structure sitting *above* the existing
 pairwise `clan_diplomacy` pacts (Phase 7's alliance/NAP system) - 2-3
@@ -508,12 +511,17 @@ same pattern as every other expiry phase in this plan.
 
 ### 5.7 Tests
 
-`constellation_test.go`: formation requires the founder to be a Leader;
-activation requires unanimous accept; a single reject dissolves the
-whole forming Constellation; dividend pays every member clan's
-encampments once per day and no more; expiry dissolves active
-Constellations past their window; `ranking.go`'s banner suffix only
-shows for `active` Constellations.
+`constellation_test.go` (handlers package, 3 tests): forming a
+Constellation starts the founder's own Clan 'accepted' and every named
+Clan 'pending'; unanimous accept activates the Constellation
+(status/activated_at/expires_at all set); a single reject dissolves
+the whole forming Constellation, not just that one Clan.
+`constellations_test.go` (tick package, 3 tests): the dividend pays
+every member Clan's encampments exactly once and sets
+`last_dividend_at`; running the dividend phase again within 24 hours
+does not pay a second time; an active Constellation past its
+`expires_at` becomes 'dissolved' while one still within its window is
+left untouched.
 
 ---
 

@@ -388,6 +388,7 @@ func main() {
 	relicConvoy := handlers.NewRelicConvoyHandler(db)
 	legacy := handlers.NewLegacyHandler(db)
 	merchant := handlers.NewMerchantHandler(db)
+	constellation := handlers.NewConstellationHandler(db)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
 	// Provider-agnostic by design: register additional providers here
@@ -506,6 +507,9 @@ func main() {
 	bot.Handle("/legacy", legacy.HandleLegacyPanel)
 	bot.Handle("/merchant", merchant.HandleMerchantPanel)
 	bot.Handle("\fmerchant_buy", merchant.HandleMerchantBuyCallback)
+	bot.Handle("/constellation", constellation.HandleConstellationPanel)
+	bot.Handle("/constellation_form", constellation.HandleConstellationForm)
+	bot.Handle("\fconstellation_r", constellation.HandleConstellationRespondCallback)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("🔄 Toggle Auto-Scan", combat.HandleAutoScanToggle)
