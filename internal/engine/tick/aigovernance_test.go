@@ -33,6 +33,14 @@ func TestGrowAICivilizationsCanDeclareClanWar(t *testing.T) {
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
+	// This test needs its tracked clan to survive the whole 300-tick
+	// loop below; zero out the independent leave/disband roll so it
+	// can't randomly disband the clan out from under the war-declare
+	// check being tested here (see aiClanLeaveChance's own doc comment).
+	oldLeaveChance := aiClanLeaveChance
+	aiClanLeaveChance = 0
+	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
+
 	faction := seedEncampment(t, db, 2028, "Faction Pi", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
 	var factionUserID int64
@@ -75,6 +83,17 @@ func TestGrowAICivilizationsWontDeclareWarWhenNotLeader(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
+
+	// Zero out the independent leave/disband roll - without this, the
+	// AI member can leave "Human-Led Clan" partway through the loop
+	// and later found or join an entirely different clan as Leader,
+	// whose own legitimate war declaration could then involve the
+	// still-existing (but now AI-vacated) original clan as the
+	// opponent, which the warCount check below can't distinguish from
+	// the actual behavior under test. See aiClanLeaveChance's comment.
+	oldLeaveChance := aiClanLeaveChance
+	aiClanLeaveChance = 0
+	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
 
 	faction := seedEncampment(t, db, 2029, "Faction Rho", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
@@ -123,6 +142,10 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
+
+	oldLeaveChance := aiClanLeaveChance
+	aiClanLeaveChance = 0
+	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
 
 	faction := seedEncampment(t, db, 2030, "Faction Sigma", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
@@ -223,7 +246,7 @@ func TestGrowAICivilizationsCanDisbandClanAsLeader(t *testing.T) {
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	faction := seedEncampment(t, db, 2030, "Faction Sigma", 0, 0, "TestRegion", true)
+	faction := seedEncampment(t, db, 2130, "Faction Sigma II", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
 	var factionUserID int64
 	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
@@ -268,7 +291,7 @@ func TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers(t *testin
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	faction := seedEncampment(t, db, 2031, "Faction Tau", 0, 0, "TestRegion", true)
+	faction := seedEncampment(t, db, 2131, "Faction Tau II", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
 	var factionUserID int64
 	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
@@ -321,7 +344,7 @@ func TestGrowAICivilizationsCanLeaveClanAsMember(t *testing.T) {
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	faction := seedEncampment(t, db, 2032, "Faction Upsilon", 0, 0, "TestRegion", true)
+	faction := seedEncampment(t, db, 2132, "Faction Upsilon II", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
 	var factionUserID int64
 	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
@@ -364,5 +387,71 @@ func TestGrowAICivilizationsCanLeaveClanAsMember(t *testing.T) {
 	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM clans WHERE id = $1)", clanID).Scan(&clanStillExists)
 	if !clanStillExists {
 		t.Error("expected the clan itself to survive a rank-and-file member leaving (only the Leader leaving should disband it)")
+	}
+}
+
+// TestGrowAICivilizationsReviewsApplicationsToLedClan is the direct
+// test for the related "applications to an AI-led clan sit pending
+// forever" gap found alongside the leave/disband fix: an AI Leader
+// must eventually accept a pending real-player application to its
+// clan, rather than nothing ever reviewing it.
+func TestGrowAICivilizationsReviewsApplicationsToLedClan(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	// Same fragility as the declare-war/federation tests above: zero
+	// out the independent leave/disband roll so the Leader's clan
+	// can't be randomly disbanded before it gets a chance to review
+	// the pending application this test is actually checking.
+	oldLeaveChance := aiClanLeaveChance
+	aiClanLeaveChance = 0
+	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
+
+	faction := seedEncampment(t, db, 2133, "Faction Phi II", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 5)
+	var factionUserID int64
+	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", faction).Scan(&factionUserID); err != nil {
+		t.Fatalf("looking up faction user_id: %v", err)
+	}
+	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Phi")
+
+	const applicantID = 5006
+	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", applicantID); err != nil {
+		t.Fatalf("seeding applicant user: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO clan_applications (clan_id, user_id, status) VALUES ($1, $2, 'pending')", myClanID, applicantID); err != nil {
+		t.Fatalf("seeding pending application: %v", err)
+	}
+
+	accepted := false
+	for i := 0; i < 300 && !accepted; i++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		if err := e.growAICivilizations(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("growAICivilizations: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1 AND clan_id = $2)", applicantID, myClanID).Scan(&accepted)
+	}
+	if !accepted {
+		t.Fatal("expected the AI clan Leader to accept the pending application at least once across 300 ticks")
+	}
+
+	var stillPending bool
+	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM clan_applications WHERE clan_id = $1 AND user_id = $2 AND status = 'pending')", myClanID, applicantID).Scan(&stillPending)
+	if stillPending {
+		t.Error("expected the application row to be cleared once accepted")
+	}
+
+	var notified bool
+	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM notifications WHERE user_id = $1 AND message LIKE '%ACCEPTED%')", applicantID).Scan(&notified)
+	if !notified {
+		t.Error("expected the accepted applicant to be notified")
 	}
 }

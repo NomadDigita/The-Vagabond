@@ -18,6 +18,13 @@ func TestGrowAICivilizationsCanProposeAndAcceptPacts(t *testing.T) {
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
+	// Zero out the independent leave/disband roll - this test needs
+	// its tracked clan(s) to survive the full 300-tick loop below; see
+	// aiClanLeaveChance's own doc comment in engine.go.
+	oldLeaveChance := aiClanLeaveChance
+	aiClanLeaveChance = 0
+	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
+
 	// --- Responding to a pending proposal ---
 	faction := seedEncampment(t, db, 2032, "Faction Upsilon", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)

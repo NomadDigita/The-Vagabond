@@ -2747,6 +2747,17 @@ func aiRollExplorationTemplate() aiExplorationSiteTemplate {
 // themselves if new-player balance ever gets tuned.
 const economicCollapseWarningThreshold = 50.0
 
+// aiClanLeaveChance is the per-tick probability (per AI faction
+// currently in a clan) of leaving it - a Leader disbands the whole
+// clan, a rank-and-file member just leaves. See growAICivilizations's
+// own comment at the roll site for the full rationale. A var, not a
+// const, so aigovernance_test.go's pre-existing clan-war and
+// federation tests (which need their tracked clan to survive their
+// full tick loop) can zero it out for their duration rather than
+// risking the clan being randomly disbanded out from under them
+// mid-test.
+var aiClanLeaveChance = 0.005
+
 // economicCollapseWarning returns the appended report text when a
 // defeated defender's post-raid resource total is critically low, or ""
 // otherwise. Pulled out as its own pure function specifically so this
@@ -2998,7 +3009,7 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 		// faction that just joined doesn't churn back out too quickly -
 		// clan membership should still feel like a real, if not
 		// permanent, commitment.
-		if rand.Float64() < 0.005 {
+		if rand.Float64() < aiClanLeaveChance {
 			var myClanID, myRole string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id, role FROM user_clans WHERE user_id = $1", f.userID).Scan(&myClanID, &myRole); err == nil {
 				if myRole == "Leader" {
@@ -3031,6 +3042,58 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 					}
 				} else {
 					_, _ = tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1", f.userID)
+				}
+			}
+		}
+
+		// Occasionally review pending applications to a clan this
+		// faction leads, exactly like a human Leader via the
+		// Applications Inbox (HandleApplicationDecisionCallback).
+		// Related gap found alongside the leave/disband fix above: a
+		// real player CAN apply to an AI-led clan (the human /clans
+		// "Apply" flow doesn't filter by leader_id the way this
+		// faction's own join-roll filters out AI-led clans for
+		// itself), but with nothing ever reviewing clan_applications
+		// for an AI Leader, that application just sat pending forever
+		// - the applicant was never accepted, never rejected, and
+		// never told. Accepts every pending applicant that still fits
+		// within the 15-member cap (a simple, welcoming default - an
+		// AI Leader has no reason to be selective the way a human
+		// might be), exactly mirroring HandleApplicationDecisionCallback's
+		// own capacity check and re-check for an applicant who joined
+		// elsewhere in the meantime.
+		if rand.Float64() < 0.05 {
+			var myLedClanID string
+			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myLedClanID); err == nil {
+				appRows, appErr := tx.QueryContext(ctx, "SELECT user_id FROM clan_applications WHERE clan_id = $1 AND status = 'pending'", myLedClanID)
+				if appErr == nil {
+					var applicantIDs []int64
+					for appRows.Next() {
+						var uid int64
+						if scanErr := appRows.Scan(&uid); scanErr == nil {
+							applicantIDs = append(applicantIDs, uid)
+						}
+					}
+					appRows.Close()
+
+					for _, applicantID := range applicantIDs {
+						var members int
+						_ = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_clans WHERE clan_id = $1", myLedClanID).Scan(&members)
+						if members >= 15 {
+							break
+						}
+						var alreadyIn bool
+						_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", applicantID).Scan(&alreadyIn)
+						if alreadyIn {
+							_, _ = tx.ExecContext(ctx, "DELETE FROM clan_applications WHERE clan_id = $1 AND user_id = $2", myLedClanID, applicantID)
+							continue
+						}
+						_, _ = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Soldier')", applicantID, myLedClanID)
+						_, _ = tx.ExecContext(ctx, "DELETE FROM clan_applications WHERE clan_id = $1 AND user_id = $2", myLedClanID, applicantID)
+						if applicantID > 0 { // only notify real humans - another AI applicant has nothing reading its notifications
+							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", applicantID, "✅ <b>APPLICATION ACCEPTED</b>: Welcome to your new Clan! 🎉")
+						}
+					}
 				}
 			}
 		}
