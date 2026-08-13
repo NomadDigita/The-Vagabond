@@ -382,3 +382,55 @@ func TestMarketResourceColumn(t *testing.T) {
 		}
 	}
 }
+
+// TestDoBuyListingQty_RecordsMarketPurchaseProgressionEvent is the
+// integration test confirming the real call site actually wires up to
+// internal/game/progression - not just that RecordEvent itself works
+// in isolation (see progression_test.go), but that a real market
+// purchase through this handler triggers it, unlocking
+// progression.Achievements' "first_purchase" (threshold 1) and paying
+// its reward.
+func TestDoBuyListingQty_RecordsMarketPurchaseProgressionEvent(t *testing.T) {
+	db := rankingTestDB(t)
+	ctx := context.Background()
+	h := &ExchangeHandler{DB: db}
+
+	sellerID := seedExchangeCamp(t, db, 45001, "Progression Seller", 200, 0, 0)
+	buyerID := seedExchangeCamp(t, db, 45002, "Progression Buyer", 0, 0, 0)
+	if _, err := db.Exec("UPDATE resources SET dollars = 1000 WHERE encampment_id = $1", buyerID); err != nil {
+		t.Fatalf("seeding buyer dollars: %v", err)
+	}
+
+	if _, err := h.doPostListing(ctx, sellerID, "metal", 200, "dollars", 400); err != nil {
+		t.Fatalf("doPostListing: unexpected error: %v", err)
+	}
+	var listingID string
+	if err := db.QueryRow("SELECT id FROM market_exchange WHERE seller_id = $1", sellerID).Scan(&listingID); err != nil {
+		t.Fatalf("reading listing id: %v", err)
+	}
+
+	if _, err := h.doBuyListingQty(ctx, buyerID, listingID, 200); err != nil {
+		t.Fatalf("doBuyListingQty: unexpected error: %v", err)
+	}
+
+	var buyerUserID int64
+	if err := db.QueryRow("SELECT user_id FROM encampments WHERE id = $1", buyerID).Scan(&buyerUserID); err != nil {
+		t.Fatalf("reading buyer user_id: %v", err)
+	}
+
+	var unlockedAt sql.NullTime
+	if err := db.QueryRow("SELECT unlocked_at FROM player_achievements WHERE user_id = $1 AND achievement_key = 'first_purchase'", buyerUserID).Scan(&unlockedAt); err != nil {
+		t.Fatalf("expected first_purchase achievement to be unlocked by a real market purchase: %v", err)
+	}
+	if !unlockedAt.Valid {
+		t.Error("expected unlocked_at to be set")
+	}
+
+	var eventCount int
+	if err := db.QueryRow("SELECT count FROM player_event_counts WHERE user_id = $1 AND trigger = 'market_purchase'", buyerUserID).Scan(&eventCount); err != nil {
+		t.Fatalf("reading event count: %v", err)
+	}
+	if eventCount != 1 {
+		t.Errorf("expected the market_purchase lifetime counter to be 1, got %d", eventCount)
+	}
+}

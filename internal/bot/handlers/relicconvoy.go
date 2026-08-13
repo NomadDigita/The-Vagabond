@@ -9,6 +9,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -154,6 +155,10 @@ func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, c
 
 	if err := tx.Commit(); err != nil {
 		return "⚠️ Claim failed to commit.", err
+	}
+
+	if userID := userIDForCamp(ctx, h.DB, myCampID); userID != 0 {
+		_ = progression.RecordEvent(ctx, h.DB, userID, progression.TriggerRelicClaimed, 1)
 	}
 
 	return fmt.Sprintf("🏺✅ %s You claimed %s and %s in salvage!", htmlBold("RELIC SECURED!"), htmlEscape(relicName), htmlCode(fmt.Sprintf("$%.0f", reward))), nil

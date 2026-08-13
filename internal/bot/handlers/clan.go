@@ -12,6 +12,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
@@ -368,6 +369,9 @@ func (h *ClanHandler) HandleApplicationDecisionCallback(c telebot.Context, accep
 	}
 
 	_ = tx.Commit()
+	if accept {
+		_ = progression.RecordEvent(ctx, h.DB, targetID, progression.TriggerClanJoined, 1)
+	}
 	return h.HandleApplicationsInboxCallback(c)
 }
 
@@ -791,6 +795,8 @@ func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 		return c.Send("⚠️ Error establishing Clan.", keyboards.MainNavigation())
 	}
 
+	_ = progression.RecordEvent(ctx, h.DB, sender.ID, progression.TriggerClanJoined, 1)
+
 	return sendWithEffect(c, EffectCelebration, fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
@@ -1122,6 +1128,8 @@ func (h *ClanHandler) doClanDonate(ctx context.Context, senderUserID, targetUser
 	if err := tx.Commit(); err != nil {
 		return "⚠️ Error completing donation.", err
 	}
+
+	_ = progression.RecordEvent(ctx, h.DB, senderUserID, progression.TriggerClanDonation, 1)
 
 	return fmt.Sprintf("🎁✅ %s Sent %s %s to your clanmate.", htmlBold("DONATION COMPLETE!"), htmlCode(fmt.Sprintf("%.0f", amount)), htmlEscape(capitalizeWord(column))), nil
 }

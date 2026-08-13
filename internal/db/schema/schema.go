@@ -1248,5 +1248,35 @@ func Statements() []string {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_constellation_members_clan ON constellation_members(clan_id, status);`,
 		`CREATE INDEX IF NOT EXISTS idx_constellations_active ON constellations(status, expires_at) WHERE status = 'active';`,
+
+		// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 1: Achievements &
+		// Milestones, and Phase 2: Daily/Weekly Quest Board. Built
+		// together per that document's suggested order - both are
+		// event-driven off the same real action call sites via
+		// internal/game/progression.RecordEvent. Definitions
+		// (which achievements/quests exist) are static Go data in that
+		// package, not DB tables - only per-player progress lives here.
+		`CREATE TABLE IF NOT EXISTS player_event_counts (
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			trigger VARCHAR(50) NOT NULL,
+			count INT NOT NULL DEFAULT 0,
+			PRIMARY KEY (user_id, trigger)
+		);`,
+		`CREATE TABLE IF NOT EXISTS player_achievements (
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			achievement_key VARCHAR(64) NOT NULL,
+			unlocked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, achievement_key)
+		);`,
+		`CREATE TABLE IF NOT EXISTS player_quest_progress (
+			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+			quest_key VARCHAR(64) NOT NULL,
+			period_start DATE NOT NULL,
+			progress INT NOT NULL DEFAULT 0,
+			completed_at TIMESTAMP WITH TIME ZONE,
+			claimed_at TIMESTAMP WITH TIME ZONE,
+			PRIMARY KEY (user_id, quest_key, period_start)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_player_quest_progress_lookup ON player_quest_progress(user_id, period_start);`,
 	}
 }

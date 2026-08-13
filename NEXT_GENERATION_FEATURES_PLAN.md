@@ -90,7 +90,15 @@ contradicting itself later:
 
 ## Phase 1: Achievements & Milestones
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `internal/game/progression/progression.go`,
+`player_achievements`/`player_event_counts` tables,
+`internal/bot/handlers/achievements.go`, `/achievements` command).
+Shipped with 18 real, fully-wired achievements (not the illustrative
+"40-50" figure below) - more can be added as pure data with zero new
+code, since `RecordEvent` checks every achievement sharing a trigger
+automatically. Wired into 7 real action call sites: market purchases,
+scout mission dispatch, relic convoy claims, faction-defeat conqueror
+kills, clan founding/joining, clan donations, and raid completion.
 
 A permanent, account-level record of things a player has done -
 currently there is no achievement system at all. Distinct from Phase 2
@@ -141,7 +149,20 @@ unlocking an achievement an AI can't see changes nothing).
 
 ## Phase 2: Daily/Weekly Quest Board
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `internal/game/progression/progression.go`,
+`player_quest_progress` table, `internal/bot/handlers/quests.go`,
+`/quests` command). Shipped with a documented scope simplification:
+a **fixed** board of 4 daily + 2 weekly quests shown every period,
+rather than this section's original "3 random dailies rerolled from a
+larger pool" design - the fixed-board version delivers the same core
+daily/weekly-goal retention mechanic with meaningfully less bookkeeping
+(no assignment table, no rollover tick phase - a new period is simply
+a fresh `player_quest_progress` row keyed by `period_start`, computed
+on read rather than tracked separately). Rotation can be added later
+as a data-layer change to `progression.Quests` if wanted. AI-parity
+auto-claim (an AI faction has no panel to visit, so a completed AI
+quest is claimed automatically rather than sitting unclaimed forever)
+shipped as designed below.
 
 A rotating checklist of repeatable goals - the single most-proven
 retention lever in the idle-game genre this project's own README

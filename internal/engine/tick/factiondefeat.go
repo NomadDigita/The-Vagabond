@@ -7,6 +7,7 @@ import (
 	"math/rand"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
@@ -109,6 +110,9 @@ func (e *Engine) checkForFactionDefeat(ctx context.Context, tx *sql.Tx) error {
 		if isRealAttacker {
 			if err := e.payConquerorBonus(ctx, tx, d.id, d.name, attackerUserID); err != nil {
 				return fmt.Errorf("paying conqueror bonus for defeating %s: %w", d.id, err)
+			}
+			if err := progression.RecordEvent(ctx, tx, attackerUserID, progression.TriggerFactionDefeated, 1); err != nil {
+				return fmt.Errorf("recording faction-defeated progress for %d: %w", attackerUserID, err)
 			}
 		}
 	}

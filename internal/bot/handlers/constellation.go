@@ -9,6 +9,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"gopkg.in/telebot.v3"
 )
 
@@ -343,6 +344,22 @@ func (h *ConstellationHandler) HandleConstellationRespondCallback(c telebot.Cont
 
 	if err := tx.Commit(); err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error responding."})
+	}
+
+	if pendingCount == 0 {
+		memberUserRows, memErr := h.DB.QueryContext(ctx, `
+			SELECT uc.user_id FROM constellation_members cm
+			JOIN user_clans uc ON uc.clan_id = cm.clan_id
+			WHERE cm.constellation_id = $1`, constellationID)
+		if memErr == nil {
+			for memberUserRows.Next() {
+				var uid int64
+				if scanErr := memberUserRows.Scan(&uid); scanErr == nil && uid > 0 {
+					_ = progression.RecordEvent(ctx, h.DB, uid, progression.TriggerConstellationFormed, 1)
+				}
+			}
+			memberUserRows.Close()
+		}
 	}
 
 	if pendingCount == 0 {

@@ -154,8 +154,14 @@ func TestCheckForFactionDefeat_CreditsMostRecentAttackerAndPaysConqueror(t *test
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", attackerID).Scan(&attackerDollars); err != nil {
 		t.Fatalf("reading attacker resources: %v", err)
 	}
-	if attackerDollars != conquerorBonusDollars {
-		t.Errorf("expected the attacker to receive the %v conqueror bonus, got %v", conquerorBonusDollars, attackerDollars)
+	// conquerorBonusDollars (5000) + a one-time 2000 "conqueror"
+	// achievement bonus (NEXT_GENERATION_FEATURES_PLAN.md Phase 1,
+	// threshold 1 on progression.TriggerFactionDefeated, unlocked by
+	// this same finishing blow via checkForFactionDefeat's
+	// progression.RecordEvent call) = 7000.
+	wantDollars := conquerorBonusDollars + 2000
+	if attackerDollars != wantDollars {
+		t.Errorf("expected the attacker to receive %v (conqueror bonus + conqueror achievement), got %v", wantDollars, attackerDollars)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/battlereport"
 	"github.com/NomadDigita/The-Vagabond/internal/game/combatmath"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
@@ -3708,6 +3709,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			newHydrogen, _ := storagecap.Clamp(curHydrogen, r.stolenHydrogen, attackerCap)
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = $1, metal = $2, crystal = $3, rations = $5, electricity = $6, hydrogen = $7, neuro_cores = $8, dollars = $9 WHERE encampment_id = $4", newScrap, newMetal, newCrystal, r.attackerID, newRations, newElectricity, newHydrogen, curNeuroCores+r.stolenNeuroCores, curDollars+r.stolenDollars)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+			if r.attackerUserID > 0 {
+				_ = progression.RecordEvent(ctx, tx, r.attackerUserID, progression.TriggerRaidCompleted, 1)
+			}
 
 			// BUGFIX: co-op helper survivors were never credited home on
 			// a NATURAL raid completion - only the manual "abort" path
@@ -4576,6 +4580,9 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				}
 			} else {
 				_, _ = tx.ExecContext(ctx, "UPDATE raids SET state = 'completed' WHERE id = $1", r.id)
+				if isRealPlayer(r.attackerUserID) {
+					_ = progression.RecordEvent(ctx, tx, r.attackerUserID, progression.TriggerRaidCompleted, 1)
+				}
 			}
 		} else if !defenderStillStanding {
 			primRatio := float64(primarySoldiers+primaryMechs) / float64(totSoldiers+totMechs)

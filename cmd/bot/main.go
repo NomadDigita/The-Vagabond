@@ -389,6 +389,8 @@ func main() {
 	legacy := handlers.NewLegacyHandler(db)
 	merchant := handlers.NewMerchantHandler(db)
 	constellation := handlers.NewConstellationHandler(db)
+	achievements := handlers.NewAchievementsHandler(db)
+	quests := handlers.NewQuestsHandler(db)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
 	// Provider-agnostic by design: register additional providers here
@@ -510,6 +512,9 @@ func main() {
 	bot.Handle("/constellation", constellation.HandleConstellationPanel)
 	bot.Handle("/constellation_form", constellation.HandleConstellationForm)
 	bot.Handle("\fconstellation_r", constellation.HandleConstellationRespondCallback)
+	bot.Handle("/achievements", achievements.HandleAchievementsPanel)
+	bot.Handle("/quests", quests.HandleQuestsPanel)
+	bot.Handle("\fquest_claim", quests.HandleQuestClaimCallback)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("🔄 Toggle Auto-Scan", combat.HandleAutoScanToggle)

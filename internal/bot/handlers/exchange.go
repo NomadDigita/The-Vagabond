@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
 )
@@ -607,7 +608,23 @@ func (h *ExchangeHandler) doBuyListingQty(ctx context.Context, myCampID, listing
 		return "⚠️ Transaction failed.", err
 	}
 
+	if buyerUserID := userIDForCamp(ctx, h.DB, myCampID); buyerUserID != 0 {
+		_ = progression.RecordEvent(ctx, h.DB, buyerUserID, progression.TriggerMarketPurchase, 1)
+	}
+
 	return fmt.Sprintf("🛍️✅ %s Bought %s %s for %s.", htmlBold("PURCHASE COMPLETE!"), htmlCode(fmt.Sprintf("%d", buyQty)), itemType, htmlCode(formatAsk(askType, askQty))), nil
+}
+
+// userIDForCamp resolves a campID's owning Telegram user_id - used by
+// achievement/quest progress hooks (internal/game/progression) that
+// need a userID but only have a campID in scope. Returns 0 (never a
+// real or AI-faction user_id) if not found, so callers can check
+// `!= 0` rather than threading an error through a best-effort side
+// call.
+func userIDForCamp(ctx context.Context, db *sql.DB, campID string) int64 {
+	var userID int64
+	_ = db.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", campID).Scan(&userID)
+	return userID
 }
 
 func (h *ExchangeHandler) HandleBuyListingCallback(c telebot.Context) error {

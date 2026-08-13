@@ -68,8 +68,12 @@ func TestDoClaimRelicConvoy_FirstClaimSetsTitleAndPaysReward(t *testing.T) {
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&dollars); err != nil {
 		t.Fatalf("reading buyer resources: %v", err)
 	}
-	if dollars != 15000 {
-		t.Errorf("expected 15000 dollars credited, got %v", dollars)
+	// 15000 (the relic's own reward) + 3000 (the "relic_hunter"
+	// achievement, NEXT_GENERATION_FEATURES_PLAN.md Phase 1, unlocked
+	// by this same claim via progression.RecordEvent's
+	// TriggerRelicClaimed hook in doClaimRelicConvoy).
+	if dollars != 18000 {
+		t.Errorf("expected 18000 dollars credited (15000 relic reward + 3000 relic_hunter achievement), got %v", dollars)
 	}
 
 	var claimedBy sql.NullString
@@ -124,13 +128,17 @@ func TestDoClaimRelicConvoy_SecondClaimNeverOverwritesTitle(t *testing.T) {
 	}
 
 	// Both claims should still have paid out though - the title rule
-	// only protects the title field, not the reward.
+	// only protects the title field, not the reward. 12000 + 18000 =
+	// 30000 in relic rewards, plus a one-time 3000 "relic_hunter"
+	// achievement bonus (NEXT_GENERATION_FEATURES_PLAN.md Phase 1)
+	// unlocked on the FIRST claim only (threshold 1, never re-fires on
+	// the second claim) = 33000.
 	var dollars float64
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&dollars); err != nil {
 		t.Fatalf("reading resources: %v", err)
 	}
-	if dollars != 30000 {
-		t.Errorf("expected both rewards (12000+18000=30000) credited, got %v", dollars)
+	if dollars != 33000 {
+		t.Errorf("expected 33000 dollars (12000+18000 relic rewards + 3000 one-time relic_hunter achievement), got %v", dollars)
 	}
 }
 

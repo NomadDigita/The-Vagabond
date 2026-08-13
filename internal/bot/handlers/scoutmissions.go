@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"gopkg.in/telebot.v3"
 )
 
@@ -80,6 +81,10 @@ func (h *ScoutMissionsHandler) doDispatchScoutMission(ctx context.Context, campI
 	}
 	if err := tx.Commit(); err != nil {
 		return "⚠️ Error dispatching scout party.", err
+	}
+
+	if userID := userIDForCamp(ctx, h.DB, campID); userID != 0 {
+		_ = progression.RecordEvent(ctx, h.DB, userID, progression.TriggerScoutMissionDispatch, 1)
 	}
 
 	return "🔭 " + htmlBold("SCOUT PARTY DISPATCHED") + "\n" + divider + "\n" +
