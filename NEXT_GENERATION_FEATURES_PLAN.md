@@ -826,7 +826,11 @@ notifications like "Relic Convoy sighted").
 
 ## Phase 17: Onboarding Polish
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete** (see `ONBOARDING_AUDIT_FINDINGS.md` for the
+audit itself, `internal/game/progression/progression.go`'s `PeriodOnce`
+and 4 `onboarding_*` quest definitions, `TriggerResearchUpgrade` wired
+into `internal/bot/handlers/research.go`, and `gettingStartedGuideText`
+in `onboarding.go`).
 
 `onboarding.go` is already the single largest handler file in the
 project (670 lines) - this phase is explicitly **not** a rewrite, it's

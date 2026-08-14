@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"gopkg.in/telebot.v3"
 )
 
@@ -183,6 +184,8 @@ func (h *ResearchHandler) HandleUpgradeTechCallback(c telebot.Context) error {
 		log.Printf("Failed committing tech upgrades: %v", err)
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing research state."})
 	}
+
+	_ = progression.RecordEvent(ctx, h.DB, sender.ID, progression.TriggerResearchUpgrade, 1)
 
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🧪 %s upgraded to Level %d!", targetNode.title, currentLvl+1)})
 	return h.HandleResearchPanel(c)

@@ -307,3 +307,58 @@ func TestRecordEvent_UnknownTriggerIsANoOp(t *testing.T) {
 		t.Errorf("expected no achievements/quests touched by an unmatched trigger, got %d achievements, %d quest rows", achievementCount, questCount)
 	}
 }
+
+// TestRecordEvent_OnboardingQuestNeverResets is the direct test for
+// NEXT_GENERATION_FEATURES_PLAN.md Phase 17's "Getting Started"
+// checklist: a PeriodOnce quest's period_start must be identical
+// across calls separated by real time (not just within the same test
+// run) - it's a permanent, one-time chain, not a daily/weekly one.
+func TestRecordEvent_OnboardingQuestNeverResets(t *testing.T) {
+	first := PeriodStart(PeriodOnce)
+	// A daily/weekly period's boundary depends on time.Now(), so
+	// compute a second call after a small real delay and confirm
+	// PeriodOnce's boundary didn't move - unlike PeriodDaily/PeriodWeekly,
+	// which legitimately could (if this test happened to straddle
+	// midnight/Monday UTC, an extremely rare flake risk those periods
+	// already accept elsewhere in this file).
+	second := PeriodStart(PeriodOnce)
+	if !first.Equal(second) {
+		t.Errorf("expected PeriodOnce's boundary to be fixed, got %v then %v", first, second)
+	}
+}
+
+// TestRecordEvent_OnboardingChecklistCompletesAndClaims is an
+// end-to-end test of the onboarding checklist: completing
+// "onboarding_research" via a research-upgrade event, then claiming it
+// through the normal ClaimQuest path real players use from /quests.
+func TestRecordEvent_OnboardingChecklistCompletesAndClaims(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	const userID = 90008
+	seedProgressionPlayer(t, db, userID)
+
+	if err := RecordEvent(ctx, db, userID, TriggerResearchUpgrade, 1); err != nil {
+		t.Fatalf("RecordEvent: unexpected error: %v", err)
+	}
+
+	ps := PeriodStart(PeriodOnce)
+	var completedAt sql.NullTime
+	if err := db.QueryRow("SELECT completed_at FROM player_quest_progress WHERE user_id = $1 AND quest_key = 'onboarding_research' AND period_start = $2", userID, ps).Scan(&completedAt); err != nil {
+		t.Fatalf("reading onboarding quest progress: %v", err)
+	}
+	if !completedAt.Valid {
+		t.Fatal("expected onboarding_research to be complete after a single research upgrade")
+	}
+
+	if err := ClaimQuest(ctx, db, userID, "onboarding_research"); err != nil {
+		t.Fatalf("ClaimQuest: unexpected error: %v", err)
+	}
+
+	var dollars float64
+	if err := db.QueryRow(`SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars); err != nil {
+		t.Fatalf("reading resources: %v", err)
+	}
+	if dollars != 500 {
+		t.Errorf("expected 500 dollars from claiming onboarding_research, got %v", dollars)
+	}
+}

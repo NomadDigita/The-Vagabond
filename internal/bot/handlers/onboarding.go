@@ -543,7 +543,9 @@ const gettingStartedGuideText = "🗺️ GETTING STARTED — YOUR FIRST 10 MINUT
 	"3️⃣ Boot your 🧠 Cognitive Agent (free for 7 days) and set it to Collector mode so it keeps gathering while you're away.\n" +
 	"4️⃣ Once you've got a few Soldiers, open ⚔️ Tactical Combat to scan for nearby targets.\n" +
 	"5️⃣ Run /refer to get your personal invite link — 25,000 of every resource per friend who joins, plus bigger milestone bonuses at 5/10/25 referrals.\n" +
-	"6️⃣ Whenever you need a refresher on any menu, /help has the full Survival Training Manual, and /guide brings this quickstart back up.\n" +
+	"6️⃣ Check /quests any time — a one-time 🎯 Getting Started checklist pays out $500 each for your first raid, research upgrade, Clan join, and market purchase, on top of daily/weekly quests and permanent /achievements.\n" +
+	"7️⃣ Join or found a Clan with /clan for shared defense and donations, and check the 💱 Market Exchange to buy/sell resources with other survivors.\n" +
+	"8️⃣ Whenever you need a refresher on any menu, /help has the full Survival Training Manual, and /guide brings this quickstart back up.\n" +
 	"━━━━━━━━━━━━━━━━━━━━━━"
 
 func formatFactionLabel(f string) string {

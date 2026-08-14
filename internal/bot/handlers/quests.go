@@ -75,6 +75,7 @@ func (h *QuestsHandler) HandleQuestsPanel(c telebot.Context) error {
 
 	renderSection("☀️ Daily (resets at UTC midnight)", progression.PeriodDaily)
 	renderSection("📅 Weekly (resets Monday UTC)", progression.PeriodWeekly)
+	renderSection("🎯 Getting Started (one-time)", progression.PeriodOnce)
 
 	panelText += divider
 	selector.Inline(buttons...)

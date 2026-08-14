@@ -54,6 +54,7 @@ const (
 	TriggerFactionDefeated      = "faction_defeated"
 	TriggerConstellationFormed  = "constellation_formed"
 	TriggerClanDonation         = "clan_donation"
+	TriggerResearchUpgrade      = "research_upgrade"
 )
 
 // AchievementDef is a permanent, one-time (per player) unlock. Trigger
@@ -117,6 +118,14 @@ type QuestPeriod string
 const (
 	PeriodDaily  QuestPeriod = "daily"
 	PeriodWeekly QuestPeriod = "weekly"
+	// PeriodOnce is NEXT_GENERATION_FEATURES_PLAN.md Phase 17's
+	// "Getting Started" checklist - a one-time onboarding quest chain
+	// that reuses this same progress-tracking machinery instead of
+	// building a third one. Its period_start never advances (see
+	// periodStart below), so a PeriodOnce quest's single
+	// player_quest_progress row is permanent, not reset like
+	// daily/weekly quests are.
+	PeriodOnce QuestPeriod = "once"
 )
 
 // QuestDef is a repeatable, period-scoped goal. Unlike achievements,
@@ -150,6 +159,23 @@ var Quests = []QuestDef{
 
 	{Key: "weekly_raid", Description: "Complete 10 raids.", Period: PeriodWeekly, Trigger: TriggerRaidCompleted, GoalAmount: 10, RewardDollars: 2500},
 	{Key: "weekly_market", Description: "Complete 10 market purchases.", Period: PeriodWeekly, Trigger: TriggerMarketPurchase, GoalAmount: 10, RewardDollars: 2500},
+
+	// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 17: "Getting Started"
+	// checklist. A one-time (PeriodOnce - never resets) onboarding
+	// quest chain walking a new player through the four actions this
+	// project's own onboarding audit found were the biggest early
+	// systems a brand-new survivor might never discover organically:
+	// their first raid, first research upgrade, first Clan join, and
+	// first market interaction. Deliberately reuses the exact same
+	// trigger keys the daily/weekly board and several achievements
+	// already use - a new player completing these also makes progress
+	// on "first_raid"/"first_clan"/etc. achievements and any active
+	// daily quest sharing the same trigger, for free, in the same
+	// RecordEvent call.
+	{Key: "onboarding_raid", Description: "🎯 Getting Started: Launch your first raid.", Period: PeriodOnce, Trigger: TriggerRaidCompleted, GoalAmount: 1, RewardDollars: 500},
+	{Key: "onboarding_research", Description: "🎯 Getting Started: Upgrade a research track.", Period: PeriodOnce, Trigger: TriggerResearchUpgrade, GoalAmount: 1, RewardDollars: 500},
+	{Key: "onboarding_clan", Description: "🎯 Getting Started: Join or found a Clan.", Period: PeriodOnce, Trigger: TriggerClanJoined, GoalAmount: 1, RewardDollars: 500},
+	{Key: "onboarding_market", Description: "🎯 Getting Started: Make your first market purchase.", Period: PeriodOnce, Trigger: TriggerMarketPurchase, GoalAmount: 1, RewardDollars: 500},
 }
 
 // PeriodStart is the exported form of periodStart, for display-only
@@ -166,6 +192,12 @@ func PeriodStart(period QuestPeriod) time.Time {
 // player_quest_progress's composite key, so a new period is naturally
 // a fresh row rather than needing a separate rollover/reset tick phase.
 func periodStart(period QuestPeriod, now time.Time) time.Time {
+	if period == PeriodOnce {
+		// A fixed, never-advancing boundary - every PeriodOnce quest
+		// keys to the same single row forever, rather than a fresh row
+		// each period the way daily/weekly quests do.
+		return time.Unix(0, 0).UTC()
+	}
 	now = now.UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if period == PeriodDaily {
