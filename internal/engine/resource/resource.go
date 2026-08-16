@@ -9,6 +9,7 @@ import (
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 	"github.com/NomadDigita/The-Vagabond/internal/game/gear"
+	"github.com/NomadDigita/The-Vagabond/internal/game/herodepth"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
@@ -136,6 +137,7 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		// other. See gear.go's package doc for why this, not raid
 		// combat power, is what "stat modifier" means for gear.
 		gearMultiplier := 1.0 + gear.ResourceBonusPctFor(ctx, tx, s.ID)/100.0
+		gearMultiplier += herodepth.ResourceBonusPctFor(ctx, tx, s.ID) / 100.0
 		scrapGenerated *= gearMultiplier
 		rationsGenerated *= gearMultiplier
 		electricityGenerated *= gearMultiplier

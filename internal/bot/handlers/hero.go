@@ -8,6 +8,8 @@ import (
 	"log"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
+	"github.com/NomadDigita/The-Vagabond/internal/game/gear"
+	"github.com/NomadDigita/The-Vagabond/internal/game/herodepth"
 	"gopkg.in/telebot.v3"
 )
 
@@ -106,10 +108,13 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	btnTrain := selector.Data("🏋️ Train Commander", "hero_action", "train")
 	btnHeal := selector.Data("💊 Heal Injury", "hero_action", "heal")
 	btnGarrison := selector.Data("🛡️ Manual Defense Garrison", "hero_action", "garrison")
+	btnSkills := selector.Data("🌳 Skill Tree", "hero_skills")
+	btnHeroGear := selector.Data("⚙️ Hero Gear", "hero_gear")
 
 	selector.Inline(
 		selector.Row(btnTrain, btnHeal),
 		selector.Row(btnGarrison),
+		selector.Row(btnSkills, btnHeroGear),
 	)
 
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), dashboard, selector)
@@ -260,28 +265,232 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Scrap! Need 50."})
 		}
 
-		newXp := currentXp + 20
+		var heroID string
+		var faction string
+		_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID)
+		_ = tx.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
+
+		// NEXT_GENERATION_FEATURES_PLAN.md Phase 6: unlocked skill
+		// nodes discount the Scrap cost of training (EffectTrainingCostPct)
+		// and a hero-equipped gear item (see herodepth.HeroXPBonusPct)
+		// boosts the XP earned - two independent Phase 6 systems this
+		// one action exercises together.
+		trainCost := 50.0 * herodepth.TrainingCostMultiplier(ctx, tx, heroID)
+		if scrap < trainCost {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap! Need %.0f.", trainCost)})
+		}
+		xpBonusPct := herodepth.HeroXPBonusPct(ctx, tx, campID, func(key string) (float64, bool) {
+			def, ok := gear.ByKey(key)
+			return def.ResourceBonusPct, ok
+		})
+		xpGain := int(20.0 * (1.0 + xpBonusPct/100.0))
+
+		newXp := currentXp + xpGain
 		newLvl := currentLvl
-		if newXp >= 100 {
+		for newXp >= 100 {
 			newLvl++
-			newXp = 0
-			levelUpMsg := fmt.Sprintf("🏆 %s: Your Hero commander has successfully reached Level %s!", htmlBold("COMMANDER LEVEL UP"), htmlCode(fmt.Sprintf("%d", newLvl)))
+			newXp -= 100
+			levelUpMsg := fmt.Sprintf("🏆 %s: Your Hero commander has successfully reached Level %s! +1 skill point available - spend it on /hero_skills.", htmlBold("COMMANDER LEVEL UP"), htmlCode(fmt.Sprintf("%d", newLvl)))
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sender.ID, levelUpMsg)
+			_, _ = tx.ExecContext(ctx, "UPDATE heroes SET skill_points = skill_points + 1 WHERE id = $1", heroID)
+		}
+		if newLvl > currentLvl && heroID != "" {
+			if err := herodepth.DeliverStoryBeats(ctx, tx, sender.ID, heroID, faction, newLvl); err != nil {
+				log.Printf("Failed delivering hero story beats: %v", err)
+			}
 		}
 
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", trainCost, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE heroes SET level = $1, xp = $2 WHERE encampment_id = $3", newLvl, newXp, campID)
-		_ = c.Respond(&telebot.CallbackResponse{Text: "🏋️ Commander training completed successfully! +20 XP."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("🏋️ Commander training completed successfully! +%d XP.", xpGain)})
 
 	case "heal":
-		if rations < 50.0 {
-			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Rations! Need 50."})
+		var heroID string
+		_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID)
+		healCost := 50.0 * herodepth.HealCostMultiplier(ctx, tx, heroID)
+		if rations < healCost {
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Rations! Need %.0f.", healCost)})
 		}
-		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - 50.0 WHERE encampment_id = $1", campID)
+		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = rations - $1 WHERE encampment_id = $2", healCost, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE heroes SET injuries = 'Perfect Health' WHERE encampment_id = $1", campID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "💊 Injuries fully cured! Commander is in perfect health."})
 	}
 
 	_ = tx.Commit()
 	return h.HandleHeroPanel(c)
+}
+
+// HandleHeroSkillsPanel (🌳 Skill Tree button) shows the three branches
+// for the player's own faction, with a node's status
+// (locked/unlocked/affordable) and an Unlock button on anything the
+// hero can currently afford with a free skill point.
+func (h *HeroHandler) HandleHeroSkillsPanel(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID, faction string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Send("⚠️ Setup your outpost camp first using /start", keyboards.MainNavigation())
+	}
+	_ = h.DB.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
+
+	var heroID string
+	var points int
+	_ = h.DB.QueryRowContext(ctx, "SELECT id, skill_points FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID, &points)
+
+	unlocked := make(map[string]bool)
+	rows, err := h.DB.QueryContext(ctx, "SELECT skill_key FROM hero_skills_unlocked WHERE hero_id = $1", heroID)
+	if err == nil {
+		for rows.Next() {
+			var key string
+			if scanErr := rows.Scan(&key); scanErr == nil {
+				unlocked[key] = true
+			}
+		}
+		rows.Close()
+	}
+
+	panelText := "🌳 " + htmlBold("HERO SKILL TREE") + "\n" + divider + "\n" +
+		fmt.Sprintf("💠 Skill Points: %s\n\n", htmlCode(fmt.Sprintf("%d", points)))
+
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
+
+	branches := []herodepth.Branch{}
+	seen := map[herodepth.Branch]bool{}
+	for _, n := range herodepth.NodesForFaction(faction) {
+		if !seen[n.Branch] {
+			branches = append(branches, n.Branch)
+			seen[n.Branch] = true
+		}
+	}
+
+	for _, branch := range branches {
+		panelText += htmlBold(capitalizeWord(string(branch))) + "\n"
+		for _, n := range herodepth.NodesForFaction(faction) {
+			if n.Branch != branch {
+				continue
+			}
+			if unlocked[n.Key] {
+				panelText += fmt.Sprintf("✅ %s - %s\n", htmlEscape(n.Name), htmlEscape(n.Description))
+			} else {
+				panelText += fmt.Sprintf("🔒 %s - %s\n", htmlEscape(n.Name), htmlEscape(n.Description))
+				if points > 0 {
+					buttons = append(buttons, selector.Row(selector.Data(fmt.Sprintf("💠 Unlock %s", n.Name), "hero_skill_unlock", n.Key)))
+				}
+			}
+		}
+		panelText += "\n"
+	}
+
+	panelText += divider
+	selector.Inline(buttons...)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+}
+
+// HandleHeroSkillUnlockCallback fires when a player taps an Unlock
+// button on HandleHeroSkillsPanel.
+func (h *HeroHandler) HandleHeroSkillUnlockCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid request."})
+	}
+
+	var campID, faction string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+	_ = h.DB.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
+
+	var heroID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Visit /hero first to recruit a commander."})
+	}
+
+	if err := herodepth.UnlockSkill(ctx, h.DB, heroID, faction, c.Args()[0]); err != nil {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: "❌ Couldn't unlock that skill."})
+	}
+	_ = c.Respond(&telebot.CallbackResponse{Text: "✅ Skill unlocked!"})
+	return h.HandleHeroSkillsPanel(c)
+}
+
+// HandleHeroGearPanel (⚙️ Hero Gear button) shows every owned item
+// with a "hero-equip" button - distinct from Phase 3's camp-level
+// /gear equip, since a hero can independently carry one item for its
+// own XP-gain bonus (see herodepth.HeroXPBonusPct) while the camp
+// separately benefits from whatever's equipped at the camp level.
+func (h *HeroHandler) HandleHeroGearPanel(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil {
+		return errors.New("invalid sender context")
+	}
+
+	var campID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Send("⚠️ Setup your outpost camp first using /start", keyboards.MainNavigation())
+	}
+
+	panelText := "⚙️ " + htmlBold("HERO GEAR") + "\n" + divider + "\n" +
+		htmlItalic("Your commander can carry one item independently of your camp's own equipped loadout - it grants an XP bonus per training session instead of a resource bonus.") + "\n\n"
+
+	selector := &telebot.ReplyMarkup{}
+	var buttons []telebot.Row
+
+	rows, err := h.DB.QueryContext(ctx, "SELECT gear_key, quantity, equipped_by_hero FROM player_gear WHERE encampment_id = $1 AND quantity > 0", campID)
+	any := false
+	if err == nil {
+		for rows.Next() {
+			var key string
+			var qty int
+			var byHero bool
+			if scanErr := rows.Scan(&key, &qty, &byHero); scanErr == nil {
+				def, ok := gear.ByKey(key)
+				if !ok {
+					continue
+				}
+				any = true
+				status := ""
+				if byHero {
+					status = " ✅ carried by hero"
+				}
+				panelText += fmt.Sprintf("%s %s (+%.0f%% XP if carried)%s\n", def.Icon, htmlEscape(def.Name), def.ResourceBonusPct, status)
+				if !byHero {
+					buttons = append(buttons, selector.Row(selector.Data(fmt.Sprintf("⚙️ Carry %s", def.Name), "hero_gear_equip", def.Key)))
+				}
+			}
+		}
+		rows.Close()
+	}
+	if !any {
+		panelText += htmlItalic("Nothing owned yet - visit /gear to craft or find items.") + "\n"
+	}
+
+	panelText += "\n" + divider
+	selector.Inline(buttons...)
+	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
+}
+
+// HandleHeroGearEquipCallback fires when a player taps a Carry button
+// on HandleHeroGearPanel.
+func (h *HeroHandler) HandleHeroGearEquipCallback(c telebot.Context) error {
+	ctx := context.Background()
+	sender := c.Sender()
+	if sender == nil || len(c.Args()) < 1 {
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid request."})
+	}
+	var campID string
+	if err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID); err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Create your outpost camp first using /start"})
+	}
+
+	if err := herodepth.EquipToHero(ctx, h.DB, campID, c.Args()[0]); err != nil {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: "❌ Couldn't equip that item to your hero."})
+	}
+	_ = c.Respond(&telebot.CallbackResponse{Text: "⚙️ Your commander is now carrying that item!"})
+	return h.HandleHeroGearPanel(c)
 }

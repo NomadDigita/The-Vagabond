@@ -469,6 +469,27 @@ func Statements() []string {
 		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS level INT DEFAULT 1;`,
 		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS xp INT DEFAULT 0;`,
 
+		// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 6: Hero System
+		// Depth. Skill points are earned on level-up and spent on
+		// branch nodes (internal/game/herodepth's static Go
+		// definitions); story_arc_stage tracks how many story beats
+		// have already been delivered so a beat is never re-sent.
+		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS skill_points INT NOT NULL DEFAULT 0;`,
+		`ALTER TABLE heroes ADD COLUMN IF NOT EXISTS story_arc_stage INT NOT NULL DEFAULT 0;`,
+		`CREATE TABLE IF NOT EXISTS hero_skills_unlocked (
+			hero_id UUID NOT NULL REFERENCES heroes(id) ON DELETE CASCADE,
+			skill_key VARCHAR(64) NOT NULL,
+			unlocked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (hero_id, skill_key)
+		);`,
+		// A hero can independently equip one item for a hero-specific
+		// bonus (XP gain rate - see herodepth.go) distinct from that
+		// same item equipped at the camp level (resource-generation
+		// bonus - see gear.go) - a second boolean on the same
+		// player_gear row rather than a parallel ownership table, so
+		// ownership stays single-sourced.
+		`ALTER TABLE player_gear ADD COLUMN IF NOT EXISTS equipped_by_hero BOOLEAN NOT NULL DEFAULT FALSE;`,
+
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,

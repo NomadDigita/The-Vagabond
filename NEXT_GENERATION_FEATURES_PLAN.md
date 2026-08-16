@@ -379,7 +379,18 @@ scope.
 
 ## Phase 6: Hero System Depth
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete, with the same scope adjustment as Phase 3** (see
+`internal/game/herodepth/herodepth.go`, `heroes.skill_points`/
+`story_arc_stage`, `hero_skills_unlocked` table,
+`player_gear.equipped_by_hero`, `/hero`'s new Skill Tree and Hero Gear
+buttons). Skill-node effects are safe, non-combat bonuses (training
+cost reduction, healing cost reduction, resource-generation bonus) for
+the exact same reason gear's own bonus stayed out of
+`resolveRaidCombats` - see Phase 3's status line and `gear.go`'s
+package doc for the full rationale. Skill tree (18 nodes, 3 branches x
+3 nodes x 2 factions), hero gear (a second, independent equip slot on
+the same `player_gear` row - XP-gain bonus instead of resource-gen
+bonus), and the 5-beat level-gated story arc all shipped as designed.
 
 `hero.go` today: one hero per camp, a name/trait/injuries/superpower
 flavor set, and a level/XP counter with no further branching. This
