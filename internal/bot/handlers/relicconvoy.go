@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
+	"github.com/NomadDigita/The-Vagabond/internal/game/gear"
 	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 	"gopkg.in/telebot.v3"
@@ -161,7 +163,28 @@ func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, c
 		_ = progression.RecordEvent(ctx, h.DB, userID, progression.TriggerRelicClaimed, 1)
 	}
 
-	return fmt.Sprintf("🏺✅ %s You claimed %s and %s in salvage!", htmlBold("RELIC SECURED!"), htmlEscape(relicName), htmlCode(fmt.Sprintf("$%.0f", reward))), nil
+	// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: a claimed Relic Convoy
+	// is one of Epic/Legendary gear's only two sources (the other is a
+	// World Boss kill - engine.go's payoutWorldBossLoot). A generous
+	// roll here relative to the boss-kill rate is deliberate - claiming
+	// a relic convoy is already extremely rare server-wide (see
+	// relicconvoys.go's own ~1-per-11-hours spawn cadence), so this is
+	// the "natural second reward tier" the plan doc's own design
+	// describes, not a separate grind.
+	var gearMsg string
+	roll := rand.Float64()
+	switch {
+	case roll < 0.10:
+		if def, err := gear.GrantRandomDrop(ctx, h.DB, myCampID, gear.RarityLegendary); err == nil {
+			gearMsg = fmt.Sprintf(" A %s %s (Legendary) tumbles out with the salvage!", def.Icon, def.Name)
+		}
+	case roll < 0.40:
+		if def, err := gear.GrantRandomDrop(ctx, h.DB, myCampID, gear.RarityEpic); err == nil {
+			gearMsg = fmt.Sprintf(" A %s %s (Epic) tumbles out with the salvage!", def.Icon, def.Name)
+		}
+	}
+
+	return fmt.Sprintf("🏺✅ %s You claimed %s and %s in salvage!%s", htmlBold("RELIC SECURED!"), htmlEscape(relicName), htmlCode(fmt.Sprintf("$%.0f", reward)), gearMsg), nil
 }
 
 // HandleClaimRelicCallback fires when a player taps the Claim button on

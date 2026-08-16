@@ -391,6 +391,7 @@ func main() {
 	constellation := handlers.NewConstellationHandler(db)
 	achievements := handlers.NewAchievementsHandler(db)
 	quests := handlers.NewQuestsHandler(db)
+	gearHandler := handlers.NewGearHandler(db)
 
 	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
 	// Provider-agnostic by design: register additional providers here
@@ -515,6 +516,9 @@ func main() {
 	bot.Handle("/achievements", achievements.HandleAchievementsPanel)
 	bot.Handle("/quests", quests.HandleQuestsPanel)
 	bot.Handle("\fquest_claim", quests.HandleQuestClaimCallback)
+	bot.Handle("/gear", gearHandler.HandleGearPanel)
+	bot.Handle("\fgear_craft", gearHandler.HandleGearCraftCallback)
+	bot.Handle("\fgear_equip", gearHandler.HandleGearEquipCallback)
 	bot.Handle("/bosses", boss.HandleBossPanel)
 	bot.Handle("/autoscan", combat.HandleAutoScanToggle)
 	bot.Handle("🔄 Toggle Auto-Scan", combat.HandleAutoScanToggle)

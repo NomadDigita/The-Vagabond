@@ -121,3 +121,54 @@ func TestRunResourcePass_BloomBoostsPassiveGenerationBy15Percent(t *testing.T) {
 	assertRatio("metal", bloomMetal, nominalMetal)
 	assertRatio("crystal", bloomCrystal, nominalCrystal)
 }
+
+// TestRunResourcePass_EquippedGearBoostsPassiveGeneration is the
+// direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 3's resource-
+// generation integration: a camp with equipped gear generates more
+// than an identical camp with none, by exactly the gear's combined
+// ResourceBonusPct.
+func TestRunResourcePass_EquippedGearBoostsPassiveGeneration(t *testing.T) {
+	db := testDB(t)
+	p := NewProcessor(db)
+	ctx := context.Background()
+
+	gearedCamp := seedResourceCamp(t, db, 62001, "GearedRegion")
+	nominalCamp := seedResourceCamp(t, db, 62002, "NominalRegion")
+
+	// scrap_blade (+2%) + patched_vest (+2%) = +4% total, equipped on
+	// gearedCamp only.
+	if _, err := db.Exec(`
+		INSERT INTO player_gear (encampment_id, gear_key, quantity, equipped) VALUES
+		($1, 'scrap_blade', 1, TRUE), ($1, 'patched_vest', 1, TRUE)`, gearedCamp); err != nil {
+		t.Fatalf("seeding gear: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := p.RunResourcePass(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("RunResourcePass: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var gearedScrap, nominalScrap float64
+	if err := db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", gearedCamp).Scan(&gearedScrap); err != nil {
+		t.Fatalf("reading geared camp resources: %v", err)
+	}
+	if err := db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", nominalCamp).Scan(&nominalScrap); err != nil {
+		t.Fatalf("reading nominal camp resources: %v", err)
+	}
+
+	if nominalScrap == 0 {
+		t.Fatal("nominal camp generated exactly 0 scrap - test fixture is broken")
+	}
+	ratio := gearedScrap / nominalScrap
+	const want, tolerance = 1.04, 0.001
+	if ratio < want-tolerance || ratio > want+tolerance {
+		t.Errorf("expected the geared camp to generate 1.04x the nominal camp's scrap (nominal=%.4f, geared=%.4f, ratio=%.4f)", nominalScrap, gearedScrap, ratio)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
+	"github.com/NomadDigita/The-Vagabond/internal/game/gear"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
@@ -127,6 +128,18 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		scrapGenerated *= bloomMultiplier
 		rationsGenerated *= bloomMultiplier
 
+		// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: Crafting & Gear.
+		// Equipped gear's ResourceBonusPct sums into one more
+		// multiplier here, stacking with (not replacing) Bloom's own -
+		// e.g. a blooming region with a fully-equipped 15%-per-slot
+		// legendary loadout gets 1.15 * 1.45, not one overriding the
+		// other. See gear.go's package doc for why this, not raid
+		// combat power, is what "stat modifier" means for gear.
+		gearMultiplier := 1.0 + gear.ResourceBonusPctFor(ctx, tx, s.ID)/100.0
+		scrapGenerated *= gearMultiplier
+		rationsGenerated *= gearMultiplier
+		electricityGenerated *= gearMultiplier
+
 		switch continentWeather[s.Region] {
 		case "solar_flare":
 			electricityGenerated *= 2.0
@@ -190,13 +203,14 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		// rule as everything else: capped if generated passively.
 		etherGenerated := 0.02*float64(s.ProductionTechLvl) + 0.03*float64(s.TechCenterLvl)
 		etherGenerated *= bloomMultiplier
+		etherGenerated *= gearMultiplier
 		newEther, _ := storagecap.Clamp(s.Ether, etherGenerated, storageCap)
 
 		// Metal Mine / Crystal Mine: passive building-based generation,
 		// distinct from (and stacking with) the active miner-queue system.
 		// Now cap-checked the same as every other passive resource gain.
-		metalGenerated := 2.0 * float64(s.MetalMineLvl) * bloomMultiplier
-		crystalGenerated := 0.8 * float64(s.CrystalMineLvl) * bloomMultiplier
+		metalGenerated := 2.0 * float64(s.MetalMineLvl) * bloomMultiplier * gearMultiplier
+		crystalGenerated := 0.8 * float64(s.CrystalMineLvl) * bloomMultiplier * gearMultiplier
 		newMetal, _ := storagecap.Clamp(s.Metal, metalGenerated, storageCap)
 		newCrystal, _ := storagecap.Clamp(s.Crystal, crystalGenerated, storageCap)
 

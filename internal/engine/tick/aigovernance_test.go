@@ -455,3 +455,41 @@ func TestGrowAICivilizationsReviewsApplicationsToLedClan(t *testing.T) {
 		t.Error("expected the accepted applicant to be notified")
 	}
 }
+
+// TestGrowAICivilizationsCraftsAndEquipsGear is the direct test for
+// NEXT_GENERATION_FEATURES_PLAN.md Phase 3's AI-parity crafting
+// heuristic: an AI faction with enough resources eventually crafts and
+// equips a Common/Rare gear item on its own, without ever visiting a
+// /gear panel.
+func TestGrowAICivilizationsCraftsAndEquipsGear(t *testing.T) {
+	db := testDB(t)
+	e := NewEngine(db, time.Minute)
+	ctx := context.Background()
+
+	faction := seedEncampment(t, db, 2134, "Faction Chi", 0, 0, "TestRegion", true)
+	setAILevel(t, db, faction, 5)
+	if _, err := db.Exec("UPDATE resources SET scrap = 10000, metal = 10000, crystal = 10000 WHERE encampment_id = $1", faction); err != nil {
+		t.Fatalf("seeding faction resources: %v", err)
+	}
+
+	crafted := false
+	for i := 0; i < 1000 && !crafted; i++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		if err := e.growAICivilizations(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("growAICivilizations: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		var count int
+		_ = db.QueryRow("SELECT COUNT(*) FROM player_gear WHERE encampment_id = $1 AND equipped = TRUE", faction).Scan(&count)
+		crafted = count > 0
+	}
+	if !crafted {
+		t.Fatal("expected the AI faction to craft and equip at least one gear item across 1000 ticks")
+	}
+}

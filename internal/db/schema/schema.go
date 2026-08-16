@@ -1278,5 +1278,29 @@ func Statements() []string {
 			PRIMARY KEY (user_id, quest_key, period_start)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_player_quest_progress_lookup ON player_quest_progress(user_id, period_start);`,
+
+		// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 3: Crafting & Gear ---
+		// Definitions are static Go data in internal/game/gear, not DB
+		// tables - only ownership/equip state and the crafting queue
+		// live here. See gear.go's own package doc for the "why
+		// resource-generation bonus, not raw combat power" scope note.
+		`CREATE TABLE IF NOT EXISTS player_gear (
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			gear_key VARCHAR(64) NOT NULL,
+			quantity INT NOT NULL DEFAULT 0,
+			equipped BOOLEAN NOT NULL DEFAULT FALSE,
+			PRIMARY KEY (encampment_id, gear_key)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_player_gear_equipped ON player_gear(encampment_id) WHERE equipped = TRUE;`,
+		`CREATE TABLE IF NOT EXISTS crafting_queue (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			encampment_id UUID NOT NULL REFERENCES encampments(id) ON DELETE CASCADE,
+			gear_key VARCHAR(64) NOT NULL,
+			started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			completes_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			is_completed BOOLEAN NOT NULL DEFAULT FALSE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_crafting_queue_pending ON crafting_queue(completes_at) WHERE is_completed = FALSE;`,
+		`CREATE INDEX IF NOT EXISTS idx_crafting_queue_camp ON crafting_queue(encampment_id, is_completed);`,
 	}
 }

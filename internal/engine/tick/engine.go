@@ -20,6 +20,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/battlereport"
 	"github.com/NomadDigita/The-Vagabond/internal/game/combatmath"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
+	"github.com/NomadDigita/The-Vagabond/internal/game/gear"
 	"github.com/NomadDigita/The-Vagabond/internal/game/progression"
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
@@ -654,6 +655,24 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 			_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newDollars, ct.campID)
 			alertMsg := fmt.Sprintf("☠️🎉 <b>BOSS SLAIN: %s</b>\n\nYour cumulative <code>%.0f damage</code> earned you 💵 <code>$%.2f</code> from the loot pool.", htmlEscapeTick(bossName), ct.damage, share)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", ct.userID, alertMsg, notifications.EffectCelebration)
+
+			// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: World Bosses are
+			// one of Epic/Legendary gear's only two sources (the other
+			// is Relic Convoy claims - relicconvoy.go). Every
+			// contributor gets an independent roll, not just the top
+			// damage dealer, since the loot pool itself already
+			// rewards top damage proportionally - gear drops are a
+			// separate, flatter "you showed up and fought" bonus. Epic
+			// is meaningfully more common than Legendary (8% vs 2%),
+			// matching this project's established "rare means rare"
+			// principle for its best rewards.
+			roll := rand.Float64()
+			switch {
+			case roll < 0.02:
+				_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityLegendary)
+			case roll < 0.10:
+				_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityEpic)
+			}
 		}
 	}
 
@@ -867,6 +886,7 @@ func (e *Engine) ProcessTick() {
 		{"daily_tax", e.collectDailyTax},
 		{"constellation_dividend", e.constellationDividend},
 		{"constellation_expire", e.constellationExpire},
+		{"crafting_resolve", func(ctx context.Context, tx *sql.Tx) error { return gear.ResolveCraftingQueue(ctx, tx) }},
 		{"exploration_resolve", e.resolveExplorationDispatches},
 		{"scout_missions", e.processScoutMissions},
 		{"expired_world_events", func(ctx context.Context, tx *sql.Tx) error {
@@ -3096,6 +3116,49 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 						}
 					}
 				}
+			}
+		}
+
+		// NEXT_GENERATION_FEATURES_PLAN.md Phase 3 AI-parity: a much
+		// simpler crafting heuristic than the full player /gear UX -
+		// an AI faction doesn't fight World Bosses or claim Relic
+		// Convoys today (both real-player-only content), so its gear
+		// ceiling is intentionally Common/Rare only. A small roll
+		// crafts whatever Common/Rare item the faction can currently
+		// afford in its best-value (highest ResourceBonusPct) affordable
+		// slot and equips it immediately - AI factions don't have a
+		// panel to visit later, so there's no separate "collect the
+		// finished craft" step the way a real player's crafting queue
+		// has; this rolls, crafts, and equips synchronously in one
+		// tick rather than waiting out CraftMinutes, since an AI
+		// faction gaining a small resource-generation edge a few
+		// minutes later than a real player would is not a meaningful
+		// balance concern the way skipping the wait for a *player*
+		// would be.
+		if rand.Float64() < 0.01 {
+			var bestAffordable *gear.Definition
+			for i := range gear.Catalog {
+				def := gear.Catalog[i]
+				if !def.Craftable {
+					continue
+				}
+				if bestAffordable != nil && def.ResourceBonusPct <= bestAffordable.ResourceBonusPct {
+					continue
+				}
+				if gear.AffordCraft(ctx, tx, f.id, def) {
+					bestAffordable = &gear.Catalog[i]
+				}
+			}
+			if bestAffordable != nil {
+				for resource, amount := range bestAffordable.CraftCost {
+					_, _ = tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = %s - $1 WHERE encampment_id = $2", resource, resource), amount, f.id)
+				}
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO player_gear (encampment_id, gear_key, quantity, equipped)
+					VALUES ($1, $2, 1, FALSE)
+					ON CONFLICT (encampment_id, gear_key) DO UPDATE SET quantity = player_gear.quantity + 1`,
+					f.id, bestAffordable.Key)
+				_ = gear.Equip(ctx, tx, f.id, bestAffordable.Key)
 			}
 		}
 

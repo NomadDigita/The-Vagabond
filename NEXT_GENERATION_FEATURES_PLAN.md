@@ -214,7 +214,21 @@ confirmation the AI can't provide.
 
 ## Phase 3: Crafting & Gear
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete, with one deliberate scope adjustment from the
+original design below** (see `internal/game/gear/gear.go`,
+`player_gear`/`crafting_queue` tables, `internal/bot/handlers/gearpanel.go`,
+`/gear` command). **Scope adjustment**: equipped gear's stat modifier
+is a passive resource-generation bonus (applied at the same call site
+Phase 2's Wasteland Bloom uses in `internal/engine/resource/resource.go`),
+not a raid-combat-power multiplier as originally described below. This
+project has an established precedent of not touching
+`internal/engine/tick`'s large, deeply interconnected raid-combat
+resolution for additive features (see `factiondefeat.go`'s own
+documented rationale for staying out of `resolveRaidCombats`) - a
+resource bonus is a fully real, felt stat modifier, just a safer
+integration point than a raw combat-power edit. Everything else below
+(crafting queue, rarity tiers, Epic/Legendary sourcing from World
+Bosses and Relic Convoys, AI-parity crafting) shipped as designed.
 
 The biggest system in this document. Currently combat is purely
 stat-based (soldiers/mechs/etc. with fixed per-unit stats) - there is
