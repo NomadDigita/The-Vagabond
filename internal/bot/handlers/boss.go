@@ -41,6 +41,35 @@ func hpBar(current, max float64) string {
 	return bar
 }
 
+// tier2KillRequirement/tier3KillRequirement gate a higher tier's
+// Attack button until enough lower-tier kills have happened server-
+// wide - see schema.go's own Phase 8 comment for why "tiering" means
+// gating an always-live boss's attackability rather than gating a
+// spawn roll (world_bosses has no spawn mechanic; it's a small, fixed
+// set that respawns to full HP after each kill).
+const (
+	tier2KillRequirement = 5
+	tier3KillRequirement = 3
+)
+
+// tierUnlocked reports whether tier is currently attackable: tier 1 is
+// always unlocked; tier 2 requires tier2KillRequirement combined kills
+// across every tier-1 boss; tier 3 requires tier3KillRequirement
+// combined kills across every tier-2 boss (which includes The
+// Ravager, since Gauntlet bosses still count as their own tier for
+// this gate).
+func (h *BossHandler) tierUnlocked(ctx context.Context, tier int) (unlocked bool, lowerTierKills, required int) {
+	if tier <= 1 {
+		return true, 0, 0
+	}
+	required = tier2KillRequirement
+	if tier == 3 {
+		required = tier3KillRequirement
+	}
+	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(total_kills), 0) FROM world_bosses WHERE tier = $1", tier-1).Scan(&lowerTierKills)
+	return lowerTierKills >= required, lowerTierKills, required
+}
+
 func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -48,7 +77,7 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	panelText := "☠️ " + htmlBold("WASTELAND WORLD BOSSES") + " ☠️\n" + divider + "\n\n" +
 		htmlItalic("⚠️ REAL ENGAGEMENT: committing Soldiers/Mechs sends them MARCHING - they're at risk for real. The boss retaliates on arrival, and only survivors march home. Damage is shared - defeat one to split its loot pool by contribution!") + "\n\n"
 
-	rows, err := h.DB.QueryContext(ctx, "SELECT id, name, emoji, max_hp, current_hp, loot_pool_dollars, retaliation_rating FROM world_bosses ORDER BY max_hp ASC")
+	rows, err := h.DB.QueryContext(ctx, "SELECT id, name, emoji, max_hp, current_hp, loot_pool_dollars, retaliation_rating, tier, is_gauntlet, enrage_threshold_pct FROM world_bosses ORDER BY tier ASC, max_hp ASC")
 	if err != nil {
 		return c.Send("⚠️ Unable to reach the World Boss tracking satellite.")
 	}
@@ -59,8 +88,22 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 
 	for rows.Next() {
 		var id, name, emoji string
-		var maxHP, curHP, lootPool, retaliation float64
-		if err := rows.Scan(&id, &name, &emoji, &maxHP, &curHP, &lootPool, &retaliation); err != nil {
+		var maxHP, curHP, lootPool, retaliation, enrageThreshold float64
+		var tier int
+		var isGauntlet bool
+		if err := rows.Scan(&id, &name, &emoji, &maxHP, &curHP, &lootPool, &retaliation, &tier, &isGauntlet, &enrageThreshold); err != nil {
+			continue
+		}
+
+		unlocked, lowerKills, required := h.tierUnlocked(ctx, tier)
+		tierLabel := fmt.Sprintf("Tier %d", tier)
+		if isGauntlet {
+			tierLabel += " 🔥 GAUNTLET"
+		}
+
+		if !unlocked {
+			lockedMsg := fmt.Sprintf("Locked - requires %d/%d Tier %d kills server-wide first.", lowerKills, required, tier-1)
+			panelText += fmt.Sprintf("%s %s (%s)\n🔒 %s\n\n", emoji, htmlBold(name), tierLabel, htmlItalic(lockedMsg))
 			continue
 		}
 
@@ -69,10 +112,16 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 			status = "💀 DEFEATED (respawning...)"
 		}
 
+		dropInfo := "Chance-based Epic/Legendary drop on kill"
+		if isGauntlet {
+			dropInfo = fmt.Sprintf("🔥 Enrages below %.0f%% HP (2x retaliation) - GUARANTEED Epic/Legendary drop on kill", enrageThreshold)
+		}
+
 		panelText += fmt.Sprintf(
-			"%s %s\n%s\n💰 Loot Pool: %s  |  ⚔️ Danger: %s  |  %s\n\n",
-			emoji, htmlBold(name), htmlCode(fmt.Sprintf("%s %.0f/%.0f HP", hpBar(curHP, maxHP), curHP, maxHP)),
+			"%s %s (%s)\n%s\n💰 Loot Pool: %s  |  ⚔️ Danger: %s  |  %s\n%s\n\n",
+			emoji, htmlBold(name), tierLabel, htmlCode(fmt.Sprintf("%s %.0f/%.0f HP", hpBar(curHP, maxHP), curHP, maxHP)),
 			htmlCode(fmt.Sprintf("$%.0f", lootPool)), htmlCode(fmt.Sprintf("%.0f%%", retaliation)), status,
+			htmlItalic(dropInfo),
 		)
 
 		if curHP > 0 {
@@ -121,9 +170,13 @@ func (h *BossHandler) HandleAttackBossCallback(c telebot.Context) error {
 
 	var bossCurHP, bossMaxHP float64
 	var bossName string
-	err = tx.QueryRowContext(ctx, "SELECT current_hp, max_hp, name FROM world_bosses WHERE id = $1", bossID).Scan(&bossCurHP, &bossMaxHP, &bossName)
+	var bossTier int
+	err = tx.QueryRowContext(ctx, "SELECT current_hp, max_hp, name, tier FROM world_bosses WHERE id = $1", bossID).Scan(&bossCurHP, &bossMaxHP, &bossName, &bossTier)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ That boss is no longer tracked."})
+	}
+	if unlocked, _, _ := h.tierUnlocked(ctx, bossTier); !unlocked {
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: "🔒 This Tier isn't unlocked yet - defeat more lower-tier bosses server-wide first."})
 	}
 	if bossCurHP <= 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "💀 This boss has already been defeated and is respawning!"})

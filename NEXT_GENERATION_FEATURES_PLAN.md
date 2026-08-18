@@ -478,7 +478,20 @@ deaths feel differentiated.
 
 ## Phase 8: World Boss Tiers & Gauntlet
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete, with one structural adjustment from the original
+design below** (see `world_bosses.tier`/`total_kills`/`is_gauntlet`/
+`enrage_threshold_pct`, `internal/bot/handlers/boss.go`'s
+`tierUnlocked`, `internal/engine/tick/engine.go`'s enrage/guaranteed-
+drop logic). **Adjustment**: `world_bosses` turned out to already be a
+small, fixed, always-live set that instantly respawns to full HP after
+each kill - not a spawn-roll system like Relic Convoys, as this
+section's original design implicitly assumed. So "tiering" means
+gating a higher tier's Attack button behind enough lower-tier kills
+server-wide (`total_kills`), and "Gauntlet" is a fixed 4th boss ("The
+Ravager") rather than a per-attack opt-in mode. Both still deliver the
+plan's actual intent - an automatic difficulty ramp and a real,
+felt-risk source of guaranteed best-in-slot gear - just adapted to the
+system that already existed rather than the one originally assumed.
 
 `boss.go` today: one-shot world boss events, single tier. This phase
 adds structured escalation.

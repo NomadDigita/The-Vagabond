@@ -45,6 +45,19 @@ func rankingTestDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec(`TRUNCATE encampments, coordinates, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncating tables: %v", err)
 	}
+	// world_bosses (NEXT_GENERATION_FEATURES_PLAN.md Phase 8) has no FK
+	// to encampments/users/coordinates, so it survives the CASCADE
+	// truncate above untouched - reset it explicitly so tier-gating
+	// tests (boss_test.go) start from a clean slate instead of
+	// accumulating total_kills across the whole shared-DB test binary
+	// run. See roadencounter_test.go's testDB for the tick-package
+	// counterpart of this same fix.
+	if _, err := db.Exec(`DELETE FROM world_bosses WHERE name NOT IN ('The Rustlord', 'Scrap Titan', 'Apex Wraith', 'The Ravager')`); err != nil {
+		t.Fatalf("clearing extra world_bosses rows: %v", err)
+	}
+	if _, err := db.Exec("UPDATE world_bosses SET current_hp = max_hp, total_kills = 0"); err != nil {
+		t.Fatalf("resetting world_bosses state: %v", err)
+	}
 	return db
 }
 

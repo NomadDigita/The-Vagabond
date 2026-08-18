@@ -464,7 +464,7 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 	// --- Stage 1: marching -> engage (retaliation happens here) ---
 	marchingRows, err := tx.QueryContext(ctx, `
 		SELECT a.id, a.boss_id, a.user_id, a.encampment_id, a.soldiers_committed, a.mechs_committed, a.march_minutes,
-		       b.name, b.emoji, b.current_hp, b.max_hp, b.loot_pool_dollars, b.retaliation_rating
+		       b.name, b.emoji, b.current_hp, b.max_hp, b.loot_pool_dollars, b.retaliation_rating, b.is_gauntlet, b.enrage_threshold_pct
 		FROM world_boss_attacks a
 		JOIN world_bosses b ON b.id = a.boss_id
 		WHERE a.state = 'marching' AND a.resolve_time <= CURRENT_TIMESTAMP`)
@@ -480,12 +480,14 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 		bossName, bossEmoji            string
 		bossCurHP, bossMaxHP, lootPool float64
 		retaliation                    float64
+		isGauntlet                     bool
+		enrageThresholdPct             float64
 	}
 	var marching []marchingAttack
 	for marchingRows.Next() {
 		var m marchingAttack
 		if scanErr := marchingRows.Scan(&m.id, &m.bossID, &m.userID, &m.encampmentID, &m.soldiers, &m.mechs, &m.marchMinutes,
-			&m.bossName, &m.bossEmoji, &m.bossCurHP, &m.bossMaxHP, &m.lootPool, &m.retaliation); scanErr == nil {
+			&m.bossName, &m.bossEmoji, &m.bossCurHP, &m.bossMaxHP, &m.lootPool, &m.retaliation, &m.isGauntlet, &m.enrageThresholdPct); scanErr == nil {
 			marching = append(marching, m)
 		}
 	}
@@ -517,8 +519,21 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 		// Real retaliation: the boss hits back. Danger scales per boss
 		// (retaliation_rating), and mechs are tankier than soldiers in the
 		// losses split (mirroring the standard 70/30 raid pattern).
+		//
+		// NEXT_GENERATION_FEATURES_PLAN.md Phase 8: a Gauntlet boss
+		// that's already below its enrage_threshold_pct BEFORE this
+		// engagement's damage lands (checked against m.bossCurHP, the
+		// HP it had on arrival - not newHP, so an attack that itself
+		// crosses the threshold doesn't retroactively enrage against
+		// the attacker who caused it) hits back at double retaliation -
+		// the real risk that makes Gauntlet's guaranteed Epic/Legendary
+		// drop (see payoutWorldBossLoot) feel earned rather than free.
+		effectiveRetaliation := m.retaliation
+		if m.isGauntlet && m.enrageThresholdPct > 0 && m.bossMaxHP > 0 && (m.bossCurHP/m.bossMaxHP*100.0) <= m.enrageThresholdPct {
+			effectiveRetaliation *= 2.0
+		}
 		totalCommitted := m.soldiers + m.mechs
-		casualties := int(float64(totalCommitted) * m.retaliation / 100.0)
+		casualties := int(float64(totalCommitted) * effectiveRetaliation / 100.0)
 		if casualties > totalCommitted {
 			casualties = totalCommitted
 		}
@@ -565,7 +580,7 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.userID, reportText)
 
 		if killingBlow {
-			if err := e.payoutWorldBossLoot(ctx, tx, m.bossID, m.bossName, m.lootPool); err != nil {
+			if err := e.payoutWorldBossLoot(ctx, tx, m.bossID, m.bossName, m.lootPool, m.isGauntlet); err != nil {
 				log.Printf("World Boss loot payout failed: %v", err)
 			}
 		}
@@ -623,7 +638,7 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 // payoutWorldBossLoot splits a defeated boss's loot pool proportional to
 // each contributor's total damage dealt, then resets the boss to full HP
 // with a 10% larger pool for long-term grinding incentive.
-func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bossName string, lootPool float64) error {
+func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bossName string, lootPool float64, isGauntlet bool) error {
 	rows, err := tx.QueryContext(ctx, "SELECT user_id, encampment_id, damage_dealt FROM world_boss_contributions WHERE boss_id = $1", bossID)
 	if err != nil {
 		return err
@@ -666,12 +681,27 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 			// is meaningfully more common than Legendary (8% vs 2%),
 			// matching this project's established "rare means rare"
 			// principle for its best rewards.
-			roll := rand.Float64()
-			switch {
-			case roll < 0.02:
-				_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityLegendary)
-			case roll < 0.10:
-				_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityEpic)
+			//
+			// NEXT_GENERATION_FEATURES_PLAN.md Phase 8: a Gauntlet
+			// kill instead GUARANTEES a drop for every contributor
+			// (70% Epic / 30% Legendary) rather than the normal
+			// mostly-nothing roll - the real, felt payoff for having
+			// survived that boss's doubled enrage retaliation above.
+			if isGauntlet {
+				dropRoll := rand.Float64()
+				if dropRoll < 0.30 {
+					_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityLegendary)
+				} else {
+					_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityEpic)
+				}
+			} else {
+				roll := rand.Float64()
+				switch {
+				case roll < 0.02:
+					_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityLegendary)
+				case roll < 0.10:
+					_, _ = gear.GrantRandomDrop(ctx, tx, ct.campID, gear.RarityEpic)
+				}
 			}
 		}
 	}
@@ -679,7 +709,7 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 	_, _ = tx.ExecContext(ctx, "DELETE FROM world_boss_contributions WHERE boss_id = $1", bossID)
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE world_bosses 
-		SET current_hp = max_hp, loot_pool_dollars = loot_pool_dollars * 1.10, last_defeated_at = CURRENT_TIMESTAMP 
+		SET current_hp = max_hp, loot_pool_dollars = loot_pool_dollars * 1.10, last_defeated_at = CURRENT_TIMESTAMP, total_kills = total_kills + 1
 		WHERE id = $1`, bossID)
 
 	return nil

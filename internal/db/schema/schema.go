@@ -288,6 +288,26 @@ func Statements() []string {
 			ON CONFLICT (name) DO NOTHING;`,
 
 		`ALTER TABLE world_bosses ADD COLUMN IF NOT EXISTS retaliation_rating DOUBLE PRECISION DEFAULT 8.0;`,
+
+		// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 8: World Boss
+		// Tiers & Gauntlet. world_bosses is a small, fixed, always-live
+		// set (not a spawn-roll system like Relic Convoys) that
+		// respawns to full HP after each kill - so "tiering" here
+		// means gating a higher tier's Attack button until enough
+		// lower-tier kills have happened server-wide (total_kills),
+		// rather than gating a spawn roll. Gauntlet is a fixed 4th
+		// boss (seeded below) rather than a per-attack opt-in mode -
+		// see boss.go's own comment for the full design rationale.
+		`ALTER TABLE world_bosses ADD COLUMN IF NOT EXISTS tier INT NOT NULL DEFAULT 1;`,
+		`ALTER TABLE world_bosses ADD COLUMN IF NOT EXISTS total_kills INT NOT NULL DEFAULT 0;`,
+		`ALTER TABLE world_bosses ADD COLUMN IF NOT EXISTS is_gauntlet BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE world_bosses ADD COLUMN IF NOT EXISTS enrage_threshold_pct DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+		`UPDATE world_bosses SET tier = 1 WHERE name = 'The Rustlord';`,
+		`UPDATE world_bosses SET tier = 2 WHERE name = 'Scrap Titan';`,
+		`UPDATE world_bosses SET tier = 3 WHERE name = 'Apex Wraith';`,
+		`INSERT INTO world_bosses (name, emoji, max_hp, current_hp, loot_pool_dollars, retaliation_rating, tier, is_gauntlet, enrage_threshold_pct) VALUES
+			('The Ravager', '🔥👹', 1800000, 1800000, 18000, 12.0, 2, TRUE, 50.0)
+			ON CONFLICT (name) DO NOTHING;`,
 		`UPDATE world_bosses SET retaliation_rating = 6.0 WHERE name = 'The Rustlord' AND retaliation_rating = 8.0;`,
 		`UPDATE world_bosses SET retaliation_rating = 12.0 WHERE name = 'Scrap Titan' AND retaliation_rating = 8.0;`,
 		`UPDATE world_bosses SET retaliation_rating = 22.0 WHERE name = 'Apex Wraith' AND retaliation_rating = 8.0;`,

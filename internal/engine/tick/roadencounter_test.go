@@ -53,6 +53,22 @@ func testDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec("TRUNCATE world_news"); err != nil {
 		t.Fatalf("truncating world_news: %v", err)
 	}
+	// world_bosses (NEXT_GENERATION_FEATURES_PLAN.md Phase 8) has no FK
+	// to encampments/users/coordinates either, so it survives the
+	// CASCADE truncate above untouched too - world_boss_attacks/
+	// world_boss_contributions/player_gear/crafting_queue DO cascade
+	// (they all reference encampments), but world_bosses itself needs
+	// its own reset: delete any extra rows a test inserted, and put
+	// the fixed launch set's mutable state (current_hp, total_kills)
+	// back to its defaults so tier-gating and boss-kill tests start
+	// from a clean slate instead of accumulating kills across the
+	// whole shared-DB test binary run.
+	if _, err := db.Exec(`DELETE FROM world_bosses WHERE name NOT IN ('The Rustlord', 'Scrap Titan', 'Apex Wraith', 'The Ravager')`); err != nil {
+		t.Fatalf("clearing extra world_bosses rows: %v", err)
+	}
+	if _, err := db.Exec("UPDATE world_bosses SET current_hp = max_hp, total_kills = 0"); err != nil {
+		t.Fatalf("resetting world_bosses state: %v", err)
+	}
 	if _, err := db.Exec("UPDATE world_state SET last_ai_spawn_at = NULL, ai_factions_spawned_count = 0 WHERE id = 1"); err != nil {
 		t.Fatalf("resetting world_state AI spawn cadence: %v", err)
 	}
