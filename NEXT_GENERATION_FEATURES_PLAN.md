@@ -286,7 +286,17 @@ reads.
 
 ## Phase 4: Prestige / Rebirth Loop
 
-**Status: 🔲 Not started.**
+**Status: ✅ Complete, with two documented adjustments below** (see
+`internal/game/prestige/prestige.go`, `encampments.prestige_level`/
+`prestige_bonus_pct`, `/prestige` command). **Adjustments**: (1) the
+research eligibility/reset requirement covers all 7 research tracks
+this build actually exposes (`research.go`'s own `fetchResearchLevels`
+reads econ/production/integrity/defense/intel/speed/military), not
+the plan's illustrative "four tracks"; (2) garrison (soldiers/mechs)
+is explicitly kept, not reset - this section's own list of what resets
+names camp level, buildings, research, and resources specifically and
+never mentions troops, so that's treated as the source of truth over
+the "starting values" phrasing elsewhere in this write-up.
 
 A veteran player who has maxed out buildings/research currently has
 nothing left to do except keep idling - a classic idle-genre problem

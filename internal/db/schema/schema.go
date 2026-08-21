@@ -84,6 +84,14 @@ func Statements() []string {
 		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS last_teleport_at TIMESTAMP WITH TIME ZONE;`,
 		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS last_sunlight_at TIMESTAMP WITH TIME ZONE;`,
 
+		// --- NEXT_GENERATION_FEATURES_PLAN.md Phase 4: Prestige /
+		// Rebirth Loop. A permanent, stacking resource-generation bonus
+		// earned by resetting the economic game back to its starting
+		// point - see internal/game/prestige/prestige.go's own package
+		// doc for exactly what resets and what's kept.
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS prestige_level INT NOT NULL DEFAULT 0;`,
+		`ALTER TABLE encampments ADD COLUMN IF NOT EXISTS prestige_bonus_pct DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+
 		`CREATE TABLE IF NOT EXISTS resources (
 			encampment_id UUID PRIMARY KEY REFERENCES encampments(id) ON DELETE CASCADE,
 			scrap DOUBLE PRECISION DEFAULT 0.00,

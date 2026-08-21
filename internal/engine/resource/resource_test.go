@@ -172,3 +172,49 @@ func TestRunResourcePass_EquippedGearBoostsPassiveGeneration(t *testing.T) {
 		t.Errorf("expected the geared camp to generate 1.04x the nominal camp's scrap (nominal=%.4f, geared=%.4f, ratio=%.4f)", nominalScrap, gearedScrap, ratio)
 	}
 }
+
+// TestRunResourcePass_PrestigeBonusBoostsPassiveGeneration is the
+// direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 4's resource-
+// tick integration: a camp with a nonzero prestige_bonus_pct generates
+// more than an identical camp at 0%, by exactly that bonus.
+func TestRunResourcePass_PrestigeBonusBoostsPassiveGeneration(t *testing.T) {
+	db := testDB(t)
+	p := NewProcessor(db)
+	ctx := context.Background()
+
+	prestigedCamp := seedResourceCamp(t, db, 63001, "PrestigedRegion")
+	nominalCamp := seedResourceCamp(t, db, 63002, "NominalRegion2")
+
+	if _, err := db.Exec("UPDATE encampments SET prestige_bonus_pct = 10 WHERE id = $1", prestigedCamp); err != nil {
+		t.Fatalf("seeding prestige bonus: %v", err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := p.RunResourcePass(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("RunResourcePass: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var prestigedScrap, nominalScrap float64
+	if err := db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", prestigedCamp).Scan(&prestigedScrap); err != nil {
+		t.Fatalf("reading prestiged camp resources: %v", err)
+	}
+	if err := db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", nominalCamp).Scan(&nominalScrap); err != nil {
+		t.Fatalf("reading nominal camp resources: %v", err)
+	}
+
+	if nominalScrap == 0 {
+		t.Fatal("nominal camp generated exactly 0 scrap - test fixture is broken")
+	}
+	ratio := prestigedScrap / nominalScrap
+	const want, tolerance = 1.10, 0.001
+	if ratio < want-tolerance || ratio > want+tolerance {
+		t.Errorf("expected the prestiged camp to generate 1.10x the nominal camp's scrap (nominal=%.4f, prestiged=%.4f, ratio=%.4f)", nominalScrap, prestigedScrap, ratio)
+	}
+}
