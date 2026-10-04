@@ -1,26 +1,32 @@
-# Makefile for orchestrating Go builds and execution
+.PHONY: all run build test vet fmt fmt-check tidy check clean
 
-.PHONY: run build tidy clean
+all: build
 
-# Default action when running make
-all: run
-
-# Run the project locally
 run:
-	go run cmd/bot/main.go
+	go run ./cmd/bot
 
-# Build production compiled binary
 build:
-	go build -o bin/bot.exe cmd/bot/main.go
+	mkdir -p bin
+	go build -o bin/bot ./cmd/bot
 
-# Format Go codebase files
+test:
+	go test ./...
+
+vet:
+	go vet ./...
+
 fmt:
 	go fmt ./...
 
-# Tidy dependencies
+fmt-check:
+	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))" || { \
+		echo "Go files need formatting; run 'make fmt'."; exit 1; \
+	}
+
 tidy:
 	go mod tidy
 
-# Clean built binaries
+check: fmt-check test vet
+
 clean:
-	if exist bin rmdir /s /q bin
+	rm -rf bin coverage.out

@@ -7,8 +7,15 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# macOS and editor files
+.DS_Store
+*.swp
+*.swo
+
 # Compiled Binaries / Build Artefacts
 bin/
+coverage.out
+*.test
 *.exe
 *.exe~
 *.dll

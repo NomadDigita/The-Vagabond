@@ -98,8 +98,7 @@ costs, they're rendered live in-bot via the Heavy Workshop panel
 
 ## Three roadmaps, three logs
 
-This repo is being actively developed by two independent AI-assisted
-workstreams that deliberately don't touch the same code:
+This repo has three active workstreams with separate tracking documents:
 
 | Workstream | Scope | Tracking file |
 |---|---|---|
@@ -107,10 +106,9 @@ workstreams that deliberately don't touch the same code:
 | **AI systems** (`internal/ai/`, Governor, Fleet Commander, Economy Advisor) | Provider-agnostic AI infra + AI-driven gameplay features built on it | [`PROJECT_MASTER_PLAN.md`](./PROJECT_MASTER_PLAN.md) |
 | **Living-world continuation** (discovery, routes, encounters, camps, AI civilizations) | The MMO extension of the gameplay workstream | [`MMO_WORLD_EVOLUTION_PLAN.md`](./MMO_WORLD_EVOLUTION_PLAN.md) |
 
-If you're picking this repo up cold — human or AI — read whichever of
-those two matches what you're about to touch **before** writing code.
-Each one documents what's done, what's in progress, and what's
-deliberately left alone so the two workstreams don't collide.
+If you're picking this repo up cold — human or AI — read the tracking
+document for the area you're changing **before** writing code. It records
+what's done, what's in progress, and work that's deliberately out of scope.
 
 ---
 
@@ -215,11 +213,15 @@ See `.env.example` for the up-to-date canonical template.
 ## Running it
 
 ```bash
-go mod tidy
-go fmt ./...
-go build ./...
-go run cmd/bot/main.go
+make tidy
+make fmt
+make check
+make run
 ```
+
+`make check` verifies formatting, runs all Go tests, and runs `go vet`.
+Use `make build` to create `bin/bot` and `make clean` to remove generated
+build files. Requires Go 1.22 or newer.
 
 On startup the bot connects to Postgres, runs every migration statement
 embedded in `main.go` (idempotent — safe to run repeatedly), registers
@@ -254,7 +256,7 @@ not the territory.
 
 ## Contributing to this repo
 
-1. Figure out which workstream your change belongs to (see the two-logs
+1. Figure out which workstream your change belongs to (see the roadmap
    table above) and read that file first.
 2. Keep changes scoped to that workstream's territory unless you're
    fixing a genuine cross-cutting bug — and if you do cross the line,
@@ -263,11 +265,8 @@ not the territory.
    change, *and* add the same statement(s) to the `migrations := []string{...}`
    slice in `cmd/bot/main.go` — the slice is what actually runs; the
    `.sql` file is the readable reference copy.
-4. `go build ./...` and `go fmt ./...` clean before committing.
+4. `make check` must pass before committing.
 5. Update the relevant log file with what you did and what's next in
-   line, the same way the existing entries are written — the next
-   person (or AI) reading it shouldn't have to reverse-engineer intent
-   from a diff.
-
-
-- **Battle Logistics**: raids require 20+ combat units, transport support, travel units for walking forces, launch supplies, and carried rations/ammunition/electricity/logistics that drain during expeditions.
+  line, the same way the existing entries are written — the next
+  person (or AI) reading it shouldn't have to reverse-engineer intent
+  from a diff.

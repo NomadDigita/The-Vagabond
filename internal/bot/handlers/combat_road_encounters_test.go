@@ -12,7 +12,7 @@ func TestIsRealPlayer_RejectsSyntheticAIFactionIDs(t *testing.T) {
 		userID int64
 		want   bool
 	}{
-		{123456789, true},  // a normal Telegram ID
+		{123456789, true},   // a normal Telegram ID
 		{1, true},           // smallest positive - still real
 		{0, false},          // zero: "no user" sentinel used throughout this codebase
 		{-1, false},         // an AI faction's synthetic ID

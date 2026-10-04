@@ -11,7 +11,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/bot/keyboards"
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
-	gopkg "gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v3"
 )
 
 type FactoryHandler struct {
@@ -23,7 +23,7 @@ func NewFactoryHandler(db *sql.DB) *FactoryHandler {
 }
 
 // renderOrEdit dynamically edits the current message if accessed via callbacks, saving layout space and preventing desyncs
-func renderOrEdit(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error {
+func renderOrEdit(c telebot.Context, text string, markup *telebot.ReplyMarkup) error {
 	if c.Callback() != nil {
 		return c.Edit(text, markup)
 	}
@@ -34,15 +34,15 @@ func renderOrEdit(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error
 // Telegram HTML parse mode - only use at a call site where `text` has
 // already been built with the htmlBold/htmlItalic/htmlCode/htmlEscape
 // helpers in render.go.
-func renderOrEditHTML(c gopkg.Context, text string, markup *gopkg.ReplyMarkup) error {
+func renderOrEditHTML(c telebot.Context, text string, markup *telebot.ReplyMarkup) error {
 	if c.Callback() != nil {
-		return c.Edit(text, gopkg.ModeHTML, markup)
+		return c.Edit(text, telebot.ModeHTML, markup)
 	}
-	return c.Send(text, gopkg.ModeHTML, markup)
+	return c.Send(text, telebot.ModeHTML, markup)
 }
 
-func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
-	_ = c.Notify(gopkg.Typing)
+func (h *FactoryHandler) HandleFactoryPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
 
 	sender := c.Sender()
 	if sender == nil {
@@ -51,21 +51,25 @@ func (h *FactoryHandler) HandleFactoryPanel(c gopkg.Context) error {
 
 	ctx := context.Background()
 
-	var campID string
-	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID)
-	if err != nil {
+	var campID, campName string
+	err := h.DB.QueryRowContext(ctx, "SELECT id, name FROM encampments WHERE user_id = $1", sender.ID).Scan(&campID, &campName)
+	if errors.Is(err, sql.ErrNoRows) {
 		return c.Send("⚠️ Create your outpost camp first using /start", keyboards.MainNavigation())
+	}
+	if err != nil {
+		log.Printf("Failed to load workshop outpost for user %d: %v", sender.ID, err)
+		return c.Send("⚠️ System connection error reading your outpost.", keyboards.MainNavigation())
 	}
 
 	panelText := "🏭 " + htmlBold("HEAVY WORKSHOP SECTOR SYSTEMS") + "\n" + divider + "\n" +
-		"📛 Outpost Name: " + htmlCode("Military Engineering Hangar") + "\n\n" +
+		"📛 Outpost Name: " + htmlCode(campName) + "\n\n" +
 		htmlItalic("Select options on your bottom menu deck to recruit troops or craft logistics vehicles.")
 
-	return c.Send(panelText, gopkg.ModeHTML, keyboards.WorkshopNavigation())
+	return c.Send(panelText, telebot.ModeHTML, keyboards.WorkshopNavigation())
 }
 
-func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
-	_ = c.Notify(gopkg.Typing)
+func (h *FactoryHandler) HandleRecruitPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
 
 	sender := c.Sender()
 	ctx := context.Background()
@@ -142,7 +146,7 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 		pmUnit.Title, pmUnit.Cost["metal"], pmUnit.Cost["crystal"], pmUnit.Flavor,
 	)
 
-	selector := &gopkg.ReplyMarkup{}
+	selector := &telebot.ReplyMarkup{}
 
 	btnCraftSoldier := selector.Data("🪖 Recruit Soldier", "craft_item", "soldier")
 	btnCraftDrone := selector.Data("🛰️ Assemble Drone", "craft_item", "drone")
@@ -173,8 +177,8 @@ func (h *FactoryHandler) HandleRecruitPanel(c gopkg.Context) error {
 	return renderOrEdit(c, panelText, selector)
 }
 
-func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
-	_ = c.Notify(gopkg.Typing)
+func (h *FactoryHandler) HandleVehiclesPanel(c telebot.Context) error {
+	_ = c.Notify(telebot.Typing)
 
 	sender := c.Sender()
 	ctx := context.Background()
@@ -233,7 +237,7 @@ func (h *FactoryHandler) HandleVehiclesPanel(c gopkg.Context) error {
 		cm3Unit.Title, cm3Unit.Cost["metal"], cm3Unit.Cost["crystal"],
 	)
 
-	selector := &gopkg.ReplyMarkup{}
+	selector := &telebot.ReplyMarkup{}
 	btnCraftBuggy := selector.Data("🚗 Craft Buggy", "craft_item", "buggy")
 	btnCraftShip := selector.Data("⛵ Craft Ship", "craft_item", "ship")
 	btnCraftJet := selector.Data("✈️ Craft Jet", "craft_item", "cargo_jet")
@@ -407,19 +411,19 @@ func quantityOptions(maxPerOrder int) []int {
 // this game already confirms before committing resources (e.g. the road-
 // encounter Attack/Continue buttons) rather than firing on the very
 // first tap.
-func (h *FactoryHandler) HandleCraftCallback(c gopkg.Context) error {
+func (h *FactoryHandler) HandleCraftCallback(c telebot.Context) error {
 	item := strings.ToLower(strings.TrimSpace(c.Args()[0]))
 	spec, ok := craftSpecFor(item)
 	if !ok {
-		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Unknown item."})
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Unknown item."})
 	}
 
 	costLine := formatCraftCost(spec.cost)
 	panelText := fmt.Sprintf("⚒️ How many %s(s) to produce?\n\nCost per unit: %s", spec.label, costLine)
 
-	selector := &gopkg.ReplyMarkup{}
-	var rows []gopkg.Row
-	var row []gopkg.Btn
+	selector := &telebot.ReplyMarkup{}
+	var rows []telebot.Row
+	var row []telebot.Btn
 	for _, qty := range quantityOptions(spec.maxPerOrder) {
 		btn := selector.Data(fmt.Sprintf("%dx", qty), "craft_qty", item, fmt.Sprintf("%d", qty))
 		row = append(row, btn)
@@ -472,28 +476,28 @@ func formatCraftCost(cost map[string]float64) string {
 // parameter) rather than looping the original single-unit logic N times -
 // both simpler and avoids N separate round-trips for what the player
 // experiences as one action.
-func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
+func (h *FactoryHandler) HandleCraftQuantityCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
 	args := c.Args()
 	if len(args) < 2 {
-		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Invalid crafting order."})
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid crafting order."})
 	}
 	item := strings.ToLower(strings.TrimSpace(args[0]))
 	var quantity int
 	fmt.Sscanf(args[1], "%d", &quantity)
 
 	if quantity == 0 {
-		_ = c.Respond(&gopkg.CallbackResponse{Text: "↩️ Order cancelled."})
+		_ = c.Respond(&telebot.CallbackResponse{Text: "↩️ Order cancelled."})
 		return h.HandleRecruitPanel(c)
 	}
 
 	spec, ok := craftSpecFor(item)
 	if !ok {
-		return c.Respond(&gopkg.CallbackResponse{Text: "❌ Unknown item."})
+		return c.Respond(&telebot.CallbackResponse{Text: "❌ Unknown item."})
 	}
 	if quantity < 1 || quantity > spec.maxPerOrder {
-		return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Quantity must be between 1 and %d for this item.", spec.maxPerOrder)})
+		return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Quantity must be between 1 and %d for this item.", spec.maxPerOrder)})
 	}
 
 	var campID string
@@ -501,7 +505,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Assembly failed."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Assembly failed."})
 	}
 	defer tx.Rollback()
 
@@ -544,7 +548,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 		if room < 0 {
 			room = 0
 		}
-		return c.Respond(&gopkg.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used, only room for %d more. Upgrade your Hangar or /deconstruct unused units.", totalUnits, maxCapacity, room)})
+		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Hangar Full: %d/%d capacity used, only room for %d more. Upgrade your Hangar or /deconstruct unused units.", totalUnits, maxCapacity, room)})
 	}
 
 	// Doomsday Rig's total-fleet cap (tied to Outpost level, not
@@ -556,7 +560,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 1) FROM encampments WHERE id = $1", campID).Scan(&campLvl)
 		maxDS := content.MaxDoomsdayRigs(campLvl)
 		if currentDS+quantity > maxDS {
-			return c.Respond(&gopkg.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s) total (you have %d). Level up to raise the cap.", campLvl, maxDS, currentDS)})
+			return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: fmt.Sprintf("❌ Limit Reached: Outpost Level %d can command at most %d Doomsday Rig(s) total (you have %d). Level up to raise the cap.", campLvl, maxDS, currentDS)})
 		}
 	}
 
@@ -565,7 +569,7 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 		need := perUnit * float64(quantity)
 		totalCost[res] = need
 		if held[res] < need {
-			return c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %s for %dx %s.", formatCraftCost(map[string]float64{res: need}), quantity, spec.label)})
+			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Materials! Need %s for %dx %s.", formatCraftCost(map[string]float64{res: need}), quantity, spec.label)})
 		}
 	}
 
@@ -590,10 +594,10 @@ func (h *FactoryHandler) HandleCraftQuantityCallback(c gopkg.Context) error {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("Failed committing craft transaction: %v", err)
-		return c.Respond(&gopkg.CallbackResponse{Text: "⚠️ Error writing inventory data."})
+		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing inventory data."})
 	}
 
-	_ = c.Respond(&gopkg.CallbackResponse{Text: fmt.Sprintf("✅ %dx %s %s successfully!", quantity, spec.label, spec.verb)})
+	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("✅ %dx %s %s successfully!", quantity, spec.label, spec.verb)})
 
 	if spec.isVehicle {
 		return h.HandleVehiclesPanel(c)
