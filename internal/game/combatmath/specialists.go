@@ -1,14 +1,5 @@
-// Package combatmath holds pure, DB-free combat math extracted out of
-// internal/engine/tick's raid-resolution loop specifically so it can be
-// unit-tested directly - the tick engine itself is DB-heavy throughout
-// and, per this project's conventions, is exercised only via
-// real-Postgres tests, which makes a narrow arithmetic bug like the one
-// this file fixes hard to pin down with a fast, deterministic test.
 package combatmath
 
-// SpecialistCounts is how many of each specialist unit type a side is
-// fielding (or has lost), keyed by the same names used throughout
-// internal/engine/tick's raid combat resolution.
 type SpecialistCounts struct {
 	Destroyers     int
 	Bombers        int
@@ -18,17 +9,10 @@ type SpecialistCounts struct {
 	Wraiths        int
 }
 
-// Total sums every field.
 func (c SpecialistCounts) Total() int {
 	return c.Destroyers + c.Bombers + c.Battlecruisers + c.DoomsdayRigs + c.Liberators + c.Wraiths
 }
 
-// SpecialistToughness is how many "effective casualties" it takes to
-// destroy one unit of each type - the constants
-// destroyerToughness/bomberToughness/bcToughness/dsToughness/
-// liberatorToughness/wraithToughness from
-// internal/engine/tick/engine.go, unchanged by this fix; only how
-// they're used to split losses changes here.
 type SpecialistToughness struct {
 	Destroyers     float64
 	Bombers        float64
@@ -38,43 +22,6 @@ type SpecialistToughness struct {
 	Wraiths        float64
 }
 
-// AllocateSpecialistLosses splits totalCasualties (an already-computed
-// count of how many specialist units die this round in total - see
-// effectiveDbCas in internal/engine/tick/engine.go, unchanged by this
-// fix) among the six specialist unit types, weighted by each type's
-// own toughness rather than by raw headcount.
-//
-// BUG THIS FIXES (reported live, 2026-08-05 - a Doomsday Rig, the
-// single most expensive unit in the game at 200x a Destroyer's
-// toughness, died in 1-2 combat rounds instead of being "almost
-// indestructible" as advertised): the previous formula computed one
-// pool-wide AVERAGE toughness (a headcount-weighted mean across every
-// specialist type) purely to size the total number of casualties, and
-// then split that total among types by raw headcount share alone -
-// e.g. 4 Doomsday Rigs out of a 119-unit specialist pool got roughly
-// 4/119 (~3.4%) of losses, with the Rig's own 200-toughness constant
-// never actually protecting an individual Rig's own survival odds
-// beyond its small contribution to the shared average. A fleet with
-// very few Rigs among many cheap units barely moved that average at
-// all, so the Rigs died at essentially the same rate as everything
-// else around them - the opposite of what a 50x-tougher unit should
-// do.
-//
-// This function keeps the same overall total (totalCasualties is
-// unchanged, still sized upstream via the same pool-average toughness
-// logic - that scale is fine and untouched), but distributes it via a
-// hazard-weighted share: each type's share of losses is proportional
-// to (count / toughness), normalized across the pool, instead of count
-// alone. A unit with high toughness now has its OWN survival
-// protected in proportion to that toughness, not just diluted into a
-// shared average - matching what "toughness" is supposed to mean.
-//
-// Any remainder left after integer division is assigned to whichever
-// type currently has the largest fractional remainder, largest-first,
-// so totalCasualties is always fully accounted for (never silently
-// dropped or double-counted) and no single type is favored by
-// truncation on every call. Each type's result is clamped to its own
-// count, so this never reports losing more units than were fielded.
 func AllocateSpecialistLosses(totalCasualties int, counts SpecialistCounts, toughness SpecialistToughness) SpecialistCounts {
 	if totalCasualties <= 0 || counts.Total() <= 0 {
 		return SpecialistCounts{}
@@ -118,10 +65,6 @@ func AllocateSpecialistLosses(totalCasualties int, counts SpecialistCounts, toug
 		assigned += whole
 	}
 
-	// Distribute the remainder (totalCasualties - assigned, always a
-	// small non-negative number less than len(slots) from truncation)
-	// to the largest fractional remainders first, skipping any type
-	// already fully depleted.
 	remaining := totalCasualties - assigned
 	for remaining > 0 {
 		bestIdx := -1
@@ -136,21 +79,16 @@ func AllocateSpecialistLosses(totalCasualties int, counts SpecialistCounts, toug
 			}
 		}
 		if bestIdx == -1 {
-			break // every type already fully depleted; can't assign more
+			break
 		}
 		*slots[bestIdx].lost++
-		slots[bestIdx].remainder = -1 // don't pick the same slot twice in a row for the same remainder unit
+		slots[bestIdx].remainder = -1
 		remaining--
 	}
 
 	return lost
 }
 
-// hazardOf returns a unit type's share weight: more units of a type,
-// or a lower toughness, both increase how much of the total casualty
-// pool that type absorbs. A type with zero units or non-positive
-// toughness (a misconfigured constant) contributes zero hazard rather
-// than dividing by zero or going negative.
 func hazardOf(count int, toughness float64) float64 {
 	if count <= 0 || toughness <= 0 {
 		return 0

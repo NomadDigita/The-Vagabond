@@ -11,14 +11,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// QuestsHandler is the panel/claim side of
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 2 - progress itself is
-// tracked automatically via internal/game/progression.RecordEvent,
-// called from every real action handler at its own completion point.
-// This handler renders the board and handles the Claim button; all
-// the actual claim logic lives in progression.ClaimQuest so both the
-// panel and a future non-Telegram surface (if one's ever added) share
-// identical rules.
 type QuestsHandler struct {
 	DB *sql.DB
 }
@@ -27,9 +19,6 @@ func NewQuestsHandler(db *sql.DB) *QuestsHandler {
 	return &QuestsHandler{DB: db}
 }
 
-// HandleQuestsPanel (/quests) shows today's dailies and this week's
-// weeklies with a progress bar and a Claim button on anything complete
-// and not yet claimed.
 func (h *QuestsHandler) HandleQuestsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -83,16 +72,10 @@ func (h *QuestsHandler) HandleQuestsPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
-// questPeriodStartForPanel mirrors progression's own periodStart via
-// its exported PeriodStart wrapper - kept as a tiny local helper so
-// the query call site below reads clearly without importing "time"
-// just for this one lookup.
 func questPeriodStartForPanel(period progression.QuestPeriod) time.Time {
 	return progression.PeriodStart(period)
 }
 
-// HandleQuestClaimCallback fires when a player taps a Claim button on
-// HandleQuestsPanel.
 func (h *QuestsHandler) HandleQuestClaimCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

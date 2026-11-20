@@ -63,13 +63,9 @@ def star(cx, cy, s, op, color="#ffe066"):
             f'<path d="M0,{-6*s} L{1.3*s},{-1.3*s} L{6*s},0 L{1.3*s},{1.3*s} '
             f'L0,{6*s} L{-1.3*s},{1.3*s} L{-6*s},0 L{-1.3*s},{-1.3*s} Z" fill="{color}"/></g>')
 
-# Main red bolt (the "core discharge") — same silhouette family as v1
 MAIN_BOLT = "56,4 20,54 44,54 38,96 82,42 56,42"
 MAIN_PTS = [(56,4),(20,54),(44,54),(38,96),(82,42),(56,42)]
 
-# Two smaller golden arc-bolts crackling off the main one, angled outward
-ARC_A = "18,30 4,46 16,46 8,66 30,40 18,40"     # lower-left arc
-ARC_B = "88,58 74,74 84,74 78,92 96,68 86,68"   # lower-right arc (mirrored-ish)
 
 def point_on_path(pts, t):
     segs = list(zip(pts, pts[1:]))
@@ -91,7 +87,6 @@ for i in range(N_FRAMES):
     dome_pulse = 0.9 + 0.1 * math.sin(2*math.pi*t)
     streak_x, streak_y = point_on_path(MAIN_PTS, t)
 
-    # golden arcs crackle: flicker on/off fast and irregularly, not a smooth sine
     arc_a_op = 0.55 + 0.45 * math.sin(2*math.pi*(t*3.0))
     arc_a_op = max(0.15, min(1.0, arc_a_op))
     arc_b_op = 0.55 + 0.45 * math.sin(2*math.pi*(t*3.0) + 2.1)

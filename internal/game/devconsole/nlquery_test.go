@@ -126,11 +126,6 @@ func TestParseClassification_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
-// Critical safety test: even a maliciously-crafted "intent" value that
-// looks like SQL or a destructive instruction must never be treated as
-// valid — IsKnownIntent must reject it regardless of what
-// ParseClassification returns, since parsing JSON successfully is not
-// the same as the intent being safe to run.
 func TestParseClassification_UnknownIntentStillRejectedByIsKnownIntent(t *testing.T) {
 	raw := `{"intent": "DROP TABLE users; --", "days": 7, "limit": 5}`
 	ic := devconsole.ParseClassification(raw, "")
@@ -150,8 +145,6 @@ func TestParseClassification_StripsMarkdownFence(t *testing.T) {
 	}
 }
 
-// See ADR-016: a response cut off mid-object is distinguished from one
-// that never contained JSON at all.
 func TestParseClassification_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"intent": "top_players", "days": 7, "lim`
 	ic := devconsole.ParseClassification(raw, "")

@@ -18,7 +18,6 @@ func NewArenaHandler(db *sql.DB) *ArenaHandler {
 	return &ArenaHandler{DB: db}
 }
 
-// HandleArenaPanel renders the matchmaking queue status panel (No markup conflict)
 func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -74,13 +73,9 @@ func (h *ArenaHandler) HandleArenaPanel(c telebot.Context) error {
 		selector.Row(btnJoin3),
 	)
 
-	// Inline buttons and the persistent bottom keyboard need two
-	// separate messages - Telegram only allows one reply_markup type
-	// per message, so they can never be combined into a single send.
 	return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
 }
 
-// HandleJoinQueueCallback handles inserting the player into the matchmaking table
 func (h *ArenaHandler) HandleJoinQueueCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

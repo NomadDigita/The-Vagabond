@@ -71,8 +71,6 @@ def main() -> int:
         except (TypeError, ValueError):
             errors.append("animation must provide numeric ip and op frame values")
 
-        # The following flags mirror Telegram's published Bodymovin-TG
-        # restrictions where those features have a stable Lottie signature.
         for node, path in walk(animation):
             ty = node.get("ty")
             if ty == 5:

@@ -22,16 +22,6 @@ func setGarrison(t *testing.T, db *sql.DB, campID string, soldiers, mechs int) {
 	}
 }
 
-// TestAIScoutCanDiscoverAnotherAIFaction verifies aiScout no longer
-// excludes AI factions as scouting targets - AI-vs-AI conflict is now in
-// scope (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, superseding
-// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note).
-// Faction Beta is seeded first (closer/earlier established), so the
-// existing danger/established_at ordering picks it before the player.
-// TestMaybeAIFlee_TriggersWhenGarrisonIsDesperatelyLow verifies the AI
-// decision loop's use of Ghost Protocol (section 3.4): a faction with a
-// near-zero garrison relocates, pays the proportional cost, and clears
-// any known_locations rows targeting it.
 func TestMaybeAIFlee_TriggersWhenGarrisonIsDesperatelyLow(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -94,8 +84,6 @@ func TestMaybeAIFlee_TriggersWhenGarrisonIsDesperatelyLow(t *testing.T) {
 	}
 }
 
-// TestMaybeAIFlee_DoesNothingWithAHealthyGarrison is the negative case:
-// a faction well above the threshold never flees.
 func TestMaybeAIFlee_DoesNothingWithAHealthyGarrison(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -120,12 +108,6 @@ func TestMaybeAIFlee_DoesNothingWithAHealthyGarrison(t *testing.T) {
 	}
 }
 
-// TestAIScoutCanDiscoverAnotherAIFaction verifies aiScout no longer
-// excludes AI factions as scouting targets - AI-vs-AI conflict is now in
-// scope (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2, superseding
-// AI_FACTION_DECISION_LOOP_PLAN.md's "deliberately out of scope" note).
-// Faction Beta is seeded first (closer/earlier established), so the
-// existing danger/established_at ordering picks it before the player.
 func TestAIScoutCanDiscoverAnotherAIFaction(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -165,14 +147,6 @@ func TestAIScoutCanDiscoverAnotherAIFaction(t *testing.T) {
 	}
 }
 
-// TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel verifies
-// the 2026-08-01 fairness inversion: a faction may only raid a target at
-// its own level or above, never below - "lower level can attack higher
-// level but higher level can't attack lower level," per the project
-// owner. Runs pickFairAIRaidTarget many times since it randomizes
-// between the normal and wide band on each call; a below-level target
-// must never appear in any of them, and an at-or-above-level target must
-// appear at least once.
 func TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -182,18 +156,16 @@ func TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel(t *testing.T) 
 	setAILevel(t, db, faction, 10)
 
 	farBelowPlayer := seedEncampment(t, db, 2005, "Weak Player", 1, 0, "TestRegion", false)
-	setAILevel(t, db, farBelowPlayer, 1) // far below - must always be excluded
+	setAILevel(t, db, farBelowPlayer, 1)
 
 	oneBelowFaction := seedEncampment(t, db, 2007, "Faction Delta", 3, 0, "TestRegion", true)
-	setAILevel(t, db, oneBelowFaction, 9) // 1 level BELOW - the exact case the project owner called out
-	// as the one that "should almost never" happen anymore: must be excluded now, even though the old
-	// (pre-2026-08-01) rule would have allowed it.
+	setAILevel(t, db, oneBelowFaction, 9)
 
 	twoAboveFaction := seedEncampment(t, db, 2006, "Faction Fair", 2, 0, "TestRegion", true)
-	setAILevel(t, db, twoAboveFaction, 12) // 2 levels ABOVE, inside the normal band - a valid "punch up" target.
+	setAILevel(t, db, twoAboveFaction, 12)
 
 	sameLevelFaction := seedEncampment(t, db, 2015, "Faction Even", 4, 0, "TestRegion", true)
-	setAILevel(t, db, sameLevelFaction, 10) // exactly level - allowed, "at or above" includes equal.
+	setAILevel(t, db, sameLevelFaction, 10)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -234,13 +206,6 @@ func TestPickFairAIRaidTargetOnlyAllowsAttackingAtOrAboveOwnLevel(t *testing.T) 
 	}
 }
 
-// TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability
-// verifies the second half of the 2026-08-01 direction: a discovered,
-// level-4+ real player who hasn't been raided in aiOverdueRaidThreshold
-// is returned by pickOverdueRaidTarget - the guarantee mechanism that
-// bypasses the probability roll entirely - while a target raided
-// recently, a target below the level floor, and another AI faction (not
-// eligible for this specific guarantee) are all correctly excluded.
 func TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -250,23 +215,22 @@ func TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability(t *te
 	setAILevel(t, db, faction, 3)
 
 	overdueTarget := seedEncampment(t, db, 2017, "Overdue Player", 1, 0, "TestRegion", false)
-	setAILevel(t, db, overdueTarget, 12) // well above the level-4 floor, never raided - should be guaranteed-eligible
+	setAILevel(t, db, overdueTarget, 12)
 
 	tooLowLevel := seedEncampment(t, db, 2018, "New Player", 2, 0, "TestRegion", false)
-	setAILevel(t, db, tooLowLevel, 3) // below aiOverdueMinTargetLevel (4) - must be excluded from the guarantee
+	setAILevel(t, db, tooLowLevel, 3)
 
 	recentlyRaidedTarget := seedEncampment(t, db, 2019, "Recently Raided Player", 3, 0, "TestRegion", false)
 	setAILevel(t, db, recentlyRaidedTarget, 12)
 
 	anotherAIFaction := seedEncampment(t, db, 2020, "Faction Kappa", 4, 0, "TestRegion", true)
-	setAILevel(t, db, anotherAIFaction, 12) // AI-vs-AI is deliberately excluded from this guarantee
+	setAILevel(t, db, anotherAIFaction, 12)
 
 	for _, target := range []string{overdueTarget, tooLowLevel, recentlyRaidedTarget, anotherAIFaction} {
 		if _, err := db.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, target); err != nil {
 			t.Fatalf("seeding discovery: %v", err)
 		}
 	}
-	// recentlyRaidedTarget was raided 1 hour ago - well inside the 10-hour threshold.
 	if _, err := db.Exec(`
 		INSERT INTO raids (attacker_id, defender_id, state, resolve_time, created_at)
 		VALUES ($1, $2, 'resolved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP - INTERVAL '1 hour')`,
@@ -291,10 +255,6 @@ func TestPickOverdueRaidTargetGuaranteesEligibilityRegardlessOfProbability(t *te
 	}
 }
 
-// TestDecideOneAIFactionPrioritizesOverdueGuaranteeOverProbabilityRoll
-// verifies decideOneAIFaction actually raids an overdue-eligible target
-// on the very next decision, with no dependency on the probability roll
-// - the "no roll, no exception" guarantee.
 func TestDecideOneAIFactionPrioritizesOverdueGuaranteeOverProbabilityRoll(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -346,7 +306,6 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 		t.Fatalf("pickFairAIRaidTarget: %v", err)
 	}
 	if target == nil {
-		// Not discovered yet - discover it directly for this test's purposes.
 		if _, err := tx.Exec("INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'ai_scout')", faction, player); err != nil {
 			t.Fatalf("seeding discovery: %v", err)
 		}
@@ -395,21 +354,11 @@ func TestLaunchAIRaidCreatesAValidRaidAndDebitsGarrison(t *testing.T) {
 		t.Errorf("expected mech garrison debited by exactly the mobilized amount: got %d remaining with %d mobilized", remainingMechs, mechsMobilized)
 	}
 
-	// A faction never strips its garrison to zero.
 	if remainingSoldiers <= 0 {
 		t.Error("expected some soldiers to remain at home after a raid launch")
 	}
 }
 
-// TestAIFactionCanRaidAnotherAIFactionRarely mirrors
-// TestEvaluateRoadBaseEncountersExcludesAIFactionBases's probabilistic
-// pattern from roadencounter_test.go: AI-vs-AI conflict is in scope
-// (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 2), and running many
-// iterations at aiVsAIRaidProbabilityWhenEligible should produce at least
-// one AI-vs-AI raid (comfortably so, now that the probability was raised
-// 2026-08-01 toward a twice-daily real-world cadence rather than staying
-// rare background texture), and it should never generate a public
-// world_news headline.
 func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -444,8 +393,6 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		// Garrison is finite and each raid debits it - replenish so later
-		// iterations can still commit forces even after earlier raids fired.
 		setGarrison(t, db, factionA, 200, 100)
 	}
 
@@ -462,11 +409,6 @@ func TestAIFactionCanRaidAnotherAIFactionRarely(t *testing.T) {
 	}
 }
 
-// TestAILaunchedRaidParticipatesInRoadEncounters is the exit-criteria
-// test AI_FACTION_DECISION_LOOP_PLAN.md calls "the single most important
-// test in this plan" - it proves an AI-launched raid is a real column
-// through the Phase 3/4 road-encounter system, not just a row that
-// resolves in isolation.
 func TestAILaunchedRaidParticipatesInRoadEncounters(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -498,9 +440,6 @@ func TestAILaunchedRaidParticipatesInRoadEncounters(t *testing.T) {
 	if err := db.QueryRow("SELECT id FROM raids WHERE attacker_id = $1", faction).Scan(&aiRaidID); err != nil {
 		t.Fatalf("expected the AI raid to exist: %v", err)
 	}
-	// Force it to the midpoint of its route, same trick seedMarchingRaid
-	// uses, so it's guaranteed to be in encounter range of a human column
-	// converging on the same point.
 	if _, err := db.Exec(`
 		UPDATE raids SET leg_started_at = $1, leg_total_minutes = 20
 		WHERE id = $2`, time.Now().UTC().Add(-10*time.Minute), aiRaidID); err != nil {
@@ -508,8 +447,6 @@ func TestAILaunchedRaidParticipatesInRoadEncounters(t *testing.T) {
 	}
 	var destX, destY int
 	_ = db.QueryRow("SELECT destination_x, destination_y FROM raids WHERE id = $1", aiRaidID).Scan(&destX, &destY)
-	// AI raid marches from (0,0) toward the player at (10,0); a human
-	// column marching the reverse direction converges at the midpoint.
 	humanAttacker := seedEncampment(t, db, 2014, "Human Column Owner", destX, destY, "TestRegion", false)
 	seedMarchingRaid(t, db, humanAttacker, destX, destY, 0, 0, "TestRegion")
 

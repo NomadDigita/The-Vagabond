@@ -44,10 +44,9 @@ func TestHTMLTable_BasicAlignment(t *testing.T) {
 	}
 	inner := strings.TrimSuffix(strings.TrimPrefix(out, "<pre>"), "</pre>")
 	lines := strings.Split(inner, "\n")
-	if len(lines) != 4 { // header, separator, 2 rows
+	if len(lines) != 4 {
 		t.Fatalf("expected 4 lines (header+sep+2 rows), got %d: %q", len(lines), inner)
 	}
-	// Every line should be the same rendered width, i.e. columns line up.
 	width := len([]rune(lines[0]))
 	for i, l := range lines {
 		if n := len([]rune(l)); n != width {
@@ -61,11 +60,11 @@ func TestHTMLTable_MalformedRowSkipped(t *testing.T) {
 		[]string{"Unit", "Win%"},
 		[][]string{
 			{"soldiers", "50"},
-			{"bad_row_only_one_col"}, // wrong length - must be dropped, not misalign the table
+			{"bad_row_only_one_col"},
 			{"bombers", "100"},
 		},
 	)
-	if strings.Count(out, "\n") != 3 { // header + separator + 2 valid rows = 3 newlines
+	if strings.Count(out, "\n") != 3 {
 		t.Errorf("expected malformed row to be dropped, got: %q", out)
 	}
 	if strings.Contains(out, "bad_row_only_one_col") {

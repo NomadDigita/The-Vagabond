@@ -6,11 +6,6 @@ import (
 )
 
 func TestCraftSpecFor_CoversEveryButtonOnBothPanels(t *testing.T) {
-	// Every item key any "Recruit"/"Forge"/"Build"/"Craft" button on
-	// HandleRecruitPanel or HandleVehiclesPanel actually sends as its
-	// craft_item callback data - if a button's key isn't resolvable here,
-	// tapping it silently fails with "❌ Unknown item." This test is the
-	// guard against that drifting out of sync as buttons/specs evolve.
 	keys := []string{
 		"soldier", "drone", "mech", "nuke", "destroyer", "bomber", "scout", "battlecruiser", "deathstar",
 		"liberator", "wraith", "observer", "guardian", "piercing_missile",
@@ -51,12 +46,6 @@ func TestCraftSpecFor_UnknownItemFails(t *testing.T) {
 	}
 }
 
-// TestCraftSpecFor_BulkCeilings is the actual "up to 20x, except for some
-// units" policy check - locks in exactly which units get the full 20x
-// ceiling and which are deliberately capped lower, so a future edit that
-// accidentally removes deathstar/nuke's special case (e.g. a careless
-// find-replace) is caught immediately instead of silently allowing a
-// 20x Nuclear Device order.
 func TestCraftSpecFor_BulkCeilings(t *testing.T) {
 	cases := map[string]int{
 		"soldier":   20,
@@ -65,8 +54,8 @@ func TestCraftSpecFor_BulkCeilings(t *testing.T) {
 		"scout":     20,
 		"liberator": 20,
 		"cargo_mk1": 20,
-		"nuke":      3, // extreme power-per-unit, see hardcodedCraftSpecs' comment
-		"deathstar": 3, // total-fleet level-cap makes a high per-order ceiling meaningless/misleading
+		"nuke":      3,
+		"deathstar": 3,
 	}
 	for item, want := range cases {
 		spec, ok := craftSpecFor(item)
@@ -108,8 +97,6 @@ func TestFormatCraftCost(t *testing.T) {
 		t.Errorf("formatCraftCost(empty) = %q, want %q", got, "free")
 	}
 
-	// Zero-amount entries (a resource key present but costing 0) must not
-	// render as "0 Metal" clutter.
 	got = formatCraftCost(map[string]float64{"metal": 0, "crystal": 5})
 	if got != "🔮5 Crystal" {
 		t.Errorf("formatCraftCost with a zero entry = %q, want %q", got, "🔮5 Crystal")

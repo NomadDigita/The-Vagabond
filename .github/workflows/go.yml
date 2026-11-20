@@ -25,6 +25,12 @@ jobs:
       - name: Check formatting
         run: make fmt-check
 
+      - name: Fetch base branch
+        run: git fetch origin main --depth=1
+
+      - name: Check comments
+        run: go run ./tools/commentlint --ratchet=origin/main
+
       - name: Run tests
         run: go test ./...
 

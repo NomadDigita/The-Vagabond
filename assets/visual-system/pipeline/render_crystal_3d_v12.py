@@ -153,9 +153,6 @@ def setup_scene(samples: int, frames: int):
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
     scene = bpy.context.scene
-    # EEVEE_NEXT stalls in this Windows headless Blender build, even for a
-    # single opaque sphere.  Cycles CPU completes reliably and preserves the
-    # glass/refraction and native RGBA film needed for a Telegram WebM.
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.cycles.samples = samples
@@ -189,7 +186,6 @@ def build_crystal(frames: int):
     bpy.context.collection.objects.link(root)
     root.rotation_euler = (math.radians(-8), math.radians(7), math.radians(-5))
 
-    # A compact, traditional crystal-ball silhouette stays identifiable at 20px.
     pedestal_low = cylinder("Low gold pedestal", 0.94, 0.24, (0, 0, -1.08), gold_dark)
     pedestal = cylinder("Polished gold pedestal", 0.76, 0.26, (0, 0, -0.89), gold)
     collar = torus("Gold pedestal collar", 0.61, 0.075, (0, 0, -0.73), gold)
@@ -212,7 +208,6 @@ def build_crystal(frames: int):
     bpy.context.collection.objects.link(glints)
     glints.parent = root
     for index, (x, z, size) in enumerate(((-0.49, 0.60, 0.11), (0.48, 0.33, 0.075), (0.12, -0.45, 0.05))):
-        # Two slim radiant diamonds make a physical, readable four-point star.
         a = cone(f"Star {index} vertical ray", size * 0.32, 0.0, size * 2.65, (x, -0.95, z), glint)
         b = cone(f"Star {index} horizontal ray", size * 0.32, 0.0, size * 2.65, (x, -0.95, z), glint, (0, math.pi / 2, 0))
         a.parent = b.parent = glints

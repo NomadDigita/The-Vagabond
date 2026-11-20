@@ -1,24 +1,3 @@
-// Package researchplanner implements Phase E of the AI Systems Roadmap:
-// the AI Research Planner. Like governor, fleetcommander, and
-// econadvisor, this package is the seam where game state meets
-// ai.Service; internal/ai itself stays game-agnostic per ADR-001 in
-// PROJECT_MASTER_PLAN.md.
-//
-// This file has zero I/O so it can be unit tested directly. All
-// database access lives in planner.go.
-//
-// Note: this package deliberately does NOT import
-// internal/bot/handlers (which owns the live /research panel and its
-// upgrade-spend logic) or any sibling AI package. The 7-node tech
-// tree's shape (key, db column, cost formula, max level) is a small,
-// deliberately duplicated copy of internal/bot/handlers/research.go's
-// researchTree — same trade-off already made for the mock provider's
-// placeholder JSON (see internal/ai/providers/mock/provider.go): each
-// AI feature package stays independently buildable/mergeable rather
-// than forming a dependency chain. If the real tech tree ever changes
-// (a node added/removed, cost formula changed), update both copies —
-// this package's own tests (TestResearchNodes_MatchLiveHandler-style
-// assertions in prompt_test.go) exist to catch drift.
 package researchplanner
 
 import (
@@ -30,12 +9,8 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MaxResearchLevel mirrors handlers.MaxResearchLevel. Kept as an
-// independent constant per the package doc comment above.
 const MaxResearchLevel = 20
 
-// Goal is a player-selectable (or inferred) strategic focus that
-// biases which tech nodes the planner prioritizes.
 type Goal string
 
 const (
@@ -45,13 +20,10 @@ const (
 	GoalBalanced Goal = "balanced"
 )
 
-// ValidGoals lists every goal accepted from a callback/command
-// argument. Anything else falls back to inference.
 func ValidGoals() []Goal {
 	return []Goal{GoalRaiding, GoalDefense, GoalEconomy, GoalBalanced}
 }
 
-// IsValidGoal reports whether s names a known Goal.
 func IsValidGoal(s string) bool {
 	for _, g := range ValidGoals() {
 		if string(g) == s {
@@ -61,20 +33,15 @@ func IsValidGoal(s string) bool {
 	return false
 }
 
-// TechNode is a minimal projection of one branch of the real 7-node
-// tech tree (see handlers.researchTree). Order here matches the live
-// panel's display order.
 type TechNode struct {
-	Key         string // matches handlers.researchNode.key / dbColumn suffix
+	Key         string
 	Title       string
 	Description string
 	Level       int
-	Cost        int // Neuro Cores to advance from Level to Level+1; 0 if maxed
+	Cost        int
 	Maxed       bool
 }
 
-// techMeta is the static (key, title, description) triple for each of
-// the 7 real tech nodes, in the live panel's display order.
 var techMeta = []struct {
 	key, title, desc string
 }{
@@ -87,16 +54,10 @@ var techMeta = []struct {
 	{"military", "Weapons", "Multiplies Mech and offensive unit combat ratings."},
 }
 
-// TechNodeCost returns the Neuro Core cost to advance from currentLvl
-// to currentLvl+1 — the same linear formula (level × 8) as
-// handlers.researchCost.
 func TechNodeCost(currentLvl int) int {
 	return currentLvl * 8
 }
 
-// BuildTechNodes turns a raw key→level map (as returned by the live
-// research_states row) into the ordered []TechNode the prompt and
-// Telegram renderer both use.
 func BuildTechNodes(levels map[string]int) []TechNode {
 	nodes := make([]TechNode, 0, len(techMeta))
 	for _, m := range techMeta {
@@ -112,8 +73,6 @@ func BuildTechNodes(levels map[string]int) []TechNode {
 	return nodes
 }
 
-// Snapshot is everything about one player's tech tree fed to the
-// model.
 type Snapshot struct {
 	EncampmentID string
 	Name         string
@@ -122,18 +81,9 @@ type Snapshot struct {
 	NeuroCores float64
 	Nodes      []TechNode
 
-	// RequestedGoal is what the player explicitly picked, if
-	// anything; empty means "infer it."
 	RequestedGoal Goal
 }
 
-// InferredGoal returns RequestedGoal if the player set one, otherwise
-// infers a reasonable default from the current tech spread: whichever
-// non-maxed node cluster is furthest behind the others gets
-// prioritized as "balanced" catch-up, unless every combat-adjacent
-// node (integrity/defense/military) is already ahead of
-// econ/production, in which case "economy" is inferred to avoid
-// recommending more of what's already ahead.
 func (s Snapshot) InferredGoal() Goal {
 	if s.RequestedGoal != "" {
 		return s.RequestedGoal
@@ -156,8 +106,6 @@ func (s Snapshot) InferredGoal() Goal {
 	combatAvg := float64(combatTotal) / float64(combatCount)
 	economyAvg := float64(economyTotal) / float64(economyCount)
 
-	// A meaningful (not noise-level) lead one way or the other
-	// nudges the inferred goal toward evening things out.
 	const driftThreshold = 2.0
 	switch {
 	case combatAvg-economyAvg >= driftThreshold:
@@ -169,7 +117,6 @@ func (s Snapshot) InferredGoal() Goal {
 	}
 }
 
-// PrioritizedNode is one step in the recommended research order.
 type PrioritizedNode struct {
 	Node         string `json:"node"`
 	TargetLevel  int    `json:"target_level"`
@@ -178,7 +125,6 @@ type PrioritizedNode struct {
 	ExpectedGain string `json:"expected_gain"`
 }
 
-// Recommendation is the Research Planner's structured output.
 type Recommendation struct {
 	Summary          string            `json:"summary"`
 	GoalUsed         string            `json:"goal_used"`
@@ -187,14 +133,8 @@ type Recommendation struct {
 	CoresAvailable   int               `json:"cores_available"`
 	Notes            string            `json:"notes"`
 
-	// FellBackToRawText is true when JSON parsing failed and Summary
-	// holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
-	// Truncated is true when the fallback happened because the
-	// model's response was cut off mid-object (almost always meaning
-	// MaxTokens was hit before the model finished). See ADR-016 in
-	// PROJECT_MASTER_PLAN.md.
-	Truncated bool
+	Truncated         bool
 }
 
 const SystemPrompt = `You are the AI Research Planner for a player's base in The Vagabond, a tick-based multiplayer survival/strategy game.
@@ -215,9 +155,6 @@ Rules:
 - If cores_available is less than cores_needed, say so plainly in notes rather than pretending the player can afford everything at once.
 - Keep summary to 2-3 sentences.`
 
-// BuildUserPrompt renders a Snapshot into the data block the model
-// reasons over. Sorted/stable iteration keeps output deterministic for
-// internal/ai's cache key hashing.
 func BuildUserPrompt(s Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "BASE: %q (Level %d, ID %s)\n\n", s.Name, s.Level, s.EncampmentID)
@@ -242,9 +179,6 @@ func BuildUserPrompt(s Snapshot) string {
 	return b.String()
 }
 
-// ParseRecommendation decodes the model's response text, tolerating a
-// markdown code fence the same way governor/fleetcommander/econadvisor
-// do.
 func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -256,8 +190,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 		return &rec
 	}
 
-	// See ADR-015: real providers occasionally leave a raw,
-	// unescaped newline/tab inside a string value.
 	repaired := ai.SanitizeJSONControlChars(candidate)
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
 		return &rec
@@ -266,9 +198,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
-// message. All fields are LLM-generated text and are escaped via
-// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
 	b.WriteString("🧪 " + ai.HTMLBold("AI RESEARCH PLANNER") + "\n\n")

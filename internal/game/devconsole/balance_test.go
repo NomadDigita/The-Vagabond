@@ -19,9 +19,6 @@ func sampleBalanceSnapshot() devconsole.BalanceSnapshot {
 }
 
 func TestBalanceSystemPrompt_WarnsAgainstCausalClaims(t *testing.T) {
-	// This is a load-bearing safety property of the whole feature: the
-	// model must be told explicitly not to state balance verdicts as
-	// fact from correlational data.
 	if !strings.Contains(devconsole.BalanceSystemPrompt, "CORRELATIONAL") {
 		t.Fatalf("expected BalanceSystemPrompt to explicitly warn that the data is correlational, not causal")
 	}
@@ -104,8 +101,6 @@ func TestParseBalanceRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
-// See ADR-016: a response cut off mid-object is distinguished from one
-// that never contained JSON at all.
 func TestParseBalanceRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Bombers show a striking pattern worth a closer look because their apparent win rate is high despite being rarely mobil`
 	rec := devconsole.ParseBalanceRecommendation(raw, "")
@@ -149,13 +144,6 @@ func TestBuildBalanceUserPrompt_NoRaidsPath(t *testing.T) {
 	}
 }
 
-// TestFormatBalanceForTelegram_RendersRealDataTable is the regression
-// test for the 2026-08-01 UI pass: the unit-usage table must be built
-// from Snapshot's real numbers, not from anything the model wrote, so
-// a made-up or mistranscribed AI figure can never end up looking like
-// ground truth. It also checks the zero-usage case renders as "—"
-// rather than a misleading literal 0% win rate (there's no rate to
-// speak of if the unit was never deployed).
 func TestFormatBalanceForTelegram_RendersRealDataTable(t *testing.T) {
 	snap := sampleBalanceSnapshot()
 	rec := &devconsole.BalanceRecommendation{
@@ -172,20 +160,11 @@ func TestFormatBalanceForTelegram_RendersRealDataTable(t *testing.T) {
 			t.Errorf("expected table to contain %q (from real Snapshot data), got: %s", want, out)
 		}
 	}
-	// wraiths was never deployed (RaidsUsedIn: 0) - must show "—", not "0",
-	// for its win rate, since a real 0% would misleadingly imply it lost
-	// every time it was used.
 	if !strings.Contains(out, "—") {
 		t.Errorf("expected a \"—\" placeholder for the never-deployed unit's win rate, got: %s", out)
 	}
 }
 
-// TestFormatBalanceForTelegram_CautionUsesExpandableQuote guards the
-// other half of the same UI pass: per-unit AI cautions render as a
-// collapsible blockquote rather than dumped inline, since they can run
-// long and this was previously a flat, unformatted wall of text (the
-// one AI Developer Console report the original HTML polish campaign
-// never reached).
 func TestFormatBalanceForTelegram_CautionUsesExpandableQuote(t *testing.T) {
 	rec := &devconsole.BalanceRecommendation{
 		Summary: "test",
@@ -202,10 +181,6 @@ func TestFormatBalanceForTelegram_CautionUsesExpandableQuote(t *testing.T) {
 	}
 }
 
-// TestFormatBalanceForTelegram_NilSnapshotOmitsTable makes sure the
-// table section is skipped cleanly (not a nil-pointer panic) when
-// Snapshot wasn't set - the case every hand-built test
-// BalanceRecommendation above exercises, since none of them set it.
 func TestFormatBalanceForTelegram_NilSnapshotOmitsTable(t *testing.T) {
 	rec := &devconsole.BalanceRecommendation{Summary: "test"}
 	out := devconsole.FormatBalanceForTelegram(rec)

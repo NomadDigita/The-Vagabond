@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// seedMerchantOffer inserts a live (unpurchased, unexpired) merchant
-// offer, returning its id.
 func seedMerchantOffer(t *testing.T, db *sql.DB, itemType string, qty int, price float64) string {
 	t.Helper()
 	var offerID string
@@ -20,11 +18,6 @@ func seedMerchantOffer(t *testing.T, db *sql.DB, itemType string, qty int, price
 	return offerID
 }
 
-// TestDoBuyMerchantOffer_PaysDollarsAndCreditsResource is the direct
-// test for RARE_WORLD_FEATURES_PLAN.md Phase 4.4: buying an offer
-// deducts exactly its price in dollars and credits exactly its
-// quantity of the resource (storage-cap clamped), with no seller
-// counterpart at all.
 func TestDoBuyMerchantOffer_PaysDollarsAndCreditsResource(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -48,7 +41,7 @@ func TestDoBuyMerchantOffer_PaysDollarsAndCreditsResource(t *testing.T) {
 	if metal != 100 {
 		t.Errorf("expected 100 metal credited, got %v", metal)
 	}
-	if dollars != 820 { // 1000 - 180
+	if dollars != 820 {
 		t.Errorf("expected 820 dollars remaining, got %v", dollars)
 	}
 
@@ -61,9 +54,6 @@ func TestDoBuyMerchantOffer_PaysDollarsAndCreditsResource(t *testing.T) {
 	}
 }
 
-// TestDoBuyMerchantOffer_InsufficientFundsFails covers the balance
-// check: a buyer without enough cash must not be charged or credited
-// anything.
 func TestDoBuyMerchantOffer_InsufficientFundsFails(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -85,9 +75,6 @@ func TestDoBuyMerchantOffer_InsufficientFundsFails(t *testing.T) {
 	}
 }
 
-// TestDoBuyMerchantOffer_AlreadyPurchasedFails covers race-safety: a
-// second purchase attempt against an already-bought offer must fail
-// cleanly rather than double-selling it.
 func TestDoBuyMerchantOffer_AlreadyPurchasedFails(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -116,9 +103,6 @@ func TestDoBuyMerchantOffer_AlreadyPurchasedFails(t *testing.T) {
 	}
 }
 
-// TestDoBuyMerchantOffer_ExpiredOfferFails confirms an offer past its
-// expiry can no longer be purchased, even if it hasn't been swept by
-// the expiry tick phase yet.
 func TestDoBuyMerchantOffer_ExpiredOfferFails(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

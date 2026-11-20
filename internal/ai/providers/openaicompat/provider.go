@@ -1,24 +1,3 @@
-// Package openaicompat implements ai.Provider once against the
-// OpenAI Chat Completions wire format
-// (POST {base_url}/chat/completions), which is also exposed, with
-// only cosmetic differences, by:
-//   - OpenAI itself            (https://api.openai.com/v1)
-//   - DeepSeek                 (https://api.deepseek.com/v1)
-//   - Alibaba Qwen / DashScope compatible mode
-//     (https://dashscope-intl.aliyuncs.com/compatible-mode/v1, or the
-//     mainland-China endpoint dashscope.aliyuncs.com/compatible-mode/v1)
-//   - xAI Grok                 (https://api.x.ai/v1)
-//   - A locally-run Ollama instance's OpenAI-compatible endpoint
-//     (http://<host>:11434/v1) — though internal/ai/providers/ollama
-//     has its own dedicated implementation using Ollama's native API,
-//     which supports a few Ollama-specific features this generic
-//     client does not.
-//
-// One implementation, four (or more) providers — each is just this
-// struct constructed with a different BaseURL/APIKey/DefaultModel/Name.
-// This directly satisfies the roadmap's "Support future providers like
-// OpenAI, ..., Qwen, Grok, DeepSeek, ..." requirement without writing
-// near-duplicate HTTP clients four times.
 package openaicompat
 
 import (
@@ -33,30 +12,16 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// Provider implements ai.Provider against any OpenAI-Chat-Completions-
-// compatible HTTP API.
 type Provider struct {
-	// ProviderName is what Name() returns — e.g. "openai", "deepseek",
-	// "qwen", "grok". Distinct from the underlying model name.
-	ProviderName string
-	// BaseURL has no trailing slash, e.g. "https://api.openai.com/v1".
-	BaseURL      string
-	APIKey       string
-	DefaultModel string
-	// SupportsJSONResponseFormat controls whether {"response_format":
-	// {"type":"json_object"}} is sent when CompletionRequest.JSONMode
-	// is true. All four target APIs above support it as of this
-	// writing, but the field exists so a future 5th OpenAI-compatible
-	// provider that doesn't can be registered without a code change —
-	// it will fall back to the same system-prompt-instruction approach
-	// internal/ai/providers/anthropic uses.
+	ProviderName               string
+	BaseURL                    string
+	APIKey                     string
+	DefaultModel               string
 	SupportsJSONResponseFormat bool
 
 	HTTPClient *http.Client
 }
 
-// New builds an OpenAI-compatible provider. apiKey may be empty;
-// Available() will correctly report false in that case.
 func New(providerName, baseURL, apiKey, defaultModel string, supportsJSONResponseFormat bool) *Provider {
 	return &Provider{
 		ProviderName:               providerName,
@@ -71,8 +36,6 @@ func New(providerName, baseURL, apiKey, defaultModel string, supportsJSONRespons
 func (p *Provider) Name() string    { return p.ProviderName }
 func (p *Provider) Available() bool { return p.APIKey != "" && p.BaseURL != "" }
 
-// wire types mirror the OpenAI Chat Completions request/response shape.
-
 type wireFunction struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
@@ -80,7 +43,7 @@ type wireFunction struct {
 }
 
 type wireTool struct {
-	Type     string       `json:"type"` // always "function"
+	Type     string       `json:"type"`
 	Function wireFunction `json:"function"`
 }
 
@@ -89,7 +52,7 @@ type wireToolCall struct {
 	Type     string `json:"type"`
 	Function struct {
 		Name      string `json:"name"`
-		Arguments string `json:"arguments"` // JSON-encoded string, per OpenAI's format
+		Arguments string `json:"arguments"`
 	} `json:"function"`
 }
 
@@ -110,16 +73,7 @@ type wireRequest struct {
 	MaxTokens      int                 `json:"max_tokens,omitempty"`
 	Temperature    float64             `json:"temperature,omitempty"`
 	ResponseFormat *wireResponseFormat `json:"response_format,omitempty"`
-	// EnableThinking is DashScope/Qwen-specific. Left as a pointer so
-	// it's omitted entirely for OpenAI/DeepSeek/Grok, which don't
-	// recognize the field. Qwen3 models default this to true, and
-	// the resulting reasoning tokens are drawn from the same
-	// max_tokens budget as the visible completion — this silently
-	// starves JSON-mode callers (Dev Console balance/weekly reports,
-	// advisors) of their MaxTokens before any visible text is
-	// written, producing output that looks truncated even though
-	// nothing is wrong with MaxTokens itself. See ADR-016/017.
-	EnableThinking *bool `json:"enable_thinking,omitempty"`
+	EnableThinking *bool               `json:"enable_thinking,omitempty"`
 }
 
 type wireChoice struct {
@@ -159,10 +113,6 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 	}
 
 	if p.ProviderName == "qwen" {
-		// DashScope's compatible-mode endpoint defaults enable_thinking
-		// to true for Qwen3 models. Force it off so reasoning tokens
-		// don't eat into MaxTokens before the visible JSON/text is
-		// written (see wireRequest.EnableThinking doc comment above).
 		noThinking := false
 		wr.EnableThinking = &noThinking
 	}
@@ -172,13 +122,6 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 		if p.SupportsJSONResponseFormat {
 			wr.ResponseFormat = &wireResponseFormat{Type: "json_object"}
 		}
-		// Belt-and-suspenders regardless of native support, exactly
-		// like the Anthropic provider does — costs nothing and
-		// tolerates a misconfigured SupportsJSONResponseFormat flag.
-		// Appended even when System was empty, so JSON mode is never
-		// silently dropped just because the caller had no system
-		// prompt of its own (a real bug caught by this package's own
-		// tests — see provider_test.go).
 		system = system + "\n\nRespond with a single valid JSON object and nothing else — no prose, no markdown fences."
 	}
 	if system != "" {
@@ -187,12 +130,6 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 	for _, m := range req.Messages {
 		role := string(m.Role)
 		if role == string(ai.RoleTool) {
-			// This generic client treats tool results as a labelled
-			// user turn for now, matching the same simplification (and
-			// same caveat — see ADR-006 in PROJECT_MASTER_PLAN.md) as
-			// internal/ai/providers/anthropic. A dedicated tool-result
-			// message type should be added to all providers together
-			// when a real tool-execution loop is built.
 			role = "user"
 		}
 		wr.Messages = append(wr.Messages, wireMessage{Role: role, Content: m.Content})
@@ -259,14 +196,6 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 	for _, tc := range choice.Message.ToolCalls {
 		var args map[string]any
 		if tc.Function.Arguments != "" {
-			// Tool-call arguments arrive as a JSON-encoded string per
-			// the OpenAI wire format, not a nested object — must be
-			// unmarshaled a second time. A malformed/partial arguments
-			// string (which happens if the model's output was
-			// truncated) is not treated as a fatal error: the tool
-			// call is still surfaced with an empty Input map so the
-			// caller can decide how to handle it, rather than losing
-			// the whole completion over one bad tool call.
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		}
 		resp.ToolCalls = append(resp.ToolCalls, ai.ToolCall{ID: tc.ID, Name: tc.Function.Name, Input: args})

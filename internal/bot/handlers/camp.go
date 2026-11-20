@@ -143,10 +143,6 @@ func (h *CampHandler) HandleStructuralUpgrades(c telebot.Context) error {
 	return sendPanelWithNav(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
-// defenseModule describes one Defense Grid structure. All of these ride on
-// the same generic `modules` table + HandleUpgradeCallback pipeline used by
-// tent/scrap_heap/generator, so adding a new turret type needs no new
-// schema or upgrade logic - just an entry here.
 type defenseModule struct {
 	moduleType string
 	emoji      string
@@ -164,7 +160,6 @@ var defenseGridModules = []defenseModule{
 	{"warehouse", "📦", "Warehouse", "Increases resource storage capacity."},
 }
 
-// HandleDefenseGridPanel renders the turret/defensive structure upgrade panel.
 func (h *CampHandler) HandleDefenseGridPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -197,9 +192,6 @@ func (h *CampHandler) HandleDefenseGridPanel(c telebot.Context) error {
 	return renderOrEdit(c, panelText, selector)
 }
 
-// infrastructureModules mirrors defenseGridModules but for economy/utility
-// buildings. Same generic modules table + HandleUpgradeCallback pipeline -
-// no new upgrade logic needed, just new type strings.
 var infrastructureModules = []defenseModule{
 	{"hangar", "🛬", "Hangar", "Increases maximum unit capacity (+200 per level)."},
 	{"radar", "📡", "Radar", "Improves early-warning intel and counter-espionage odds."},
@@ -214,7 +206,6 @@ var infrastructureModules = []defenseModule{
 	{"crystal_mine", "🔮", "Crystal Mine", "Passive Crystal generation every tick."},
 }
 
-// HandleInfrastructureGridPanel renders the economy/utility building panel.
 func (h *CampHandler) HandleInfrastructureGridPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -274,7 +265,6 @@ func (h *CampHandler) HandleActiveMining(c telebot.Context) error {
 
 	minerCost := ownedMiners * 500
 
-	// Retrieve User alerts subscription settings
 	var alertSubscribed bool
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(idle_miner_notifications, FALSE) FROM users WHERE telegram_id = $1", sender.ID).Scan(&alertSubscribed)
 
@@ -453,7 +443,6 @@ func (h *CampHandler) HandleMineCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing mining task queue."})
 	}
 
-	// Cinematic Drilling Telemetry animation loop
 	msg, err := c.Bot().Send(c.Recipient(), "⛏️ COUPLING EXTRACTION DRILLS...")
 	if err == nil {
 		time.Sleep(300 * time.Millisecond)
@@ -570,7 +559,6 @@ func (h *CampHandler) HandleMutationCallback(c telebot.Context) error {
 	queryUpdate := fmt.Sprintf("UPDATE mutation_states SET %s = %s + 1 WHERE encampment_id = $1", dbColumn, dbColumn)
 	_, _ = tx.ExecContext(ctx, queryUpdate, campID)
 
-	// Cinematic Cellular Splicing Animation
 	msg, errAnim := c.Bot().Send(c.Recipient(), "🧬 EXTRACTING CELLULAR NUCLEI FOR MUTATION...")
 	if errAnim == nil {
 		time.Sleep(350 * time.Millisecond)
@@ -616,7 +604,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 	var scrap float64
 	_ = tx.QueryRowContext(ctx, "SELECT scrap FROM resources WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&scrap)
 
-	// Phase 7 (item 12): per-continent world events.
 	var campRegion string
 	_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", campID).Scan(&campRegion)
 	activeWeather := world.ActiveEventFor(ctx, tx, campRegion)
@@ -640,7 +627,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = scrap - $1 WHERE encampment_id = $2", cost, campID)
 		_, _ = tx.ExecContext(ctx, "UPDATE encampments SET level = level + 1 WHERE id = $1", campID)
 
-		// Cinematic Construction Upgrade Loader
 		msg, errAnim := c.Bot().Send(c.Recipient(), "🏗️ INITIALIZING STRUCTURAL CONVERSION BLUEPRINTS...")
 		if errAnim == nil {
 			time.Sleep(350 * time.Millisecond)
@@ -706,7 +692,6 @@ func (h *CampHandler) HandleUpgradeCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Error writing building configurations."})
 	}
 
-	// Cinematic Construction Upgrade Loader
 	msg, errAnim := c.Bot().Send(c.Recipient(), "🏗️ INITIALIZING STRUCTURAL CONVERSION BLUEPRINTS...")
 	if errAnim == nil {
 		time.Sleep(350 * time.Millisecond)

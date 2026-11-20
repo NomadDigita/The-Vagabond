@@ -8,18 +8,12 @@ import (
 	"time"
 )
 
-// TestCheckForFactionDefeat_ZeroResourcesAndGarrisonMarksDefeated is the
-// direct test for RARE_WORLD_FEATURES_PLAN.md Phase 3.3: an AI faction
-// at (near-)zero resources AND (near-)zero garrison gets marked
-// defeated, with an epitaph generated, in a single pass.
 func TestCheckForFactionDefeat_ZeroResourcesAndGarrisonMarksDefeated(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
 	factionID := seedEncampment(t, db, 52001, "The Ashfall Remnant", 10, 10, "TestRegion", true)
-	// seedEncampment already leaves resources/workshop_inventory at
-	// their zero defaults - nothing further to seed for this case.
 
 	runTickPhase(t, db, func(tx *sql.Tx) error { return e.checkForFactionDefeat(ctx, tx) })
 
@@ -40,10 +34,6 @@ func TestCheckForFactionDefeat_ZeroResourcesAndGarrisonMarksDefeated(t *testing.
 	}
 }
 
-// TestCheckForFactionDefeat_MerelyPoorButGarrisonedIsSpared covers the
-// plan doc's explicit "both conditions, not just resources" rule: a
-// faction with an empty treasury but a live garrison must NOT be
-// marked defeated.
 func TestCheckForFactionDefeat_MerelyPoorButGarrisonedIsSpared(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -65,9 +55,6 @@ func TestCheckForFactionDefeat_MerelyPoorButGarrisonedIsSpared(t *testing.T) {
 	}
 }
 
-// TestCheckForFactionDefeat_UngarrisonedButRichIsSpared is the mirror
-// case: a faction with no garrison but real resources must also NOT be
-// marked defeated - "total defeat" means both, not either.
 func TestCheckForFactionDefeat_UngarrisonedButRichIsSpared(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -89,9 +76,6 @@ func TestCheckForFactionDefeat_UngarrisonedButRichIsSpared(t *testing.T) {
 	}
 }
 
-// TestCheckForFactionDefeat_IsIdempotent confirms a faction already
-// marked defeated is left alone on a second pass (no duplicate
-// notification, no epitaph regenerated/overwritten).
 func TestCheckForFactionDefeat_IsIdempotent(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -117,12 +101,6 @@ func TestCheckForFactionDefeat_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCheckForFactionDefeat_CreditsMostRecentAttackerAndPaysConqueror
-// covers the finishing-attacker lookup (3.3) and conqueror bonus: when
-// a real player's completed raid is the faction's most recent, the
-// epitaph should credit that player by name and they should receive
-// the conqueror bonus, storage-cap-clamped like every other
-// resource-gain path.
 func TestCheckForFactionDefeat_CreditsMostRecentAttackerAndPaysConqueror(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -154,21 +132,12 @@ func TestCheckForFactionDefeat_CreditsMostRecentAttackerAndPaysConqueror(t *test
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", attackerID).Scan(&attackerDollars); err != nil {
 		t.Fatalf("reading attacker resources: %v", err)
 	}
-	// conquerorBonusDollars (5000) + a one-time 2000 "conqueror"
-	// achievement bonus (NEXT_GENERATION_FEATURES_PLAN.md Phase 1,
-	// threshold 1 on progression.TriggerFactionDefeated, unlocked by
-	// this same finishing blow via checkForFactionDefeat's
-	// progression.RecordEvent call) = 7000.
 	wantDollars := conquerorBonusDollars + 2000
 	if attackerDollars != wantDollars {
 		t.Errorf("expected the attacker to receive %v (conqueror bonus + conqueror achievement), got %v", wantDollars, attackerDollars)
 	}
 }
 
-// TestCheckForFactionDefeat_NoRaidHistoryFallsBackToFlavor covers the
-// no-raid-history fallback: a faction that starved out with no combat
-// record at all should still get a valid epitaph (crediting "the
-// wasteland itself"), and no conqueror bonus should be paid to anyone.
 func TestCheckForFactionDefeat_NoRaidHistoryFallsBackToFlavor(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -187,10 +156,6 @@ func TestCheckForFactionDefeat_NoRaidHistoryFallsBackToFlavor(t *testing.T) {
 	}
 }
 
-// TestFactionDefeat_ExcludedFromAIPools confirms a defeated faction no
-// longer appears in the AI-decision, AI-jobs, or AI-growth pools (Phase
-// 3.4) - it stops scouting, raiding, growing, and running jobs, but
-// its row persists (permanent ruin, discoverable per 3.5).
 func TestFactionDefeat_ExcludedFromAIPools(t *testing.T) {
 	db := testDB(t)
 	factionID := seedEncampment(t, db, 52008, "The Graywater Syndicate", 17, 17, "TestRegion", true)
@@ -206,7 +171,6 @@ func TestFactionDefeat_ExcludedFromAIPools(t *testing.T) {
 		t.Error("expected a defeated faction to be excluded by the is_ai_faction=TRUE AND is_defeated=FALSE filter every AI pool query now uses")
 	}
 
-	// The row itself must still exist (permanent ruin).
 	var stillExists bool
 	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM encampments WHERE id = $1)", factionID).Scan(&stillExists); err != nil {
 		t.Fatalf("checking row existence: %v", err)
@@ -216,11 +180,6 @@ func TestFactionDefeat_ExcludedFromAIPools(t *testing.T) {
 	}
 }
 
-// TestResolveExplorationDiscovery_DefeatedFactionShowsRuinsAndEpitaph is
-// the direct test for RARE_WORLD_FEATURES_PLAN.md Phase 3.5: exploring
-// into a permanently-defeated AI faction's old territory should report
-// ruins and the generated epitaph instead of the ordinary "now
-// available in the Tactical Target Matrix" first-contact framing.
 func TestResolveExplorationDiscovery_DefeatedFactionShowsRuinsAndEpitaph(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -233,10 +192,6 @@ func TestResolveExplorationDiscovery_DefeatedFactionShowsRuinsAndEpitaph(t *test
 		t.Fatalf("marking target defeated: %v", err)
 	}
 
-	// ExplorationDiscoveryChance is ~92% at 0 scouts (not guaranteed
-	// 100%), so retry a handful of times rather than asserting on a
-	// single roll - matches roadencounter_test.go's runUntilCondition
-	// pattern for other probabilistic tick-phase tests in this package.
 	var message string
 	for attempt := 0; attempt < 10; attempt++ {
 		tx, err := db.BeginTx(ctx, nil)

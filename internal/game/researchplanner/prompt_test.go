@@ -87,8 +87,6 @@ func TestInferredGoal_ExplicitRequestWins(t *testing.T) {
 }
 
 func TestInferredGoal_CombatAheadInfersEconomy(t *testing.T) {
-	// Combat nodes (integrity/defense/military) far ahead of
-	// economy nodes (econ/production) → infer "economy" catch-up.
 	s := Snapshot{Nodes: BuildTechNodes(map[string]int{
 		"integrity": 10, "defense": 10, "military": 10,
 		"econ": 1, "production": 1,
@@ -186,10 +184,6 @@ func TestParseRecommendation_InvalidFallsBackToRawText(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// (hit MaxTokens) is now distinguished from one that never contained
-// JSON at all, so the player sees a more specific message.
-
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Prioritize integrity tech first, since your defenses`
 	rec := ParseRecommendation(raw, "")
@@ -212,12 +206,6 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 		t.Errorf("expected truncation-specific message, got: %s", out)
 	}
 }
-
-// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
-// production failure (confirmed live via Governor/Economy
-// Advisor/Fleet Commander) where prose or a raw newline around/inside
-// an otherwise-valid JSON object made json.Unmarshal fail outright,
-// sending the player a raw JSON dump instead of a formatted report.
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Focus raiding.", "recommended_order": []}` +

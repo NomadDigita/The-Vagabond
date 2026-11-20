@@ -11,9 +11,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// TestDisplayName_PrefixesAIFactions verifies the leaderboard's honest-
-// labeling rule from AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section
-// 1.2: AI factions get a 🤖 prefix, humans don't, and both are HTML-escaped.
 func TestDisplayName_PrefixesAIFactions(t *testing.T) {
 	if got := displayName("Rogue Drone Nest", true); got != "🤖 Rogue Drone Nest" {
 		t.Errorf("expected 🤖-prefixed name for an AI faction, got %q", got)
@@ -45,13 +42,6 @@ func rankingTestDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec(`TRUNCATE encampments, coordinates, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncating tables: %v", err)
 	}
-	// world_bosses (NEXT_GENERATION_FEATURES_PLAN.md Phase 8) has no FK
-	// to encampments/users/coordinates, so it survives the CASCADE
-	// truncate above untouched - reset it explicitly so tier-gating
-	// tests (boss_test.go) start from a clean slate instead of
-	// accumulating total_kills across the whole shared-DB test binary
-	// run. See roadencounter_test.go's testDB for the tick-package
-	// counterpart of this same fix.
 	if _, err := db.Exec(`DELETE FROM world_bosses WHERE name NOT IN ('The Rustlord', 'Scrap Titan', 'Apex Wraith', 'The Ravager')`); err != nil {
 		t.Fatalf("clearing extra world_bosses rows: %v", err)
 	}
@@ -81,9 +71,6 @@ func seedRankingEncampment(t *testing.T, db *sql.DB, telegramID int64, name stri
 	}
 }
 
-// TestTopPlayersQuery_IncludesAIFactionsRankedByScore proves the leaderboard
-// fix: an AI faction with a higher score than a human now outranks that
-// human in the "top players" query, instead of being filtered out.
 func TestTopPlayersQuery_IncludesAIFactionsRankedByScore(t *testing.T) {
 	db := rankingTestDB(t)
 

@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-// TestGrowAICivilizationsCreatesHeroOnFirstTick verifies every AI faction
-// gets exactly one Hero row, lazily created on its very first tick,
-// mirroring HandleHeroPanel's lazy-create behavior.
 func TestGrowAICivilizationsCreatesHeroOnFirstTick(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -43,10 +40,6 @@ func TestGrowAICivilizationsCreatesHeroOnFirstTick(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontDuplicateHero verifies repeated ticks never
-// create a second Hero row for the same faction, relying on the
-// heroes.encampment_id UNIQUE constraint plus the explicit existence
-// check.
 func TestGrowAICivilizationsWontDuplicateHero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -78,9 +71,6 @@ func TestGrowAICivilizationsWontDuplicateHero(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanTrainHero verifies an AI faction with ample
-// Scrap eventually trains its Hero (XP increases, and levels up once XP
-// crosses 100), mirroring HandleHeroCallback's "train" action exactly.
 func TestGrowAICivilizationsCanTrainHero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -117,9 +107,6 @@ func TestGrowAICivilizationsCanTrainHero(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanHealHero verifies an injured AI faction Hero
-// with ample Rations eventually gets healed, mirroring
-// HandleHeroCallback's "heal" action exactly.
 func TestGrowAICivilizationsCanHealHero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -131,8 +118,6 @@ func TestGrowAICivilizationsCanHealHero(t *testing.T) {
 		t.Fatalf("seeding rations: %v", err)
 	}
 
-	// Force-create the hero on tick 1, then seed a real injury before
-	// letting the heal roll have a chance to fire.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -171,11 +156,6 @@ func TestGrowAICivilizationsCanHealHero(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontHealAlreadyHealthyHero verifies an AI
-// faction never spends Rations healing a Hero that's already at
-// 'Perfect Health' - the one deliberate AI-side guard on top of the
-// human handler's exact mechanics (see the comment above the block in
-// engine.go for the reasoning).
 func TestGrowAICivilizationsWontHealAlreadyHealthyHero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

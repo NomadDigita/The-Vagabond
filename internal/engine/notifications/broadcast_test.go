@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// seedBroadcastEncampment creates a user + encampment + coordinate at a
-// unique (x, y) in region.
 func seedBroadcastEncampment(t *testing.T, db *sql.DB, telegramID int64, x, y int, region string, isAIFaction bool) {
 	t.Helper()
 	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", telegramID); err != nil {
@@ -28,8 +26,6 @@ func seedBroadcastEncampment(t *testing.T, db *sql.DB, telegramID int64, x, y in
 	}
 }
 
-// assertNotified checks whether userID has at least one queued
-// notification containing message.
 func assertNotified(t *testing.T, db *sql.DB, userID int64, want bool, message string) {
 	t.Helper()
 	var count int
@@ -48,8 +44,8 @@ func TestQueueToRegion_OnlyReachesRealPlayersInThatRegion(t *testing.T) {
 
 	seedBroadcastEncampment(t, db, 8001, 100, 100, "RegionA", false)
 	seedBroadcastEncampment(t, db, 8002, 101, 101, "RegionA", false)
-	seedBroadcastEncampment(t, db, 8003, 105, 105, "RegionB", false) // different region, must not receive
-	seedBroadcastEncampment(t, db, 8004, 102, 102, "RegionA", true)  // AI faction, must not receive
+	seedBroadcastEncampment(t, db, 8003, 105, 105, "RegionB", false)
+	seedBroadcastEncampment(t, db, 8004, 102, 102, "RegionA", true)
 
 	const message = "weather alert for TestQueueToRegion"
 	if err := QueueToRegion(ctx, db, "RegionA", message, "general"); err != nil {

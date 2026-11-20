@@ -94,7 +94,6 @@ def ao(cx, cy, rx, ry, op=0.4):
     return (f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="#000000" opacity="{op}" filter="url(#blur2)"/>')
 
 def dome(cx, cy, rx, ry):
-    # broad soft glass highlight across the upper portion of a shape
     return f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="url(#glassDome)"/>'
 
 def scratches(pts, color="#ffffff", op=0.14, w=0.9):

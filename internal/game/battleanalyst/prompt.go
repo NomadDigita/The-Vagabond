@@ -1,27 +1,3 @@
-// Package battleanalyst implements Phase F of the AI Systems Roadmap:
-// the AI Battle Analyst. Like governor, fleetcommander, econadvisor,
-// and researchplanner, this package is the seam where game state meets
-// ai.Service; internal/ai itself stays game-agnostic per ADR-001 in
-// PROJECT_MASTER_PLAN.md.
-//
-// This file has zero I/O so it can be unit tested directly. All
-// database access lives in analyst.go.
-//
-// Unlike Fleet Commander (Phase C), which is forward-looking — "should
-// I attack this specific target right now?" — Battle Analyst is
-// backward-looking: it reviews a player's accumulated combat record
-// across raids (as both attacker and defender) and arena battles, and
-// surfaces recurring patterns the player might not notice from
-// scrolling through individual battle reports one at a time.
-//
-// Scope note: this package deliberately does NOT analyze World Boss
-// engagements. See ADR-017 in PROJECT_MASTER_PLAN.md — a schema audit
-// done before writing this file (not assumed from an older session's
-// notes) confirmed world_boss_attacks rows are deleted once survivors
-// return home, and world_boss_contributions rows are deleted the
-// moment a boss is defeated. Neither table retains any history across
-// completed engagements, so there is nothing durable for this package
-// to read for World Bosses today.
 package battleanalyst
 
 import (
@@ -32,29 +8,19 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// RaidStats summarizes a player's completed raids from one side of the
-// fight (attacker or defender). "Apparent" outcomes are the same
-// stolen-resources heuristic fleetcommander.BuildCombatHistory already
-// uses (raids has no explicit outcome column) — see that package's
-// doc comment for why this is flagged as approximate.
 type RaidStats struct {
 	TotalRaids       int
 	ApparentWins     int
 	TotalLosses      int
 	AverageLosses    float64
-	TotalStolenValue float64 // attacker side only; always 0 for defender stats
+	TotalStolenValue float64
 }
 
-// ArenaStats summarizes a player's arena_battles rows, matched by
-// their current username (see analyst.go for the caveat this implies
-// about username changes).
 type ArenaStats struct {
 	Wins   int
 	Losses int
 }
 
-// Snapshot is everything about one player's combat record fed to the
-// model.
 type Snapshot struct {
 	EncampmentID string
 	Name         string
@@ -65,35 +31,22 @@ type Snapshot struct {
 	Arena      ArenaStats
 }
 
-// Pattern is one recurring observation the model identifies, in the
-// shape it's asked to return inside Recommendation.KeyPatterns.
 type Pattern struct {
 	Observation string `json:"observation"`
 	Evidence    string `json:"evidence"`
 	Suggestion  string `json:"suggestion"`
 }
 
-// Recommendation is the Battle Analyst's structured output. If the
-// model's response can't be parsed as JSON, ParseRecommendation falls
-// back to Summary=<raw text>, matching every other Phase B-J package.
 type Recommendation struct {
 	Summary          string    `json:"summary"`
 	KeyPatterns      []Pattern `json:"key_patterns"`
 	RecommendedFocus string    `json:"recommended_focus"`
 	Notes            string    `json:"notes"`
 
-	// FellBackToRawText is true when JSON parsing failed and Summary
-	// holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
-	// Truncated is true when the fallback happened because the
-	// model's response was cut off mid-object (almost always meaning
-	// MaxTokens was hit before the model finished). See ADR-016 in
-	// PROJECT_MASTER_PLAN.md.
-	Truncated bool
+	Truncated         bool
 }
 
-// SystemPrompt is the fixed instruction given to the model for every
-// Battle Analyst call.
 const SystemPrompt = `You are the AI Battle Analyst for a player in The Vagabond, a tick-based multiplayer survival/strategy game.
 
 Your job: review the player's accumulated combat record — raids they've launched as attacker, raids launched against them as defender, and arena battles — and identify recurring patterns the player might not notice from reading individual battle reports one at a time. You NEVER launch, retreat, or change anything yourself — you only analyze what already happened.
@@ -108,8 +61,6 @@ Rules:
 - If a side (attacker/defender/arena) has zero recorded battles, say so plainly in notes rather than fabricating a pattern for it.
 - Keep summary to 2-3 sentences.`
 
-// BuildUserPrompt renders a Snapshot into the data block the model
-// reasons over.
 func BuildUserPrompt(s Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "PLAYER BASE: %q (Level %d, ID %s)\n\n", s.Name, s.Level, s.EncampmentID)
@@ -147,8 +98,6 @@ func writeRaidStats(b *strings.Builder, stats RaidStats, isAttacker bool) {
 	}
 }
 
-// ParseRecommendation decodes the model's response text, tolerating a
-// markdown code fence the same way every other Phase B-J package does.
 func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -160,8 +109,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 		return &rec
 	}
 
-	// See ADR-015: real providers occasionally leave a raw,
-	// unescaped newline/tab inside a string value.
 	repaired := ai.SanitizeJSONControlChars(candidate)
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
 		return &rec
@@ -170,9 +117,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
-// message. All fields are LLM-generated text and are escaped via
-// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
 	b.WriteString("📊 " + ai.HTMLBold("AI BATTLE ANALYST") + "\n\n")

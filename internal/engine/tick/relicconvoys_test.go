@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// TestRelicConvoySpawn_OnlyOneActiveAtATime is the direct test for
-// RARE_WORLD_FEATURES_PLAN.md Phase 1.2's "at most one live at a time,
-// server-wide" rule - relicConvoySpawn must never create a second
-// convoy while one is already active, even at 100% roll odds.
 func TestRelicConvoySpawn_OnlyOneActiveAtATime(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -32,8 +28,6 @@ func TestRelicConvoySpawn_OnlyOneActiveAtATime(t *testing.T) {
 		t.Fatalf("expected exactly 1 active relic convoy after the first spawn phase, got %d", countAfterFirst)
 	}
 
-	// Run it again at the same 100% roll odds - the "already active"
-	// guard must prevent a second spawn.
 	runTickPhase(t, db, func(tx *sql.Tx) error { return e.relicConvoySpawn(ctx, tx) })
 
 	var countAfterSecond int
@@ -45,9 +39,6 @@ func TestRelicConvoySpawn_OnlyOneActiveAtATime(t *testing.T) {
 	}
 }
 
-// TestRelicConvoySpawn_NeverRollsWhenChanceIsZero confirms the roll
-// actually gates spawning - at 0% chance, no convoy should ever appear
-// even with no active convoy blocking it.
 func TestRelicConvoySpawn_NeverRollsWhenChanceIsZero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -70,10 +61,6 @@ func TestRelicConvoySpawn_NeverRollsWhenChanceIsZero(t *testing.T) {
 	}
 }
 
-// TestRelicConvoyExpire_ClearsOnlyUnclaimedExpiredConvoys covers Phase
-// 1.4: an unclaimed convoy past its expires_at is deleted, but a
-// claimed convoy (kept permanently for the Hall of Relics) and a
-// still-live unclaimed convoy are both left untouched.
 func TestRelicConvoyExpire_ClearsOnlyUnclaimedExpiredConvoys(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -88,21 +75,18 @@ func TestRelicConvoyExpire_ClearsOnlyUnclaimedExpiredConvoys(t *testing.T) {
 		t.Fatalf("seeding coordinate: %v", err)
 	}
 
-	// Expired + unclaimed -> should be deleted.
 	var expiredID string
 	if err := db.QueryRow(`
 		INSERT INTO relic_convoys (relic_name, coordinate_id, reward_dollars, expires_at)
 		VALUES ('Expired Relic', $1, 1000, CURRENT_TIMESTAMP - INTERVAL '1 minute') RETURNING id`, coordID).Scan(&expiredID); err != nil {
 		t.Fatalf("seeding expired convoy: %v", err)
 	}
-	// Expired + claimed -> must survive (permanent Hall of Relics history).
 	var claimedID string
 	if err := db.QueryRow(`
 		INSERT INTO relic_convoys (relic_name, coordinate_id, reward_dollars, expires_at, claimed_by, claimed_at)
 		VALUES ('Claimed Relic', $1, 2000, CURRENT_TIMESTAMP - INTERVAL '1 minute', $2, CURRENT_TIMESTAMP) RETURNING id`, coordID, winnerID).Scan(&claimedID); err != nil {
 		t.Fatalf("seeding claimed convoy: %v", err)
 	}
-	// Still live -> must survive.
 	var liveID string
 	if err := db.QueryRow(`
 		INSERT INTO relic_convoys (relic_name, coordinate_id, reward_dollars, expires_at)
@@ -127,11 +111,6 @@ func TestRelicConvoyExpire_ClearsOnlyUnclaimedExpiredConvoys(t *testing.T) {
 	}
 }
 
-// runTickPhase runs a single tick-phase function in its own committed
-// transaction - the non-probabilistic counterpart to
-// roadencounter_test.go's runUntilCondition, for phases this file's
-// tests drive deterministically (via the var-not-const roll-chance
-// override above) rather than by retrying a real random roll.
 func runTickPhase(t *testing.T, db *sql.DB, phase func(tx *sql.Tx) error) {
 	t.Helper()
 	ctx := context.Background()

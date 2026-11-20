@@ -10,12 +10,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// AchievementsHandler is the panel side of
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 1 - unlocking itself happens
-// automatically via internal/game/progression.RecordEvent, called from
-// every real action handler at its own completion point. This handler
-// only ever reads player_achievements and player_event_counts to
-// render progress; it never writes to them.
 type AchievementsHandler struct {
 	DB *sql.DB
 }
@@ -24,11 +18,6 @@ func NewAchievementsHandler(db *sql.DB) *AchievementsHandler {
 	return &AchievementsHandler{DB: db}
 }
 
-// HandleAchievementsPanel (/achievements) shows every achievement,
-// grouped by category, as a Rich Message <table> per category -
-// unlocked ones marked with a checkmark and their unlock date,
-// in-progress ones showing "current/threshold" against the player's
-// lifetime counter for that achievement's trigger.
 func (h *AchievementsHandler) HandleAchievementsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()

@@ -31,8 +31,6 @@ func (h *ChangelogHandler) IsAdmin(senderID int64) bool {
 	return false
 }
 
-// changelogPageSize matches the plan doc's "at least 5" instruction
-// literally - see FEEDBACK_CHANGELOG_NLP_PLAN.md milestone 2.
 const changelogPageSize = 5
 
 var changelogValidCategories = map[string]bool{"feature": true, "fix": true, "balance": true}
@@ -50,16 +48,6 @@ func changelogCategoryIcon(category string) string {
 	}
 }
 
-// doPublishChangelog is the testable core shared by the admin panel's
-// guided-input flow and (if ever needed) a direct call - matching this
-// session's doX convention. Stores the entry, then broadcasts it to
-// every real player via the already-built QueueToAllPlayers (see
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.2) - the actual
-// "dispatch it to users" half of the milestone 2 ask. Category
-// "general" (non-mutable): a release note is exactly the kind of thing
-// notifications/preferences.go's own contract says must never be
-// muteable, same reasoning as the scout-mission discovery-alert fix
-// earlier this session.
 func (h *ChangelogHandler) doPublishChangelog(ctx context.Context, category, title, body string) (string, error) {
 	category = strings.ToLower(strings.TrimSpace(category))
 	title = strings.TrimSpace(title)
@@ -86,10 +74,6 @@ func (h *ChangelogHandler) doPublishChangelog(ctx context.Context, category, tit
 		changelogCategoryIcon(category), htmlBold(strings.ToUpper(category)),
 		htmlBold(htmlEscape(title)), divider, htmlEscape(body))
 	if err := notifications.QueueToAllPlayers(ctx, h.DB, broadcast, "general"); err != nil {
-		// The entry is already saved - a broadcast failure shouldn't
-		// make the admin think publishing failed outright and retry,
-		// duplicating the entry. Surface it as a partial-success notice
-		// instead of a hard error.
 		return "📰 Changelog entry saved, but broadcasting to players failed - check logs. Players can still find it via /changelog.", err
 	}
 
@@ -104,13 +88,6 @@ type changelogEntry struct {
 	publishedAt time.Time
 }
 
-// fetchChangelogPage returns up to changelogPageSize entries for
-// userID: the oldest entries they haven't read yet, oldest-first, so a
-// player with a backlog catches up in chronological order instead of
-// landing mid-story. If they have no unread backlog at all, falls back
-// to the most recent entries instead (nothing to "catch up" on, so
-// most-recent is the useful default) - reported via the caughtUp
-// return value so the caller knows whether to mark anything as read.
 func (h *ChangelogHandler) fetchChangelogPage(ctx context.Context, userID int64) (entries []changelogEntry, caughtUp bool, err error) {
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT id, category, title, body, published_at
@@ -136,9 +113,6 @@ func (h *ChangelogHandler) fetchChangelogPage(ctx context.Context, userID int64)
 		return entries, false, nil
 	}
 
-	// Fully caught up - show the most recent entries instead, without
-	// touching changelog_reads (they're already read, nothing new to
-	// mark).
 	rows, err = h.DB.QueryContext(ctx, `
 		SELECT id, category, title, body, published_at
 		FROM changelog_entries
@@ -187,9 +161,6 @@ func renderChangelogText(entries []changelogEntry, caughtUp bool) string {
 	return strings.TrimSuffix(text, divider+"\n\n") + divider
 }
 
-// HandleChangelogPanel (/changelog, and a button) is the player-facing
-// entry point - shows the oldest unread entries first, marks them read,
-// and offers a "Show 5 more" button if a backlog remains.
 func (h *ChangelogHandler) HandleChangelogPanel(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -223,20 +194,11 @@ func (h *ChangelogHandler) HandleChangelogPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionProfile, keyboards.ProfileNavigation(), panelText, selector)
 }
 
-// HandleChangelogMoreCallback is the "Show 5 More" button - since
-// entries are marked read on view, the "next" oldest-unread batch is
-// just whatever fetchChangelogPage returns on a fresh call, no
-// offset/pagination state needed.
 func (h *ChangelogHandler) HandleChangelogMoreCallback(c telebot.Context) error {
 	_ = c.Respond()
 	return h.HandleChangelogPanel(c)
 }
 
-// HandlePublishChangelogPendingInput consumes an admin's guided-input
-// reply for publishing a changelog entry. Expected format: category on
-// the first line, title on the second, body on the rest - see
-// adminPromptFor's "changelog" case in admin.go for the prompt text
-// shown to the admin.
 func (h *ChangelogHandler) HandlePublishChangelogPendingInput(c telebot.Context) (string, error) {
 	lines := strings.SplitN(c.Text(), "\n", 3)
 	if len(lines) < 3 {

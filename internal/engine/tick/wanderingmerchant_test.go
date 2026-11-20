@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// TestWanderingMerchantSpawn_OnlyOneActiveBatchAtATime is the direct
-// test for RARE_WORLD_FEATURES_PLAN.md Phase 4.3: wanderingMerchantSpawn
-// must never create a second batch of offers while any offer from the
-// current visit is still active, even at 100% roll odds.
 func TestWanderingMerchantSpawn_OnlyOneActiveBatchAtATime(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -30,8 +26,6 @@ func TestWanderingMerchantSpawn_OnlyOneActiveBatchAtATime(t *testing.T) {
 		t.Fatalf("expected between %d and %d offers after the first spawn, got %d", merchantMinOffers, merchantMaxOffers, countAfterFirst)
 	}
 
-	// Run it again at the same 100% roll odds - the "already active"
-	// guard must prevent a second batch.
 	runTickPhase(t, db, func(tx *sql.Tx) error { return e.wanderingMerchantSpawn(ctx, tx) })
 
 	var countAfterSecond int
@@ -43,8 +37,6 @@ func TestWanderingMerchantSpawn_OnlyOneActiveBatchAtATime(t *testing.T) {
 	}
 }
 
-// TestWanderingMerchantSpawn_NeverRollsWhenChanceIsZero confirms the
-// roll actually gates spawning.
 func TestWanderingMerchantSpawn_NeverRollsWhenChanceIsZero(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -65,10 +57,6 @@ func TestWanderingMerchantSpawn_NeverRollsWhenChanceIsZero(t *testing.T) {
 	}
 }
 
-// TestWanderingMerchantExpire_ClearsOnlyUnpurchasedExpiredOffers covers
-// Phase 4.5: an unpurchased offer past its expires_at is deleted, but a
-// purchased offer (kept for its own transaction history) and a
-// still-live unpurchased offer are both left untouched.
 func TestWanderingMerchantExpire_ClearsOnlyUnpurchasedExpiredOffers(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

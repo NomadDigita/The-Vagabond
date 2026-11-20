@@ -16,9 +16,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// RelicConvoyHandler is the panel/claim side of RARE_WORLD_FEATURES_PLAN.md
-// Phase 1 - the tick.Engine side (spawn/expire) lives in
-// internal/engine/tick/relicconvoys.go.
 type RelicConvoyHandler struct {
 	DB *sql.DB
 }
@@ -27,11 +24,6 @@ func NewRelicConvoyHandler(db *sql.DB) *RelicConvoyHandler {
 	return &RelicConvoyHandler{DB: db}
 }
 
-// HandleRelicPanel (/relic) shows the current live relic convoy, if
-// any, with a Claim button, plus a Hall of Relics - the last 10 claimed
-// relics server-wide, rendered as a Rich Message table (same pattern
-// exchange.go's listings board and ranking.go's leaderboard use) so a
-// claimed relic has permanent, visible legacy.
 func (h *RelicConvoyHandler) HandleRelicPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -94,14 +86,6 @@ func (h *RelicConvoyHandler) HandleRelicPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
-// doClaimRelicConvoy is the testable core behind HandleClaimRelicCallback -
-// race-safe via SELECT ... FOR UPDATE, re-checking claimed_by IS NULL
-// AND not expired inside the same transaction as the claim, exactly
-// like doBuyListingQty's listing lock or HandleAttackBossCallback's
-// boss lock elsewhere in this codebase. On success, credits the
-// reward (storage-cap clamped) and - only if this is the encampment's
-// FIRST relic ever - sets a permanent relic_title that is never
-// overwritten by a later claim.
 func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, convoyID string) (string, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -137,8 +121,6 @@ func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, c
 		return "⚠️ Claim failed.", err
 	}
 
-	// The relic title is permanent and never overwritten - only the
-	// FIRST relic an encampment ever wins sets it (see plan doc 1.3).
 	var existingTitle sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT relic_title FROM encampments WHERE id = $1", myCampID).Scan(&existingTitle)
 	if !existingTitle.Valid || existingTitle.String == "" {
@@ -163,14 +145,6 @@ func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, c
 		_ = progression.RecordEvent(ctx, h.DB, userID, progression.TriggerRelicClaimed, 1)
 	}
 
-	// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: a claimed Relic Convoy
-	// is one of Epic/Legendary gear's only two sources (the other is a
-	// World Boss kill - engine.go's payoutWorldBossLoot). A generous
-	// roll here relative to the boss-kill rate is deliberate - claiming
-	// a relic convoy is already extremely rare server-wide (see
-	// relicconvoys.go's own ~1-per-11-hours spawn cadence), so this is
-	// the "natural second reward tier" the plan doc's own design
-	// describes, not a separate grind.
 	var gearMsg string
 	roll := rand.Float64()
 	switch {
@@ -187,8 +161,6 @@ func (h *RelicConvoyHandler) doClaimRelicConvoy(ctx context.Context, myCampID, c
 	return fmt.Sprintf("🏺✅ %s You claimed %s and %s in salvage!%s", htmlBold("RELIC SECURED!"), htmlEscape(relicName), htmlCode(fmt.Sprintf("$%.0f", reward)), gearMsg), nil
 }
 
-// HandleClaimRelicCallback fires when a player taps the Claim button on
-// HandleRelicPanel.
 func (h *RelicConvoyHandler) HandleClaimRelicCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

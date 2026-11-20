@@ -67,8 +67,6 @@ def add_star(canvas: Image.Image, x: int, y: int, size: int, intensity: float) -
 
 def make_heart(heart: Image.Image, frame: int, count: int) -> Image.Image:
     phase = math.tau * frame / count
-    # A slower full turn: the wide front view gets most of the animation time,
-    # but a clearly visible edge-on moment proves actual rotation in Telegram.
     width_factor = 0.22 + 0.90 * (abs(math.cos(phase)) ** 0.55)
     height = 232
     width = max(34, int(height * heart.width / heart.height * width_factor))
@@ -81,24 +79,17 @@ def frame_image(base: Image.Image, heart: Image.Image, frame: int, count: int) -
     canvas = base.copy()
     rotating = make_heart(heart, frame, count)
     position = ((512 - rotating.width) // 2, 120 - (rotating.height - 232) // 2)
-    # Short, bright inner bloom: it makes the turning heart readable without
-    # blurring every glass edge.
     bloom = rotating.filter(ImageFilter.GaussianBlur(9))
     bloom.putalpha(bloom.getchannel("A").point(lambda value: int(value * 0.34)))
     canvas.alpha_composite(bloom, position)
     canvas.alpha_composite(rotating, position)
-    # Refractive veil restores the impression that the heart is inside glass.
     veil = base.copy()
     veil.putalpha(veil.getchannel("A").point(lambda value: int(value * 0.13)))
     canvas.alpha_composite(veil)
     t = frame / count
-    # Larger, simpler stars survive the 100px target much more effectively
-    # than micro-facets.
     for x, y, size, phase in ((154, 132, 68, 0.00), (366, 192, 54, 0.31), (223, 285, 44, 0.64)):
         intensity = 0.18 + 0.82 * max(0.0, math.sin(math.tau * (t + phase))) ** 5
         add_star(canvas, x, y, size, intensity)
-    # A single moving highlight is deliberately broad and low-opacity: it
-    # reads as a curved glass reflection rather than raster shimmer.
     slash = Image.new("RGBA", canvas.size)
     draw = ImageDraw.Draw(slash)
     sweep = 95 + int(110 * (0.5 + 0.5 * math.sin(math.tau * t)))

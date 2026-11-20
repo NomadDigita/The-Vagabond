@@ -11,30 +11,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/roadcombat"
 )
 
-// evaluateRoadBaseEncounters completes MMO_WORLD_EVOLUTION_PLAN.md Phase 4
-// milestone 2 ("expeditions and bases"): discoverRouteContacts already
-// reveals a passive base to a passing expedition, but never forced a
-// decision - a column would just keep marching. This mirrors
-// evaluateRoadEncounters (expedition-vs-expedition) but against a
-// stationary base instead of a second moving column.
-//
-// AI factions were previously excluded here too (encampments.is_ai_faction
-// = FALSE), matching the same exclusion pattern AI-vs-AI raids and
-// scouting used to have - removed per
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4: "everything
-// should affect them too." An AI faction has never set a manual home-
-// defense garrison (workshop_inventory.garrisoned_soldiers/
-// garrisoned_mechs - nobody's played its Hero Commander panel), so
-// HandleRoadBaseEncounterCallback in combat_road_encounters.go gives it a
-// synthetic reserve computed from its live soldiers/mechs pool instead of
-// reading that always-zero column - see loadBaseGarrisonForce's doc
-// comment for the full reasoning on why a straight parity fix would have
-// been a free, uncontested win for any human passing by.
-//
-// Runs its own fresh query rather than reusing evaluateRoadEncounters'
-// in-memory movers slice, since that slice may already be stale within the
-// same tick (a raid resolved into an expedition-vs-expedition encounter
-// there is no longer eligible here).
 func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.attacker_id, ea.user_id, ea.name, r.state,
@@ -104,8 +80,6 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 			continue
 		}
 
-		// Cooldown: same shape as evaluateRoadEncounters, so a
-		// "Continue" past this base isn't immediately re-asked.
 		var recentCount int
 		_ = tx.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM road_base_encounters
@@ -129,19 +103,15 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 			RETURNING id`, m.raidID, baseID, baseX, baseY, deadline).Scan(&encounterID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				continue // another tick worker already created this pending encounter
+				continue
 			}
 			return fmt.Errorf("creating road-base encounter: %w", err)
 		}
 
-		// Freeze the column exactly like an expedition-vs-expedition
-		// encounter - no arrival/return processing until resolved.
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE raids SET movement_state = 'encounter_pending', active_base_encounter_id = $1, paused_at = CURRENT_TIMESTAMP
 			WHERE id = $2`, encounterID, m.raidID)
 
-		// Discovery is reciprocal even if nobody chooses to fight,
-		// matching discoverRouteContacts' existing behavior.
 		_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, m.attackerID, baseID)
 		_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, baseID, m.attackerID)
 
@@ -160,10 +130,6 @@ func (e *Engine) evaluateRoadBaseEncounters(ctx context.Context, tx *sql.Tx) err
 	return e.expireRoadBaseEncounters(ctx, tx)
 }
 
-// expireRoadBaseEncounters resolves any pending base encounter whose
-// response window has lapsed as a peaceful pass, and unfreezes the column
-// from exactly the position it paused at - same shape as
-// expireRoadEncounters/resolveEncounterAsContinue for expedition-vs-expedition.
 func (e *Engine) expireRoadBaseEncounters(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, raid_id FROM road_base_encounters

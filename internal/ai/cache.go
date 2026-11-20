@@ -8,18 +8,11 @@ import (
 	"time"
 )
 
-// Cache is the abstraction the Service uses to avoid re-paying for
-// identical AI calls. The default implementation is an in-process TTL
-// map; a future session may swap this for a Redis- or Postgres-backed
-// implementation without touching Service.
 type Cache interface {
 	Get(key string) (*CompletionResponse, bool)
 	Set(key string, resp *CompletionResponse, ttl time.Duration)
 }
 
-// CacheKey derives a stable cache key from the parts of a request that
-// affect its output. Feature and UserID are included so one player's
-// cached answer is never served to another under a different context.
 func CacheKey(req CompletionRequest) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
@@ -46,11 +39,6 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// InMemoryCache is a simple sync.Map-backed TTL cache. It leaks
-// expired-but-unread entries until they're next looked up (acceptable
-// for the request volumes expected from Telegram slash commands); a
-// background sweeper can be added later without changing the Cache
-// interface.
 type InMemoryCache struct {
 	mu      sync.RWMutex
 	entries map[string]cacheEntry

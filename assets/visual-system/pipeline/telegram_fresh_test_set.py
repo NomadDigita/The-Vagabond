@@ -300,9 +300,6 @@ def main() -> None:
     source = ASSET["path"]
     if not source.is_file():
         raise SystemExit(f"Missing source asset: {source}")
-    # Reject local naming mistakes before requesting any credential. This keeps
-    # a typo such as an overlong fresh-test slug from causing an unnecessary
-    # hidden-token prompt.
     if args.apply:
         if args.recover_set:
             validate_set_name(args.recover_set)

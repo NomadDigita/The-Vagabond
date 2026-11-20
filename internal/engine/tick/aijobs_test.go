@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// TestRunAIJobsCanGatherSunlight verifies an AI faction eventually gets
-// a free Electricity burst, gated by the same 30-minute cooldown a
-// human's own repeated taps would hit.
 func TestRunAIJobsCanGatherSunlight(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -42,8 +39,6 @@ func TestRunAIJobsCanGatherSunlight(t *testing.T) {
 		t.Fatal("expected the AI faction to gather sunlight at least once across 300 ticks")
 	}
 
-	// Immediately after gaining, the 30-minute cooldown should block a
-	// second gain even across many more ticks.
 	var afterFirst float64
 	_ = db.QueryRow("SELECT electricity FROM resources WHERE encampment_id = $1", faction).Scan(&afterFirst)
 	for i := 0; i < 100; i++ {
@@ -66,8 +61,6 @@ func TestRunAIJobsCanGatherSunlight(t *testing.T) {
 	}
 }
 
-// TestRunAIJobsCanRepairUnits verifies an AI faction with enough Scrap
-// eventually spends 200 for +5 Soldiers.
 func TestRunAIJobsCanRepairUnits(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -105,8 +98,6 @@ func TestRunAIJobsCanRepairUnits(t *testing.T) {
 	}
 }
 
-// TestRunAIJobsCanRushBuildingUpgrade verifies an AI faction with a
-// module mid-upgrade eventually spends Scrap to halve the remaining time.
 func TestRunAIJobsCanRushBuildingUpgrade(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -147,9 +138,6 @@ func TestRunAIJobsCanRushBuildingUpgrade(t *testing.T) {
 	}
 }
 
-// TestRunAIJobsCanUseHyperSpeed verifies an AI faction with an active
-// outbound raid eventually spends Electricity to halve its remaining
-// resolve time.
 func TestRunAIJobsCanUseHyperSpeed(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -191,8 +179,6 @@ func TestRunAIJobsCanUseHyperSpeed(t *testing.T) {
 	}
 }
 
-// TestRunAIJobsCanUseOrbitalManeuverAndExtendPlanet verifies the two
-// lower-probability actions still fire given enough ticks.
 func TestRunAIJobsCanUseOrbitalManeuverAndExtendPlanet(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

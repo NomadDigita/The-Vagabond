@@ -19,10 +19,8 @@ func NewFederationHandler(db *sql.DB) *FederationHandler {
 	return &FederationHandler{DB: db}
 }
 
-const federationFoundCost = 5000.0 // Crystal - founding a Federation is a major, deliberate milestone
+const federationFoundCost = 5000.0
 
-// getMyClan resolves the caller's clan membership and whether they're the
-// Leader, returning (clanID, isLeader, error).
 func (h *FederationHandler) getMyClan(ctx context.Context, userID int64) (string, bool, error) {
 	var clanID string
 	var leaderID int64
@@ -37,8 +35,6 @@ func (h *FederationHandler) getMyClan(ctx context.Context, userID int64) (string
 	return clanID, leaderID == userID, nil
 }
 
-// HandleFederationsPanel (/federations) lists all Federations ranked by
-// combined score of every member clan's members.
 func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -84,8 +80,6 @@ func (h *FederationHandler) HandleFederationsPanel(c telebot.Context) error {
 	return c.Send(panelText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// HandleMyFederationPanel (/federation) shows detailed info on the
-// caller's own Federation.
 func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -140,8 +134,6 @@ func (h *FederationHandler) HandleMyFederationPanel(c telebot.Context) error {
 	return c.Send(panelText, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// HandleFoundFederation (/fed_found [name]) - a Clan Leader founds a new
-// Federation, deliberately costly since it's a major milestone.
 func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -200,8 +192,6 @@ func (h *FederationHandler) HandleFoundFederation(c telebot.Context) error {
 		htmlBold("FEDERATION FOUNDED"), htmlEscape(name), htmlCode(fmt.Sprintf("/fed_join %s", htmlEscape(name)))), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// HandleJoinFederation (/fed_join [name]) - a Clan Leader brings their whole
-// Clan into an existing Federation.
 func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -222,9 +212,6 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 		return c.Send("❌ Only your Clan's Leader can join a Federation.", keyboards.EconomyNavigation())
 	}
 
-	// BUGFIX: HandleFoundFederation already blocks founding while in a
-	// Federation, but this had no equivalent check - a Leader could
-	// silently switch Federations without ever running /fed_leave.
 	var existingFed sql.NullString
 	_ = h.DB.QueryRowContext(ctx, "SELECT federation_id FROM clans WHERE id = $1", clanID).Scan(&existingFed)
 	if existingFed.Valid {
@@ -245,8 +232,6 @@ func (h *FederationHandler) HandleJoinFederation(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("🌐✅ Your Clan has joined \"%s\"!", htmlEscape(name)), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// HandleLeaveFederation (/fed_leave) - a Clan Leader removes their Clan from
-// its current Federation.
 func (h *FederationHandler) HandleLeaveFederation(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

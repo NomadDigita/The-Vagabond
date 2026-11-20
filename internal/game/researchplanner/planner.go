@@ -9,15 +9,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from every other Phase B+ scope.
 const MemoryScope = "research_planner"
 
-// ErrNoEncampment is returned when the calling player has no
-// registered base yet.
 var ErrNoEncampment = errors.New("researchplanner: player has no encampment")
 
-// Planner is the Phase E entry point.
 type Planner struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -27,8 +22,6 @@ func New(db *sql.DB, service *ai.Service) *Planner {
 	return &Planner{DB: db, AI: service}
 }
 
-// BuildSnapshot loads the current tech tree state of a player's base.
-// goal may be empty ("infer it") or one of ValidGoals().
 func (p *Planner) BuildSnapshot(ctx context.Context, userID int64, goal string) (*Snapshot, error) {
 	var s Snapshot
 	if err := p.DB.QueryRowContext(ctx, `SELECT id, name, level FROM encampments WHERE user_id = $1`, userID).
@@ -57,10 +50,6 @@ func (p *Planner) BuildSnapshot(ctx context.Context, userID int64, goal string) 
 	return &s, nil
 }
 
-// fetchResearchLevels reads all 7 tech levels for an encampment,
-// initializing the row if it doesn't exist yet — matching
-// handlers.ResearchHandler.fetchResearchLevels exactly so the two
-// never disagree about a brand-new player's starting state.
 func (p *Planner) fetchResearchLevels(ctx context.Context, campID string) (map[string]int, error) {
 	levels := make(map[string]int)
 
@@ -89,13 +78,6 @@ func (p *Planner) fetchResearchLevels(ctx context.Context, campID string) (map[s
 	return levels, nil
 }
 
-// Recommend produces a fresh AI recommendation for the given player's
-// research order. It stores both turns in ai_memory under MemoryScope.
-//
-// Advisory-only: nothing in this method spends a single Neuro Core or
-// otherwise mutates research_states/resources — that stays exclusively
-// in handlers.ResearchHandler.HandleUpgradeTechCallback, which the
-// player must tap themselves.
 func (p *Planner) Recommend(ctx context.Context, userID int64, goal string) (*Recommendation, error) {
 	snapshot, err := p.BuildSnapshot(ctx, userID, goal)
 	if err != nil {

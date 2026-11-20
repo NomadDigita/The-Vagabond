@@ -28,7 +28,6 @@ func NewListener(dbURL string, db *sql.DB, bot *telebot.Bot) *Listener {
 	}
 }
 
-// Start opens the database listener loop
 func (l *Listener) Start() {
 	reportEvent := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
@@ -36,7 +35,6 @@ func (l *Listener) Start() {
 		}
 	}
 
-	// Initialize the connection
 	l.pqListener = pq.NewListener(l.DBURL, 10*time.Second, time.Minute, reportEvent)
 	err := l.pqListener.Listen("realtime_notification_event")
 	if err != nil {
@@ -54,11 +52,6 @@ func (l *Listener) Start() {
 					return
 				}
 				if notification != nil {
-					// Same defense-in-depth as the tick engine and
-					// notification dispatcher: an unrecovered panic in
-					// dispatchNotification would otherwise kill this
-					// goroutine and silently stop all future realtime
-					// (LISTEN/NOTIFY-driven) push events forever.
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
@@ -77,13 +70,11 @@ func (l *Listener) Start() {
 	}()
 }
 
-// Stop shuts down the background listener safely
 func (l *Listener) Stop() {
 	close(l.stopChan)
 }
 
 func (l *Listener) dispatchNotification(notificationID string) {
-	// Defensive UUID length validation to prevent PostgreSQL "invalid input syntax for type uuid" aborts
 	if len(notificationID) != 36 {
 		log.Printf("Realtime dispatcher ignored malformed payload ID: %q (not a valid UUIDv4 format)", notificationID)
 		return
@@ -91,7 +82,6 @@ func (l *Listener) dispatchNotification(notificationID string) {
 
 	ctx := context.Background()
 
-	// Query message contents and mark as sent in a single transaction with FOR UPDATE row locks
 	tx, err := l.DB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Printf("Realtime dispatcher failed initiating transaction: %v", err)
@@ -115,10 +105,9 @@ func (l *Listener) dispatchNotification(notificationID string) {
 	}
 
 	if isSent {
-		return // Handled successfully by backup polling dispatcher
+		return
 	}
 
-	// Dispatch message immediately
 	targetUser := &telebot.User{ID: userID}
 	_, err = l.Bot.Send(targetUser, message)
 	if err != nil {
@@ -126,7 +115,6 @@ func (l *Listener) dispatchNotification(notificationID string) {
 		return
 	}
 
-	// Update sentinel status to true
 	_, err = tx.ExecContext(ctx, "UPDATE notifications SET is_sent = TRUE WHERE id = $1", notificationID)
 	if err != nil {
 		log.Printf("Realtime dispatcher failed executing DB writeback: %v", err)

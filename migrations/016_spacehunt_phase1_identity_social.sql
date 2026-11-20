@@ -1,11 +1,3 @@
--- ==============================================================================
--- THE VAGABOND — SPACEHUNT REVIVAL: PHASE 1 - IDENTITY & SOCIAL COMMANDS
--- (016_spacehunt_phase1_identity_social.sql)
--- DB Engine: PostgreSQL (Supabase)
---
--- NOTE: main.go already runs every statement below automatically on every
--- bot startup. This file is a readable reference only.
--- ==============================================================================
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_on_raid BOOLEAN DEFAULT TRUE;
@@ -33,5 +25,3 @@ CREATE TABLE IF NOT EXISTS feedback_submissions (
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Commands added: /description, /settings, /refer, /feedback, /msg,
--- /mute, /unmute, /mutes, /log, /stats, /units

@@ -51,9 +51,6 @@ func (h *CombatHandler) HandleTargetMatrix(c telebot.Context) error {
 	return h.HandleRaidBoard(c)
 }
 
-// raidBoardPageSize caps how many scouted targets the Tactical Target
-// Matrix shows per page. Fixed at 5 to match Doc-ID's discoveries
-// remaining meaning at every dashboard.
 const raidBoardPageSize = 5
 
 func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
@@ -61,15 +58,6 @@ func (h *CombatHandler) HandleRaidBoard(c telebot.Context) error {
 	return h.sendRaidBoardPage(c, 0, false)
 }
 
-// HandleRaidBoardPageCallback fires when a player taps "▶️ More" or
-// "◀️ Back" on the Tactical Target Matrix. 2026-08-06 fix: the matrix
-// used to hardcode `ORDER BY d.last_seen_at DESC LIMIT 5`, so a player
-// who had scouted more than 5 targets could never see anything past
-// their 5 most-recently-seen ones - older-but-still-valid discoveries
-// just silently vanished from the board with no way to reach them. This
-// paginates instead of truncating: page is carried in callback_data (see
-// cmd/bot/main.go's "\fraid_board_page" registration) and every older
-// discovery stays reachable via ◀️/▶️.
 func (h *CombatHandler) HandleRaidBoardPageCallback(c telebot.Context) error {
 	if len(c.Args()) < 1 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Invalid page."})
@@ -82,11 +70,6 @@ func (h *CombatHandler) HandleRaidBoardPageCallback(c telebot.Context) error {
 	return h.sendRaidBoardPage(c, page, true)
 }
 
-// sendRaidBoardPage renders one page of the Tactical Target Matrix.
-// edit controls whether the result replaces the message the callback
-// came from (page nav) or is sent fresh (initial /raid open) - matches
-// the c.Edit vs c.Send split used by every other paginated panel's
-// callback in this codebase.
 func (h *CombatHandler) sendRaidBoardPage(c telebot.Context, page int, edit bool) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -214,9 +197,6 @@ func (h *CombatHandler) sendRaidBoardPage(c telebot.Context, page int, edit bool
 		}
 	}
 
-	// Co-Op lobbies and world-contact sections are page-1-only - they
-	// aren't part of the paginated discovery list and would otherwise
-	// repeat identically on every page.
 	if page == 0 {
 		queryCoops := `
 		SELECT r.id, ea.name, ed.name, r.resolve_time 
@@ -255,11 +235,6 @@ func (h *CombatHandler) sendRaidBoardPage(c telebot.Context, page int, edit bool
 			WHERE observer_encampment_id = $1 AND target_key = $2
 		)`, myCampID, worldintel.RogueDroneNestKey).Scan(&knowsRogueNest)
 		if knowsRogueNest {
-			// The Rogue Drone Nest has no real encampments row and no real
-			// coordinate (see worldintel.RogueDroneNestKey's doc comment) -
-			// this used to hardcode a fake "(Sector 1,1)" here regardless of
-			// the player's actual position, which was just wrong information
-			// dressed up as a coordinate. Say what it actually is instead.
 			dashboard += "🤖 " + htmlBold("DISCOVERED AI CONTACT") + "\n" +
 				"👹 " + htmlBold("Rogue Drone Nest") + " " + htmlItalic("(a roaming threat, not a fixed outpost - no coordinates to report)") + "\n" +
 				"    💰 Loot Yield: Metal/Crystal/Scrap | ⏱️ Journey Time: Dynamic\n" +
@@ -313,9 +288,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
 
-	// Speedup/Abort per active expedition gets pulled into its own small
-	// colored message instead of unstyled buttons mixed into the shared
-	// HUD - see keyboards/styled.go.
 	type expeditionActionPrompt struct {
 		label string
 		speed keyboards.StyledBtn
@@ -392,19 +364,7 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		outboundText = "🛰️ OUTBOUND: Radar clean. No active offensive marching forces detected.\n\n"
 	}
 
-	// Road encounters: pending Attack/Continue decisions for any of this
-	// commander's moving expeditions. The queued notification only tells
-	// them to check here, since plain-text notifications can't carry
-	// inline buttons.
 	roadText := ""
-	// Road-contact Attack/Continue decisions get pulled out of the
-	// shared panel keyboard and sent as their own small, colored
-	// messages below (see the end of this function) - Telegram Bot
-	// API 9.4 (Feb 2026) added a real "style" field for exactly this
-	// kind of binary choice (danger/success/primary), and a genuine
-	// Attack-vs-Continue decision is the clearest possible case for it
-	// in this game. See keyboards/styled.go for how this works without
-	// needing a telebot.v3 library upgrade.
 	type roadContactPrompt struct {
 		text    string
 		attack  keyboards.StyledBtn
@@ -450,9 +410,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		}
 	}
 
-	// Road-vs-base encounters: same idea as the road_encounters block
-	// above, but the other side is a passive base rather than a second
-	// expedition, so only this commander gets an Attack/Continue choice.
 	queryRoadBase := `
 		SELECT rbe.id, r.id, e.name
 		FROM road_base_encounters rbe
@@ -530,15 +487,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 			var resolveTime time.Time
 			var isOutbound, resolved bool
 			if err := rowsSpies.Scan(&spyID, &eaName, &edName, &resolveTime, &isOutbound, &resolved); err == nil {
-				// Real remaining time until resolve_time - the same field
-				// resolvePendingEspionageMissions actually checks - not a
-				// fixed 120s window from created_at. The outbound scan and
-				// return-flight legs are both distance-based (see
-				// HandleSpyCallback's steps*1.5-minutes-per-tile formula)
-				// and can genuinely take many hours for a long-distance
-				// target; showing a fake 2-minute countdown made this look
-				// permanently stuck at "0s remaining" long before the real
-				// flight was anywhere close to done.
 				timeLeft := time.Until(resolveTime.UTC())
 				if timeLeft < 0 {
 					timeLeft = 0
@@ -621,11 +569,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 		return err
 	}
 
-	// Sent as separate messages, after the main HUD, rather than folded
-	// into its keyboard: each is its own real decision with a deadline,
-	// and Bot API 9.4's colored buttons only work via the raw send path
-	// (see keyboards/styled.go) - they can't be mixed into the same
-	// telebot.ReplyMarkup.Inline() call as the HUD's other buttons.
 	for _, rc := range roadContacts {
 		if err := keyboards.SendStyled(c, rc.text, [][]keyboards.StyledBtn{{rc.attack, rc.proceed}}); err != nil {
 			return err
@@ -639,15 +582,6 @@ func (h *CombatHandler) HandleExpeditionRadar(c telebot.Context) error {
 	return nil
 }
 
-// HandleAutoScanToggle toggles the SpaceHunt-style "Automatic Scan" job:
-// when enabled, the tick engine periodically runs a lightweight scan
-// against a random rival outpost and reports it directly to the player,
-// without them needing to manually run /scout each time.
-// HandleReconAICallback lets a player scout the Rogue Drone Nest before
-// committing forces. Since the nest's composition is deterministic (scaled
-// to the player's own level via content.RogueNestComposition), this
-// reveals EXACTLY what they'll face - no surprises, no wasted losses from
-// blind attacks, matching a real scouting report rather than a guess.
 func (h *CombatHandler) HandleReconAICallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -964,11 +898,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Already Neutralized."})
 	}
 
-	// Enforce the intercept window: the deadline is whatever resolve_time
-	// currently represents (outbound arrival before the tick engine flips
-	// `resolved`, or the return-to-orbit deadline afterward). Without this
-	// check the satellite stays interceptable indefinitely, even long
-	// after it should have safely landed.
 	if time.Now().UTC().After(resolveTime) {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Too Late: The intercept window has closed. The satellite is out of range."})
 	}
@@ -993,13 +922,6 @@ func (h *CombatHandler) HandleLaunchInterceptor(c telebot.Context) error {
 	var radarLvl int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'radar'", myCampID).Scan(&radarLvl)
 
-	// BUGFIX: the Observer unit's own flavor text promises it "boosts
-	// counter-espionage odds when stationed at home" (internal/game/content/units.go),
-	// but this formula never referenced observers at all - the unit's
-	// stated purpose was simply never wired in. 3% per Observer, capped
-	// at 30%, mirrors the same shape as its (separate, smaller) raid
-	// early-warning bonus elsewhere, just weighted higher since
-	// counter-espionage is this unit's actual primary purpose.
 	var observers int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(observers, 0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&observers)
 	observerBonus := math.Min(float64(observers)*0.03, 0.30)
@@ -1160,19 +1082,6 @@ func (h *CombatHandler) HandleLaunchRaidCallback(c telebot.Context) error {
 	return h.startRaidDraft(c, sender.ID, c.Args()[0])
 }
 
-// startRaidDraft is the shared core behind both HandleLaunchRaidCallback
-// (a player tapping a target in the /raid matrix) and
-// HandleNLPLaunchRaid below (a player typing "raid <name>") - 2026-08-05
-// extraction, so a natural-language launch opens the exact same,
-// already-proven draft/launch-style picker a manual tap does, rather
-// than duplicating this discovery-check-and-draft-reset logic. Nothing
-// is actually committed here: this only resets campaign_drafts'
-// composition to 0 for the given target and shows the customizer HUD -
-// the player still has to choose their own force composition and tap
-// one of the three Launch buttons (which go through the unmodified,
-// unchanged HandleConfirmHangarLaunchCallback) to actually send anyone
-// anywhere. That's the real confirmation step for this whole flow, by
-// design - deliberately not touched or reimplemented by this addition.
 func (h *CombatHandler) startRaidDraft(c telebot.Context, senderID int64, defenderCampID string) error {
 	ctx := context.Background()
 
@@ -1217,17 +1126,6 @@ func (h *CombatHandler) startRaidDraft(c telebot.Context, senderID int64, defend
 	return h.renderDraftCustomizerHUD(c, senderID, defenderCampID, myRegion)
 }
 
-// resolveRaidTargetByName searches the caller's OWN discovered targets
-// (never the global encampment table - see the same
-// encampment_discoveries scoping startRaidDraft re-checks below) for an
-// outpost name or commander first name matching a case-insensitive
-// partial match of name, for the natural-language "raid <name>"
-// command. Returns the matched target's encampment ID and a
-// human-readable label. If zero or more than one target matches, an
-// error is returned instead of guessing - raiding is a real commitment
-// of a player's own forces, so an ambiguous or unmatched name should
-// never silently resolve to some target the player didn't actually
-// mean.
 func (h *CombatHandler) resolveRaidTargetByName(ctx context.Context, myCampID, name string) (targetCampID, label string, err error) {
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT e.id, e.name, u.first_name
@@ -1261,15 +1159,6 @@ func (h *CombatHandler) resolveRaidTargetByName(ctx context.Context, myCampID, n
 	}
 }
 
-// HandleNLPLaunchRaid is nlpcommand.ActionLaunchRaid's execution
-// (2026-08-05 addition, by explicit project-owner request - "launching
-// raids on this particular person"). No Confirm/Cancel card, matching
-// the existing manual flow's own UX exactly: tapping a target in the
-// /raid matrix has never itself required a confirmation, because
-// nothing is committed by opening the draft board - see
-// startRaidDraft's doc comment for why the real confirmation is the
-// mandatory next step (choosing a composition and tapping Launch),
-// which this does not skip or shortcut.
 func (h *CombatHandler) HandleNLPLaunchRaid(c telebot.Context, targetName string) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -1305,9 +1194,6 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	queryInv := `SELECT COALESCE(soldiers, 0), COALESCE(mechs, 0), COALESCE(buggies, 0), COALESCE(ships, 0), COALESCE(jets, 0), COALESCE(nukes, 0), COALESCE(destroyers, 0), COALESCE(bombers, 0), COALESCE(battlecruisers, 0), COALESCE(deathstars, 0), COALESCE(liberators, 0), COALESCE(wraiths, 0), COALESCE(haulers, 0), COALESCE(tankers, 0), COALESCE(cargo_mk1, 0), COALESCE(cargo_mk2, 0), COALESCE(cargo_mk3, 0) FROM workshop_inventory WHERE encampment_id = $1`
 	_ = h.DB.QueryRowContext(ctx, queryInv, myCampID).Scan(&availSoldiers, &availMechs, &availBuggies, &availShips, &availJets, &availNukes, &availDestroyers, &availBombers, &availBC, &availDS, &availLiberators, &availWraiths, &availHaulers, &availTankers, &availCargoMk1, &availCargoMk2, &availCargoMk3)
 
-	// Manual Defense Garrison: units reserved as permanent home defense
-	// are never presented as draftable, protecting them from being sent
-	// out on a raid by accident.
 	var garrSoldiers, garrMechs int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1", myCampID).Scan(&garrSoldiers, &garrMechs)
 	availSoldiers -= garrSoldiers
@@ -1433,9 +1319,6 @@ func (h *CombatHandler) renderDraftCustomizerHUD(c telebot.Context, userID int64
 	return c.Send(panelText, selector)
 }
 
-// draftUnitAliases maps the free-text unit names a player might type in
-// "/add 10 soldiers" to the canonical unitType key used throughout the
-// draft adjustment logic (matching the "adjust_draft" callback's switch).
 var draftUnitAliases = map[string]string{
 	"soldier": "soldier", "soldiers": "soldier", "troop": "soldier", "troops": "soldier",
 	"mech": "mech", "mechs": "mech", "colossus": "mech",
@@ -1456,14 +1339,10 @@ var draftUnitAliases = map[string]string{
 	"cargo3": "cargo_mk3", "cargo_mk3": "cargo_mk3", "cargo iii": "cargo_mk3",
 }
 
-// HandleAddDraftCommand implements "/add <n> <unit>" - a bulk text
-// shortcut for the same draft adjustment the +/- buttons perform, so a
-// player doesn't have to tap a button 100 times to draft 100 Soldiers.
 func (h *CombatHandler) HandleAddDraftCommand(c telebot.Context) error {
 	return h.handleBulkDraftCommand(c, 1)
 }
 
-// HandleRemoveDraftCommand implements "/remove <n> <unit>".
 func (h *CombatHandler) HandleRemoveDraftCommand(c telebot.Context) error {
 	return h.handleBulkDraftCommand(c, -1)
 }
@@ -1519,7 +1398,6 @@ func (h *CombatHandler) handleBulkDraftCommand(c telebot.Context, sign int) erro
 	var avail int
 	_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(%s,0) FROM workshop_inventory WHERE encampment_id = $1 FOR UPDATE", invCol), campID).Scan(&avail)
 
-	// Manual Defense Garrison exclusion applies to soldiers/mechs here too.
 	if unitKey == "soldier" || unitKey == "mech" {
 		garrCol := "garrisoned_soldiers"
 		if unitKey == "mech" {
@@ -1574,16 +1452,6 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 	unitType := c.Args()[0]
 	action := c.Args()[1]
 
-	// BUGFIX: Nukes mobilized into a marching raid (nukes_mobilized on
-	// raid_forces) were never actually used anywhere in raid combat
-	// resolution - they contributed zero attack power, never appeared in
-	// the battle report, and always returned home 100% intact regardless
-	// of outcome. Nukes' real, fully-implemented mechanic is the
-	// Strategic Silo's direct-launch strike (HandleLaunchICBMCallback) -
-	// interception odds, Nuclear Shields, structural damage, the works.
-	// Rather than inventing a second, redundant "nuke joins the raid"
-	// mechanic from scratch, retire the dead one and point players at
-	// the real one.
 	if unitType == "nuke" {
 		return c.Respond(&telebot.CallbackResponse{ShowAlert: true, Text: "☢️ Nukes don't march with a raid - use the Strategic Silo (Combat menu) to launch one directly at a scouted target instead."})
 	}
@@ -1617,8 +1485,6 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Inventory records inaccessible."})
 	}
 
-	// Manual Defense Garrison: reserved units are excluded from the
-	// enforced draftable maximum, not just hidden from display.
 	var garrSoldiers, garrMechs int
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(garrisoned_soldiers,0), COALESCE(garrisoned_mechs,0) FROM workshop_inventory WHERE encampment_id = $1", campID).Scan(&garrSoldiers, &garrMechs)
 	availSoldiers -= garrSoldiers
@@ -1640,10 +1506,6 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ No active campaign parameters found."})
 	}
 
-	// Bulk selection: cycle the persisted step size (x1 -> x10 -> x100 ->
-	// MAX -> x1...) instead of adjusting a specific unit type. -1 is the
-	// MAX sentinel: inc/dec on any unit then jumps straight to its cap or
-	// to zero, rather than moving a fixed amount.
 	if unitType == "step" {
 		next := 1
 		switch stepSize {
@@ -1747,7 +1609,7 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		if currentVal >= maxVal {
 			return c.Respond(&telebot.CallbackResponse{Text: "❌ Insufficient Warehouse Stock: Deploy limit reached!"})
 		}
-		if stepSize == -1 { // MAX
+		if stepSize == -1 {
 			newVal = maxVal
 		} else {
 			newVal = currentVal + stepSize
@@ -1759,7 +1621,7 @@ func (h *CombatHandler) HandleAdjustDraftCallback(c telebot.Context) error {
 		if currentVal <= 0 {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Invalid Value: Already at 0."})
 		}
-		if stepSize == -1 { // MAX
+		if stepSize == -1 {
 			newVal = 0
 		} else {
 			newVal = currentVal - stepSize
@@ -1808,9 +1670,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		WHERE e.user_id = $1 FOR UPDATE`
 	_ = tx.QueryRowContext(ctx, queryMe, sender.ID).Scan(&myCampID, &myRegion, &myX, &myY)
 
-	// The target matrix is only a convenience view. Re-check discovery in
-	// the launch transaction so a stale or forged callback cannot turn a
-	// globally-known ID into an unauthorised raid.
 	var discovered bool
 	if defenderCampID == worldintel.RogueDroneNestKey {
 		_ = tx.QueryRowContext(ctx, `
@@ -1829,8 +1688,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		return c.Respond(&telebot.CallbackResponse{Text: "🧭 Target intelligence is no longer available. Explore or scout before launching."})
 	}
 
-	// Phase 7 (item 12): per-continent world events. myRegion (the
-	// attacker's own outpost region) is already resolved above.
 	activeWeather := world.ActiveEventFor(ctx, tx, myRegion)
 
 	var heroID sql.NullString
@@ -1881,9 +1738,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		defRegion = myRegion
 	}
 
-	// Phase 7 (item 11): diplomacy. An active alliance or non-aggression
-	// pact between the attacker's and defender's Clans blocks the raid
-	// outright, mirroring how clan membership already protects clanmates.
 	if !isAI {
 		var myClanID, defenderClanID sql.NullString
 		_ = tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1", sender.ID).Scan(&myClanID)
@@ -1998,13 +1852,6 @@ func (h *CombatHandler) HandleConfirmHangarLaunchCallback(c telebot.Context) err
 		err = tx.QueryRowContext(ctx, insertRaid, myCampID, defenderCampID, resolveTime, marchingMinutes, myX, myY, defX, defY, myRegion, defRegion, legStartedAt).Scan(&raidID)
 	}
 	if err != nil {
-		// Was previously `_ = ...Scan(...)`, silently discarded - which is
-		// exactly how the two-INSERT-statements-concatenated-with-no-
-		// separator bug this replaces went unnoticed: a guaranteed SQL
-		// syntax error aborted the transaction (rolling back the resource/
-		// unit deduction above), yet the code continued straight through
-		// to a "campaign launched" success animation regardless. See
-		// BUGS_AND_INCONSISTENCIES.md for the full writeup.
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Launch failed - your forces and supplies were not committed. Please try again."})
 	}
 
@@ -2133,10 +1980,6 @@ func (h *CombatHandler) HandleExpeditionActions(c telebot.Context) error {
 			newResolve = time.Now().UTC().Add(5 * time.Second)
 		}
 
-		// A speed-up pulls the arrival clock forward, so it must also pull
-		// the route-leg clock forward by the same 30 minutes, or the next
-		// route-progress read would still show the column crawling along
-		// its old (slower) pace while its actual arrival time jumped.
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1, leg_total_minutes = GREATEST(1.0, leg_total_minutes - 30.0) WHERE id = $2", newResolve, raidID)
 		_ = c.Respond(&telebot.CallbackResponse{Text: "⚡ Speed boosted! Arrival time advanced by 30 minutes."})
 		resolveTime = newResolve

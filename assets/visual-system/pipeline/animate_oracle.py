@@ -96,7 +96,6 @@ def rivet(x, y, r=2.4):
     return (f'<circle cx="{x}" cy="{y}" r="{r}" fill="url(#gold)" stroke="#3d2704" stroke-width="0.7"/>'
             f'<circle cx="{x-r*0.3}" cy="{y-r*0.3}" r="{r*0.25}" fill="#ffffff" opacity="0.85"/>')
 
-# Depth-parallax particles: (angle_deg, radius_from_center, size, depth 0=far..1=near)
 PARTICLES = [(20, 22, 0.55, 0.2), (95, 14, 0.4, 0.1), (200, 24, 0.7, 0.5),
              (260, 10, 0.5, 0.35), (150, 27, 0.9, 0.9), (330, 18, 0.6, 0.6)]
 
@@ -107,15 +106,11 @@ for i in range(N_FRAMES):
     t = i / N_FRAMES
     ang = 2 * math.pi * t
 
-    # Mechanical iris: blades rotate slowly, aperture breathes open/closed
     iris_rot = t * 60
     aperture = 8 + 2.5 * math.sin(ang * 1.3)
 
-    # Chromatic rim: cyan and magenta strokes offset in phase, simulating
-    # dispersion (the two colors visibly separate and re-converge)
     disp = 0.9 * math.sin(ang)
 
-    # Two independent refraction bands, different speeds/angles
     band1 = -70 + (t * 200) % 200
     band2 = -70 + ((t * 1.6 + 0.4) * 200) % 200
 
@@ -125,7 +120,7 @@ for i in range(N_FRAMES):
     for (pang, prad, psize, depth) in PARTICLES:
         orbit_ang = math.radians(pang + t * 360 * (0.3 + depth * 0.5))
         px = 50 + prad * math.cos(orbit_ang)
-        py = 44 + prad * 0.55 * math.sin(orbit_ang)  # flattened orbit, glass-interior feel
+        py = 44 + prad * 0.55 * math.sin(orbit_ang)
         op = 0.35 + 0.5 * depth * (0.5 + 0.5*math.sin(orbit_ang*2))
         blur = "blur1" if depth < 0.4 else ("blur05" if depth < 0.7 else "blurstar")
         particles_svg += star(px, py, psize * (0.7 + depth*0.5), max(0.15, op), "#e8d9ff", blur)

@@ -21,11 +21,6 @@ from pathlib import Path
 
 
 MAX_DURATION_SECONDS = 3.0
-# Telegram's public video-emoji page states 256KiB, but the live Bot API
-# rejected the 71.7KiB v10 Oracle as "file is too big" during custom-emoji set
-# creation on 2026-07-19. Keep a conservative 64KiB delivery gate until the
-# discrepancy is resolved upstream; callers can explicitly override it for
-# diagnostic work.
 DEFAULT_MAX_BYTES = 64 * 1024
 
 
@@ -78,8 +73,6 @@ def main() -> None:
         errors.append("audio stream present")
     if asset.stat().st_size > max_bytes:
         errors.append(f"file must be <= {max_bytes // 1024}KiB for this pipeline, got {asset.stat().st_size / 1024:.1f}KiB")
-    # ffprobe may describe VP9-alpha as yuv420p while exposing alpha_mode=1 in
-    # stream tags. Decode an RGBA frame instead of trusting either label.
     decoded = subprocess.run(
         [
             ffmpeg,

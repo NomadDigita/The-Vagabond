@@ -10,15 +10,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/content"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from governor.MemoryScope and any future scope.
 const MemoryScope = "fleet_commander"
 
-// ErrNoEncampment is returned when the calling player has no
-// registered base yet.
 var ErrNoEncampment = errors.New("fleetcommander: player has no encampment")
 
-// Commander is the Phase C entry point.
 type Commander struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -28,25 +23,6 @@ func New(db *sql.DB, service *ai.Service) *Commander {
 	return &Commander{DB: db, AI: service}
 }
 
-// unitColumns lists every workshop_inventory unit column this package
-// knows about. Kept as an explicit list (rather than SELECT *) so a
-// schema change is a deliberate one-line addition here, not a silent
-// behavior change.
-//
-// Verified complete against origin/main as of 2026-07-16 by
-// cross-referencing every CREATE TABLE column and every
-// `ALTER TABLE workshop_inventory ADD COLUMN` statement in
-// cmd/bot/main.go (28 real unit/garrison columns, excluding the
-// encampment_id foreign key) — not assumed. This list was previously
-// missing 10 columns added by the parallel SpaceHunt Phase 6/7 combat
-// work (liberators, wraiths, observers, guardians, piercing_missiles,
-// cargo_mk1/2/3, garrisoned_soldiers, garrisoned_mechs), which would
-// have made Fleet Commander silently blind to a meaningful slice of a
-// player's real fleet strength — not a crash (those columns are all
-// properly ALTER-guarded), but a real analysis-quality gap. Re-run the
-// cross-reference in PROJECT_MASTER_PLAN.md's audit notes before
-// trusting this list is still complete after any future SpaceHunt
-// combat-phase merge.
 var unitColumns = []string{
 	"soldiers", "drones", "jets", "mechs", "nukes", "buggies", "ships",
 	"haulers", "tankers", "rigs", "miners", "destroyers", "bombers",
@@ -55,7 +31,6 @@ var unitColumns = []string{
 	"cargo_mk1", "cargo_mk2", "cargo_mk3", "garrisoned_soldiers", "garrisoned_mechs",
 }
 
-// BuildOwnFleet loads the calling player's current unit composition.
 func (c *Commander) BuildOwnFleet(ctx context.Context, userID int64) (FleetComposition, string, int, error) {
 	var encampmentID string
 	var level int
@@ -74,8 +49,6 @@ func (c *Commander) BuildOwnFleet(ctx context.Context, userID int64) (FleetCompo
 	}
 	err := c.DB.QueryRowContext(ctx, query, encampmentID).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
-		// No workshop_inventory row yet (brand new player) — an empty
-		// fleet is a valid, meaningful state, not an error.
 		return FleetComposition{}, encampmentID, level, nil
 	}
 	if err != nil {
@@ -100,17 +73,6 @@ func columnList() string {
 	return out
 }
 
-// BuildRogueNestTarget produces a PvE TargetProfile scaled to the
-// player's level, reusing the exact same composition logic already
-// shown to players via /recon (internal/game/content.RogueNestComposition)
-// so the Fleet Commander's view of the nest never disagrees with what
-// the static recon report already told the player.
-//
-// As of the parallel SpaceHunt Phase 7 work ("Rogue AI scaling via
-// real player subsystems"), RogueNestForce carries a full per-turret
-// Defense Grid, Guardian/Observer garrison, research level, shields,
-// and an optional hero-equivalent superpower — all surfaced here, not
-// just the legacy flat TurretBonus.
 func BuildRogueNestTarget(campLevel int) TargetProfile {
 	nest := content.RogueNestComposition(campLevel)
 	return TargetProfile{
@@ -139,13 +101,6 @@ func BuildRogueNestTarget(campLevel int) TargetProfile {
 	}
 }
 
-// BuildCombatHistory summarizes the player's last N completed raids as
-// attacker. "Win" here is a heuristic — the raids table has no
-// explicit outcome column, so a raid is counted as an apparent win if
-// it yielded any stolen resources. This is flagged as a known
-// approximation in PROJECT_MASTER_PLAN.md; a future session should
-// replace it if/when the SpaceHunt combat branch adds an authoritative
-// outcome column.
 func (c *Commander) BuildCombatHistory(ctx context.Context, encampmentID string, limit int) (CombatHistorySummary, error) {
 	if limit <= 0 {
 		limit = 20
@@ -183,12 +138,6 @@ func (c *Commander) BuildCombatHistory(ctx context.Context, encampmentID string,
 	return summary, nil
 }
 
-// Recommend produces a fresh AI recommendation for a player's fleet
-// against the (currently PvE-only, see PROJECT_MASTER_PLAN.md) rogue
-// nest target. It stores both turns in ai_memory under MemoryScope.
-//
-// This is advisory-only: nothing in this method launches a raid or
-// moves any unit.
 func (c *Commander) Recommend(ctx context.Context, userID int64) (*Recommendation, error) {
 	ownFleet, encampmentID, level, err := c.BuildOwnFleet(ctx, userID)
 	if err != nil {

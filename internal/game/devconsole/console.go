@@ -10,33 +10,14 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from every other Phase B+ scope.
 const MemoryScope = "dev_console"
 
-// newPlayerListCap bounds how many individual new-player rows are
-// listed in the prompt (Snapshot.NewPlayerCount still carries the true
-// total even if the list itself is capped) — a signup surge shouldn't
-// blow up the prompt size or the token bill for a report that's meant
-// to be a summary, not a full export.
 const newPlayerListCap = 30
 
-// topPlayerCount mirrors the "Top Skilled"/ranking panel's usual
-// depth for a quick read, not the full 15 HandleRankingPanel shows —
-// this report is a summary, not a leaderboard reprint.
 const topPlayerCount = 5
 
-// recentNewsCap mirrors the same 5-headline depth
-// HandleWorldFeed/galaxyadvisor already use elsewhere, filtered to the
-// reporting window instead of an unconditional "last 5 ever".
 const recentNewsCap = 10
 
-// Console is the Phase J entry point. Unlike every other Phase B-I
-// package, this one has no per-player ErrNoEncampment-style guard —
-// it reports on the whole game, not one player's own state. Admin
-// gating happens in the handler layer (matching
-// internal/bot/handlers/admin.go's existing IsAdmin pattern), not
-// here — this package doesn't know about Telegram admin IDs at all.
 type Console struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -46,10 +27,6 @@ func New(db *sql.DB, service *ai.Service) *Console {
 	return &Console{DB: db, AI: service}
 }
 
-// windowSince returns the cutoff time for a "last N days" window,
-// defaulting to 7 if windowDays isn't positive. Shared by
-// BuildSnapshot and RunIntent so "last N days" always means the same
-// thing everywhere in this package.
 func windowSince(windowDays int) time.Time {
 	if windowDays <= 0 {
 		windowDays = 7
@@ -57,8 +34,6 @@ func windowSince(windowDays int) time.Time {
 	return time.Now().UTC().AddDate(0, 0, -windowDays)
 }
 
-// BuildSnapshot loads new-player signups, top players, active-user
-// count, and recent world news for the last windowDays days.
 func (co *Console) BuildSnapshot(ctx context.Context, windowDays int) (*Snapshot, error) {
 	if windowDays <= 0 {
 		windowDays = 7
@@ -100,11 +75,6 @@ func (co *Console) BuildSnapshot(ctx context.Context, windowDays int) (*Snapshot
 	return &s, nil
 }
 
-// buildNewPlayers reads the newPlayerListCap most recently registered
-// users in the window, LEFT JOINed to their encampment (if any) so a
-// player who registered but never finished onboarding still shows up
-// — with an honest "no outpost yet" home continent rather than being
-// silently dropped or guessed at.
 func (co *Console) buildNewPlayers(ctx context.Context, since time.Time) ([]NewPlayer, error) {
 	rows, err := co.DB.QueryContext(ctx, `
 		SELECT u.username, u.first_name, u.registered_at, COALESCE(c.region, '')
@@ -132,10 +102,6 @@ func (co *Console) buildNewPlayers(ctx context.Context, since time.Time) ([]NewP
 	return players, rows.Err()
 }
 
-// buildTopPlayers reuses the exact same scoring.ScoreExpr formula the
-// player-facing Global Ranking panel already uses, so this report's
-// "top players" never disagrees with what players themselves see on
-// /ranking.
 func (co *Console) buildTopPlayers(ctx context.Context) ([]TopPlayer, error) {
 	query := fmt.Sprintf(`
 		SELECT e.name, e.level, %s AS score
@@ -182,15 +148,6 @@ func (co *Console) buildRecentNews(ctx context.Context, since time.Time) ([]stri
 	return headlines, rows.Err()
 }
 
-// Recommend produces a fresh AI activity-report summary for the last
-// windowDays days. callerUserID is the requesting admin's Telegram ID,
-// used only for ai_memory attribution/cost tracking the same way
-// every other Phase B-I package attributes its calls — this method
-// itself does not check whether callerUserID is actually an admin
-// (see Console's doc comment for why that's the handler's job).
-//
-// Read-only: nothing in this method changes any player, setting, or
-// game data — it only reads and reports.
 func (co *Console) Recommend(ctx context.Context, callerUserID int64, windowDays int) (*Recommendation, error) {
 	snapshot, err := co.BuildSnapshot(ctx, windowDays)
 	if err != nil {

@@ -46,8 +46,6 @@ def key_green(path: Path) -> Image.Image:
         for x in range(width):
             red, green, blue, _ = pixels[x, y]
             dominance = green - max(red, blue)
-            # Pure key green has very high dominance. A narrow transition keeps
-            # bright rim pixels intact while removing antialiased green edges.
             alpha = max(0.0, min(1.0, (105.0 - dominance) / 42.0))
             desaturate = max(0.0, min(1.0, (dominance - 30.0) / 120.0))
             pixels[x, y] = (red, int(green * (1.0 - desaturate * 0.42)), blue, int(alpha * 255))
@@ -70,8 +68,6 @@ def star(size: int, opacity: float, phase: float) -> Image.Image:
 
 def scaled_heart(heart: Image.Image, frame: int, count: int) -> Image.Image:
     phase = math.tau * frame / count
-    # A full turn is represented by the changing width, highlight and a small
-    # tilt; at its narrowest it reads as a gemstone turning edge-on.
     width_factor = 0.24 + 0.76 * abs(math.cos(phase))
     tilt = math.degrees(math.sin(phase) * 0.13)
     brightness = 0.74 + 0.34 * (0.5 + 0.5 * math.cos(phase - 0.65))
@@ -90,8 +86,6 @@ def render_frame(base: Image.Image, heart: Image.Image, index: int, count: int) 
     position = ((512 - rotated.width) // 2, 144 - (rotated.height - 188) // 2)
     canvas.alpha_composite(glow, (position[0], position[1]))
     canvas.alpha_composite(rotated, position)
-    # Reapply a faint glass reflection veil after the heart, making it read as
-    # enclosed by the sphere instead of pasted on its front.
     veil = base.copy()
     veil.putalpha(veil.getchannel("A").point(lambda value: int(value * 0.18)))
     canvas.alpha_composite(veil)

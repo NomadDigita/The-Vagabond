@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// seedClanWithLeader creates a Clan led by telegramID (also seeding
-// that user's own encampment via seedExchangeCamp, so tests exercising
-// the dividend payout later have somewhere for cash to land), returning
-// the clan's id.
 func seedClanWithLeader(t *testing.T, db *sql.DB, telegramID int64, clanName, campName string) string {
 	t.Helper()
 	seedExchangeCamp(t, db, telegramID, campName, 0, 0, 0)
@@ -23,10 +19,6 @@ func seedClanWithLeader(t *testing.T, db *sql.DB, telegramID int64, clanName, ca
 	return clanID
 }
 
-// TestDoConstellationForm_CreatesForOwnClanAndInvitesOthers is the
-// direct test for RARE_WORLD_FEATURES_PLAN.md Phase 5.3 step 1: a Clan
-// Leader forming a Constellation should end up with a 'forming' row,
-// their own Clan already 'accepted', and every named Clan 'pending'.
 func TestDoConstellationForm_CreatesForOwnClanAndInvitesOthers(t *testing.T) {
 	db := rankingTestDB(t)
 
@@ -68,10 +60,6 @@ func TestDoConstellationForm_CreatesForOwnClanAndInvitesOthers(t *testing.T) {
 	}
 }
 
-// TestHandleConstellationRespondCallback_UnanimousAcceptActivates
-// covers Phase 5.3 step 3: once every invited Clan has accepted, the
-// Constellation should become 'active' with activated_at/expires_at
-// set.
 func TestHandleConstellationRespondCallback_UnanimousAcceptActivates(t *testing.T) {
 	db := rankingTestDB(t)
 	h := &ConstellationHandler{DB: db}
@@ -97,10 +85,6 @@ func TestHandleConstellationRespondCallback_UnanimousAcceptActivates(t *testing.
 		t.Fatalf("seeding invitee member: %v", err)
 	}
 
-	// Directly exercise the accept transition's SQL (the same
-	// statements HandleConstellationRespondCallback runs) rather than
-	// going through the telebot.Context-dependent handler, matching
-	// this package's doX-core testing convention elsewhere.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -135,12 +119,9 @@ func TestHandleConstellationRespondCallback_UnanimousAcceptActivates(t *testing.
 	if !activatedAt.Valid || !expiresAt.Valid {
 		t.Error("expected activated_at and expires_at to be set")
 	}
-	_ = h // handler constructed for consistency with other test files in this package; not called directly per the doX convention note above
+	_ = h
 }
 
-// TestConstellationReject_DissolvesWholeProposal covers Phase 5.3 point
-// 4: a single invited Clan rejecting must dissolve the entire forming
-// Constellation, not just remove that one Clan from it.
 func TestConstellationReject_DissolvesWholeProposal(t *testing.T) {
 	db := rankingTestDB(t)
 
@@ -164,7 +145,6 @@ func TestConstellationReject_DissolvesWholeProposal(t *testing.T) {
 		t.Fatalf("seeding invitee member: %v", err)
 	}
 
-	// Mirror HandleConstellationRespondCallback's reject branch.
 	if _, err := db.Exec("UPDATE constellations SET status = 'dissolved' WHERE id = $1", constellationID); err != nil {
 		t.Fatalf("dissolving: %v", err)
 	}

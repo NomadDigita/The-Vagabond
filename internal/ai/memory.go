@@ -5,26 +5,12 @@ import (
 	"database/sql"
 )
 
-// MemoryStore persists short conversational history per (user, scope)
-// so a follow-up call to the same AI feature has continuity without
-// the caller re-assembling context by hand. "Scope" separates
-// unrelated conversations for the same player, e.g. "fleet_commander"
-// vs "npc:trader_rell", so memory never bleeds across features or NPCs.
-//
-// This is deliberately a thin, generic layer: Phase I (NPC
-// Intelligence) and Phase G (Guild Assistant) will likely want richer,
-// summarized long-term memory. That should be built as a decorator
-// around this interface (e.g. a SummarizingMemoryStore that
-// periodically compacts old rows via a Provider call), not by changing
-// this interface's contract.
 type MemoryStore interface {
 	Append(ctx context.Context, userID int64, scope string, msg Message) error
 	Recent(ctx context.Context, userID int64, scope string, limit int) ([]Message, error)
 	Clear(ctx context.Context, userID int64, scope string) error
 }
 
-// PostgresMemoryStore implements MemoryStore against the ai_memory
-// table created by migrations/020_vagabond_ai_foundation.sql.
 type PostgresMemoryStore struct {
 	DB *sql.DB
 }

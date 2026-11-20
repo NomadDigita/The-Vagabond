@@ -72,9 +72,6 @@ func TestParseResponse_MatchesKnownToolCall(t *testing.T) {
 	}
 }
 
-// TestParseResponse_BarterListing covers the market's extension beyond
-// cash-only listings: "list 200k scrap for 40k metal" should parse to
-// ask_type="metal", not force a dollar price.
 func TestParseResponse_BarterListing(t *testing.T) {
 	resp := &ai.CompletionResponse{
 		ToolCalls: []ai.ToolCall{
@@ -96,9 +93,6 @@ func TestParseResponse_BarterListing(t *testing.T) {
 	}
 }
 
-// TestParseResponse_BuyMarketItem covers the 2026-08-05 addition:
-// "buy 200 metal for $500" should parse to ActionBuyMarketItem with
-// min_quantity/max_dollars, not be confused with list_market_item.
 func TestParseResponse_BuyMarketItem(t *testing.T) {
 	resp := &ai.CompletionResponse{
 		ToolCalls: []ai.ToolCall{
@@ -125,11 +119,6 @@ func TestParseResponse_BuyMarketItem(t *testing.T) {
 	}
 }
 
-// TestParseResponse_LaunchRaid covers the 2026-08-05 addition:
-// "raid Lotus Dominion" should parse to ActionLaunchRaid with
-// target_name, and must NOT require confirmation - the card/confirm
-// step lives inside the existing draft-board UI this jumps to, not
-// here (see ActionLaunchRaid's doc comment in prompt.go).
 func TestParseResponse_LaunchRaid(t *testing.T) {
 	resp := &ai.CompletionResponse{
 		ToolCalls: []ai.ToolCall{
@@ -171,9 +160,6 @@ func TestToolDefinitions_ListMarketItemRequiresAskTypeAndQuantity(t *testing.T) 
 				t.Errorf("expected list_market_item to require %q", field)
 			}
 		}
-		// The old dollars-only field name should be gone entirely -
-		// this tool now expresses cash via ask_type="dollars" instead
-		// of a dedicated price field.
 		if _, ok := d.InputSchema["properties"].(map[string]any)["price"]; ok {
 			t.Error("expected the old 'price' field to be removed in favor of ask_type/ask_quantity")
 		}

@@ -59,14 +59,10 @@ func seedPrestigePlayer(t *testing.T, db *sql.DB, userID int64, campLevel int) s
 	return campID
 }
 
-// TestCheckEligibility_RequiresBothCampLevelAndAllResearchTracks is
-// the direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 4's
-// eligibility gate: both camp level AND every one of the 7 research
-// tracks must meet their requirement.
 func TestCheckEligibility_RequiresBothCampLevelAndAllResearchTracks(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
-	campID := seedPrestigePlayer(t, db, 100001, 10) // below campLevelRequirement (25)
+	campID := seedPrestigePlayer(t, db, 100001, 10)
 
 	result, err := CheckEligibility(ctx, db, campID)
 	if err != nil {
@@ -79,8 +75,6 @@ func TestCheckEligibility_RequiresBothCampLevelAndAllResearchTracks(t *testing.T
 		t.Error("expected a non-empty Missing breakdown")
 	}
 
-	// Raise camp level but leave research at the default level 1 -
-	// still ineligible.
 	if _, err := db.Exec("UPDATE encampments SET level = 25 WHERE id = $1", campID); err != nil {
 		t.Fatalf("raising camp level: %v", err)
 	}
@@ -92,7 +86,6 @@ func TestCheckEligibility_RequiresBothCampLevelAndAllResearchTracks(t *testing.T
 		t.Error("expected the camp to still be ineligible with research tracks at level 1")
 	}
 
-	// Raise every research track to the requirement - now eligible.
 	if _, err := db.Exec(`
 		INSERT INTO research_states (encampment_id, econ_tech_lvl, production_tech_lvl, integrity_tech_lvl, defense_tech_lvl, intel_tech_lvl, speed_tech_lvl, military_tech_lvl)
 		VALUES ($1, 20, 20, 20, 20, 20, 20, 20)
@@ -108,10 +101,6 @@ func TestCheckEligibility_RequiresBothCampLevelAndAllResearchTracks(t *testing.T
 	}
 }
 
-// TestDoPrestige_ResetsEconomyAndGrantsPermanentBonus is the direct
-// test for the actual reset: camp level, buildings, research, and
-// resources all reset, prestige_level increments, and
-// prestige_bonus_pct grows by exactly prestigeBonusPctPerLevel.
 func TestDoPrestige_ResetsEconomyAndGrantsPermanentBonus(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -169,10 +158,6 @@ func TestDoPrestige_ResetsEconomyAndGrantsPermanentBonus(t *testing.T) {
 	}
 }
 
-// TestDoPrestige_RejectsIneligibleCamp confirms DoPrestige refuses to
-// run (and changes nothing) for a camp that doesn't meet the
-// eligibility gate - the panel already hides the button, but the core
-// function itself must not trust that alone.
 func TestDoPrestige_RejectsIneligibleCamp(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -189,10 +174,6 @@ func TestDoPrestige_RejectsIneligibleCamp(t *testing.T) {
 	}
 }
 
-// TestDoPrestige_StacksAcrossMultiplePrestiges confirms
-// prestige_bonus_pct accumulates (not resets) across repeated
-// Prestige cycles - "stacking forever" is the whole point of the
-// mechanic.
 func TestDoPrestige_StacksAcrossMultiplePrestiges(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -207,7 +188,6 @@ func TestDoPrestige_StacksAcrossMultiplePrestiges(t *testing.T) {
 		t.Fatalf("first DoPrestige: unexpected error: %v", err)
 	}
 
-	// Raise the camp back to eligibility for a second Prestige cycle.
 	if _, err := db.Exec("UPDATE encampments SET level = 25 WHERE id = $1", campID); err != nil {
 		t.Fatalf("re-raising camp level: %v", err)
 	}

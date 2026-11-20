@@ -119,8 +119,6 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Your continent is currently experiencing an EMP burst which has disabled all automat`
 	rec := galaxyadvisor.ParseRecommendation(raw, "")

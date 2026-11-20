@@ -41,7 +41,6 @@ type ActiveAgent struct {
 	SynapticLvl  int
 }
 
-// RunAgentPass executes automation logic for all active agents inside the transaction
 func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT t.user_id, t.mode, e.id, e.name, 
@@ -80,12 +79,8 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, a := range agents {
-		// Calculate fuel deductions incorporating Science Tech and Biological Mutations
-		// Base upkeep and floor tuned 2026-07-26 per Asiwaju's balance
-		// call: automation should cost real electricity even at max tech
-		// investment, not trail off to a token fee.
 		upkeepReduction := (float64(a.EconTechLvl-1) * 0.15) + (float64(a.SynapticLvl-1) * 0.10)
-		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.40) // Floor: even maxed tech still pays 40% of base upkeep
+		upkeepMultiplier := math.Max(1.0-upkeepReduction, 0.40)
 		upkeepEnergy := 5.0 * upkeepMultiplier
 
 		if a.Electricity < upkeepEnergy {
@@ -120,10 +115,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector] executed action for outpost: %s (+5.0 Scrap, +2.0 Rations capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_omega":
-			// Autopilot Industrial mode (Metal, Hydrogen). Former separate
-			// Iron/Oil gains are now folded directly into Metal.
-			// Same Surplus Preservation cap rule as `collector`: no
-			// further passive gain once a resource is at/above cap.
 			newMetal, _ := storagecap.Clamp(a.Metal, 33.00, storageCap)
 			newHydrogen, _ := storagecap.Clamp(a.Hydrogen, 5.00, storageCap)
 
@@ -139,10 +130,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			log.Printf("Agent [Collector Ω] executed resource extraction pass for outpost: %s (capped at %.0f)", a.CampName, storageCap)
 
 		case "collector_precious":
-			// Autopilot Precious mode (Crystal, Dollars, Neuro Cores).
-			// Former separate Silver/Gold/Diamond gains are now folded
-			// directly into Crystal. Same cap rule as the other
-			// collector modes.
 			newCrystal, _ := storagecap.Clamp(a.Crystal, 8.10, storageCap)
 			newDollars, _ := storagecap.Clamp(a.Dollars, 2.00, storageCap)
 			newNeuro, _ := storagecap.Clamp(a.NeuroCores, 1.00, storageCap)
@@ -166,11 +153,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 				continue
 			}
 
-			// Same "Module levels cannot exceed your Outpost Core level"
-			// rule enforced on the manual upgrade path (camp.go
-			// HandleUpgradeCallback: `currentLvl >= campLvl` is blocked).
-			// Only consider modules still below that cap so the agent
-			// can't auto-build past what a manual upgrade would allow.
 			queryEligible := `
 				SELECT type, level 
 				FROM modules 
@@ -184,9 +166,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			err = tx.QueryRowContext(ctx, queryEligible, a.CampID, a.CampLvl).Scan(&modType, &lvl)
 			if err != nil {
 				if err == sql.ErrNoRows {
-					// Either no modules exist yet, or every module is
-					// already capped at the Outpost Core level. Seed a
-					// starter tent only if nothing exists at all.
 					var anyModule bool
 					_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1)", a.CampID).Scan(&anyModule)
 					if !anyModule {
@@ -230,13 +209,6 @@ func (p *Processor) RunAgentPass(ctx context.Context, tx *sql.Tx) error {
 			var rations, metal float64
 			_ = tx.QueryRowContext(ctx, "SELECT rations, metal FROM resources WHERE encampment_id = $1", a.CampID).Scan(&rations, &metal)
 
-			// Same Hangar capacity rule enforced on the manual Recruit
-			// Soldier path (factory.go HandleCraftItemCallback):
-			// maxCapacity = 500 + hangarLvl*200 (10x pass on the original
-			// 50 + hangarLvl*20 - level 1 now holds 700 instead of 70,
-			// level 2 holds 900 instead of 90, etc.), blocked once
-			// totalUnits hits that cap. The agent must not be able to
-			// auto-recruit past what a manual recruit would allow.
 			var hangarLvl int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'hangar'", a.CampID).Scan(&hangarLvl)
 			maxCapacity := 500 + hangarLvl*200

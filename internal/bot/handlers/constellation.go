@@ -13,26 +13,8 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// RARE_WORLD_FEATURES_PLAN.md Phase 5: Constellation Alliances.
-//
-// A rare, temporary, N-ary cross-clan structure sitting above the
-// existing pairwise clan_diplomacy pacts (diplomacy.go). See the plan
-// doc's section 5.1 for why this needed its own header+membership
-// table pair (constellations/constellation_members) rather than
-// reusing clan_diplomacy's pairwise shape. The tick.Engine side
-// (dividend payout, expiry) lives in internal/engine/tick/constellations.go.
-
-// constellationDurationDays is how long an activated Constellation
-// lasts before automatically dissolving - long enough to feel like a
-// real commitment, short enough to stay a special, opt-in moment
-// rather than a silent permanent power bloc (see the plan doc's design
-// principle 2 - "rare means rare").
 const constellationDurationDays = 7
 
-// constellationMaxMembers is the largest a Constellation can be
-// (founder + up to 2 invited clans) - kept small so "which clans are
-// in my Constellation" stays an easy, memorable fact rather than
-// approaching a second clan-membership system.
 const constellationMaxMembers = 3
 
 type ConstellationHandler struct {
@@ -43,9 +25,6 @@ func NewConstellationHandler(db *sql.DB) *ConstellationHandler {
 	return &ConstellationHandler{DB: db}
 }
 
-// getMyClanForConstellation mirrors diplomacy.go's
-// getMyClanForDiplomacy exactly (can't call that one directly - it's a
-// method on a different receiver type).
 func (h *ConstellationHandler) getMyClanForConstellation(ctx context.Context, userID int64) (clanID string, clanName string, isLeader bool, err error) {
 	var leaderID int64
 	err = h.DB.QueryRowContext(ctx, `
@@ -59,12 +38,6 @@ func (h *ConstellationHandler) getMyClanForConstellation(ctx context.Context, us
 	return clanID, clanName, leaderID == userID, nil
 }
 
-// HandleConstellationForm (/constellation_form Name, ClanA, ClanB)
-// lets a Clan Leader propose forming a Constellation with 1-2 other
-// named Clans (comma-separated so both the Constellation's own name
-// and Clan names can contain spaces - see plan doc 5.3). Creates the
-// constellations row (status 'forming'), an 'accepted' member row for
-// the founder's own Clan, and one 'pending' row per invited Clan.
 func (h *ConstellationHandler) HandleConstellationForm(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -105,7 +78,7 @@ func (h *ConstellationHandler) HandleConstellationForm(c telebot.Context) error 
 	}
 	defer tx.Rollback()
 
-	inviteeClanIDs := make(map[string]string, len(inviteeNames)) // clanID -> display name
+	inviteeClanIDs := make(map[string]string, len(inviteeNames))
 	for _, name := range inviteeNames {
 		var clanID, clanName string
 		if err := tx.QueryRowContext(ctx, "SELECT id, name FROM clans WHERE LOWER(name) = LOWER($1)", name).Scan(&clanID, &clanName); err != nil {
@@ -147,8 +120,6 @@ func (h *ConstellationHandler) HandleConstellationForm(c telebot.Context) error 
 		telebot.ModeHTML)
 }
 
-// splitConstellationArgs splits a comma-separated payload into trimmed,
-// non-empty fields.
 func splitConstellationArgs(payload string) []string {
 	raw := strings.Split(payload, ",")
 	var out []string
@@ -161,10 +132,6 @@ func splitConstellationArgs(payload string) []string {
 	return out
 }
 
-// HandleConstellationPanel (/constellation) shows this Clan's current
-// Constellation (any status - forming/active/dissolved most recent
-// first), member Clans, banner, expiry countdown, and Accept/Reject
-// buttons for any pending invitation addressed to this Clan.
 func (h *ConstellationHandler) HandleConstellationPanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -265,13 +232,6 @@ func statusLabel(status string) string {
 	}
 }
 
-// HandleConstellationRespondCallback fires when an invited Clan
-// Leader taps Accept/Reject on HandleConstellationPanel. A single
-// reject dissolves the whole forming Constellation (see plan doc 5.3
-// point 4) rather than leaving it stuck at partial acceptance forever.
-// Once every invited member has accepted, the Constellation activates:
-// status -> 'active', activated_at/expires_at set, and a broadcast
-// announces it to every member Clan's players.
 func (h *ConstellationHandler) HandleConstellationRespondCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -370,10 +330,6 @@ func (h *ConstellationHandler) HandleConstellationRespondCallback(c telebot.Cont
 	return h.HandleConstellationPanel(c)
 }
 
-// broadcastConstellationActivated notifies every player in every member
-// Clan directly (via notifications.Queue, not a region-scoped
-// broadcast - member Clans' players may be spread across regions) that
-// their Constellation has activated.
 func broadcastConstellationActivated(ctx context.Context, tx *sql.Tx, constellationID, name, bannerEmoji string) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uc.user_id

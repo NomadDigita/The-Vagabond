@@ -5,22 +5,11 @@ import (
 	"database/sql"
 )
 
-// Queryer is satisfied by both *sql.DB and *sql.Tx, so callers already
-// inside a tick transaction and callers making a one-off query from a
-// bot handler can both use the same lookup helpers below.
 type Queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// ActiveEventFor returns the currently active world event type for a
-// given continent ("nominal" if none is active, the row has expired, or
-// the continent is unrecognized/empty - e.g. a rogue AI nest with no
-// real region). Every mechanical consumer of world events (combat
-// resolution, passive resource generation, march timing, construction
-// flavor text) should resolve its own encampment's continent via
-// coordinates.region and call this instead of reading world_state
-// directly, which is no longer written to.
 func ActiveEventFor(ctx context.Context, q Queryer, continent string) string {
 	if continent == "" {
 		return "nominal"
@@ -36,12 +25,6 @@ func ActiveEventFor(ctx context.Context, q Queryer, continent string) string {
 	return eventType
 }
 
-// ActiveEventsByContinent returns every continent's currently active
-// event type in one query, for callers that process many encampments in
-// a single pass (e.g. the passive resource tick) and would otherwise pay
-// for one query per encampment. Continents with no active event are
-// simply absent from the map - callers should treat a missing key the
-// same as "nominal".
 func ActiveEventsByContinent(ctx context.Context, q Queryer) map[string]string {
 	result := make(map[string]string, len(Continents))
 

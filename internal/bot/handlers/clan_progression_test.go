@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// TestDoClanDonate_RecordsClanDonationProgressionEvent is the
-// integration test confirming doClanDonate's real call site wires up
-// to internal/game/progression - a real donation between clanmates
-// unlocks "generous_1" (threshold 1 on TriggerClanDonation) and pays
-// its reward.
 func TestDoClanDonate_RecordsClanDonationProgressionEvent(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

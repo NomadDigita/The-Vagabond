@@ -20,37 +20,17 @@ func NewWeatherEngine(db *sql.DB) *WeatherEngine {
 	return &WeatherEngine{DB: db}
 }
 
-// Continents mirrors coordinates.region's existing quadrant scheme
-// (see relocateZeroCoordinates in cmd/bot/main.go) so that world events
-// line up with where players actually spawn instead of an unrelated
-// separate zone list.
 var Continents = []string{"Africa", "Europe", "Asia", "Americas"}
 
-// eventPool is every non-nominal world event that can currently roll.
-// Solar Flare/Radiation Storm/Acid Rain are the original three; EMP,
-// Supply Crisis, Disease, and Sandstorm are Phase 7 item 12's additions;
-// Bloom is RARE_WORLD_FEATURES_PLAN.md Phase 2's addition - the
-// wasteland's one purely POSITIVE event, and deliberately weighted
-// rarer than the rest (see weatherPool/pickWeightedEvent below) so a
-// "rare and beautiful" moment doesn't become a routine one.
 var eventPool = []string{
 	"solar_flare", "radiation_storm", "acid_rain", "emp", "supply_crisis", "disease", "sandstorm", "bloom",
 }
 
-// weatherPoolEntry pairs an event type with its relative roll weight.
 type weatherPoolEntry struct {
 	eventType string
 	weight    int
 }
 
-// weatherPool assigns bloom a weight of 1 against every other event's
-// weight of 4 - roughly 4x rarer than any single existing event, while
-// leaving the other seven events' odds relative to EACH OTHER exactly
-// as uniform as eventPool's old flat rand.Intn(len(eventPool)) draw
-// always made them. Built from eventPool at init time (a range loop,
-// not a second hand-maintained literal) so a future addition to
-// eventPool can't silently fall out of sync with this weighting table
-// by only updating one of the two.
 var weatherPool = func() []weatherPoolEntry {
 	pool := make([]weatherPoolEntry, 0, len(eventPool))
 	for _, e := range eventPool {
@@ -63,9 +43,6 @@ var weatherPool = func() []weatherPoolEntry {
 	return pool
 }()
 
-// pickWeightedEvent draws one event type from weatherPool, respecting
-// each entry's relative weight - the weighted-draw replacement for
-// eventPool's old flat rand.Intn(len(eventPool)) selection.
 func pickWeightedEvent() string {
 	total := 0
 	for _, e := range weatherPool {
@@ -78,31 +55,13 @@ func pickWeightedEvent() string {
 		}
 		roll -= e.weight
 	}
-	// Unreachable given the loop above always exhausts roll < total,
-	// but keeps the function total rather than relying on that
-	// invariant silently forever.
 	return weatherPool[len(weatherPool)-1].eventType
 }
 
 const eventDuration = 2 * time.Hour
 const eventRollChance = 0.10
 
-// RunWeatherPass rolls world events independently per continent, instead
-// of one global front affecting the whole game. Each continent persists
-// its current event for 2 hours (via expires_at), then rolls a 10%
-// chance per tick to start a new one once clear. A continent with an
-// event still running is left alone (persistence); a continent whose
-// event just expired gets a "conditions have cleared" headline before
-// it's eligible to roll again.
 func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
-	// Per-continent outcome for this pass, logged once at the end
-	// regardless of whether anything happened. Previously this
-	// function only logged on an actual trigger, so a live deployment
-	// that only ever rolled misses produced zero log output from this
-	// phase - indistinguishable from the phase not running at all when
-	// diagnosing "no world events have ever fired" reports. See
-	// LastTickStatus in internal/engine/tick/engine.go for the
-	// companion admin-visible confirmation that ticks are executing.
 	summary := make([]string, 0, len(Continents))
 
 	for _, continent := range Continents {
@@ -118,13 +77,10 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 
 		if stillActive {
 			summary = append(summary, fmt.Sprintf("%s=%s(active,%s left)", continent, eventType, time.Until(expiresAt.UTC()).Round(time.Minute)))
-			continue // persistence barrier: this continent's event holds stable
+			continue
 		}
 
 		if hasRow {
-			// The most recent event for this continent exists but has
-			// expired - clear it out and announce the all-clear before
-			// considering a fresh roll this same pass.
 			if _, delErr := tx.ExecContext(ctx, "DELETE FROM world_events WHERE id = $1", eventID); delErr != nil {
 				log.Printf("Failed clearing expired world event %s (%s/%s): %v", eventID, continent, eventType, delErr)
 			} else {
@@ -132,11 +88,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 				if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 					log.Printf("Failed writing world-event clear headline: %v", err)
 				}
-				// Direct push, not just the passive world_news feed - see
-				// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3.
-				// Non-mutable ("general") for now; see that doc's open
-				// question 2 on whether this should get its own mutable
-				// category instead.
 				if err := notifications.QueueToRegion(ctx, tx, continent, headline, "general"); err != nil {
 					log.Printf("Failed broadcasting world-event clear notification for %s: %v", continent, err)
 				}
@@ -145,7 +96,7 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 
 		if rand.Float64() >= eventRollChance {
 			summary = append(summary, fmt.Sprintf("%s=nominal(rolled,miss)", continent))
-			continue // this continent stays clear this pass
+			continue
 		}
 
 		newEvent := pickWeightedEvent()
@@ -153,26 +104,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		expiresAt = startsAt.Add(eventDuration)
 		headline := eventHeadline(newEvent, continent)
 
-		// NOTE (2026-08-02, confirmed live via Render logs): world_events
-		// was originally created by migrations/001_initial_schema.sql with
-		// title VARCHAR(150) NOT NULL and starts_at TIMESTAMPTZ NOT NULL
-		// (plus description/multiplier, both nullable/defaulted). This
-		// package's simplified 4-column model (id/event_type/continent/
-		// expires_at) was added later via schema.go's `CREATE TABLE IF NOT
-		// EXISTS world_events`, which is a no-op against a table that
-		// already exists - so on any deployment whose DB predates that
-		// change, the live table still carries the old NOT NULL columns
-		// this INSERT never populated. Every single roll-hit was failing
-		// at the DB layer with "null value in column title violates
-		// not-null constraint", silently eating the whole weather pass
-		// (RunWeatherPass returns the error, aborting the tx) - this is
-		// the actual root cause of "zero world events have ever fired"
-		// despite the roll logic itself always having been correct.
-		// Supplying title/starts_at here fixes it directly; see schema.go
-		// for the accompanying idempotent ALTER TABLE that also relaxes
-		// the constraint with a DEFAULT, so a *fresh* database (no legacy
-		// columns at all) and this codebase's own migration order can't
-		// reintroduce the same trap.
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO world_events (title, event_type, continent, starts_at, expires_at)
 			 VALUES ($1, $2, $3, $4, $5)`,
@@ -184,8 +115,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO world_news (headline) VALUES ($1)", headline); err != nil {
 			log.Printf("Failed writing world-event news headline: %v", err)
 		}
-		// Same headline text pushed directly, so the world_news feed and
-		// the direct notification never say different things (section 5.3).
 		if err := notifications.QueueToRegion(ctx, tx, continent, headline, "general"); err != nil {
 			log.Printf("Failed broadcasting world-event notification for %s: %v", continent, err)
 		}
@@ -198,8 +127,6 @@ func (w *WeatherEngine) RunWeatherPass(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// eventLabel gives a short human-readable name for a stored event_type,
-// used in "conditions have cleared" headlines.
 func eventLabel(eventType string) string {
 	switch eventType {
 	case "solar_flare":
@@ -223,13 +150,6 @@ func eventLabel(eventType string) string {
 	}
 }
 
-// eventHeadline builds the full news-feed announcement for a freshly
-// triggered event, matching the original three's tone and mechanical
-// callouts. See internal/bot/handlers/world.go for the matching
-// in-panel description text, and each mechanical consumer
-// (internal/engine/tick/engine.go, internal/engine/resource/resource.go,
-// internal/bot/handlers/combat.go, internal/bot/handlers/camp.go) for
-// where these actually apply their effects.
 func eventHeadline(eventType, continent string) string {
 	switch eventType {
 	case "solar_flare":

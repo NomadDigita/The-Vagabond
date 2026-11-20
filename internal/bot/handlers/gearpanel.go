@@ -11,11 +11,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// GearHandler is the panel/craft/equip side of
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 3 - definitions and the core
-// craft/equip/drop logic live in internal/game/gear; the tick-engine
-// side (crafting queue resolution) is wired directly into
-// internal/engine/tick/engine.go's phase list via gear.ResolveCraftingQueue.
 type GearHandler struct {
 	DB *sql.DB
 }
@@ -24,10 +19,6 @@ func NewGearHandler(db *sql.DB) *GearHandler {
 	return &GearHandler{DB: db}
 }
 
-// HandleGearPanel (/gear) shows the current equipped loadout (one slot
-// per row), owned-but-unequipped inventory, and a Craft sub-section for
-// every Craftable definition with inline affordability - matching the
-// exchange panel's own established affordability-preview pattern.
 func (h *GearHandler) HandleGearPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -139,7 +130,6 @@ func (h *GearHandler) HandleGearPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// HandleGearCraftCallback fires when a player taps a Craft button.
 func (h *GearHandler) HandleGearCraftCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -160,7 +150,6 @@ func (h *GearHandler) HandleGearCraftCallback(c telebot.Context) error {
 	return h.HandleGearPanel(c)
 }
 
-// HandleGearEquipCallback fires when a player taps an Equip button.
 func (h *GearHandler) HandleGearEquipCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

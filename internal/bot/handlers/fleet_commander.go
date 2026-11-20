@@ -9,11 +9,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// FleetCommanderHandler exposes Phase C (AI Fleet Commander). New
-// command name (/fleet_commander) — no collision with any SpaceHunt
-// phase 1-6 command, and distinct from combat.go's existing
-// HandleReconAICallback, which is a static templated report, not an
-// LLM call.
 type FleetCommanderHandler struct {
 	Commander *fleetcommander.Commander
 }
@@ -37,13 +32,6 @@ func (h *FleetCommanderHandler) renderReport(ctx context.Context, userID int64) 
 	return fleetcommander.FormatForTelegram(rec), buildFleetCommanderKeyboard(), nil
 }
 
-// ── /fleet_commander ─────────────────────────────────────────────────
-//
-// Analyzes the player's fleet against the rogue-nest PvE target scaled
-// to their level (see PROJECT_MASTER_PLAN.md — PvP target support is
-// future work) plus their recent raid history, and returns one of:
-// attack, retreat, reinforce, scout, wait, split_fleet — with
-// reasoning. Read-only: never launches anything.
 func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -63,10 +51,6 @@ func (h *FleetCommanderHandler) HandleFleetCommander(c telebot.Context) error {
 	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
-// ── callback: fleet_refresh ──────────────────────────────────────────
-//
-// Re-runs the same analysis on demand (a real new AI Foundation call,
-// subject to the usual cost/cache/budget rules) and posts a fresh report.
 func (h *FleetCommanderHandler) HandleFleetCommanderRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

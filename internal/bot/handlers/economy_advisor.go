@@ -9,9 +9,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// EconomyAdvisorHandler exposes Phase D (AI Economy Advisor). New
-// command name (/economy_advisor) — no collision with any SpaceHunt
-// phase 1-6 command.
 type EconomyAdvisorHandler struct {
 	Advisor *econadvisor.Advisor
 }
@@ -35,12 +32,6 @@ func (h *EconomyAdvisorHandler) renderReport(ctx context.Context, userID int64) 
 	return econadvisor.FormatForTelegram(rec), buildEconomyAdvisorKeyboard(), nil
 }
 
-// ── /economy_advisor ──────────────────────────────────────────────────
-//
-// Analyzes the player's resources, buildings, bank debt, and market
-// activity, and recommends the highest-ROI next actions with
-// quantitative expected gains. Read-only: never buys, sells, or
-// upgrades anything on the player's behalf.
 func (h *EconomyAdvisorHandler) HandleEconomyAdvisor(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -60,10 +51,6 @@ func (h *EconomyAdvisorHandler) HandleEconomyAdvisor(c telebot.Context) error {
 	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
-// ── callback: econ_refresh ────────────────────────────────────────────
-//
-// Re-runs the same analysis on demand (a real new AI Foundation call,
-// subject to the usual cost/cache/budget rules) and posts a fresh report.
 func (h *EconomyAdvisorHandler) HandleEconomyAdvisorRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

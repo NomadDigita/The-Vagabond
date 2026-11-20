@@ -1,10 +1,3 @@
-// Package fleetcommander implements Phase C of the AI Systems Roadmap:
-// the AI Fleet Commander. Like internal/game/governor, this package is
-// the seam where game state meets the ai.Service — internal/ai itself
-// stays game-agnostic per ADR-001 in PROJECT_MASTER_PLAN.md.
-//
-// This file has zero I/O so it can be unit tested directly. All
-// database access lives in commander.go.
 package fleetcommander
 
 import (
@@ -16,61 +9,28 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// FleetComposition is a generic unit-name → count map, deliberately
-// not a hardcoded struct field per unit type. workshop_inventory has
-// grown unit columns over time (see cmd/bot/main.go's ALTER TABLE
-// history) and will keep growing as the parallel SpaceHunt Phase 6
-// (Combat) branch adds new ship/turret types — a map means this
-// package never needs a code change just because a new unit column
-// was added upstream.
 type FleetComposition map[string]int
 
-// TargetProfile describes what the fleet might be sent against.
-// TargetProfile describes what the fleet might be sent against.
-//
-// TurretGrid, IntegrityTechLvl, Shields, and HeroSuperpower mirror the
-// enriched internal/game/content.RogueNestForce fields added by the
-// parallel SpaceHunt Phase 7 work ("Rogue AI scaling via real player
-// subsystems") — a rogue nest now stands up individually-typed
-// turrets, research levels, and (at high tiers) a hero-equivalent
-// superpower, the same way a real player base would, rather than a
-// single flat bonus. TurretBonus is kept for backward compatibility
-// with anything reading only the legacy summed total.
 type TargetProfile struct {
 	Name        string
 	IsPvE       bool
-	ThreatTier  string // human-readable, e.g. "Moderate", "Severe" (PvE only)
+	ThreatTier  string
 	Garrison    FleetComposition
-	TurretBonus float64 // legacy flat defense-rating modifier bonus, 0 if none
+	TurretBonus float64
 
-	// TurretGrid is a turret-type→level map (e.g. "light_laser": 4),
-	// empty if the target has no Defense Grid breakdown available.
-	TurretGrid FleetComposition
-	// IntegrityTechLvl mirrors research_states.integrity_tech_lvl (or
-	// its PvE equivalent) — 0 if not applicable/unknown.
+	TurretGrid       FleetComposition
 	IntegrityTechLvl int
-	// Shields mirrors nuclear_shields count — 0 if none.
-	Shields int
-	// HeroSuperpower names an active hero-equivalent ability the
-	// target can bring to the fight (e.g. "Kinetic Barrier"), empty if
-	// none.
-	HeroSuperpower string
+	Shields          int
+	HeroSuperpower   string
 }
 
-// CombatHistorySummary is a rough win/loss proxy built from completed
-// raids where the player was the attacker. See BuildCombatHistory in
-// commander.go for the exact (heuristic) definition of "win" — the
-// `raids` table has no explicit outcome column, so this is an
-// approximation flagged as technical debt in PROJECT_MASTER_PLAN.md.
 type CombatHistorySummary struct {
 	RaidsAnalyzed int
 	ApparentWins  int
-	TotalLosses   int // summed attacker_losses across analyzed raids
+	TotalLosses   int
 	AverageLosses float64
 }
 
-// Action mirrors the roadmap's required recommendation vocabulary:
-// attack, retreat, reinforce, scout, wait, split fleets.
 type Action string
 
 const (
@@ -82,22 +42,15 @@ const (
 	ActionSplit     Action = "split_fleet"
 )
 
-// Recommendation is the Fleet Commander's structured output.
 type Recommendation struct {
-	Recommendation string `json:"recommendation"` // one of the Action constants, as free text from the model
-	Confidence     string `json:"confidence"`     // e.g. "high", "medium", "low"
+	Recommendation string `json:"recommendation"`
+	Confidence     string `json:"confidence"`
 	Reasoning      string `json:"reasoning"`
 	RiskAssessment string `json:"risk_assessment"`
-	SuggestedSplit string `json:"suggested_split"` // only meaningful if Recommendation == split_fleet
+	SuggestedSplit string `json:"suggested_split"`
 
-	// FellBackToRawText is true when JSON parsing failed and
-	// Reasoning holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
-	// Truncated is true when the fallback happened because the
-	// model's response was cut off mid-object (almost always meaning
-	// MaxTokens was hit before the model finished). See ADR-016 in
-	// PROJECT_MASTER_PLAN.md.
-	Truncated bool
+	Truncated         bool
 }
 
 const SystemPrompt = `You are the AI Fleet Commander for a player in The Vagabond, a tick-based multiplayer survival/strategy game.
@@ -114,9 +67,6 @@ Rules:
 - Be honest about uncertainty — if the target's garrison is only a rough estimate (as with a scanned rogue nest), say so in risk_assessment.
 - If the target has an active hero superpower, treat it as a significant risk factor and call it out explicitly in risk_assessment — it can change the outcome regardless of raw unit counts.`
 
-// BuildUserPrompt renders own fleet + target + history into the data
-// block the model reasons over. Sorted map iteration keeps output
-// deterministic for internal/ai's cache key hashing.
 func BuildUserPrompt(own FleetComposition, target TargetProfile, history CombatHistorySummary) string {
 	var b strings.Builder
 
@@ -180,10 +130,6 @@ func writeComposition(b *strings.Builder, comp FleetComposition) {
 	}
 }
 
-// ParseRecommendation decodes the model's response text, tolerating a
-// markdown code fence the way governor.ParseRecommendation does. On
-// failure it falls back to Reasoning=<raw text> so the player always
-// gets something usable.
 func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -195,8 +141,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 		return &rec
 	}
 
-	// See ADR-015: real providers occasionally leave a raw,
-	// unescaped newline/tab inside a string value.
 	repaired := ai.SanitizeJSONControlChars(candidate)
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Recommendation != "" {
 		return &rec
@@ -205,8 +149,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 	return &Recommendation{Reasoning: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// actionEmoji gives each recommendation a distinct glyph so players
-// can scan the outcome at a glance before reading the reasoning.
 var actionEmoji = map[string]string{
 	string(ActionAttack):    "⚔️",
 	string(ActionRetreat):   "🏳️",
@@ -216,9 +158,6 @@ var actionEmoji = map[string]string{
 	string(ActionSplit):     "🔀",
 }
 
-// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
-// message. All fields are LLM-generated text and are escaped via
-// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
 	b.WriteString("🎖️ " + ai.HTMLBold("AI FLEET COMMANDER") + "\n\n")

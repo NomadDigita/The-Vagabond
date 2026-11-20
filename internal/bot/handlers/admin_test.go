@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// TestDoSetTaxRate_BroadcastsToAllRealPlayersNotAIFactions verifies the
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3 addition: a tax
-// rate change now reaches every real player directly, not just the
-// admin's own confirmation message, while AI factions (which have a
-// synthetic users row but no Telegram session) are excluded.
 func TestDoSetTaxRate_BroadcastsToAllRealPlayersNotAIFactions(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

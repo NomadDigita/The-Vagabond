@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// TestFormatDurationTick_PicksTheRightUnitTier mirrors
-// bot/handlers/render_test.go's coverage for the tick package's own
-// duration formatter, used in notification text (road contact deadlines,
-// espionage intercept windows, scout mission ETAs).
 func TestFormatDurationTick_PicksTheRightUnitTier(t *testing.T) {
 	cases := []struct {
 		name string

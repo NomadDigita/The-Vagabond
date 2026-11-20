@@ -64,7 +64,7 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 HERE = pathlib.Path(__file__).resolve().parent
 MAPPING_PATH = HERE.parent / "mapping.json"
 
-EXPECTED_ICON_COUNT = 11  # the current pilot batch (10 + oracle); bump if/when it grows further
+EXPECTED_ICON_COUNT = 11
 
 
 def call(method, **kwargs):

@@ -20,14 +20,10 @@ func NewResearchHandler(db *sql.DB) *ResearchHandler {
 	return &ResearchHandler{DB: db}
 }
 
-// MaxResearchLevel caps every tech node. Raised from the old 5-level cap to
-// give the tree real long-term progression depth.
 const MaxResearchLevel = 20
 
-// researchNode describes one branch of the tree. dbColumn must match a real
-// column on research_states.
 type researchNode struct {
-	key      string // used in callback data
+	key      string
 	dbColumn string
 	emoji    string
 	title    string
@@ -44,13 +40,10 @@ var researchTree = []researchNode{
 	{"military", "military_tech_lvl", "🦾", "Weapons", "Multiplies Mech and offensive unit combat ratings."},
 }
 
-// researchCost returns the Neuro Core cost to advance from currentLvl to currentLvl+1.
 func researchCost(currentLvl int) int {
 	return currentLvl * 8
 }
 
-// fetchResearchLevels reads all 7 tech levels for an encampment, initializing
-// the row if it doesn't exist yet.
 func (h *ResearchHandler) fetchResearchLevels(ctx context.Context, campID string) (map[string]int, error) {
 	levels := make(map[string]int)
 
@@ -79,7 +72,6 @@ func (h *ResearchHandler) fetchResearchLevels(ctx context.Context, campID string
 	return levels, nil
 }
 
-// HandleResearchPanel renders the science research status
 func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 
@@ -130,7 +122,6 @@ func (h *ResearchHandler) HandleResearchPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
-// HandleUpgradeTechCallback manages spending neuro cores to level up research nodes
 func (h *ResearchHandler) HandleUpgradeTechCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

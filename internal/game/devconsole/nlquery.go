@@ -1,24 +1,3 @@
-// This file implements natural-language admin queries: an admin types
-// a free-text question, and gets a grounded answer. See queries.go's
-// doc comment for the safety model this depends on — the model never
-// writes or executes SQL; it only ever picks a name from a fixed
-// whitelist plus two bounded integers.
-//
-// This is a two-call flow, unlike every other Phase B-J feature's
-// single call:
-//  1. Classify: given the admin's question and the whitelist
-//     (IntentDescriptions), the model returns {"intent": "...",
-//     "days": N, "limit": N}. Validated against the whitelist and
-//     clamped to safe bounds before anything runs.
-//  2. Answer: given the admin's original question and the actual
-//     query result text (never anything the model wrote), the model
-//     produces a final natural-language answer grounded in those real
-//     numbers.
-//
-// Two calls cost more than one, but there's no safe way to compress
-// this to one call without either letting the model's raw output
-// drive execution (unsafe) or answering before the real numbers exist
-// (ungrounded/hallucination-prone).
 package devconsole
 
 import (
@@ -30,8 +9,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// NLQueryMemoryScope is used for both calls in the natural-language
-// query flow, distinct from MemoryScope (the weekly-report scope).
 const NLQueryMemoryScope = "dev_console_nlquery"
 
 const (
@@ -59,8 +36,6 @@ func ClampLimit(n int) int {
 	return n
 }
 
-// IntentClassification is the model's raw choice — validated by
-// ClassifyIntent before ever being used to run anything.
 type IntentClassification struct {
 	Intent string `json:"intent"`
 	Days   int    `json:"days"`
@@ -70,8 +45,6 @@ type IntentClassification struct {
 	Truncated         bool
 }
 
-// ClassificationSystemPrompt is the fixed instruction for the
-// intent-classification call.
 const ClassificationSystemPrompt = `You are a query classifier for The Vagabond's admin console. Given an admin's free-text question, pick EXACTLY ONE intent from this fixed list that would answer it — never invent a new intent name:
 
 ` + "REPLACED_AT_INIT" + `
@@ -86,9 +59,6 @@ func BuildClassificationUserPrompt(question string) string {
 	return fmt.Sprintf("Admin's question: %q", question)
 }
 
-// parseClassification decodes the classifier's response text,
-// tolerating a markdown code fence the same way every other Phase B-J
-// package does.
 func ParseClassification(text string, stopReason string) *IntentClassification {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -105,7 +75,6 @@ func ParseClassification(text string, stopReason string) *IntentClassification {
 	return &IntentClassification{FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// AnswerRecommendation is the final, grounded natural-language answer.
 type AnswerRecommendation struct {
 	Answer  string `json:"answer"`
 	Caveats string `json:"caveats"`
@@ -114,8 +83,6 @@ type AnswerRecommendation struct {
 	Truncated         bool
 }
 
-// AnswerSystemPrompt is the fixed instruction for the second
-// (grounded-answer) call.
 const AnswerSystemPrompt = `You are the AI Developer Console for The Vagabond, answering an admin's question using ONLY the real data provided below — never add numbers, names, or facts that aren't in it. You NEVER take any action yourself — you only report.
 
 Rules:
@@ -144,8 +111,6 @@ func ParseAnswer(text string, stopReason string) *AnswerRecommendation {
 	return &AnswerRecommendation{Answer: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatAnswerForTelegram renders an AnswerRecommendation as a
-// plain-text Telegram reply.
 func FormatAnswerForTelegram(rec *AnswerRecommendation) string {
 	var b strings.Builder
 	b.WriteString("🖥️ AI DEVELOPER CONSOLE\n\n")
@@ -167,14 +132,6 @@ func FormatAnswerForTelegram(rec *AnswerRecommendation) string {
 	return b.String()
 }
 
-// Ask runs the full classify → execute → answer flow for one
-// free-text admin question. It stores all turns in ai_memory under
-// NLQueryMemoryScope.
-//
-// Read-only end to end: every intent in queryIntents is a SELECT (see
-// queries.go), and nothing the model outputs is ever used as
-// executable code — only as a validated choice from a fixed list plus
-// two clamped integers.
 func (co *Console) Ask(ctx context.Context, callerUserID int64, question string) (*AnswerRecommendation, error) {
 	classifyPrompt := BuildClassificationUserPrompt(question)
 

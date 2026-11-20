@@ -197,9 +197,6 @@ def render_icon(name, glow_hex, frame_fn, extra_defs="", crf=30, n_frames=None):
     return size_kb
 
 
-# ---------------------------------------------------------------------
-# warning — sharp red rim-flash + exclamation pulse
-# ---------------------------------------------------------------------
 def frame_warning(t):
     rim_op = twin_flick(t, 0.08) * 0.9
     exclaim_op = 0.4 + 0.6 * twin_flick(t, 0.14)
@@ -222,9 +219,6 @@ def frame_warning(t):
 {rivet(50,11,2.7)}{rivet(13,81,2.7)}{rivet(87,81,2.7)}
 </g>'''
 
-# ---------------------------------------------------------------------
-# failure — gold impact-spark burst radiating from the X
-# ---------------------------------------------------------------------
 def frame_failure(t):
     burst = twin_flick(t, 0.09)
     burst_len = 14 + 16 * burst
@@ -254,9 +248,6 @@ def frame_failure(t):
 </g>
 {streaks}'''
 
-# ---------------------------------------------------------------------
-# shield — cyan core breathing + gold light chasing the rim
-# ---------------------------------------------------------------------
 def frame_shield(t):
     breathe = 13 + 1.6 * math.sin(2*math.pi*t)
     breathe_op = 0.75 + 0.25 * math.sin(2*math.pi*t)
@@ -280,9 +271,6 @@ def frame_shield(t):
 <path d="M18 74 L28 84" stroke="url(#rust)" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
 </g>'''
 
-# ---------------------------------------------------------------------
-# transport — wheels rotate, headlight pulses, gold dust behind
-# ---------------------------------------------------------------------
 def frame_transport(t):
     ang = t * 360
     headlight_op = 0.6 + 0.4 * math.sin(2*math.pi*t*2)
@@ -322,9 +310,6 @@ def frame_transport(t):
 {scratches([(34,50,44,58),(40,64,50,60)], "#3a1c08", 0.4, 1)}
 </g>'''
 
-# ---------------------------------------------------------------------
-# ai_mech — cyan visor scan-line sweep, gold status ping on antenna
-# ---------------------------------------------------------------------
 def frame_ai_mech(t):
     scan_y = 42 + (t % 1.0) * 14
     scan_op = 0.9 * (1 - abs((t % 1.0) - 0.5) * 1.4) if 0.05 < (t%1.0) < 0.95 else 0.2
@@ -350,9 +335,6 @@ def frame_ai_mech(t):
 {scratches([(24,60,30,50),(70,58,76,50)], "#000", 0.3, 1)}
 </g>'''
 
-# ---------------------------------------------------------------------
-# gear — full continuous rotation, gold spark flick once per turn
-# ---------------------------------------------------------------------
 def frame_gear(t):
     ang = t * 360
     spark_op = flick(t, 0.06)
@@ -377,9 +359,6 @@ def frame_gear(t):
 {spark_streak(50,3,-90,10+6*spark_op,spark_op*0.95,"url(#gold)",2.4)}
 {star(50,2,1.1,spark_op,"#ffe066")}'''
 
-# ---------------------------------------------------------------------
-# satellite — gold radar-ping rings expand from the dish, panels flicker
-# ---------------------------------------------------------------------
 def frame_satellite(t):
     rings = ""
     for k in range(3):
@@ -416,9 +395,6 @@ def frame_satellite(t):
 </g>
 {rings}'''
 
-# ---------------------------------------------------------------------
-# combat — gold glint travels down each blade, red core beats
-# ---------------------------------------------------------------------
 def frame_combat(t):
     glint_y1 = 6 + ((t) % 1.0) * 58
     glint_y2 = 6 + ((t + 0.5) % 1.0) * 58
@@ -448,9 +424,6 @@ def frame_combat(t):
 <circle cx="50" cy="50" r="{core_r:.2f}" fill="url(#danger)"/>
 {spec(48,48,2.5,1.5,-30,0.65)}'''
 
-# ---------------------------------------------------------------------
-# scrap — gold weld-spark bursts off the bolt
-# ---------------------------------------------------------------------
 WELD_ANGLES = [random.uniform(0, 360) for _ in range(6)]
 def frame_scrap(t):
     burst = twin_flick(t, 0.07)
@@ -478,15 +451,6 @@ def frame_scrap(t):
 {sparks}'''
 
 
-# ---------------------------------------------------------------------
-# v9 glass upgrade — layered on top of each icon's existing motion,
-# not a redesign of it. Each icon gets its own chromatic-rim color pair
-# (no two icons share the same unordered pair — see SKILL.md's
-# color-pairing table) and a small set of depth-parallax particles.
-# Approved by the project owner on the `oracle`/electricity-glass
-# prototypes before being rolled out here — see log §6 v8 checkpoints
-# 4-5 and the "continue" go-ahead that followed.
-# ---------------------------------------------------------------------
 GLASS_UPGRADE = {
     "warning":   dict(cx=50, cy=54, r=40, rim=("#ffb347", "#ff5c4d"), particle_color="#fff3c9",
                        particles=[(20, 22, 0.5, 0.3), (160, 26, 0.6, 0.6), (280, 18, 0.4, 0.15)]),

@@ -10,21 +10,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
-// runAIJobs mirrors the /jobs panel's resource-only utility actions for
-// AI factions - project owner direction 2026-08-01: "every single thing
-// a human can do." Split into its own file/phase rather than folded into
-// growAICivilizations, since that function was already large and these
-// actions are a genuinely separate category (one-off utility spends, not
-// passive growth or governance) - matches how aispawning.go and
-// aidecisions.go are already split out by concern.
-//
-// Deliberately covers only the resource-only actions from jobs.go:
-// GatherSunlight, RepairUnits, RepairBuildings, HyperSpeed,
-// OrbitalManeuver, ExtendPlanet. HandleTeleport is deliberately excluded
-// - relocating already has a real equivalent for AI factions via
-// maybeAIFlee/Ghost Protocol in aidecisions.go, and a second, unrelated
-// relocation mechanic risks working against Item 1's continent-balanced
-// spawn placement for no real benefit.
 func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id FROM encampments WHERE is_ai_faction = TRUE AND is_defeated = FALSE")
 	if err != nil {
@@ -40,10 +25,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 	rows.Close()
 
 	for _, campID := range factionIDs {
-		// Gather Sunlight: mirrors HandleGatherSunlight exactly - a free
-		// 150 Electricity burst, gated by the same 30-minute
-		// last_sunlight_at cooldown a human's own repeated taps would
-		// hit.
 		if rand.Float64() < 0.02 {
 			var lastSunlight sql.NullTime
 			_ = tx.QueryRowContext(ctx, "SELECT last_sunlight_at FROM encampments WHERE id = $1", campID).Scan(&lastSunlight)
@@ -58,8 +39,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Repair Units: mirrors HandleRepairUnits exactly - 200 Scrap
-		// for +5 Soldiers.
 		if rand.Float64() < 0.02 {
 			const cost = 200.0
 			const repaired = 5
@@ -71,13 +50,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Repair Buildings (rush construction): mirrors
-		// HandleRepairBuildings exactly - 150 Scrap halves the
-		// remaining time on whichever module is currently upgrading.
-		// Only relevant now that AI factions actually queue module
-		// upgrades (see growAICivilizations's facility-upgrade block),
-		// so this naturally does nothing until that's true for a given
-		// faction - no ordering dependency needed between the two.
 		if rand.Float64() < 0.02 {
 			const cost = 150.0
 			var moduleID string
@@ -95,11 +67,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// HyperSpeed: mirrors HandleHyperSpeed exactly - 300
-		// Electricity halves the remaining time on the AI faction's
-		// nearest active raid/mission. Only relevant once a faction has
-		// an outbound raid via launchAIRaid, same non-dependency
-		// reasoning as Repair Buildings above.
 		if rand.Float64() < 0.02 {
 			const cost = 300.0
 			var raidID string
@@ -117,10 +84,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Orbital Maneuver: mirrors HandleOrbitalManeuver exactly - 400
-		// Electricity for a +30% defense buff (orbital_buff_until) for
-		// 2 hours. A faction under raid pressure benefits from this the
-		// same way a human under pressure would reach for it.
 		if rand.Float64() < 0.01 {
 			const cost = 400.0
 			const buffDuration = 2 * time.Hour
@@ -133,12 +96,6 @@ func (e *Engine) runAIJobs(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Extend Planet: mirrors HandleExtendPlanet exactly - a
-		// permanent +1000 storage cap, cost scaling with
-		// extension_lvl+1 (500 Metal / 100 Crystal at level 0,
-		// doubling each level). Deliberately the rarest of these rolls -
-		// it's the human "Jobs" panel's biggest, least-frequent
-		// investment too, not something tapped casually.
 		if rand.Float64() < 0.005 {
 			var extensionLvl int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(extension_lvl,0) FROM encampments WHERE id = $1 FOR UPDATE", campID).Scan(&extensionLvl)

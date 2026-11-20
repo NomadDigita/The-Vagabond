@@ -60,9 +60,6 @@ func seedHeroPlayer(t *testing.T, db *sql.DB, userID int64, faction string) (cam
 	return campID, heroID
 }
 
-// TestUnlockSkill_SpendsPointAndRejectsDoubleUnlock is the direct test
-// for NEXT_GENERATION_FEATURES_PLAN.md Phase 6's skill tree: unlocking
-// a node spends exactly 1 skill point and can't be unlocked twice.
 func TestUnlockSkill_SpendsPointAndRejectsDoubleUnlock(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -85,8 +82,6 @@ func TestUnlockSkill_SpendsPointAndRejectsDoubleUnlock(t *testing.T) {
 	}
 }
 
-// TestUnlockSkill_RejectsWrongFactionAndNoPoints covers two failure
-// modes: a node from the other faction, and running out of points.
 func TestUnlockSkill_RejectsWrongFactionAndNoPoints(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -96,7 +91,6 @@ func TestUnlockSkill_RejectsWrongFactionAndNoPoints(t *testing.T) {
 		t.Error("expected unlocking a Rust Nomads node with a Steel Vanguard faction to fail")
 	}
 
-	// Spend both starting points, then try a third.
 	if err := UnlockSkill(ctx, db, heroID, "steel_vanguard", "sv_fort_1"); err != nil {
 		t.Fatalf("first unlock: unexpected error: %v", err)
 	}
@@ -108,16 +102,11 @@ func TestUnlockSkill_RejectsWrongFactionAndNoPoints(t *testing.T) {
 	}
 }
 
-// TestTrainingCostMultiplier_StacksDiscountsWithFloor confirms
-// unlocked EffectTrainingCostPct nodes stack multiplicatively-additive
-// (summed as percentages) and never drop the multiplier below the 20%
-// floor even with many stacked discounts.
 func TestTrainingCostMultiplier_StacksDiscountsWithFloor(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	_, heroID := seedHeroPlayer(t, db, 80003, "steel_vanguard")
 
-	// No skills unlocked yet -> multiplier should be 1.0 (no discount).
 	if m := TrainingCostMultiplier(ctx, db, heroID); m != 1.0 {
 		t.Errorf("expected multiplier 1.0 with no skills unlocked, got %v", m)
 	}
@@ -125,15 +114,11 @@ func TestTrainingCostMultiplier_StacksDiscountsWithFloor(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO hero_skills_unlocked (hero_id, skill_key) VALUES ($1, 'sv_fort_1')", heroID); err != nil {
 		t.Fatalf("seeding unlocked skill: %v", err)
 	}
-	// sv_fort_1 is -10% -> multiplier 0.90.
 	if m := TrainingCostMultiplier(ctx, db, heroID); m < 0.899 || m > 0.901 {
 		t.Errorf("expected multiplier ~0.90 with sv_fort_1 unlocked, got %v", m)
 	}
 }
 
-// TestResourceBonusPctFor_SumsUnlockedResourceGenNodes confirms the
-// resource-tick integration point sums exactly the unlocked
-// EffectResourceGenPct nodes for the hero belonging to campID.
 func TestResourceBonusPctFor_SumsUnlockedResourceGenNodes(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -146,16 +131,11 @@ func TestResourceBonusPctFor_SumsUnlockedResourceGenNodes(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO hero_skills_unlocked (hero_id, skill_key) VALUES ($1, 'rn_scv_3')", heroID); err != nil {
 		t.Fatalf("seeding unlocked skill: %v", err)
 	}
-	// rn_scv_3 grants +3% resource generation.
 	if bonus := ResourceBonusPctFor(ctx, db, campID); bonus != 3 {
 		t.Errorf("expected 3%% bonus after unlocking rn_scv_3, got %v", bonus)
 	}
 }
 
-// TestDeliverStoryBeats_DeliversOnceAndAdvancesStage is the direct
-// test for the level-gated story arc: reaching level 5 delivers
-// exactly the level-5 beat (not level 10+), and a second call at the
-// same level delivers nothing further.
 func TestDeliverStoryBeats_DeliversOnceAndAdvancesStage(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -182,7 +162,6 @@ func TestDeliverStoryBeats_DeliversOnceAndAdvancesStage(t *testing.T) {
 		t.Errorf("expected story_arc_stage to advance to 5, got %d", stage)
 	}
 
-	// Calling again at the same level must not deliver a duplicate.
 	if err := DeliverStoryBeats(ctx, db, userID, heroID, "steel_vanguard", 5); err != nil {
 		t.Fatalf("DeliverStoryBeats (2nd call): unexpected error: %v", err)
 	}
@@ -194,10 +173,6 @@ func TestDeliverStoryBeats_DeliversOnceAndAdvancesStage(t *testing.T) {
 	}
 }
 
-// TestEquipToHero_ReplacesPreviousHeroEquipAndRequiresOwnership covers
-// the hero-gear slot: equipping a second item to the hero unequips the
-// first (a hero carries exactly one item), and equipping an unowned
-// item fails.
 func TestEquipToHero_ReplacesPreviousHeroEquipAndRequiresOwnership(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

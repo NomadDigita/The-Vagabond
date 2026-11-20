@@ -19,8 +19,6 @@ func NewRankingHandler(db *sql.DB) *RankingHandler {
 	return &RankingHandler{DB: db}
 }
 
-// medalFor returns a rank-appropriate medal/trophy glyph, matching
-// SpaceHunt's ranking board style.
 func medalFor(rank int) string {
 	switch rank {
 	case 1:
@@ -34,10 +32,6 @@ func medalFor(rank int) string {
 	}
 }
 
-// displayName returns the escaped name for leaderboard display, prefixed
-// with 🤖 for AI factions so parity in the score doesn't come at the cost
-// of honest labeling in the text (AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md
-// section 1.2).
 func displayName(name string, isAIFaction bool) string {
 	if isAIFaction {
 		return "🤖 " + htmlEscape(name)
@@ -45,15 +39,6 @@ func displayName(name string, isAIFaction bool) string {
 	return htmlEscape(name)
 }
 
-// rankTable renders a medal-ranked list as a native Rich Message
-// <table> (Bot API 10.1) - the same real-columns approach exchange.go's
-// market panel established for its listings board, applied here so the
-// leaderboard's three sections (which are exactly this "rank, name,
-// score" shape) get the same aligned, scannable layout instead of the
-// emoji+em-dash card lines every panel used before Rich Messages were
-// available. header names the score column (e.g. "Score", "Rating");
-// rows must already be display-ready strings (medal, name, formatted
-// score) - this function only lays them out, it doesn't format them.
 func rankTable(header string, rows [][3]string) string {
 	if len(rows) == 0 {
 		return htmlItalic("No entries yet.") + "\n"
@@ -73,11 +58,6 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 
 	panelText := "🏆 " + htmlBold("GLOBAL WASTELAND RANKING") + " 🏆\n" + divider + "\n\n"
 
-	// ── Top Players ────────────────────────────────────────────────
-	// AI factions are ranked identically to humans here (full parity -
-	// they earned the score the same way), but are visually marked with
-	// a 🤖 prefix so the distinction stays honest in the display line.
-	// See AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.2.
 	panelText += "👑 " + htmlBold("TOP SURVIVORS") + "\n"
 	topPlayersQuery := fmt.Sprintf(`
 		SELECT e.name, e.is_ai_faction, %s AS score
@@ -106,7 +86,6 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	}
 	panelText += rankTable("Score", topPlayerRows) + "\n"
 
-	// ── Top Skilled (military-only) ───────────────────────────────
 	panelText += "⚔️ " + htmlBold("TOP SKILLED (Military Might)") + "\n"
 	topSkilledQuery := fmt.Sprintf(`
 		SELECT e.name, e.is_ai_faction, %s AS mil_score
@@ -135,7 +114,6 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 	}
 	panelText += rankTable("Combat Rating", topSkilledRows) + "\n"
 
-	// ── Top Guilds ──────────────────────────────────────────────────
 	panelText += "🛡️ " + htmlBold("TOP GUILDS") + "\n"
 	topGuildsQuery := fmt.Sprintf(`
 		SELECT cl.id, cl.name, COUNT(uc.user_id) AS members, COALESCE(SUM(%s), 0) AS total_score
@@ -155,10 +133,6 @@ func (h *RankingHandler) HandleRankingPanel(c telebot.Context) error {
 			var members int
 			var score float64
 			if scanErr := rows3.Scan(&clanID, &name, &members, &score); scanErr == nil {
-				// RARE_WORLD_FEATURES_PLAN.md Phase 5.6: a small
-				// banner-emoji suffix for any Clan currently in an
-				// ACTIVE Constellation - a visible, "arrived" flourish
-				// on the leaderboard itself, not just on /constellation.
 				var banner string
 				_ = h.DB.QueryRowContext(ctx, `
 					SELECT cst.banner_emoji FROM constellation_members cm

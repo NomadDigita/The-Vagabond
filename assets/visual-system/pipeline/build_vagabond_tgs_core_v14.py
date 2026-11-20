@@ -54,7 +54,6 @@ def star(size):
 
 
 def base_layers(index):
-    # A subtle violet badge aids visibility but never replaces the subject.
     return [layer(index, "violet aura", ellipse((448, 448), VIOLET, LAVENDER, 8), opacity=46)]
 
 

@@ -54,22 +54,14 @@ func seedWeatherPlayer(t *testing.T, db *sql.DB, telegramID int64, x, y int, reg
 	}
 }
 
-// TestRunWeatherPass_NewEventNotifiesRegionPlayersDirectly proves a new
-// world event does more than write a passive world_news row - it also
-// pushes a direct notification to every real player in the affected
-// continent, per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3.
 func TestRunWeatherPass_NewEventNotifiesRegionPlayersDirectly(t *testing.T) {
 	db := testDB(t)
 	w := NewWeatherEngine(db)
 	ctx := context.Background()
 
 	seedWeatherPlayer(t, db, 9001, 500, 500, "Africa")
-	seedWeatherPlayer(t, db, 9002, -500, 500, "Europe") // different continent, must not be notified for an Africa event
+	seedWeatherPlayer(t, db, 9002, -500, 500, "Europe")
 
-	// Deterministically force a new event to roll on the very first pass:
-	// eventRollChance is 10%, so run the pass in a retry loop rather than
-	// depending on a lucky single roll (same probabilistic-but-bounded
-	// pattern the tick-engine tests already use elsewhere).
 	found := false
 	for attempt := 0; attempt < 200 && !found; attempt++ {
 		tx, err := db.BeginTx(ctx, nil)
@@ -99,10 +91,6 @@ func TestRunWeatherPass_NewEventNotifiesRegionPlayersDirectly(t *testing.T) {
 		t.Error("expected the Africa player to receive a direct notification for the new world event")
 	}
 
-	// The Europe player must never receive a notification mentioning
-	// Africa - cross-region isolation is already unit-tested directly in
-	// QueueToRegion's own tests, so this just confirms weather.go passes
-	// the right continent through, not a stale/wrong one.
 	var wrongRegionCount int
 	_ = db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND message LIKE '%Africa%'", int64(9002)).Scan(&wrongRegionCount)
 	if wrongRegionCount != 0 {
@@ -110,9 +98,6 @@ func TestRunWeatherPass_NewEventNotifiesRegionPlayersDirectly(t *testing.T) {
 	}
 }
 
-// TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly covers the
-// other half of section 5.3: the "conditions have cleared" headline
-// should also reach affected players directly, not just world_news.
 func TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly(t *testing.T) {
 	db := testDB(t)
 	w := NewWeatherEngine(db)
@@ -145,17 +130,6 @@ func TestRunWeatherPass_ClearedEventNotifiesRegionPlayersDirectly(t *testing.T) 
 	}
 }
 
-// TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent is
-// RARE_WORLD_FEATURES_PLAN.md Phase 2.2's direct test: bloom must draw
-// meaningfully less often than any other single event over a large
-// sample. This is inherently statistical (pickWeightedEvent is a real
-// weighted random draw, not a deterministic function), so the
-// assertion is a generous tolerance band, not an exact ratio - bloom's
-// weight (1) against every other event's weight (4) means it should
-// land close to 1-in-11 of all draws (1 / (1*1 + 4*7)); the test only
-// requires it stays well under half of a "fair" 1-in-8 share, which a
-// correctly-weighted draw will clear by a wide margin every run while
-// still catching a regression back to a flat, unweighted pool.
 func TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent(t *testing.T) {
 	const samples = 20000
 	counts := make(map[string]int)
@@ -164,11 +138,6 @@ func TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent(t *testing.T) {
 	}
 
 	bloomShare := float64(counts["bloom"]) / float64(samples)
-	// An unweighted flat pool of 8 events would give bloom ~12.5%
-	// (1-in-8); the weighted pool should land close to ~9% (1-in-11).
-	// Assert well under half of the flat-pool share (6.25%) as a loose
-	// but meaningful regression guard against weighting silently being
-	// dropped or inverted.
 	if bloomShare > 0.0625 {
 		t.Errorf("expected bloom to draw well under the unweighted 12.5%% share, got %.2f%% (%d/%d) - weighting may be broken", bloomShare*100, counts["bloom"], samples)
 	}
@@ -176,9 +145,6 @@ func TestPickWeightedEvent_BloomIsRarerThanEveryOtherEvent(t *testing.T) {
 		t.Error("expected bloom to be drawn at least once in 20000 samples - it should never be literally unreachable")
 	}
 
-	// Every other event should individually draw more often than
-	// bloom - confirms bloom isn't just "rare because everything is
-	// rare", but specifically rarer than its 7 siblings.
 	for _, e := range eventPool {
 		if e == "bloom" {
 			continue

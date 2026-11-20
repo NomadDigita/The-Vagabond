@@ -22,30 +22,10 @@ func NewScoutMissionsHandler(db *sql.DB) *ScoutMissionsHandler {
 	return &ScoutMissionsHandler{DB: db}
 }
 
-// scoutQuickDispatchCounts are the one-tap quantity options shown on the
-// panel's inline keyboard - common round numbers rather than an exhaustive
-// picker, matching the "a handful of good defaults, not a slider" spirit
-// of every other quantity choice in this game (see e.g. the Workshop's
-// batch-production buttons).
 var scoutQuickDispatchCounts = []int{1, 5, 10, 25}
 
-// maxConcurrentScoutMissions caps how many independent scout_missions rows
-// an encampment can have active (phase 'searching' or 'returning') at
-// once. Originally 1 (a hard EXISTS gate); raised to 3 per player request
-// and AI_AND_SCOUTING_EXPANSION_PLAN.md item 3 - each mission still finds
-// its own target and returns on its own timeline independently, since the
-// tick-side processing in internal/engine/tick/scoutmissions.go already
-// operates per-row (queries every mission in a phase, not "the"
-// encampment's mission), so raising this cap needed no tick-engine
-// changes, only the dispatch gate and the status rendering below.
 const maxConcurrentScoutMissions = 3
 
-// doDispatchScoutMission is the testable core of HandleDispatchScoutMission
-// and HandleScoutDispatchCallback - no telebot.Context dependency, so both
-// the slash command and the inline quantity buttons share one code path
-// (and one set of tests), matching admin.go's doSetTaxRate / jobs.go's
-// doGhostProtocol convention. Returns the HTML-formatted message to show
-// and, on failure, a non-nil error alongside a plain-text failure notice.
 func (h *ScoutMissionsHandler) doDispatchScoutMission(ctx context.Context, campID string, count int) (string, error) {
 	if count <= 0 {
 		return "🔭 Commit at least 1 scout.", errors.New("count must be positive")
@@ -93,9 +73,6 @@ func (h *ScoutMissionsHandler) doDispatchScoutMission(ctx context.Context, campI
 		divider, nil
 }
 
-// HandleDispatchScoutMission (/scoutmission <count>) is the slash-command
-// entry point - kept for players who prefer typing, alongside the wired
-// panel below.
 func (h *ScoutMissionsHandler) HandleDispatchScoutMission(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -120,11 +97,6 @@ func (h *ScoutMissionsHandler) HandleDispatchScoutMission(c telebot.Context) err
 	return c.Send(message, telebot.ModeHTML, keyboards.CombatNavigation())
 }
 
-// HandleScoutDispatchCallback fires when a player taps one of the panel's
-// quantity buttons. Mirrors HandleDispatchExpeditionCallback's
-// respond-then-redraw pattern in exploration.go: a short toast
-// acknowledgment, then the panel itself resent with the now-updated
-// mission state.
 func (h *ScoutMissionsHandler) HandleScoutDispatchCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -150,23 +122,12 @@ func (h *ScoutMissionsHandler) HandleScoutDispatchCallback(c telebot.Context) er
 	return h.HandleScoutPanel(c)
 }
 
-// myScoutCamp resolves the caller's outpost ID.
 func (h *ScoutMissionsHandler) myScoutCamp(ctx context.Context, userID int64) (string, error) {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", userID).Scan(&campID)
 	return campID, err
 }
 
-// HandleScoutPanel (button-driven, and also useful as a direct command)
-// is the wired "mother" screen for long-range scouting - the entry point
-// missing before this pass: dispatching or checking a mission previously
-// required already knowing the exact /scoutmission or /scoutstatus slash
-// syntax, with no button path and no formatting at all.
-//
-// Shows the in-flight mission status (if any) with no action buttons -
-// nothing to tap mid-mission, matching HandleExplorePanel's "expedition
-// en route" read-only state - or, if the outpost is free, an info panel
-// plus one-tap quantity buttons that dispatch directly.
 func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 	ctx := context.Background()
@@ -222,19 +183,12 @@ func (h *ScoutMissionsHandler) HandleScoutPanel(c telebot.Context) error {
 	}
 	rows = append(rows, selector.Row(muteBtn))
 	if len(rows) == 1 {
-		// Only the mute toggle made it in - no scouts to dispatch.
 		panelText += "\n\n" + htmlItalic("No Scout Walkers available - recruit some at the Heavy Workshop first.")
 	}
 	selector.Inline(rows...)
 	return sendPanelWithNavHTML(c, navCaptionCombat, keyboards.CombatNavigation(), panelText, selector)
 }
 
-// scoutMuteToggleButton renders the Scout panel's one-tap notification
-// toggle - 2026-08-06 direct request for a way to mute/unmute long-range
-// scouting pings "directly without any other things", i.e. right here on
-// the panel a player is already looking at, not buried three taps deep in
-// /settings (that toggle still exists too, for anyone who prefers it -
-// see HandleSettings - both read/write the same mute_scout_status column).
 func scoutMuteToggleButton(muted bool) telebot.Btn {
 	selector := &telebot.ReplyMarkup{}
 	if muted {
@@ -243,9 +197,6 @@ func scoutMuteToggleButton(muted bool) telebot.Btn {
 	return selector.Data("🔕 Mute Scouting Pings", "scout_mute_toggle")
 }
 
-// HandleScoutMuteToggleCallback flips mute_scout_status for the tapping
-// player and re-renders the Scout panel in place so the button label
-// (🔔 Unmute / 🔕 Mute) immediately reflects the new state.
 func (h *ScoutMissionsHandler) HandleScoutMuteToggleCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -264,11 +215,6 @@ func (h *ScoutMissionsHandler) HandleScoutMuteToggleCallback(c telebot.Context) 
 	return h.HandleScoutPanel(c)
 }
 
-// renderScoutStatus builds the beautified status block shared by
-// HandleScoutStatus and HandleScoutPanel, listing every one of this
-// encampment's currently active missions (up to maxConcurrentScoutMissions)
-// rather than just the most recent one, and reports how many are active so
-// callers can decide whether there's still a free dispatch slot.
 func (h *ScoutMissionsHandler) renderScoutStatus(ctx context.Context, campID string) (string, int, error) {
 	rows, err := h.DB.QueryContext(ctx, `
 		SELECT sm.phase, sm.scouts_committed, te.name, sm.return_eta
@@ -327,8 +273,6 @@ func (h *ScoutMissionsHandler) renderScoutStatus(ctx context.Context, campID str
 	return header + body + divider, len(missions), nil
 }
 
-// HandleScoutStatus (/scoutstatus) is the slash-command equivalent of the
-// panel's read-only status view, kept for players who prefer typing.
 func (h *ScoutMissionsHandler) HandleScoutStatus(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

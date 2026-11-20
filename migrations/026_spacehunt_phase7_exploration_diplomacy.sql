@@ -1,14 +1,4 @@
--- ==============================================================================
--- THE VAGABOND — SPACEHUNT REVIVAL: PHASE 7 EXPLORATION + DIPLOMACY
--- (026_spacehunt_phase7_exploration_diplomacy.sql)
--- DB Engine: PostgreSQL (Supabase)
---
--- NOTE: main.go already runs the statements below automatically on every
--- bot startup. This file is a readable reference only.
--- ==============================================================================
 
--- Item 10: World Exploration. Sites rotate in per continent (same
--- pattern as world_events) and are claimed first-come-first-served.
 CREATE TABLE IF NOT EXISTS exploration_sites (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	continent VARCHAR(50) NOT NULL,
@@ -30,10 +20,6 @@ CREATE TABLE IF NOT EXISTS exploration_dispatches (
 	resolve_time TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Item 11: Diplomacy. Mirrors clan_wars's clan_a/clan_b shape, for
--- peaceful pacts instead of conflicts. Only 'active' status blocks raids
--- (see combat.go's launch check) - a Clan King must accept a 'pending'
--- proposal first.
 CREATE TABLE IF NOT EXISTS clan_diplomacy (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	clan_a_id UUID NOT NULL REFERENCES clans(id) ON DELETE CASCADE,

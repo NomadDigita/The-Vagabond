@@ -15,51 +15,12 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/worldintel"
 )
 
-// scoutMissionPingInterval gates BOTH the actual discovery-roll cadence
-// during the searching phase AND the periodic "still searching"/"en route
-// home" status pings, off a single scout_missions.last_status_notified_at
-// column - mirroring the AI decision loop's cadence-gate pattern
-// (ai_last_decision_at), per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md
-// section 3.5's own note.
-//
-// This is a deliberate interpretation of an underspecified detail in the
-// plan doc, flagged explicitly rather than silently decided: the doc's
-// literal wording ("each tick... roll ExplorationDiscoveryChance") would,
-// taken at face value against a 60-second default tick interval, resolve
-// almost every search within 1-2 minutes - that trivializes "search until
-// found, no ETA" into "search for basically no time." Gating the roll on
-// the same ~30-minute cadence as the status ping keeps the probabilistic
-// model (worldintel.ExplorationDiscoveryChance) meaningful while still
-// giving the player periodic feedback that something is happening.
 const scoutMissionPingInterval = 30 * time.Minute
 
-// scoutBonusDiscoveryChance is a flat, modest chance per gate-open during
-// the return leg that the party stumbles onto a second target passing by
-// - mirroring discoverRouteContacts' "reveal a base while marching past
-// it" mechanic for raids, but rolled rather than guaranteed-on-proximity
-// since a scout mission's return path (unlike a raid's fixed origin/
-// destination line) has no interpolatable route until it actually finds
-// its primary target.
 const scoutBonusDiscoveryChance = 0.15
 
-// scoutResourceRatePerHourPerScout calibrates the resource trickle from
-// section 3.6. A normal /newjobexplore dispatch averages roughly a
-// 32-minute round trip for a flat ~150-400 (avg ~275) single-resource
-// payout, uncommitted to any manpower. Scouting is a much longer,
-// open-ended, manpower-committing mission, so it's priced per scout per
-// hour instead of flat-per-dispatch: at 1 scout for a short ~2-hour
-// mission that's ~100 total value (less than one normal dispatch, since
-// nothing was guaranteed and manpower sat idle from other tasks the
-// whole time); at 5 scouts on a long ~4-hour mission that's ~1000 (a
-// genuinely meaningful haul for a long, risky-feeling commitment). Split
-// 60/40 scrap/metal, matching the two most common exploration reward
-// tiers' relative weighting. Tunable starting constant, not a
-// precisely-right number - same spirit as this session's other new
-// tunables (ghostProtocolCostFraction, aiFleeGarrisonThreshold, etc.).
 const scoutResourceRatePerHourPerScout = 50.0
 
-// processScoutMissions is the tick pass entry point, registered in
-// engine.go's ProcessTick phase list.
 func (e *Engine) processScoutMissions(ctx context.Context, tx *sql.Tx) error {
 	if err := e.processSearchingScoutMissions(ctx, tx); err != nil {
 		return fmt.Errorf("processing searching scout missions: %w", err)
@@ -83,9 +44,6 @@ type searchingScoutMission struct {
 	originY         int
 }
 
-// processSearchingScoutMissions gates each mission's discovery roll on
-// scoutMissionPingInterval, then either transitions it to 'returning' (a
-// hit) or sends a "still searching" ping (a miss).
 func (e *Engine) processSearchingScoutMissions(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT sm.id, sm.encampment_id, sm.scouts_committed, sm.last_status_notified_at,
@@ -132,14 +90,6 @@ func (e *Engine) processSearchingScoutMissions(ctx context.Context, tx *sql.Tx) 
 	return nil
 }
 
-// scoutMissionFindsTarget picks a target using the same no-omniscience
-// selection query aiScout/resolveExplorationDiscovery already use
-// (undiscovered-by-this-observer, ordered by danger/established_at) -
-// but deliberately without a region filter, since long-range scouting is
-// meant to search the whole planet, not just the home continent (unlike
-// aiScout, which is intentionally home-continent-scoped for the AI
-// decision loop). A real player or an AI faction are both valid finds,
-// consistent with this session's earlier AI-vs-AI parity work.
 func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m searchingScoutMission) error {
 	var targetID, targetName string
 	var targetUserID int64
@@ -157,8 +107,6 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 		ORDER BY c.danger_level ASC, e.established_at ASC
 		LIMIT 1`, m.encampmentID).Scan(&targetID, &targetName, &targetUserID, &targetX, &targetY, &targetRegion)
 	if err == sql.ErrNoRows {
-		// Nothing left anywhere in the world for this observer to find -
-		// not an error, just keep searching.
 		if _, execErr := tx.ExecContext(ctx, "UPDATE scout_missions SET last_status_notified_at = CURRENT_TIMESTAMP WHERE id = $1", m.id); execErr != nil {
 			return execErr
 		}
@@ -176,9 +124,6 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 		VALUES ($1, $2, 'scout_mission') ON CONFLICT DO NOTHING`, m.encampmentID, targetID); err != nil {
 		return fmt.Errorf("recording scout mission discovery: %w", err)
 	}
-	// known_locations is the coordinate SNAPSHOT (see schema.go's comment
-	// on the table) - locked now, at discovery time, distinct from the
-	// permanent boolean relationship just recorded above.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO known_locations (observer_encampment_id, target_encampment_id, x, y, region)
 		VALUES ($1, $2, $3, $4, $5)
@@ -188,9 +133,6 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 		return fmt.Errorf("locking known location: %w", err)
 	}
 
-	// Same Manhattan-distance march formula launchAIRaid already uses
-	// (steps * 10 minutes, minimum 1 minute) - one consistent notion of
-	// travel time across the codebase rather than a scouting-specific one.
 	steps := math.Abs(float64(targetX-m.originX)) + math.Abs(float64(targetY-m.originY))
 	marchingMinutes := steps * 10.0
 	if marchingMinutes < 1.0 {
@@ -211,27 +153,12 @@ func (e *Engine) scoutMissionFindsTarget(ctx context.Context, tx *sql.Tx, m sear
 	}
 
 	if isRealPlayer(m.userID) {
-		// "general" (non-mutable), not "scout_status": the periodic
-		// "still searching" ping above is routine chatter and fine to
-		// mute, but this is the actual discovery event - the entire
-		// payoff of the mission - and MutableCategories' own contract
-		// (notifications/preferences.go) is explicit that discovery
-		// alerts must never be suppressible. This was previously tagged
-		// "route_status" by mistake (before scouting got its own
-		// mutable category), meaning a player who'd muted the routine
-		// pings would silently lose this one too.
 		if err := notifications.Queue(ctx, tx, m.userID, fmt.Sprintf(
 			"🎯 %s\n\nYour Scout Walkers located Outpost %s. Its position is now locked in your intel and marked in your Tactical Target Matrix.\n\n🚶 Beginning the journey home - ETA %s.",
 			htmlBoldTick("CONTACT!"), htmlBoldTick(htmlEscapeTick(targetName)), htmlCodeTick(formatDurationTick(time.Duration(marchingMinutes*float64(time.Minute))))), "general"); err != nil {
 			return err
 		}
 	}
-	// Being found is genuine information for the target too - matches
-	// discoverRouteContacts' existing "being seen is reciprocal
-	// knowledge" precedent for raids, though a scout sighting doesn't
-	// grant the target reciprocal discovery of the *scout's* base (a
-	// distant, passive survey team isn't the same as a raid crossing
-	// your road) - just a heads-up that they're now on someone's radar.
 	if isRealPlayer(targetUserID) {
 		if err := notifications.Queue(ctx, tx, targetUserID,
 			"📡 "+htmlBoldTick("SPOTTED")+": A distant scouting party has located and locked in your outpost's position. You may want to check your defenses.", "general"); err != nil {
@@ -250,9 +177,6 @@ type returningScoutMission struct {
 	bonusName       sql.NullString
 }
 
-// completeReturnedScoutMissions credits the resource trickle (section
-// 3.6), returns the committed scouts to workshop_inventory, and marks
-// the mission complete once return_eta has passed.
 func (e *Engine) completeReturnedScoutMissions(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT sm.id, sm.encampment_id, sm.scouts_committed, sm.started_at, e.user_id, be.name
@@ -337,11 +261,6 @@ type inTransitScoutMission struct {
 	bonusAlreadyFound bool
 }
 
-// pingInTransitScoutMissions handles the still-en-route case: a periodic
-// "ETA" ping, plus a chance (scoutBonusDiscoveryChance, gated on the same
-// cadence) of a bonus mid-journey discovery mirroring
-// discoverRouteContacts' "reveal a base while marching past it" behavior
-// for raids.
 func (e *Engine) pingInTransitScoutMissions(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT sm.id, sm.encampment_id, e.user_id, sm.last_status_notified_at,
@@ -398,10 +317,6 @@ func (e *Engine) pingInTransitScoutMissions(ctx context.Context, tx *sql.Tx) err
 	return nil
 }
 
-// scoutMissionBonusDiscovery interpolates the return leg's current
-// position (reusing roadcombat's exact progress/position math, the same
-// way discoverRouteContacts does for raids) and looks for an undiscovered
-// target within one tile.
 func (e *Engine) scoutMissionBonusDiscovery(ctx context.Context, tx *sql.Tx, m inTransitScoutMission) error {
 	progress := roadcombat.RouteProgress(m.returnLegStarted, m.returnLegMinutes, time.Now().UTC())
 	pos := roadcombat.CurrentPosition("returning", m.originX, m.originY, m.foundX, m.foundY, progress)

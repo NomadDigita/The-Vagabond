@@ -97,8 +97,6 @@ def material(
         set_socket(bsdf, "Emission Color", rgba(emission))
         set_socket(bsdf, "Emission Strength", emission_strength)
     if hasattr(mat, "surface_render_method") and alpha < 1.0:
-        # Dithered blending adds visible grain at a 100px canvas. Blended
-        # transmission preserves the intentionally smooth liquid-glass read.
         mat.surface_render_method = "BLENDED"
     return mat
 
@@ -223,8 +221,6 @@ def setup_scene(samples: int, frames: int) -> bpy.types.Scene:
     scene.frame_start = 1
     scene.frame_end = frames
     scene.view_settings.look = "AgX - Medium High Contrast"
-    # EEVEE's sample setting moved between Blender releases; use the current
-    # property when it exists and remain compatible with older LTS builds.
     if hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
         scene.eevee.taa_render_samples = samples
     world = bpy.data.worlds.new("Void")
@@ -246,8 +242,6 @@ def setup_scene(samples: int, frames: int) -> bpy.types.Scene:
     composite = tree.nodes.new("CompositorNodeComposite")
     tree.links.new(layers.outputs["Image"], glare.inputs["Image"])
     tree.links.new(glare.outputs["Image"], set_alpha.inputs["Image"])
-    # Glare affects colour but must never turn the transparent film into an
-    # opaque black square when the PNG sequence is encoded to VP9 alpha.
     tree.links.new(layers.outputs["Alpha"], set_alpha.inputs["Alpha"])
     tree.links.new(set_alpha.outputs["Image"], composite.inputs["Image"])
     return scene
@@ -266,8 +260,6 @@ def build_oracle(frames: int) -> None:
     root = bpy.data.objects.new("Oracle animation root", None)
     bpy.context.collection.objects.link(root)
 
-    # A unique Vagabond object: a mechanical survey core, not an eye, crystal
-    # ball, or copy of a Telegram asset. The iris is an aperture scanner.
     base = add_cylinder("Reinforced plinth", 1.48, 0.28, (0, 0.12, -1.72), (math.pi / 2, 0, 0), gunmetal)
     parent_to(base, root)
     base_ring = add_torus("Gold base signal ring", 1.22, 0.08, (0, -0.03, -1.72), (math.pi / 2, 0, 0), gold)
@@ -323,7 +315,6 @@ def build_oracle(frames: int) -> None:
         )
         parent_to(blade, iris)
 
-    # Purposeful debris: depth and parallax, not generic sparkle confetti.
     particle_specs = [(-1.95, -0.20, 1.14, 0.09, cyan), (1.75, 0.3, 0.92, 0.06, magenta), (1.55, -0.5, -1.20, 0.075, gold), (-1.68, 0.42, -1.0, 0.055, cyan)]
     particles: list[bpy.types.Object] = []
     for index, (x, y, z, size, mat) in enumerate(particle_specs):
@@ -331,10 +322,6 @@ def build_oracle(frames: int) -> None:
         parent_to(particle, root)
         particles.append(particle)
 
-    # A custom emoji is read at roughly 20px. A full turn makes this narrow
-    # silhouette disappear edge-on, so the heavy command core has a deliberate
-    # glassy yaw/bob while the aperture performs the visibly full rotation.
-    # The matching start/end pose makes the two-second loop seamless.
     root.rotation_euler = (math.radians(-4), 0, math.radians(-16))
     root.keyframe_insert(data_path="rotation_euler", frame=1)
     root.rotation_euler = (math.radians(4), 0, math.radians(18))

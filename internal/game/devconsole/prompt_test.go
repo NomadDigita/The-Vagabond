@@ -128,8 +128,6 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This week saw a healthy increase in new signups, largely concentrated in the Asia contin`
 	rec := devconsole.ParseRecommendation(raw, "")
@@ -184,11 +182,6 @@ func TestFormatForTelegram_StructuredPath(t *testing.T) {
 	}
 }
 
-// TestFormatForTelegram_NarrativesUseExpandableQuote is the regression
-// test for the 2026-08-01 UI pass: the three free-text AI narrative
-// fields can legitimately run to several sentences each, so they now
-// render as collapsible blockquotes instead of sitting inline as one
-// dense wall of prose between the report's other sections.
 func TestFormatForTelegram_NarrativesUseExpandableQuote(t *testing.T) {
 	rec := &devconsole.Recommendation{
 		Summary:                  "test",
@@ -207,10 +200,6 @@ func TestFormatForTelegram_NarrativesUseExpandableQuote(t *testing.T) {
 	}
 }
 
-// TestFormatForTelegram_TopPlayersTableFromRealSnapshot guards the
-// same ground-truth-vs-AI-paraphrase property as the Balance Report's
-// unit table: the Top Players table must come from Snapshot's real
-// scores, not from anything the model wrote in TopPerformerNarrative.
 func TestFormatForTelegram_TopPlayersTableFromRealSnapshot(t *testing.T) {
 	rec := &devconsole.Recommendation{
 		Summary: "test",
@@ -232,10 +221,6 @@ func TestFormatForTelegram_TopPlayersTableFromRealSnapshot(t *testing.T) {
 	}
 }
 
-// TestFormatForTelegram_NilSnapshotOmitsTable makes sure the table
-// section is skipped cleanly (not a nil-pointer panic) when Snapshot
-// wasn't set - the exact case every existing hand-built test
-// Recommendation above exercises, since none of them set Snapshot.
 func TestFormatForTelegram_NilSnapshotOmitsTable(t *testing.T) {
 	rec := &devconsole.Recommendation{Summary: "test"}
 	out := devconsole.FormatForTelegram(rec)

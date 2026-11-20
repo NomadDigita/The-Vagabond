@@ -26,25 +26,12 @@ func NewClanHandler(db *sql.DB) *ClanHandler {
 	return &ClanHandler{DB: db}
 }
 
-const clanRenameCost = 800.0 // Crystal
+const clanRenameCost = 800.0
 
-// canManageClan reports whether a role grants alliance-management
-// permissions (reviewing applications, kicking Soldiers, setting the
-// icon/description). Introduced to fix BUGS_AND_INCONSISTENCIES.md
-// bug #4: HandlePromoteMemberCallback set role = "Co-Leader" but
-// nothing ever checked for it, making Promote a purely cosmetic
-// no-op. Co-Leader now grants real, but deliberately narrower than
-// Leader, authority - see the callers of this helper for exactly
-// which actions it unlocks. Declaring war, renaming the clan, and
-// promoting/demoting/kicking a Leader or another Co-Leader remain
-// Leader-only: those are either costly/structural (rename costs
-// Crystal, war commits the whole clan for 48h) or would let a
-// Co-Leader remove the person who promoted them.
 func canManageClan(role string) bool {
 	return role == "Leader" || role == "Co-Leader"
 }
 
-// HandleClanPanel renders the player's own clan HUD, or the "unaligned" screen.
 func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.FindingLocation)
 
@@ -169,8 +156,6 @@ func (h *ClanHandler) HandleClanPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// HandleBrowseClansCallback / HandleBrowseClansCommand lists all clans,
-// ranked by combined member score, each with an Apply button.
 func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -218,7 +203,6 @@ func (h *ClanHandler) HandleBrowseClans(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// HandleApplyToClanCallback sends a join application, notifying the Leader.
 func (h *ClanHandler) HandleApplyToClanCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -254,7 +238,6 @@ func (h *ClanHandler) HandleApplyToClanCallback(c telebot.Context) error {
 	return nil
 }
 
-// HandleApplicationsInboxCallback shows the Leader their pending applications.
 func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -320,7 +303,6 @@ func (h *ClanHandler) HandleApplicationsInboxCallback(c telebot.Context) error {
 	return nil
 }
 
-// HandleApplicationDecisionCallback processes Accept/Reject on an application.
 func (h *ClanHandler) HandleApplicationDecisionCallback(c telebot.Context, accept bool) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -383,7 +365,6 @@ func (h *ClanHandler) HandleRejectApplicationCallback(c telebot.Context) error {
 	return h.HandleApplicationDecisionCallback(c, false)
 }
 
-// HandleManageMembersCallback renders the roster management page with Promote & Kick inline buttons
 func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
@@ -416,9 +397,6 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 				btnPromote := keyboards.Styled(selector.Data(fmt.Sprintf("🛡️ Promote [%d]", index), "clan_promote", strconv.FormatInt(memberID, 10)), keyboards.StyleSuccess)
 				styledRows = append(styledRows, []keyboards.StyledBtn{btnPromote, btnKick})
 			} else if senderRole == "Co-Leader" && memberID != sender.ID && role == "Soldier" {
-				// Co-Leaders can manage rank-and-file Soldiers but not
-				// the Leader or fellow Co-Leaders, and can't promote -
-				// only the Leader hands out the Co-Leader rank.
 				btnKick := keyboards.Styled(selector.Data(fmt.Sprintf("❌ Kick [%d]", index), "clan_kick", strconv.FormatInt(memberID, 10)), keyboards.StyleDanger)
 				styledRows = append(styledRows, []keyboards.StyledBtn{btnKick})
 			}
@@ -430,7 +408,6 @@ func (h *ClanHandler) HandleManageMembersCallback(c telebot.Context) error {
 	return keyboards.SendStyled(c, rosterText, styledRows)
 }
 
-// HandleKickMemberCallback processes kicking members from the alliance
 func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 	ctx := context.Background()
 	targetIDStr := c.Args()[0]
@@ -458,12 +435,6 @@ func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 		}
 	}
 
-	// BUGFIX: this used to DELETE by targetID alone, with no check that
-	// the target actually belongs to the acting leader's own clan. A
-	// stale "Kick" button (e.g. the member left and joined a different
-	// clan between opening Manage Members and tapping Kick) could
-	// remove someone from an unrelated clan's roster entirely. The
-	// clan_id match makes this a no-op instead of a cross-clan kick.
 	res, _ := tx.ExecContext(ctx, "DELETE FROM user_clans WHERE user_id = $1 AND clan_id = $2", targetID, myClanID)
 	if n, _ := res.RowsAffected(); n == 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
@@ -477,7 +448,6 @@ func (h *ClanHandler) HandleKickMemberCallback(c telebot.Context) error {
 	return h.HandleClanPanel(c)
 }
 
-// HandlePromoteMemberCallback processes promoting members to Co-Leaders
 func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
 	ctx := context.Background()
 	targetIDStr := c.Args()[0]
@@ -497,9 +467,6 @@ func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ Access Denied: Leaders only."})
 	}
 
-	// BUGFIX: same cross-clan gap as HandleKickMemberCallback above -
-	// verify the target is actually in the acting leader's own clan
-	// before promoting them, rather than trusting targetID alone.
 	res, _ := tx.ExecContext(ctx, "UPDATE user_clans SET role = 'Co-Leader' WHERE user_id = $1 AND clan_id = $2", targetID, myClanID)
 	if n, _ := res.RowsAffected(); n == 0 {
 		return c.Respond(&telebot.CallbackResponse{Text: "❌ That commander is no longer in your alliance."})
@@ -513,7 +480,6 @@ func (h *ClanHandler) HandlePromoteMemberCallback(c telebot.Context) error {
 	return h.HandleClanPanel(c)
 }
 
-// HandleAllianceStatsCallback calculates the accumulated strength metrics
 func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 	ctx := context.Background()
 	clanID := c.Args()[0]
@@ -549,12 +515,8 @@ func (h *ClanHandler) HandleAllianceStatsCallback(c telebot.Context) error {
 	return c.Send(report, telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// randomAnimalIcons is the pool /guild_icon draws from, matching
-// SpaceHunt's "change your guild icon to another random animal" feature.
 var randomAnimalIcons = []string{"🦅", "🐺", "🐻", "🦁", "🐯", "🦂", "🐍", "🦇", "🦉", "🐗", "🦖", "🦍", "🐉", "🦌", "🦊"}
 
-// HandleGuildMissions (/guild_missions) shows recent raids and transfers
-// involving any member of the caller's clan.
 func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -603,7 +565,6 @@ func (h *ClanHandler) HandleGuildMissions(c telebot.Context) error {
 	return c.Send(panelText, telebot.ModeHTML, keyboards.MainNavigation())
 }
 
-// HandleGuildMsg (/guildmsg [message]) broadcasts to every clan member.
 func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -642,7 +603,6 @@ func (h *ClanHandler) HandleGuildMsg(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("📢 Message broadcast to %d Clan member(s)!", count), keyboards.MainNavigation())
 }
 
-// HandleGuildIcon (/guild_icon) randomly changes the clan's icon.
 func (h *ClanHandler) HandleGuildIcon(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -668,8 +628,6 @@ func (h *ClanHandler) HandleGuildIcon(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("%s Your Clan's icon is now %s!", newIcon, newIcon), keyboards.MainNavigation())
 }
 
-// HandleGuildDescription (/guild_description [text]) sets the clan's
-// description, shown on the recruitment /board.
 func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -702,9 +660,6 @@ func (h *ClanHandler) HandleGuildDescription(c telebot.Context) error {
 	return c.Send("✅ Clan description updated!", keyboards.MainNavigation())
 }
 
-// HandleBoard (/board) is the recruitment post board - clans currently
-// open to recruiting, with their icon and description, distinct from
-// /clans (which is the pure ranking list).
 func (h *ClanHandler) HandleBoard(c telebot.Context) error {
 	ctx := context.Background()
 
@@ -749,9 +704,6 @@ func (h *ClanHandler) HandleBoard(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// HandleCreateClanCommand establishes a clan with a REAL custom name
-// (payload), matching SpaceHunt's naming freedom instead of an
-// auto-generated placeholder.
 func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -800,7 +752,6 @@ func (h *ClanHandler) HandleCreateClanCommand(c telebot.Context) error {
 	return sendWithEffect(c, EffectCelebration, fmt.Sprintf("🛡️🎉 <b>CLAN ESTABLISHED: \"%s\"!</b> You are its Leader. Use /clans to see it listed, or /clan for your HUD.", htmlEscape(name)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
-// HandleRenameClanCommand lets a Leader rename their clan for a real cost.
 func (h *ClanHandler) HandleRenameClanCommand(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -853,7 +804,6 @@ func (h *ClanHandler) HandleRenameClanCommand(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("✅ <b>CLAN RENAMED</b>: Now known as \"%s\"! 🎉", htmlEscape(newName)), telebot.ModeHTML, keyboards.MainNavigation())
 }
 
-// HandleLeaveClanCallback removes the member (or dissolves if Leader)
 func (h *ClanHandler) HandleLeaveClanCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -880,10 +830,6 @@ func (h *ClanHandler) HandleLeaveClanCallback(c telebot.Context) error {
 	return h.HandleClanPanel(c)
 }
 
-// HandleDeclareClanWarCallback creates a REAL tracked war (48h duration,
-// live score accumulated from actual raid outcomes between the two clans'
-// members, resolved by the tick engine) - replacing the old stub that just
-// sent a one-time notification with zero mechanical effect.
 func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -926,7 +872,6 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	)
 	_ = c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("⚔️ WAR DECLARED on %s! 48h battle begins now.", enemyName)})
 
-	// Notify all members of both clans
 	rows, _ := h.DB.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id IN ($1, $2)", clanID, enemyID)
 	if rows != nil {
 		for rows.Next() {
@@ -941,26 +886,8 @@ func (h *ClanHandler) HandleDeclareClanWarCallback(c telebot.Context) error {
 	return nil
 }
 
-// clanDonateMaxLen bounds /clan_donate's @username argument length
-// purely as a sanity check before it ever reaches a query - Telegram
-// usernames are capped at 32 characters, so anything longer is
-// certainly a typo/garbage, not a real target.
 const clanDonateMaxLen = 32
 
-// HandleClanDonateCommand (/clan_donate <resource> <amount> <@username>)
-// shows a Confirm/Cancel preview before transferring resources from the
-// caller's own stockpile to a fellow clan member's - 2026-08-05
-// addition, closing a real gap flagged by the project owner ("there's
-// no way to transport resources to clan"). Deliberately a direct
-// peer-to-peer transfer between two members' existing `resources` rows
-// rather than a new clan-wide treasury/vault concept - the latter would
-// need a new table, a withdrawal-authority model (who can spend from
-// it, and how that interacts with Leader/Co-Leader/Soldier roles), and
-// its own audit trail, which is a materially bigger design than "let me
-// help a clanmate who's short on Crystal right now." Nothing here
-// touches the database - the actual transfer only happens if the
-// player taps Confirm, via HandleClanDonateConfirmCallback calling
-// doClanDonate.
 func (h *ClanHandler) HandleClanDonateCommand(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -1023,12 +950,6 @@ func (h *ClanHandler) HandleClanDonateCommand(c telebot.Context) error {
 	return keyboards.SendStyled(c, cardText, [][]keyboards.StyledBtn{{btnCancel, btnConfirm}})
 }
 
-// HandleClanDonateConfirmCallback fires when a player taps "✅ Confirm
-// Donation" on the card HandleClanDonateCommand rendered. Re-derives
-// the caller's own clan/balance server-side rather than trusting
-// anything about the sender from callback_data (only the resource,
-// amount, and target ID are read from it - all revalidated fresh
-// inside doClanDonate).
 func (h *ClanHandler) HandleClanDonateConfirmCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -1049,20 +970,10 @@ func (h *ClanHandler) HandleClanDonateConfirmCallback(c telebot.Context) error {
 	return c.Edit(message, telebot.ModeHTML)
 }
 
-// HandleClanDonateCancelCallback fires when a player taps "❌ Cancel" -
-// nothing was ever transferred, so this just closes out the card.
 func (h *ClanHandler) HandleClanDonateCancelCallback(c telebot.Context) error {
 	return sendCancelledCard(c, "🎁 Donation")
 }
 
-// doClanDonate is the testable core of HandleClanDonateConfirmCallback:
-// transfers amount of resource from senderUserID's stockpile to
-// targetUserID's, revalidating from scratch that both are still real
-// clanmates in the SAME clan (membership could have changed between the
-// card being shown and Confirm being tapped) and that senderUserID
-// still has enough of resource. Storage-cap clamps the recipient's gain
-// the same way every other resource-gain path in this codebase does
-// (see storagecap.Clamp's callers in exchange.go).
 func (h *ClanHandler) doClanDonate(ctx context.Context, senderUserID, targetUserID int64, resource string, amount float64) (string, error) {
 	column, ok := marketResourceColumn(resource)
 	if !ok {

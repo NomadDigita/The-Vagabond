@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// TestFormatDuration_PicksTheRightUnitTier verifies the human-friendly
-// duration formatter used throughout the game's countdowns (raid ETAs,
-// road-contact deadlines, spy timers, scout mission ETAs, etc.) instead
-// of a raw second count like "310955s remaining".
 func TestFormatDuration_PicksTheRightUnitTier(t *testing.T) {
 	cases := []struct {
 		name string

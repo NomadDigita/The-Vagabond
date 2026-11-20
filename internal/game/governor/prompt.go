@@ -1,12 +1,3 @@
-// Package governor implements Phase B of the AI Systems Roadmap: the
-// AI Planet Governor. Unlike internal/ai (which must stay game-agnostic
-// per ADR-001 in PROJECT_MASTER_PLAN.md), this package is allowed to
-// know about encampments, modules, and resources — it is the seam
-// where game state meets the AI Foundation.
-//
-// This file intentionally contains zero I/O (no *sql.DB, no network)
-// so it can be unit tested directly. All database access lives in
-// governor.go.
 package governor
 
 import (
@@ -18,16 +9,11 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// ModuleState is a minimal projection of a row in the `modules` table.
 type ModuleState struct {
 	Type  string
 	Level int
 }
 
-// Snapshot is everything about one player's base that the Governor
-// feeds to the model. It deliberately mirrors existing DB concepts
-// (see internal/engine/resource.EncampmentState) rather than inventing
-// a parallel data model.
 type Snapshot struct {
 	EncampmentID string
 	Name         string
@@ -51,38 +37,21 @@ type Snapshot struct {
 	ProductionTechLvl int
 }
 
-// Action is one recommended step, in the shape the model is asked to
-// return inside Recommendation.PriorityActions.
 type Action struct {
 	Action string `json:"action"`
 	Target string `json:"target"`
 	Reason string `json:"reason"`
 }
 
-// Recommendation is the Governor's structured output. If the model's
-// response can't be parsed as JSON (see ADR-005 in
-// PROJECT_MASTER_PLAN.md — Anthropic has no enforced JSON mode),
-// ParseRecommendation falls back to Summary=<raw text>, so the player
-// always sees *something* useful rather than an error.
 type Recommendation struct {
-	Summary         string   `json:"summary"`
-	PriorityActions []Action `json:"priority_actions"`
-	StorageWarning  string   `json:"storage_warning"`
-	ExpectedImpact  string   `json:"expected_impact"`
-	// FellBackToRawText is true when JSON parsing failed and Summary
-	// holds the model's raw, unparsed text instead.
+	Summary           string   `json:"summary"`
+	PriorityActions   []Action `json:"priority_actions"`
+	StorageWarning    string   `json:"storage_warning"`
+	ExpectedImpact    string   `json:"expected_impact"`
 	FellBackToRawText bool
-	// Truncated is true when the fallback happened because the
-	// model's response was cut off mid-object (almost always meaning
-	// MaxTokens was hit before the model finished), as opposed to the
-	// response never containing a recognizable JSON object at all.
-	// See ADR-016 in PROJECT_MASTER_PLAN.md.
-	Truncated bool
+	Truncated         bool
 }
 
-// SystemPrompt is the fixed instruction given to the model for every
-// Governor call. It stays outside the per-call BuildUserPrompt so it's
-// easy to find and tune independent of the encampment data.
 const SystemPrompt = `You are the AI Planet Governor for a player's base in The Vagabond, a tick-based multiplayer survival/strategy game.
 
 Your job: analyze the player's current base state and recommend concrete next actions. You NEVER take action yourself — you only recommend. The player (or an explicit autopilot toggle they control elsewhere) decides whether to act.
@@ -96,11 +65,6 @@ Focus areas, in priority order:
 
 Be specific and concrete — reference actual module names and levels from the data given, not generic advice. Keep the summary to 2-3 sentences. List at most 4 priority actions, ordered most-to-least important.`
 
-// BuildUserPrompt renders a Snapshot into the human-readable data
-// block the model reasons over. Kept deterministic (sorted module
-// list) so identical snapshots produce identical prompts, which
-// matters for the AI Foundation's cache layer (internal/ai.CacheKey
-// hashes the full message list).
 func BuildUserPrompt(s Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "BASE: %q (Level %d, ID %s)\n\n", s.Name, s.Level, s.EncampmentID)
@@ -128,10 +92,6 @@ func BuildUserPrompt(s Snapshot) string {
 	return b.String()
 }
 
-// ParseRecommendation decodes the model's response text. It tolerates
-// responses wrapped in markdown code fences (some models add them
-// despite instructions not to) by stripping a leading/trailing ```
-// fence before attempting to parse.
 func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -143,11 +103,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 		return &rec
 	}
 
-	// Second attempt: real providers occasionally leave a raw,
-	// unescaped newline/tab inside a string value (most often in a
-	// multi-sentence "summary"), which Go's strict encoding/json
-	// rejects even though the model's intent was clearly valid JSON.
-	// See ADR-015.
 	repaired := ai.SanitizeJSONControlChars(candidate)
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
 		return &rec
@@ -156,9 +111,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
-// message. Every field is LLM-generated text, so it's escaped via
-// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
 	b.WriteString("🧠 " + ai.HTMLBold("AI PLANET GOVERNOR") + "\n\n")

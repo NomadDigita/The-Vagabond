@@ -7,8 +7,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// fakeProvider lets tests control availability/failure without any
-// network or database dependency.
 type fakeProvider struct {
 	name       string
 	available  bool
@@ -38,7 +36,6 @@ type testError struct{ msg string }
 
 func (e *testError) Error() string { return e.msg }
 
-// fakeCost is a zero-dependency in-memory CostTracker.
 type fakeCost struct {
 	userSpend   map[int64]float64
 	globalSpend float64
@@ -165,10 +162,6 @@ func TestComplete_ReturnsCachedResponseOnSecondCall(t *testing.T) {
 	}
 }
 
-// A truncated response must never be cached: caching it would lock a
-// player who taps "Refresh" (or anything else that re-issues the same
-// request) into replaying the same cut-off text for the rest of the
-// TTL window instead of getting a fresh, hopefully-complete retry.
 func TestComplete_DoesNotCacheTruncatedResponse(t *testing.T) {
 	primary := &fakeProvider{name: "primary", available: true, stopReason: "length"}
 	svc, _ := newTestService(t, primary)

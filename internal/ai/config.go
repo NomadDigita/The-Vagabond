@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// Feature is a stable identifier for an AI-driven subsystem. Every
-// Phase B-J capability registers under one of these so permissions,
-// cost attribution, and feature flags all key off the same string.
 type Feature string
 
 const (
@@ -22,18 +19,9 @@ const (
 	FeatureNPCIntel       Feature = "ai_npc_intelligence"
 	FeatureDevConsole     Feature = "ai_developer_console"
 
-	// FeatureCommandInterpreter is Milestone 3 of
-	// FEEDBACK_CHANGELOG_NLP_PLAN.md: the natural-language command
-	// interpreter wired as nlp.HandleTextMessage's final fallback.
-	// Unlike every feature above (advisory-only), this one's parsed
-	// intent can result in state-mutating game actions - always via
-	// the same doX core functions the button UI uses, and always
-	// behind an explicit Confirm/Cancel step for anything that spends
-	// resources. See the plan doc's "Why this is different" section.
 	FeatureCommandInterpreter Feature = "ai_command_interpreter"
 )
 
-// AllFeatures lists every known feature flag, used to seed defaults.
 func AllFeatures() []Feature {
 	return []Feature{
 		FeaturePlanetGovernor,
@@ -49,91 +37,38 @@ func AllFeatures() []Feature {
 	}
 }
 
-// Config holds process-wide AI settings, loaded from environment
-// variables at startup. Per-feature and per-user overrides live in the
-// database (see ai_feature_flags / ai_permissions in
-// migrations/020_vagabond_ai_foundation.sql) and are consulted by
-// PermissionManager on top of this static config.
 type Config struct {
-	// Enabled is a master kill switch. When false, Service.Complete
-	// returns ErrAIDisabled immediately for every request.
 	Enabled bool
 
-	// DefaultProvider is tried first for every request.
 	DefaultProvider string
-	// FallbackOrder lists provider names to try, in order, if the
-	// default (or a preceding fallback) errors or is unavailable.
-	FallbackOrder []string
+	FallbackOrder   []string
 
-	// AnthropicAPIKey / AnthropicModel configure the built-in
-	// Anthropic provider. Empty key means the provider reports
-	// itself Available() == false and is skipped.
 	AnthropicAPIKey string
 	AnthropicModel  string
 
-	// OpenAIAPIKey / OpenAIModel configure the OpenAI provider
-	// (internal/ai/providers/openaicompat, registered as "openai").
 	OpenAIAPIKey string
 	OpenAIModel  string
 
-	// DeepSeekAPIKey / DeepSeekModel configure the DeepSeek provider
-	// (openaicompat, registered as "deepseek"). Note: as of 2026-07-15
-	// the legacy "deepseek-chat" model alias is scheduled for
-	// deprecation by DeepSeek on 2026-07-24 — the default below uses
-	// "deepseek-v4-flash" instead.
 	DeepSeekAPIKey string
 	DeepSeekModel  string
 
-	// QwenAPIKey / QwenModel / QwenBaseURL configure the Qwen provider
-	// (openaicompat, registered as "qwen") via Alibaba DashScope's
-	// OpenAI-compatible endpoint. QwenBaseURL defaults to the
-	// international (Singapore) endpoint; mainland China deployments
-	// should set it to the dashscope.aliyuncs.com equivalent.
 	QwenAPIKey  string
 	QwenModel   string
 	QwenBaseURL string
 
-	// GrokAPIKey / GrokModel configure the Grok/xAI provider
-	// (openaicompat, registered as "grok"). xAI's model lineup and
-	// naming have shifted repeatedly through 2026 — verify GrokModel
-	// against https://docs.x.ai/docs/models if recommendations seem
-	// to be failing with a model-not-found error.
 	GrokAPIKey string
 	GrokModel  string
 
-	// GeminiAPIKey / GeminiModel configure the Gemini provider
-	// (internal/ai/providers/gemini, registered as "gemini").
-	// GeminiModelFallbacks are additional models the provider itself
-	// cycles through before giving up (see gemini.Provider.Complete) -
-	// Google tracks free-tier quota per model, not per account, so a
-	// different model is frequently still usable even when the
-	// configured one is exhausted. Defaults to a hand-picked list of
-	// free-tier-eligible models (see LoadConfig below); set
-	// GEMINI_MODEL_FALLBACKS="" explicitly to disable and fail straight
-	// to the next provider instead.
 	GeminiAPIKey         string
 	GeminiModel          string
 	GeminiModelFallbacks []string
 
-	// OllamaBaseURL / OllamaModel configure the Ollama provider
-	// (internal/ai/providers/ollama, registered as "ollama") for
-	// self-hosted open-weight models. No API key is used. Empty
-	// OllamaBaseURL means the provider reports itself unavailable —
-	// it is never enabled by default.
 	OllamaBaseURL string
 	OllamaModel   string
 
-	// MaxUserCostPerDayUSD caps spend attributable to a single
-	// Telegram user across all features, per UTC day. Zero disables
-	// the per-user cap (not recommended in production).
-	MaxUserCostPerDayUSD float64
-	// MaxGlobalCostPerDayUSD caps total AI spend across all users and
-	// background jobs, per UTC day.
+	MaxUserCostPerDayUSD   float64
 	MaxGlobalCostPerDayUSD float64
 
-	// CacheTTLSeconds controls how long identical requests (same
-	// feature + user + prompt hash) are served from cache instead of
-	// hitting a provider. Zero disables caching.
 	CacheTTLSeconds int
 }
 
@@ -181,42 +116,6 @@ func getenvString(key, def string) string {
 	return v
 }
 
-// LoadConfig reads AI configuration from the environment. Every
-// variable is optional; a functioning (mock-only, zero-cost) config is
-// produced even with no environment set at all, so the AI foundation
-// never blocks a boot of the game server.
-//
-// Recognized variables:
-//
-//	AI_ENABLED                 (bool,   default true)
-//	AI_DEFAULT_PROVIDER        (string, default "mock")
-//	AI_FALLBACK_PROVIDERS      (comma-separated, default "mock")
-//	ANTHROPIC_API_KEY          (string, default "")
-//	ANTHROPIC_MODEL            (string, default "claude-sonnet-4-6")
-//	OPENAI_API_KEY             (string, default "")
-//	OPENAI_MODEL               (string, default "gpt-5.6-luna")
-//	DEEPSEEK_API_KEY           (string, default "")
-//	DEEPSEEK_MODEL             (string, default "deepseek-v4-flash")
-//	QWEN_API_KEY               (string, default "")
-//	QWEN_MODEL                 (string, default "qwen-plus")
-//	QWEN_BASE_URL              (string, default DashScope international endpoint)
-//	GROK_API_KEY               (string, default "")
-//	GROK_MODEL                 (string, default "grok-4-fast")
-//	GEMINI_API_KEY             (string, default "")
-//	GEMINI_MODEL               (string, default "gemini-3.5-flash")
-//	GEMINI_MODEL_FALLBACKS     (string, comma-separated, default
-//	                            "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.1-flash-lite";
-//	                            "none" disables)
-//	OLLAMA_BASE_URL            (string, default "" — unset means disabled)
-//	OLLAMA_MODEL               (string, default "llama3.1")
-//	AI_MAX_USER_COST_USD_DAY   (float,  default 0.50)
-//	AI_MAX_GLOBAL_COST_USD_DAY (float,  default 25.00)
-//	AI_CACHE_TTL_SECONDS       (int,    default 120)
-//
-// Only ANTHROPIC_API_KEY is required for any real (non-mock) output;
-// every other provider activates automatically the moment its own key
-// is set, with no other code change needed — set only the ones you
-// have.
 func LoadConfig() *Config {
 	fallback := getenvString("AI_FALLBACK_PROVIDERS", "mock")
 	var order []string
@@ -247,13 +146,7 @@ func LoadConfig() *Config {
 		AnthropicModel:  getenvString("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
 
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
-		// Default model note (confirmed via web search 2026-07-16):
-		// gpt-4o-mini is an older OpenAI generation. OpenAI shipped
-		// GPT-5.6 to general availability on 2026-07-09; Luna is its
-		// cheapest tier ($1.00/$6.00 per million tokens, confirmed
-		// against OpenAI's own pricing page). gpt-4o-mini likely still
-		// works but is no longer current.
-		OpenAIModel: getenvString("OPENAI_MODEL", "gpt-5.6-luna"),
+		OpenAIModel:  getenvString("OPENAI_MODEL", "gpt-5.6-luna"),
 
 		DeepSeekAPIKey: os.Getenv("DEEPSEEK_API_KEY"),
 		DeepSeekModel:  getenvString("DEEPSEEK_MODEL", "deepseek-v4-flash"),

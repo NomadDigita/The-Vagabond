@@ -18,9 +18,6 @@ func seedFeedbackUser(t *testing.T, db *sql.DB, telegramID int64, firstName, use
 	}
 }
 
-// TestDoSubmitFeedback_StoresAndNotifiesEveryAdminImmediately is the
-// direct test for this milestone's actual ask: feedback should reach
-// admins immediately, not just sit in a table nobody queries.
 func TestDoSubmitFeedback_StoresAndNotifiesEveryAdminImmediately(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -49,9 +46,6 @@ func TestDoSubmitFeedback_StoresAndNotifiesEveryAdminImmediately(t *testing.T) {
 	}
 }
 
-// TestDoSubmitFeedback_NoAdminsConfiguredStillStoresSubmission covers
-// the degenerate case (no ADMIN_IDS configured) - the submission must
-// still be saved even if there's nobody to notify.
 func TestDoSubmitFeedback_NoAdminsConfiguredStillStoresSubmission(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -69,9 +63,6 @@ func TestDoSubmitFeedback_NoAdminsConfiguredStillStoresSubmission(t *testing.T) 
 	}
 }
 
-// TestFeedbackSenderLabel_IncludesUsernameWhenPresent verifies the
-// admin-facing label formatting, and that it doesn't collide in name or
-// behavior with ranking.go's unrelated displayName function.
 func TestFeedbackSenderLabel_IncludesUsernameWhenPresent(t *testing.T) {
 	withUsername := &telebot.User{FirstName: "Raider", Username: "raider99"}
 	if got := feedbackSenderLabel(withUsername); got != "Raider (@raider99)" {
@@ -84,8 +75,6 @@ func TestFeedbackSenderLabel_IncludesUsernameWhenPresent(t *testing.T) {
 	}
 }
 
-// TestHandleFeedbackInbox_RequiresAdmin is a direct smoke test of the
-// admin gate - a non-admin must never see the inbox.
 func TestHandleFeedbackInbox_RequiresAdmin(t *testing.T) {
 	db := rankingTestDB(t)
 	h := &ProfileHandler{DB: db, AdminIDs: []int64{9901}}
@@ -98,11 +87,6 @@ func TestHandleFeedbackInbox_RequiresAdmin(t *testing.T) {
 	}
 }
 
-// TestProfileHandler_FeedbackPendingFlow_DirectMapManipulation verifies
-// the pending-input bookkeeping directly (set on button tap, consumed
-// and cleared on the next message) without needing a telebot.Context
-// mock - mirrors how admin.go's own pending-input map is exercised
-// elsewhere in this codebase.
 func TestProfileHandler_FeedbackPendingFlow_DirectMapManipulation(t *testing.T) {
 	h := NewProfileHandler(rankingTestDB(t), nil)
 

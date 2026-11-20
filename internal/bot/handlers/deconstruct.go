@@ -22,13 +22,11 @@ func NewDeconstructHandler(db *sql.DB) *DeconstructHandler {
 	return &DeconstructHandler{DB: db}
 }
 
-// deconstructRefund describes what a single unit gives back when scrapped,
-// at a flat 40% of its original build cost (see factory.go HandleCraftCallback).
 type deconstructRefund struct {
 	key     string
 	emoji   string
 	title   string
-	column  string // workshop_inventory column
+	column  string
 	refunds map[string]float64
 }
 
@@ -58,9 +56,6 @@ var deconstructTable = []deconstructRefund{
 	{"cargo_mk3", "🚚🚚🚚", "Cargo Ship Mk III", "cargo_mk3", content.MustFindUnit("cargo_mk3").DeconstructRefund()},
 }
 
-// HandleDeconstructCommand implements "/deconstruct <n> <unit>" as a bulk
-// text shortcut alongside the existing one-tap-per-unit panel button. With
-// no arguments it falls back to the original panel view unchanged.
 func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
 	args := c.Args()
 	if len(args) < 2 {
@@ -86,7 +81,6 @@ func (h *DeconstructHandler) HandleDeconstructCommand(c telebot.Context) error {
 			break
 		}
 	}
-	// Handle known irregular plurals that a plain TrimSuffix("s") misses.
 	if target == nil {
 		irregular := map[string]string{"buggie": "buggy", "batterie": "battery"}
 		if alt, ok := irregular[unitArg]; ok {

@@ -25,13 +25,6 @@ type AdminHandler struct {
 	TickEngine *tick.Engine
 	AdminIDs   []int64
 
-	// Phase 7 (item 13): admin panel consolidation. Tracks which admin
-	// (by Telegram ID) is mid-flow on a button that needs a free-text
-	// argument (e.g. "Gift Premium" needs a username + day count), so
-	// their next plain-text message can be consumed as that argument
-	// instead of falling through to normal NLP parsing. See
-	// HandleAdminPendingInput, wired ahead of nlp.HandleTextMessage in
-	// main.go's OnText registration.
 	pendingMu sync.Mutex
 	pending   map[int64]string
 }
@@ -72,14 +65,6 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 		return c.Send("❌ Access Denied: Authorized administrators only.", keyboards.MainNavigation())
 	}
 
-	// Phase 7 (item 13): admin panel consolidation. Every admin action
-	// used to be split across this panel (4 of them), 9 separate
-	// /admin_* slash commands, and 4 duplicate bottom-menu buttons -
-	// several were exact copy-pasted logic reachable 3 different ways
-	// (see SPACEHUNT_PHASE7_LOG.md). This panel is now the single
-	// discoverable place for all of them; the old slash commands still
-	// work unchanged for muscle memory, but every one of them now
-	// delegates to the same shared do*/db* helper this panel calls.
 	selector := &telebot.ReplyMarkup{}
 	btnTick := selector.Data("⚡ Force Tick", "admin_action", "tick")
 	btnInject := selector.Data("🪙 Inject 5000 (Self)", "admin_action", "inject")
@@ -104,24 +89,9 @@ func (h *AdminHandler) HandleAdminPanel(c telebot.Context) error {
 	panelText := htmlBold("🏛️ ADMIN OVERRIDE TERMINAL ACTIVATED") + "\n" + divider +
 		"\nDeploy overrides using the secure inline controls or bottom submenu deck." +
 		"\nActions marked ⚠️ are destructive and require a confirmation tap."
-	// Previously this sent panelText directly via c.Send with BOTH the
-	// inline selector and keyboards.AdminNavigation() passed as separate
-	// ReplyMarkup arguments in one call - telebot only honors one
-	// *telebot.ReplyMarkup per message, so the inline one was silently
-	// dropped. Every admin action button (Tick, Inject, Gift Premium,
-	// Broadcast, Publish Changelog, all of them) never actually
-	// rendered. This is the exact "single-ReplyMarkup collision" this
-	// codebase's own sendPanelWithNav/sendPanelWithNavHTML helpers exist
-	// to prevent (see navhelper.go) - use it here too, like every other
-	// panel already does. See send_markup_guard_test.go for the
-	// regression guard against this reappearing anywhere else.
 	return sendPanelWithNavHTML(c, navCaptionAdmin, keyboards.AdminNavigation(), panelText, selector)
 }
 
-// adminPromptFor gives the guided-input prompt text for each action that
-// needs a free-text argument after the button tap, plus registers the
-// pending state so HandleAdminPendingInput knows how to parse the
-// admin's next message.
 func (h *AdminHandler) adminPromptFor(senderID int64, action string) string {
 	h.pendingMu.Lock()
 	h.pending[senderID] = action
@@ -186,14 +156,6 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 				htmlCode(fmt.Sprintf("%d", memStats.NumGC))) +
 			divider
 
-		// Tick-engine + world-event liveness. Added 2026-08-02 after a
-		// player-reported "world events never fire" investigation that
-		// had no way to distinguish "the tick engine isn't running in
-		// this deployment" from "it's running, just rolling misses" -
-		// both looked identical from inside the game. See
-		// internal/engine/tick/engine.go's LastTickStatus and
-		// internal/engine/world/weather.go's per-tick heartbeat log for
-		// the underlying instrumentation this reads/complements.
 		metricsReport += "\n" + htmlBold("🌍 WORLD ENGINE LIVENESS") + "\n"
 		if h.TickEngine != nil {
 			startedAt, finishedAt := h.TickEngine.LastTickStatus()
@@ -236,11 +198,6 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 		return c.Send(metricsReport, telebot.ModeHTML, keyboards.AdminNavigation())
 
 	case "db_reset":
-		// Destructive - require a second, explicit confirmation tap
-		// rather than executing immediately. This was a real safety
-		// gap in the panel path before item 13 (the /admin_db_reset
-		// slash command had the exact same gap, and still does - typing
-		// it out is itself a kind of confirmation, so that's left as-is).
 		confirmSelector := &telebot.ReplyMarkup{}
 		btnConfirm := confirmSelector.Data("⚠️ CONFIRM: Wipe raids/news/queues & redistribute coordinates", "admin_action", "db_reset_confirm")
 		btnCancel := confirmSelector.Data("✅ Cancel", "admin_action", "db_reset_cancel")
@@ -259,12 +216,6 @@ func (h *AdminHandler) HandleAdminActionCallback(c telebot.Context) error {
 	return nil
 }
 
-// HandleAdminPendingInput consumes an admin's next free-text message if
-// (and only if) they're mid-flow on a guided-input action from the
-// consolidated /admin panel above. Returns handled=false immediately
-// for anyone with no pending action, so normal NLP text parsing
-// (nlp.HandleTextMessage) continues completely unaffected - see
-// main.go's OnText registration for how the two are chained.
 func (h *AdminHandler) HandleAdminPendingInput(c telebot.Context) (handled bool, err error) {
 	sender := c.Sender()
 	if sender == nil || !h.IsAdmin(sender.ID) {
@@ -370,11 +321,6 @@ func (h *AdminHandler) HandleAdminDBReset(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doDBReset is the single source of truth for the destructive database
-// reset, shared by /admin_db_reset and the consolidated /admin panel's
-// two-tap confirm flow (Phase 7 item 13) - the panel path didn't have
-// any confirmation step before this, which was a real safety gap for
-// something this destructive.
 func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -382,7 +328,6 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 	}
 	defer tx.Rollback()
 
-	// Safe Refunding Loop: Refund all active campaigns (and staged co-op lobbies) before erasing states
 	queryActiveRaids := `
 		SELECT r.id, r.attacker_id, r.defender_id, ea.user_id as attacker_user_id, COALESCE(ed.user_id, 0) as defender_user_id, ea.name as attacker_name, COALESCE(ed.name, 'Rogue Drone Nest') as defender_name
 		FROM raids r
@@ -414,10 +359,8 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 			var sols, mechs, buggies int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0), COALESCE(buggies_mobilized, 0) FROM raid_forces WHERE raid_id = $1", ar.id).Scan(&sols, &mechs, &buggies)
 
-			// Refund primary forces
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2, buggies = buggies + $3 WHERE encampment_id = $4", sols, mechs, buggies, ar.attackerID)
 
-			// Refund co-op members
 			rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", ar.id)
 			if errCoop == nil {
 				for rowsCoop.Next() {
@@ -435,7 +378,6 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 				rowsCoop.Close()
 			}
 
-			// Send real-time notification alerts
 			attackerAlert := "↩️ " + htmlBold("SYSTEM UPDATE") + ": Your ongoing campaign against Outpost " +
 				htmlCode(htmlEscape(ar.defenderName)) + " has been aborted due to an administrative database reset. Remaining forces have returned safely."
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ar.attackerUserID, attackerAlert)
@@ -448,7 +390,6 @@ func (h *AdminHandler) doDBReset(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Cascading deletes on dependent tables
 	_, _ = tx.ExecContext(ctx, "DELETE FROM raids")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM world_news")
 	_, _ = tx.ExecContext(ctx, "DELETE FROM arena_queue")
@@ -524,9 +465,6 @@ func (h *AdminHandler) HandleAdminGiftPremium(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doGiftPremium is the single source of truth for granting Premium,
-// shared by /admin_gift_premium and the consolidated /admin panel's
-// guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doGiftPremium(ctx context.Context, targetUser string, days int) (string, error) {
 	var targetID int64
 	err := h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE LOWER(username) = LOWER($1)", targetUser).Scan(&targetID)
@@ -577,9 +515,6 @@ func (h *AdminHandler) HandleAdminGiftResources(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doGiftResources is the single source of truth for gifting a resource
-// to a player, shared by /admin_gift_resources and the consolidated
-// /admin panel's guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doGiftResources(ctx context.Context, targetUser, resType string, amount float64) (string, error) {
 	resType = strings.ToLower(strings.TrimSpace(resType))
 
@@ -630,13 +565,6 @@ func (h *AdminHandler) HandleAdminGive(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doInjectSelf is the single source of truth for injecting 5,000 of
-// every resource into the admin's own camp - shared by /admin_give, the
-// "🪙 Inject Resources" bottom-menu button, and the consolidated /admin
-// panel's "inject" callback (Phase 7 item 13). All three were
-// independently maintaining the same UPDATE statement before this, and
-// had quietly drifted - this version (with neuro_cores included) is now
-// the canonical one.
 func (h *AdminHandler) doInjectSelf(ctx context.Context, senderID int64) (string, error) {
 	var campID string
 	err := h.DB.QueryRowContext(ctx, "SELECT id FROM encampments WHERE user_id = $1", senderID).Scan(&campID)
@@ -683,9 +611,6 @@ func (h *AdminHandler) HandleAdminSetTaxRate(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doSetTaxRate is the single source of truth for the daily tax rate,
-// shared by /settaxrate and the consolidated /admin panel's
-// guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doSetTaxRate(ctx context.Context, rate int) (string, error) {
 	if rate < 0 || rate > 10 {
 		return "⚠️ Tax rate must be a whole number between 0 and 10 (percent).", errors.New("tax rate out of range")
@@ -699,10 +624,6 @@ func (h *AdminHandler) doSetTaxRate(ctx context.Context, rate int) (string, erro
 		return "⚠️ Error updating tax law.", err
 	}
 
-	// Server-wide broadcast, not just an admin-panel confirmation - see
-	// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 5.3. Non-mutable
-	// ("general") for now; see that doc's open question 2 on whether this
-	// should get its own mutable category instead.
 	broadcastMsg := fmt.Sprintf("💰 WASTELAND TAX LAW UPDATED: Daily rate changes from %d%% to %d%%.", oldRate, rate)
 	if err := notifications.QueueToAllPlayers(ctx, h.DB, broadcastMsg, "general"); err != nil {
 		log.Printf("Failed broadcasting tax rate change: %v", err)
@@ -729,9 +650,6 @@ func (h *AdminHandler) HandleAdminFaction(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doFactionChange is the single source of truth for an admin's own
-// self-directed faction swap, shared by /admin_faction and the
-// consolidated /admin panel's guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doFactionChange(ctx context.Context, senderID int64, targetFaction string) (string, error) {
 	if targetFaction != "steel_vanguard" && targetFaction != "rust_nomads" {
 		return "⚠️ Syntax Error: Use `steel_vanguard` or `rust_nomads`.", errors.New("invalid faction")
@@ -770,9 +688,6 @@ func (h *AdminHandler) HandleAdminBroadcast(c telebot.Context) error {
 	return c.Send(result, telebot.ModeHTML, keyboards.AdminNavigation())
 }
 
-// doBroadcast is the single source of truth for a system-wide broadcast,
-// shared by /admin_broadcast and the consolidated /admin panel's
-// guided-input flow (Phase 7 item 13).
 func (h *AdminHandler) doBroadcast(ctx context.Context, broadcastMsg string) (string, error) {
 	rows, err := h.DB.QueryContext(ctx, "SELECT telegram_id FROM users WHERE state != 'ai_faction'")
 	if err != nil {

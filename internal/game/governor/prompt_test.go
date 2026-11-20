@@ -34,9 +34,6 @@ func sampleSnapshot() governor.Snapshot {
 
 func TestBuildUserPrompt_IsDeterministic(t *testing.T) {
 	s := sampleSnapshot()
-	// Shuffle module order to confirm the prompt sorts them, which
-	// matters for internal/ai's cache key hashing (identical logical
-	// state must produce an identical prompt string).
 	shuffled := governor.Snapshot{
 		EncampmentID: s.EncampmentID, Name: s.Name, Level: s.Level,
 		Scrap: s.Scrap, Rations: s.Rations, Electricity: s.Electricity,
@@ -101,12 +98,6 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
-// The next two tests reproduce a real production failure (see
-// PROJECT_MASTER_PLAN.md ADR-016 / §1.9): a response that got cut off
-// mid-object (hit MaxTokens) used to be indistinguishable from a
-// response that never contained JSON at all, both showing the player
-// the same generic "couldn't parse" message.
-
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade the generator next, since it's your`
 	rec := governor.ParseRecommendation(raw, "")
@@ -129,13 +120,6 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 		t.Errorf("expected truncation-specific message, got: %s", out)
 	}
 }
-
-// The next two tests reproduce a real production failure (see
-// PROJECT_MASTER_PLAN.md ADR-015 / §1.8): real providers, despite an
-// explicit "JSON only" instruction, sometimes wrap the object in
-// prose or leave a raw newline inside a string value. Both used to
-// make json.Unmarshal fail outright, sending the player a raw JSON
-// dump instead of a formatted report.
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Upgrade generator next.", "priority_actions": []}` +

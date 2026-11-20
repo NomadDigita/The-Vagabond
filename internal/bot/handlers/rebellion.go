@@ -20,8 +20,6 @@ func NewRebellionHandler(db *sql.DB) *RebellionHandler {
 	return &RebellionHandler{DB: db}
 }
 
-// renownRank maps total lifetime contribution to a SpaceHunt-style
-// Rebellion standing title.
 func renownRank(total float64) (string, string) {
 	switch {
 	case total >= 100000:

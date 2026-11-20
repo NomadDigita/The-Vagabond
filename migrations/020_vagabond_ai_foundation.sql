@@ -1,12 +1,3 @@
--- 020_vagabond_ai_foundation.sql
---
--- Phase A — AI Foundation (Vagabond AI Roadmap, independent branch).
---
--- This migration is additive-only and touches no table owned by the
--- parallel SpaceHunt roadmap (phases 1-6). It creates the persistence
--- layer for internal/ai: cost accounting, feature flags, per-user
--- permissions, and conversational memory. Every table is namespaced
--- with an ai_ prefix to make ownership unambiguous during merges.
 
 CREATE TABLE IF NOT EXISTS ai_feature_flags (
     feature     VARCHAR(50) PRIMARY KEY,
@@ -50,9 +41,6 @@ CREATE TABLE IF NOT EXISTS ai_cost_log (
 CREATE INDEX IF NOT EXISTS idx_ai_cost_log_user_time ON ai_cost_log (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_ai_cost_log_time ON ai_cost_log (created_at);
 
--- Seed every known Phase B-J feature flag as enabled so admins have a
--- visible row to toggle from day one instead of relying on the
--- "missing row = enabled" default.
 INSERT INTO ai_feature_flags (feature, enabled) VALUES
     ('ai_planet_governor', TRUE),
     ('ai_fleet_commander', TRUE),

@@ -7,25 +7,15 @@ import (
 	"time"
 )
 
-// TestGrowAICivilizationsCanProposeAndAcceptPacts verifies both
-// diplomacy paths: a Leader-role AI faction with a pending proposal
-// addressed to it eventually responds (mirrors
-// HandleDiplomacyRespondCallback), and, separately, a Leader-role AI
-// faction with no pending proposal eventually proposes a new pact to an
-// unrelated clan (mirrors proposePact/HandleProposeAlliance/HandleProposeNAP).
 func TestGrowAICivilizationsCanProposeAndAcceptPacts(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	// Zero out the independent leave/disband roll - this test needs
-	// its tracked clan(s) to survive the full 300-tick loop below; see
-	// aiClanLeaveChance's own doc comment in engine.go.
 	oldLeaveChance := aiClanLeaveChance
 	aiClanLeaveChance = 0
 	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
 
-	// --- Responding to a pending proposal ---
 	faction := seedEncampment(t, db, 2032, "Faction Upsilon", 0, 0, "TestRegion", true)
 	setAILevel(t, db, faction, 5)
 	var factionUserID int64
@@ -69,7 +59,6 @@ func TestGrowAICivilizationsCanProposeAndAcceptPacts(t *testing.T) {
 		t.Fatal("expected the AI Leader to respond to the pending proposal at least once across 300 ticks")
 	}
 
-	// --- Proposing a new pact ---
 	factionB := seedEncampment(t, db, 2033, "Faction Phi", 1, 0, "TestRegion", true)
 	setAILevel(t, db, factionB, 5)
 	var factionBUserID int64
@@ -105,10 +94,6 @@ func TestGrowAICivilizationsCanProposeAndAcceptPacts(t *testing.T) {
 	}
 }
 
-// TestPickFairAIRaidTargetRespectsActivePact verifies a target whose
-// clan has an active pact with the attacking faction's clan is excluded
-// from raid selection - the same rule HasActivePact enforces for
-// human-launched raids.
 func TestPickFairAIRaidTargetRespectsActivePact(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -123,7 +108,7 @@ func TestPickFairAIRaidTargetRespectsActivePact(t *testing.T) {
 	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Chi")
 
 	protectedTarget := seedEncampment(t, db, 2035, "Protected Player", 1, 0, "TestRegion", false)
-	setAILevel(t, db, protectedTarget, 11) // in-band otherwise
+	setAILevel(t, db, protectedTarget, 11)
 	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES (5006) ON CONFLICT DO NOTHING"); err != nil {
 		t.Fatalf("seeding protected target's clan leader: %v", err)
 	}

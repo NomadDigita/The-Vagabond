@@ -48,17 +48,6 @@ func (h *SiloHandler) HandleSiloPanel(c telebot.Context) error {
 	var piercingMissiles int
 	_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE((SELECT piercing_missiles FROM workshop_inventory WHERE encampment_id = $1), 0)", campID).Scan(&piercingMissiles)
 
-	// BUGFIX: this used to be `WHERE e.id != $1 LIMIT 3` - any 3
-	// encampments in the entire game, in whatever order Postgres felt
-	// like returning them, with no relation to what this commander has
-	// actually scouted. Every other targeting surface in the game (the
-	// raid board's HandleRaidBoard, above) gates on encampment_discoveries
-	// - you have to scout a target before you can act on it, the fog-of-
-	// war rule this game is built around. The Silo was the one exception,
-	// silently bypassing it while also being effectively random about
-	// which handful of (mostly un-scouted, unreachable-by-raid) outposts
-	// it even offered. Now it shows the same discovered targets the raid
-	// board would, most-recently-scouted first.
 	queryTargets := `
 		SELECT e.id, e.name, u.first_name
 		FROM encampment_discoveries d
@@ -154,7 +143,6 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	var defenderName string
 	var defenderUserID int64
 
-	// Handled separately if target is an AI target
 	var isAI bool = targetCampID == "ai_drone_nest"
 	if !isAI {
 		err = tx.QueryRowContext(ctx, "SELECT name, user_id FROM encampments WHERE id = $1", targetCampID).Scan(&defenderName, &defenderUserID)
@@ -255,12 +243,6 @@ func (h *SiloHandler) HandleLaunchICBMCallback(c telebot.Context) error {
 	return h.HandleSiloPanel(c)
 }
 
-// HandleLaunchPiercingMissileCallback fires a Piercing Missile: a Silo
-// weapon built to punch through defenses rather than raid strength. It's
-// far harder for an Anti-Missile Battery to intercept than a standard
-// Nuke (half the intercept chance, half the cap) and is never stopped by
-// Nuclear Shields at all - but instead of vaporizing troops, it directly
-// strips levels off the target's Defense Grid turrets.
 func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -313,8 +295,6 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 	_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'anti_missile'", targetCampID).Scan(&antiMissileLvl)
 
 	if antiMissileLvl > 0 {
-		// Half the intercept chance and half the cap of a standard ICBM -
-		// piercing warheads are built specifically to slip past this.
 		interceptChance := 0.04 * float64(antiMissileLvl)
 		if interceptChance > 0.40 {
 			interceptChance = 0.40
@@ -338,9 +318,6 @@ func (h *SiloHandler) HandleLaunchPiercingMissileCallback(c telebot.Context) err
 		}
 	}
 
-	// Piercing Missiles ignore Nuclear Shields entirely - that's the
-	// entire point of the weapon - and strip one level off EVERY Defense
-	// Grid turret type instead of vaporizing troops or a random facility.
 	turretTypes := []string{"light_laser", "heavy_laser", "gauss_cannon", "ion_cannon", "plasma_turret"}
 	for _, t := range turretTypes {
 		_, _ = tx.ExecContext(ctx, "UPDATE modules SET level = GREATEST(level - 1, 0) WHERE encampment_id = $1 AND type = $2", targetCampID, t)

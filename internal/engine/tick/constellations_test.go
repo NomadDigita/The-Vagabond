@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// seedActiveConstellation creates an 'active' Constellation with two
-// member Clans (founder + one invited, both 'accepted'), each led by a
-// distinct seeded encampment - returning the constellation id and both
-// member encampment ids.
 func seedActiveConstellation(t *testing.T, db *sql.DB, founderTelegramID, memberTelegramID int64, expiresInHours float64) (constellationID, founderCampID, memberCampID string) {
 	t.Helper()
 
@@ -50,11 +46,6 @@ func seedActiveConstellation(t *testing.T, db *sql.DB, founderTelegramID, member
 	return constellationID, founderCampID, memberCampID
 }
 
-// TestConstellationDividend_PaysEveryMemberClanOnce is the direct test
-// for RARE_WORLD_FEATURES_PLAN.md Phase 5.4: an active Constellation
-// due a dividend (last_dividend_at NULL) should pay
-// constellationDividendDollars to every member Clan's encampments and
-// set last_dividend_at.
 func TestConstellationDividend_PaysEveryMemberClanOnce(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -87,9 +78,6 @@ func TestConstellationDividend_PaysEveryMemberClanOnce(t *testing.T) {
 	}
 }
 
-// TestConstellationDividend_DoesNotPayTwiceWithin24Hours confirms the
-// "once per day" throttle: running the phase again immediately after a
-// dividend was just paid must not pay a second time.
 func TestConstellationDividend_DoesNotPayTwiceWithin24Hours(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -109,17 +97,13 @@ func TestConstellationDividend_DoesNotPayTwiceWithin24Hours(t *testing.T) {
 	}
 }
 
-// TestConstellationExpire_DissolvesPastDeadlineAndLeavesLiveOnesAlone
-// is the direct test for Phase 5.5: an active Constellation past its
-// expires_at becomes 'dissolved', while one still within its window is
-// untouched.
 func TestConstellationExpire_DissolvesPastDeadlineAndLeavesLiveOnesAlone(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	expiredID, _, _ := seedActiveConstellation(t, db, 54005, 54006, -1) // expired 1 hour ago
-	liveID, _, _ := seedActiveConstellation(t, db, 54007, 54008, 168)   // 1 week out
+	expiredID, _, _ := seedActiveConstellation(t, db, 54005, 54006, -1)
+	liveID, _, _ := seedActiveConstellation(t, db, 54007, 54008, 168)
 
 	runTickPhase(t, db, func(tx *sql.Tx) error { return e.constellationExpire(ctx, tx) })
 

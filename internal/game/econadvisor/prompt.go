@@ -1,17 +1,3 @@
-// Package econadvisor implements Phase D of the AI Systems Roadmap:
-// the AI Economy Advisor. Like governor and fleetcommander, this
-// package is the seam where game state meets ai.Service; internal/ai
-// itself stays game-agnostic per ADR-001 in PROJECT_MASTER_PLAN.md.
-//
-// This file has zero I/O so it can be unit tested directly. All
-// database access lives in advisor.go.
-//
-// Note: this package deliberately does NOT import internal/game/governor
-// or internal/game/fleetcommander, even though all three read
-// overlapping data (resources, modules). Each stays independently
-// buildable/mergeable rather than forming a dependency chain between
-// sibling AI features — a small amount of duplicated type definition
-// (ModuleState) is a worthwhile trade for that isolation.
 package econadvisor
 
 import (
@@ -23,21 +9,17 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// ModuleState is a minimal projection of a row in the `modules` table.
 type ModuleState struct {
 	Type  string
 	Level int
 }
 
-// MarketListing is one active (unsold) market_exchange row.
 type MarketListing struct {
 	ItemType     string
 	Quantity     int
 	PriceDollars float64
 }
 
-// MarketItemStats summarizes market-wide pricing for one item type,
-// across all sellers, used for market-timing advice.
 type MarketItemStats struct {
 	ItemType     string
 	ActiveCount  int
@@ -46,16 +28,11 @@ type MarketItemStats struct {
 	MaxPrice     float64
 }
 
-// Snapshot is everything about one player's economy fed to the model.
 type Snapshot struct {
 	EncampmentID string
 	Name         string
 	Level        int
 
-	// Resources is a generic name→amount map (scrap, rations,
-	// electricity, neuro_cores, metal, crystal, hydrogen, dollars,
-	// ether, ...) so a new resource column never requires a change
-	// to this struct's shape.
 	Resources map[string]float64
 	Modules   []ModuleState
 
@@ -68,16 +45,13 @@ type Snapshot struct {
 	MarketStats []MarketItemStats
 }
 
-// Action is one recommended step with a required quantitative
-// estimate, per the roadmap's "Explain expected gains quantitatively."
 type Action struct {
 	Action       string `json:"action"`
 	Target       string `json:"target"`
 	Reason       string `json:"reason"`
-	ExpectedGain string `json:"expected_gain"` // e.g. "+18% scrap/tick", "~450 dollars/day"
+	ExpectedGain string `json:"expected_gain"`
 }
 
-// Recommendation is the Economy Advisor's structured output.
 type Recommendation struct {
 	Summary       string   `json:"summary"`
 	TopROIActions []Action `json:"top_roi_actions"`
@@ -85,14 +59,8 @@ type Recommendation struct {
 	MarketTiming  string   `json:"market_timing"`
 	TradingAdvice string   `json:"trading_advice"`
 
-	// FellBackToRawText is true when JSON parsing failed and Summary
-	// holds the model's raw, unparsed text instead.
 	FellBackToRawText bool
-	// Truncated is true when the fallback happened because the
-	// model's response was cut off mid-object (almost always meaning
-	// MaxTokens was hit before the model finished). See ADR-016 in
-	// PROJECT_MASTER_PLAN.md.
-	Truncated bool
+	Truncated         bool
 }
 
 const SystemPrompt = `You are the AI Economy Advisor for a player's base in The Vagabond, a tick-based multiplayer survival/strategy game.
@@ -106,9 +74,6 @@ Rules:
 - For market timing: compare the player's own active listings' prices to the market-wide average/min/max for the same item type, and say whether they're priced competitively.
 - Keep the summary to 2-3 sentences. List at most 4 top ROI actions, ordered most-to-least valuable.`
 
-// BuildUserPrompt renders a Snapshot into the data block the model
-// reasons over. Sorted map/slice iteration keeps output deterministic
-// for internal/ai's cache key hashing.
 func BuildUserPrompt(s Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "BASE: %q (Level %d, ID %s)\n\n", s.Name, s.Level, s.EncampmentID)
@@ -163,8 +128,6 @@ func BuildUserPrompt(s Snapshot) string {
 	return b.String()
 }
 
-// ParseRecommendation decodes the model's response text, tolerating a
-// markdown code fence the same way governor/fleetcommander do.
 func ParseRecommendation(text string, stopReason string) *Recommendation {
 	candidate, found := ai.ExtractJSONObject(text)
 	if !found {
@@ -176,8 +139,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 		return &rec
 	}
 
-	// See ADR-015: real providers occasionally leave a raw,
-	// unescaped newline/tab inside a string value.
 	repaired := ai.SanitizeJSONControlChars(candidate)
 	if err := json.Unmarshal([]byte(repaired), &rec); err == nil && rec.Summary != "" {
 		return &rec
@@ -186,9 +147,6 @@ func ParseRecommendation(text string, stopReason string) *Recommendation {
 	return &Recommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatForTelegram renders a Recommendation as a Telegram HTML-mode
-// message. All fields are LLM-generated text and are escaped via
-// ai.HTMLEscape before being wrapped in a tag - see internal/ai/render.go.
 func FormatForTelegram(rec *Recommendation) string {
 	var b strings.Builder
 	b.WriteString("💹 " + ai.HTMLBold("AI ECONOMY ADVISOR") + "\n\n")

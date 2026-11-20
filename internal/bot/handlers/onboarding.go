@@ -25,18 +25,10 @@ func NewOnboardingHandler(db *sql.DB) *OnboardingHandler {
 	return &OnboardingHandler{DB: db}
 }
 
-// generateReferralCode derives a referral code directly from a player's
-// Telegram ID. Because Telegram IDs are themselves unique, base36-encoding
-// the ID guarantees a collision-free code with no DB round-trip or retry
-// loop needed (unlike the old `telegramID % 1_000_000` scheme, which could
-// map two different players to the same code).
 func generateReferralCode(telegramID int64) string {
 	return "REF" + strings.ToUpper(strconv.FormatInt(telegramID, 36))
 }
 
-// referralMilestones defines one-time bonus payouts unlocked once a
-// referrer's total referral count reaches the given threshold, on top of
-// the standard per-referral reward.
 var referralMilestones = []struct {
 	Count                 int
 	Metal, Crystal, Neuro float64
@@ -46,11 +38,6 @@ var referralMilestones = []struct {
 	{25, 250000, 2500, 250000},
 }
 
-// topUpAllResources adds amount to all nine resources for a camp,
-// respecting the storage cap (via storagecap.Clamp) the same way any
-// other post-creation resource grant does - unlike the initial Welcome
-// Pack insert, which deliberately starts a brand-new player above their
-// tiny starting cap and is never clamped.
 func topUpAllResources(ctx context.Context, db *sql.DB, campID string, amount float64) error {
 	var scrap, rations, electricity, neuro, metal, crystal, hydrogen, dollars, ether float64
 	err := db.QueryRowContext(ctx, "SELECT scrap, rations, electricity, neuro_cores, metal, crystal, hydrogen, dollars, ether FROM resources WHERE encampment_id = $1", campID).
@@ -174,8 +161,6 @@ func (h *OnboardingHandler) HandleStart(c telebot.Context) error {
 		return c.Send("⚠️ Database reading failure.", keyboards.MainNavigation())
 	}
 
-	// Brand new user - capture a referral code from the /start payload if
-	// present (e.g. /start REF123456), before the faction picker.
 	if refCode := strings.TrimSpace(c.Message().Payload); refCode != "" {
 		var referrerID int64
 		if refErr := h.DB.QueryRowContext(ctx, "SELECT telegram_id FROM users WHERE referral_code = $1", refCode).Scan(&referrerID); refErr == nil && referrerID != sender.ID {
@@ -212,16 +197,9 @@ func (h *OnboardingHandler) renderFactionChoice(c telebot.Context, senderID int6
 	return c.Send(welcomeText, telebot.ModeHTML, selector)
 }
 
-// nameChangeCostCrystal and nameChangeCostDollars are deliberately steep -
-// SpaceHunt's /name command is a rare, deliberate vanity purchase, not
-// something players do casually.
 const nameChangeCostCrystal = 1000.0
 const nameChangeCostDollars = 500.0
 
-// HandleRenameOutpost implements SpaceHunt's "Change your username"
-// feature. The new name applies everywhere the player is identified:
-// battle reports, the Global Ranking board, World Boss/Rebellion
-// leaderboards, and raid targeting.
 func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -286,10 +264,6 @@ func (h *OnboardingHandler) HandleRenameOutpost(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("✅ OUTPOST RENAMED: You are now known as \"%s\" across the Wasteland.", newName), keyboards.MainNavigation())
 }
 
-// HandleGuide (/guide) re-sends the game briefing and getting-started
-// quickstart shown on first spawn, so a player can pull it back up any
-// time — e.g. if they skipped past it, or want to re-check the referral
-// reward numbers or agent-trial reminder.
 func (h *OnboardingHandler) HandleGuide(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	text := gameDescriptionText + "\n\n" + gettingStartedGuideText
@@ -341,11 +315,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	}
 	defer tx.Rollback()
 
-	// Every player gets a referral code the moment their account is
-	// created (or upgraded from 'onboarding' to 'active'), instead of
-	// waiting for them to first run /refer. COALESCE on conflict means
-	// an existing code (e.g. set by an earlier session) is never
-	// clobbered.
 	newReferralCode := generateReferralCode(telegramID)
 	insertUser := `
 		INSERT INTO users (telegram_id, username, first_name, state, faction, referral_code) 
@@ -361,10 +330,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	continents := []string{"Africa", "Europe", "Asia", "Americas"}
 	spawnedContinent := continents[sender.ID%4]
 
-	// Decouple Seeding Loop: seed exactly once, deterministically per
-	// player, for an even initial spread across each continent's
-	// quadrant (see spawnlocation.go's allocateCoordinate for the
-	// retry-on-collision + continent-quadrant logic itself).
 	coordID, _, _, err := allocateCoordinate(ctx, tx, time.Now().UnixNano()+sender.ID, spawnedContinent)
 	if err != nil {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Spawning coordinate allocator failed. Please retry registration."})
@@ -376,10 +341,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	isNewCamp := errors.Is(err, sql.ErrNoRows)
 	var startingScrap, startingEnergy float64
 	if isNewCamp {
-		// Temporary placeholder only - HandleOnboardingPendingInput
-		// (users.state = 'naming', set below) overwrites this with the
-		// player's own chosen name before they see anything else. Never
-		// player-facing as a "final" name.
 		placeholderName := fmt.Sprintf("Unnamed-Outpost-%d", telegramID)
 		insertCamp := `
 			INSERT INTO encampments (user_id, name, coordinate_id, level) 
@@ -391,15 +352,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 			return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Camp allocation error."})
 		}
 
-		// Welcome Pack: every brand-new, non-referred survivor starts
-		// with 25,000 of all nine resources - a flat, equal baseline
-		// across the board rather than the old lopsided split (1,000
-		// Scrap/50 Rations/250 Electricity with everything else in the
-		// low hundreds). Referred players effectively double this (see
-		// the referral-bonus block below), since it tops up the same
-		// baseline by another 25,000 of everything. The small per-
-		// faction bonus below is a flavor differentiator layered on top
-		// of the shared baseline, not a replacement for it.
 		const startingBaseline = 25000.0
 		startingScrap = startingBaseline
 		startingEnergy = startingBaseline
@@ -431,16 +383,8 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 
 		_, _ = tx.ExecContext(ctx, "INSERT INTO workshop_inventory (encampment_id) VALUES ($1) ON CONFLICT DO NOTHING", campID)
 
-		// 7-day Cognitive Agent (Premium) trial for every new survivor.
-		// This only ever runs inside the isNewCamp guard, so it can't be
-		// replayed to keep extending someone's trial.
 		_, _ = tx.ExecContext(ctx, "UPDATE users SET premium_until = NOW() + INTERVAL '7 days' WHERE telegram_id = $1", telegramID)
 
-		// Gate on naming: the very first thing a brand-new survivor does
-		// after picking a faction is name their outpost (see
-		// HandleOnboardingPendingInput), before they see their resources,
-		// location, or anything else. state flips back to 'active' once
-		// naming completes.
 		_, _ = tx.ExecContext(ctx, "UPDATE users SET state = 'naming' WHERE telegram_id = $1", telegramID)
 	}
 
@@ -448,26 +392,9 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "⚠️ Ledger completion error."})
 	}
 
-	// Referral reward: if this new survivor arrived via a referral code,
-	// grant both them and their referrer a resource bonus. Gated on
-	// isNewCamp so this can only ever fire once per player — previously
-	// this ran on every HandleFactionCallback invocation, letting anyone
-	// replay the still-live "join faction" button to farm free resources
-	// indefinitely.
 	var referrerID sql.NullInt64
 	_ = h.DB.QueryRowContext(ctx, "SELECT referred_by FROM users WHERE telegram_id = $1", telegramID).Scan(&referrerID)
 	if isNewCamp && referrerID.Valid {
-		// referralBonusPerResource tops up all nine resources by the same
-		// amount as the base Welcome Pack (startingBaseline above), so a
-		// referred player's total starting stake becomes a clean 2x
-		// (50,000) of every resource rather than the old flat 50,000
-		// Metal / 500 Crystal / 50,000 Neuro Cores special-case, which
-		// left most resources untouched and wildly overshot others
-		// (Metal/Neuro would've ended up at 3x once stacked on top of
-		// the now-25,000 baseline, Crystal barely above 1x). Applied to
-		// the referrer too, as their reward for bringing in a new
-		// survivor - not meant to double their whole economy, just a
-		// flat top-up like any other referral bonus.
 		const referralBonusPerResource = 25000.0
 
 		if err := topUpAllResources(ctx, h.DB, campID, referralBonusPerResource); err != nil {
@@ -483,8 +410,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 				fmt.Sprintf("🎁 %s: %s joined using your code! You both received %s of every resource.",
 					htmlBold("REFERRAL BONUS"), htmlCode(htmlEscape(sender.FirstName)), htmlCode(fmt.Sprintf("%.0f", referralBonusPerResource))))
 
-			// Milestone tiers: grant a one-time bonus the first time the
-			// referrer's total referral count crosses a threshold.
 			var referralCount, tierClaimed int
 			_ = h.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE referred_by = $1", referrerID.Int64).Scan(&referralCount)
 			_ = h.DB.QueryRowContext(ctx, "SELECT COALESCE(referral_tier_claimed, 0) FROM users WHERE telegram_id = $1", referrerID.Int64).Scan(&tierClaimed)
@@ -521,9 +446,6 @@ func (h *OnboardingHandler) HandleFactionCallback(c telebot.Context) error {
 	), keyboards.MainNavigation())
 }
 
-// gameDescriptionText is The Vagabond's lore/premise briefing, shown to
-// every new survivor on their first spawn and available any time via
-// /guide.
 const gameDescriptionText = "🌍 THE VAGABOND — SURVIVOR'S BRIEFING\n" +
 	"The old world ended in fire and static. What's left is the Wastes: a " +
 	"fractured, tick-driven frontier where every outpost, raid, market trade, " +
@@ -534,9 +456,6 @@ const gameDescriptionText = "🌍 THE VAGABOND — SURVIVOR'S BRIEFING\n" +
 	"nests, and rival factions won't wait for you to catch up — so build, " +
 	"trade, ally, and fight, before the Wastes do it for you."
 
-// gettingStartedGuideText is the step-by-step quickstart, shared between the
-// first-spawn welcome message and the standalone /guide command so a player
-// can always call it back up later.
 const gettingStartedGuideText = "🗺️ GETTING STARTED — YOUR FIRST 10 MINUTES\n" +
 	"1️⃣ Tap 📦 Warehouse Stocks below to see everything in your Welcome Pack.\n" +
 	"2️⃣ Open the ⛺ Outpost Camp Menu and spend Scrap upgrading your Tent and Generator first.\n" +
@@ -555,15 +474,8 @@ func formatFactionLabel(f string) string {
 	return "⚙️ Rust Nomads"
 }
 
-// outpostNameRegex validates any player-chosen outpost name - both the
-// mandatory first-naming prompt below and the paid /name rename command
-// (HandleRenameOutpost) share this exact rule.
 var outpostNameRegex = regexp.MustCompile(`^[a-zA-Z0-9 \-]+$`)
 
-// sendNamingPrompt is the very first thing a brand-new survivor sees
-// after picking a faction - before their resources, location, or
-// anything else. Also re-sent from HandleStart if someone abandons
-// onboarding mid-naming and comes back via /start.
 func sendNamingPrompt(c telebot.Context, firstName string) error {
 	prompt := htmlBold("🛰️ ONE LAST STEP") + "\n" + divider +
 		"\nWelcome to the wastes, Commander " + htmlEscape(firstName) + ".\n\n" +
@@ -573,13 +485,6 @@ func sendNamingPrompt(c telebot.Context, firstName string) error {
 	return c.Send(prompt, telebot.ModeHTML)
 }
 
-// HandleOnboardingPendingInput consumes a plain-text reply as the
-// player's chosen outpost name, but only while users.state = 'naming'
-// (set by HandleFactionCallback the moment a brand-new camp is
-// created). Registered in cmd/bot/main.go's OnText chain, same pattern
-// as admin.go's HandleAdminPendingInput: returns handled=false
-// immediately for anyone not mid-naming, so it's a no-op for every
-// other message in the game.
 func (h *OnboardingHandler) HandleOnboardingPendingInput(c telebot.Context) (handled bool, err error) {
 	sender := c.Sender()
 	if sender == nil {
@@ -621,12 +526,6 @@ func (h *OnboardingHandler) HandleOnboardingPendingInput(c telebot.Context) (han
 	return true, h.sendWelcomeComplete(ctx, c, sender.ID, sender.FirstName, campID, newName)
 }
 
-// sendWelcomeComplete fires once, right after a brand-new survivor
-// finishes the mandatory naming step above: it reveals their faction,
-// resources, and where in the wastes they've settled (a named town and
-// country within their assigned continent - see spawnlocation.go's
-// flavorLocation - rather than raw coordinates or a bare continent
-// name).
 func (h *OnboardingHandler) sendWelcomeComplete(ctx context.Context, c telebot.Context, telegramID int64, firstName, campID, campName string) error {
 	var faction string
 	var scrap, electricity float64

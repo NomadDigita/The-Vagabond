@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// TestGrowAICivilizationsCanDispatchExploration verifies an AI faction
-// with ample Rations/Metal eventually dispatches a personal exploration
-// expedition, mirroring HandleDispatchExpeditionCallback's exact
-// mechanics (site + dispatch rows inserted, resources debited).
 func TestGrowAICivilizationsCanDispatchExploration(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -62,10 +58,6 @@ func TestGrowAICivilizationsCanDispatchExploration(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontDispatchExplorationConcurrently verifies an
-// AI faction with one expedition already en route never starts a second
-// one at the same time, mirroring HandleDispatchExpeditionCallback's
-// "already have an expedition en route" guard.
 func TestGrowAICivilizationsWontDispatchExplorationConcurrently(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -112,10 +104,6 @@ func TestGrowAICivilizationsWontDispatchExplorationConcurrently(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies verifies
-// an AI faction with insufficient Rations/Metal never dispatches an
-// exploration expedition, mirroring HandleDispatchExpeditionCallback's
-// "Insufficient supplies" guard.
 func TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -139,9 +127,6 @@ func TestGrowAICivilizationsWontDispatchExplorationWithoutSupplies(t *testing.T)
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		// Zero out the level-1 Scrap/Rations/Metal trickle after every
-		// tick so this faction never accumulates enough to afford the
-		// 30 Rations / 15 Metal dispatch cost across all 50 iterations.
 		if _, err := db.Exec("UPDATE resources SET rations = 0, metal = 0 WHERE encampment_id = $1", faction); err != nil {
 			t.Fatalf("re-zeroing resources: %v", err)
 		}

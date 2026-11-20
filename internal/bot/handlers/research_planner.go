@@ -10,9 +10,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// ResearchPlannerHandler exposes Phase E (AI Research Planner). New
-// command name (/research_planner) — no collision with any SpaceHunt
-// phase 1-6 command or the existing /research panel.
 type ResearchPlannerHandler struct {
 	Planner *researchplanner.Planner
 }
@@ -21,7 +18,6 @@ func NewResearchPlannerHandler(p *researchplanner.Planner) *ResearchPlannerHandl
 	return &ResearchPlannerHandler{Planner: p}
 }
 
-// goalLabels maps each Goal to its inline-button display text.
 var goalLabels = map[researchplanner.Goal]string{
 	researchplanner.GoalRaiding:  "⚔️ Raiding",
 	researchplanner.GoalDefense:  "🛡️ Defense",
@@ -29,10 +25,6 @@ var goalLabels = map[researchplanner.Goal]string{
 	researchplanner.GoalBalanced: "⚖️ Balanced",
 }
 
-// buildResearchPlannerKeyboard renders the inline keyboard attached to
-// every Research Planner report: a refresh button (re-runs with
-// whatever goal was last used/inferred) and one button per goal so the
-// player can steer future recommendations without typing a command.
 func buildResearchPlannerKeyboard() *telebot.ReplyMarkup {
 	selector := &telebot.ReplyMarkup{}
 	btnRefresh := selector.Data("🔄 Refresh Analysis", "research_refresh")
@@ -49,10 +41,6 @@ func buildResearchPlannerKeyboard() *telebot.ReplyMarkup {
 	return selector
 }
 
-// renderResearchPlannerReport runs a fresh recommendation and returns
-// the formatted text plus its attached keyboard, shared by the
-// /research_planner command and both callbacks so the three can never
-// drift apart. goal may be empty (infer it).
 func (h *ResearchPlannerHandler) renderResearchPlannerReport(ctx context.Context, userID int64, goal string) (string, *telebot.ReplyMarkup, error) {
 	rec, err := h.Planner.Recommend(ctx, userID, goal)
 	if err != nil {
@@ -61,13 +49,6 @@ func (h *ResearchPlannerHandler) renderResearchPlannerReport(ctx context.Context
 	return researchplanner.FormatForTelegram(rec), buildResearchPlannerKeyboard(), nil
 }
 
-// ── /research_planner [goal] ────────────────────────────────────────
-//
-// Analyzes the player's tech tree and Neuro Core stockpile, and
-// recommends the best research order for a stated or inferred
-// strategic goal (raiding, defense, economy, balanced). Read-only:
-// never spends Neuro Cores or upgrades any tech node on the player's
-// behalf — /research remains the only place that actually happens.
 func (h *ResearchPlannerHandler) HandleResearchPlanner(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -89,11 +70,6 @@ func (h *ResearchPlannerHandler) HandleResearchPlanner(c telebot.Context) error 
 	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
-// ── callback: research_refresh ──────────────────────────────────────
-//
-// Re-runs the analysis on demand with an inferred goal (a real new AI
-// Foundation call, subject to the usual cost/cache/budget rules) and
-// posts a fresh report.
 func (h *ResearchPlannerHandler) HandleResearchPlannerRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -113,10 +89,6 @@ func (h *ResearchPlannerHandler) HandleResearchPlannerRefreshCallback(c telebot.
 	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
-// ── callback: research_goal <goal> ──────────────────────────────────
-//
-// Re-runs the analysis pinned to whichever goal button the player
-// tapped, overriding inference for that one report.
 func (h *ResearchPlannerHandler) HandleResearchPlannerGoalCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

@@ -9,9 +9,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// LegacyHandler is the panel side of RARE_WORLD_FEATURES_PLAN.md Phase
-// 3 - the tick.Engine side (defeat detection, epitaph generation, pool
-// exclusion) lives in internal/engine/tick/factiondefeat.go.
 type LegacyHandler struct {
 	DB *sql.DB
 }
@@ -20,14 +17,6 @@ func NewLegacyHandler(db *sql.DB) *LegacyHandler {
 	return &LegacyHandler{DB: db}
 }
 
-// HandleLegacyPanel (/legacy) shows the Hall of the Fallen - every
-// permanently-defeated AI faction, most recent first, as a Rich
-// Message <table> (name / defeated date / epitaph excerpt), matching
-// the Hall of Relics (relicconvoy.go) and ranking.go's leaderboard
-// table pattern. This is deliberately AI-faction-only content - see
-// the plan doc's design principle 3: real players are never
-// permanently defeated by anything in this feature set, so this panel
-// will never show a real player's outpost.
 func (h *LegacyHandler) HandleLegacyPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -76,11 +65,6 @@ func (h *LegacyHandler) HandleLegacyPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
-// truncateEpitaph shortens a full epitaph to a table-friendly excerpt,
-// appending an ellipsis when it had to cut - the full epitaph is still
-// shown in full wherever it's the primary content (the exploration
-// discovery message in engine.go's resolveExplorationDiscovery), this
-// is only for the Hall of the Fallen's compact table column.
 func truncateEpitaph(epitaph string, maxLen int) string {
 	runes := []rune(epitaph)
 	if len(runes) <= maxLen {

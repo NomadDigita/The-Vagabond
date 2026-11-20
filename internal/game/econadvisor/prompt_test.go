@@ -77,10 +77,6 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// (hit MaxTokens) is now distinguished from one that never contained
-// JSON at all, so the player sees a more specific message.
-
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "Sell excess metal on the market while prices are`
 	rec := econadvisor.ParseRecommendation(raw, "")
@@ -103,10 +99,6 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 		t.Errorf("expected truncation-specific message, got: %s", out)
 	}
 }
-
-// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
-// production failure where prose or a raw newline around/inside an
-// otherwise-valid JSON object made json.Unmarshal fail outright.
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"summary": "Focus on storage.", "top_roi_actions": []}` +

@@ -33,10 +33,6 @@ func testDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedResourceCamp creates a camp with a Scrap Heap, Generator, Metal
-// Mine, and Crystal Mine all at level 1 (so every passive generation
-// line RunResourcePass touches produces a clean, non-zero, easily
-// hand-verified amount) in the given region.
 func seedResourceCamp(t *testing.T, db *sql.DB, telegramID int64, region string) string {
 	t.Helper()
 	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", telegramID); err != nil {
@@ -65,13 +61,6 @@ func seedResourceCamp(t *testing.T, db *sql.DB, telegramID int64, region string)
 	return campID
 }
 
-// TestRunResourcePass_BloomBoostsPassiveGenerationBy15Percent is the
-// direct test for RARE_WORLD_FEATURES_PLAN.md Phase 2.3: a continent
-// with an active "bloom" event should see every passively-generated
-// resource line (Scrap/Metal/Crystal here - the ones a level-1 camp
-// with no loan/troops actually produces a clean, comparable amount of)
-// come out to exactly 1.15x what an identical camp in a nominal-weather
-// continent produces in the same pass.
 func TestRunResourcePass_BloomBoostsPassiveGenerationBy15Percent(t *testing.T) {
 	db := testDB(t)
 	p := NewProcessor(db)
@@ -122,11 +111,6 @@ func TestRunResourcePass_BloomBoostsPassiveGenerationBy15Percent(t *testing.T) {
 	assertRatio("crystal", bloomCrystal, nominalCrystal)
 }
 
-// TestRunResourcePass_EquippedGearBoostsPassiveGeneration is the
-// direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 3's resource-
-// generation integration: a camp with equipped gear generates more
-// than an identical camp with none, by exactly the gear's combined
-// ResourceBonusPct.
 func TestRunResourcePass_EquippedGearBoostsPassiveGeneration(t *testing.T) {
 	db := testDB(t)
 	p := NewProcessor(db)
@@ -135,8 +119,6 @@ func TestRunResourcePass_EquippedGearBoostsPassiveGeneration(t *testing.T) {
 	gearedCamp := seedResourceCamp(t, db, 62001, "GearedRegion")
 	nominalCamp := seedResourceCamp(t, db, 62002, "NominalRegion")
 
-	// scrap_blade (+2%) + patched_vest (+2%) = +4% total, equipped on
-	// gearedCamp only.
 	if _, err := db.Exec(`
 		INSERT INTO player_gear (encampment_id, gear_key, quantity, equipped) VALUES
 		($1, 'scrap_blade', 1, TRUE), ($1, 'patched_vest', 1, TRUE)`, gearedCamp); err != nil {
@@ -173,10 +155,6 @@ func TestRunResourcePass_EquippedGearBoostsPassiveGeneration(t *testing.T) {
 	}
 }
 
-// TestRunResourcePass_PrestigeBonusBoostsPassiveGeneration is the
-// direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 4's resource-
-// tick integration: a camp with a nonzero prestige_bonus_pct generates
-// more than an identical camp at 0%, by exactly that bonus.
 func TestRunResourcePass_PrestigeBonusBoostsPassiveGeneration(t *testing.T) {
 	db := testDB(t)
 	p := NewProcessor(db)

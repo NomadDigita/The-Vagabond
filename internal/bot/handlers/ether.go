@@ -36,9 +36,6 @@ var etherDeals = []etherDeal{
 	{"ether_dollars", "💵", "Cash", 12.0, "dollars", 300.0},
 }
 
-// HandleEtherShop (/ether) converts Ether - a slow-trickling passive
-// resource - into a burst of other goods, matching SpaceHunt's Ether
-// Shop feature.
 func (h *EtherHandler) HandleEtherShop(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()

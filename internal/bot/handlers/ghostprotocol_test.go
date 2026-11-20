@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-// TestDoGhostProtocol_DeductsProportionalCostAndClearsLocks verifies the
-// core mechanic from AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section
-// 3.4: relocates the camp, deducts ghostProtocolCostFraction of current
-// resources (not a flat number), and deletes every known_locations row
-// targeting this camp while leaving encampment_discoveries untouched.
 func TestDoGhostProtocol_DeductsProportionalCostAndClearsLocksButNotDiscoveries(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -90,14 +85,11 @@ func TestDoGhostProtocol_DeductsProportionalCostAndClearsLocksButNotDiscoveries(
 		t.Error("expected encampment_discoveries to be left untouched (it's a different, weaker kind of knowledge)")
 	}
 
-	// Second call should now be on cooldown.
 	if _, err := h.doGhostProtocol(ctx, campID); err == nil {
 		t.Error("expected a second immediate Ghost Protocol call to be rejected by the cooldown")
 	}
 }
 
-// TestDoGhostProtocol_RespectsExistingCooldown covers the cooldown gate
-// directly, independent of having just executed once.
 func TestDoGhostProtocol_RespectsExistingCooldown(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
