@@ -7,17 +7,10 @@ import (
 	"time"
 )
 
-// ErrAIDisabled is returned when the master AI_ENABLED kill switch is off.
 var ErrAIDisabled = errors.New("ai: disabled by configuration")
 
-// ErrNoProviderAvailable is returned when every provider in the
-// fallback chain is unavailable or failed.
 var ErrNoProviderAvailable = errors.New("ai: no provider available")
 
-// Service is the single entry point every game subsystem (Phase B-J)
-// should depend on. It is intentionally the only exported type in this
-// package that touches permissions, cost, cache, and memory together —
-// callers should never need to reach into those pieces individually.
 type Service struct {
 	Config      *Config
 	Registry    *Registry
@@ -27,9 +20,6 @@ type Service struct {
 	Memory      MemoryStore
 }
 
-// NewService wires the foundation together from a loaded Config and a
-// Postgres connection. Pass additional providers via Registry.Register
-// before the first call to Complete.
 func NewService(cfg *Config, registry *Registry, cost CostTracker, perms *PermissionManager, memory MemoryStore) *Service {
 	registry.SetOrder(append([]string{cfg.DefaultProvider}, cfg.FallbackOrder...))
 	return &Service{
@@ -42,11 +32,6 @@ func NewService(cfg *Config, registry *Registry, cost CostTracker, perms *Permis
 	}
 }
 
-// Complete is the single call site every Phase B-J feature uses to
-// talk to an LLM. It enforces, in order: the master kill switch,
-// per-feature/per-user permissions, cache lookup, per-user and global
-// daily budgets, then tries each available provider in fallback order,
-// recording cost and (optionally) memory on success.
 func (s *Service) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	if req.Feature == "" {
 		return nil, errors.New("ai: CompletionRequest.Feature is required")
@@ -98,12 +83,6 @@ func (s *Service) Complete(ctx context.Context, req CompletionRequest) (*Complet
 				log.Printf("ai: failed to record cost usage: %v", err)
 			}
 		}
-		// Never cache a response that got cut off mid-completion —
-		// doing so would lock every caller (including a player
-		// tapping "Refresh") into replaying the same truncated
-		// output for the rest of the TTL window instead of getting
-		// a fresh, hopefully-complete retry. See ADR-025 in
-		// PROJECT_MASTER_PLAN.md.
 		if s.Cache != nil && s.Config.CacheTTLSeconds > 0 && !IsTruncatedStopReason(resp.StopReason) {
 			s.Cache.Set(cacheKey, resp, time.Duration(s.Config.CacheTTLSeconds)*time.Second)
 		}

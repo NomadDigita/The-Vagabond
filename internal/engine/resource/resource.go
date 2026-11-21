@@ -51,9 +51,6 @@ type EncampmentState struct {
 }
 
 func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
-	// Phase 7 (item 12): world events are per-continent now. Fetch every
-	// continent's active event once (cheap, small result set) instead of
-	// re-querying per encampment inside the loop below.
 	continentWeather := world.ActiveEventsByContinent(ctx, tx)
 
 	query := `
@@ -112,17 +109,8 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		scrapGenerated := (0.25 * float64(s.ScrapHeapLvl)) * (1.0 + overclockBonus + salvageBonus)
 		rationsGenerated := 0.10
 		electricityGenerated := 0.05 * float64(s.GeneratorLvl)
-		electricityGenerated += 0.04 * float64(s.SolarPanelLvl) // Solar Panel: independent bonus generation
+		electricityGenerated += 0.04 * float64(s.SolarPanelLvl)
 
-		// RARE_WORLD_FEATURES_PLAN.md Phase 2: Seasonal Wasteland
-		// Blooms. The wasteland's one purely positive weather event -
-		// a flat +15% applied to every passively-generated resource
-		// line below (Scrap/Rations/Electricity/Ether/Metal/Crystal),
-		// the mirror image of Supply Crisis's negative effect
-		// elsewhere in this codebase. Computed once here so every
-		// generation line below can apply it identically rather than
-		// duplicating the "is this continent blooming" check at each
-		// site.
 		bloomMultiplier := 1.0
 		if continentWeather[s.Region] == "bloom" {
 			bloomMultiplier = 1.15
@@ -130,13 +118,6 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		scrapGenerated *= bloomMultiplier
 		rationsGenerated *= bloomMultiplier
 
-		// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: Crafting & Gear.
-		// Equipped gear's ResourceBonusPct sums into one more
-		// multiplier here, stacking with (not replacing) Bloom's own -
-		// e.g. a blooming region with a fully-equipped 15%-per-slot
-		// legendary loadout gets 1.15 * 1.45, not one overriding the
-		// other. See gear.go's package doc for why this, not raid
-		// combat power, is what "stat modifier" means for gear.
 		gearMultiplier := 1.0 + gear.ResourceBonusPctFor(ctx, tx, s.ID)/100.0
 		gearMultiplier += herodepth.ResourceBonusPctFor(ctx, tx, s.ID) / 100.0
 		gearMultiplier += prestige.ResourceBonusPctFor(ctx, tx, s.ID) / 100.0
@@ -150,7 +131,6 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 		case "radiation_storm":
 			electricityGenerated *= 0.5
 		case "emp":
-			// EMP knocks out unshielded electronics outright, per the news headline.
 			electricityGenerated = 0
 		case "bloom":
 			electricityGenerated *= bloomMultiplier
@@ -169,14 +149,12 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 
 		rationsConsumed := float64(s.TroopCount) * 0.05
 		if continentWeather[s.Region] == "disease" {
-			// Disease outbreak: commanders divert extra rations to treatment, per the news headline.
 			rationsConsumed *= 1.5
 		}
 		electricityConsumed := (float64(s.BuggyCount) * 0.02) + (float64(s.ShipCount) * 0.05) + (float64(s.JetCount) * 0.10)
 
 		storageCap := storagecap.Cap(s.TentLvl, s.WarehouseLvl, s.ExtensionLvl)
 
-		// Surplus Preservation System: Only caps new passive allocations. Pre-existing balances are preserved.
 		newScrap := s.Scrap
 		if s.Scrap < storageCap {
 			newScrap = math.Min(s.Scrap+scrapGenerated, storageCap)
@@ -202,17 +180,11 @@ func (p *Processor) RunResourcePass(ctx context.Context, tx *sql.Tx) error {
 			newElectricity = math.Max(s.Electricity+electricityDiff, 0.0)
 		}
 
-		// Ether trickles in slowly, scaled by Technology research and
-		// boosted further by the Technology Center building. Same cap
-		// rule as everything else: capped if generated passively.
 		etherGenerated := 0.02*float64(s.ProductionTechLvl) + 0.03*float64(s.TechCenterLvl)
 		etherGenerated *= bloomMultiplier
 		etherGenerated *= gearMultiplier
 		newEther, _ := storagecap.Clamp(s.Ether, etherGenerated, storageCap)
 
-		// Metal Mine / Crystal Mine: passive building-based generation,
-		// distinct from (and stacking with) the active miner-queue system.
-		// Now cap-checked the same as every other passive resource gain.
 		metalGenerated := 2.0 * float64(s.MetalMineLvl) * bloomMultiplier * gearMultiplier
 		crystalGenerated := 0.8 * float64(s.CrystalMineLvl) * bloomMultiplier * gearMultiplier
 		newMetal, _ := storagecap.Clamp(s.Metal, metalGenerated, storageCap)

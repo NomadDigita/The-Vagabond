@@ -11,9 +11,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// PrestigeHandler is the panel/confirm side of
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 4 - eligibility checking and
-// the actual reset live in internal/game/prestige.
 type PrestigeHandler struct {
 	DB *sql.DB
 }
@@ -22,10 +19,6 @@ func NewPrestigeHandler(db *sql.DB) *PrestigeHandler {
 	return &PrestigeHandler{DB: db}
 }
 
-// HandlePrestigePanel (/prestige) shows the current Prestige level and
-// cumulative bonus, an eligibility check with a clear "what's missing"
-// breakdown if not yet eligible, and a Prestige button (behind a
-// confirm dialog - see HandlePrestigeConfirmCallback) once eligible.
 func (h *PrestigeHandler) HandlePrestigePanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -70,11 +63,6 @@ func (h *PrestigeHandler) HandlePrestigePanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
-// HandlePrestigeConfirmPromptCallback shows a styled Confirm/Cancel
-// dialog making unmistakably clear what resets and what's kept -
-// Prestige is irreversible by design, so this confirmation has to be
-// real, matching this project's established Confirm/Cancel-with-cost-
-// preview convention exactly.
 func (h *PrestigeHandler) HandlePrestigeConfirmPromptCallback(c telebot.Context) error {
 	_ = c.Respond(&telebot.CallbackResponse{})
 	selector := &telebot.ReplyMarkup{}
@@ -89,8 +77,6 @@ func (h *PrestigeHandler) HandlePrestigeConfirmPromptCallback(c telebot.Context)
 	return keyboards.SendStyled(c, text, [][]keyboards.StyledBtn{{btnConfirm, btnCancel}})
 }
 
-// HandlePrestigeConfirmCallback fires from the Confirm/Cancel dialog
-// above.
 func (h *PrestigeHandler) HandlePrestigeConfirmCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

@@ -9,18 +9,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory so it never collides with Fleet Commander, Guild
-// Assistant, etc., which will use their own scope strings.
 const MemoryScope = "planet_governor"
 
-// ErrNoEncampment is returned when the calling player has no
-// registered base yet (e.g. hasn't finished onboarding).
 var ErrNoEncampment = errors.New("governor: player has no encampment")
 
-// Governor is the Phase B entry point. One instance is shared across
-// all requests (it holds only a DB pool and the shared AI Service,
-// both already safe for concurrent use).
 type Governor struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -30,10 +22,6 @@ func New(db *sql.DB, service *ai.Service) *Governor {
 	return &Governor{DB: db, AI: service}
 }
 
-// BuildSnapshot loads the current state of a player's base. Every
-// COALESCE default mirrors internal/engine/resource.RunResourcePass so
-// the Governor's picture of "level 1 / not built yet" agrees with the
-// tick engine's own defaults.
 func (g *Governor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, error) {
 	var s Snapshot
 	err := g.DB.QueryRowContext(ctx, `
@@ -78,15 +66,6 @@ func (g *Governor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, 
 	return &s, nil
 }
 
-// Recommend produces a fresh AI recommendation for the given player's
-// base. It stores both the prompt and the response in ai_memory
-// (scoped to MemoryScope) so a later call to Recommend — or any future
-// feature that reads the same scope — has continuity without needing
-// to re-derive it from raw DB state.
-//
-// This is advisory-only: nothing in this method mutates encampments,
-// modules, or any other game table. See PROJECT_MASTER_PLAN.md §4 for
-// why autopilot execution is deliberately not implemented yet.
 func (g *Governor) Recommend(ctx context.Context, userID int64) (*Recommendation, error) {
 	snapshot, err := g.BuildSnapshot(ctx, userID)
 	if err != nil {
@@ -121,13 +100,6 @@ func (g *Governor) Recommend(ctx context.Context, userID int64) (*Recommendation
 	return rec, nil
 }
 
-// AutopilotSetting reports whether a player has opted into autopilot
-// for their base. Reading/writing this preference is implemented now
-// so the UI and data model exist, but — importantly — nothing in this
-// package currently *acts* on a true value. No code path calls
-// upgrade/build/repair automatically. That execution engine is
-// explicitly deferred (see PROJECT_MASTER_PLAN.md §4) so it can be
-// built and tested deliberately rather than bolted on here.
 func (g *Governor) AutopilotSetting(ctx context.Context, userID int64) (bool, error) {
 	var enabled sql.NullBool
 	err := g.DB.QueryRowContext(ctx, `
@@ -145,9 +117,6 @@ func (g *Governor) AutopilotSetting(ctx context.Context, userID int64) (bool, er
 	return enabled.Valid && enabled.Bool, nil
 }
 
-// SetAutopilot stores the player's preference. See the doc comment on
-// AutopilotSetting: this does not currently cause any autonomous
-// action to occur.
 func (g *Governor) SetAutopilot(ctx context.Context, userID int64, enabled bool) error {
 	var encampmentID string
 	if err := g.DB.QueryRowContext(ctx, `SELECT id FROM encampments WHERE user_id = $1`, userID).Scan(&encampmentID); err != nil {

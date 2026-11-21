@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// TestSpawnNewAIFactionsCreatesAFullyFunctionalEncampment verifies a
-// spawned faction gets exactly the same shape as a boot-seeded one
-// (seedAICivilizations in cmd/bot/main.go): a users row, an encampments
-// row with is_ai_faction = TRUE at the deliberately-weak starting level,
-// a resources row, and a workshop_inventory row - so growAICivilizations
-// and decideAIFactionActions need zero special-casing to pick it up.
 func TestSpawnNewAIFactionsCreatesAFullyFunctionalEncampment(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -84,9 +78,6 @@ func TestSpawnNewAIFactionsCreatesAFullyFunctionalEncampment(t *testing.T) {
 	}
 }
 
-// TestSpawnNewAIFactionsRespectsCadence verifies the world-scoped cadence
-// gate: calling spawnNewAIFactions again immediately after a spawn does
-// nothing until aiFactionSpawnInterval has passed.
 func TestSpawnNewAIFactionsRespectsCadence(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -123,7 +114,6 @@ func TestSpawnNewAIFactionsRespectsCadence(t *testing.T) {
 		t.Errorf("expected the cadence gate to block a second spawn immediately after the first, went from %d to %d", countAfterFirst, countAfterSecond)
 	}
 
-	// Force the cadence to have elapsed and confirm a third spawn succeeds.
 	if _, err := db.Exec("UPDATE world_state SET last_ai_spawn_at = CURRENT_TIMESTAMP - INTERVAL '1 day' WHERE id = 1"); err != nil {
 		t.Fatalf("forcing cadence elapsed: %v", err)
 	}
@@ -144,14 +134,6 @@ func TestSpawnNewAIFactionsRespectsCadence(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanListSurplusOnExchange verifies an AI faction
-// with a healthy crystal surplus eventually lists some of it on
-// market_exchange, using the exact same lot size/price a human posting
-// via /exchange would - project owner direction 2026-08-01 ("they can
-// literally do every single thing in the game," market listings given as
-// the explicit example). Runs many ticks since the listing chance is
-// probabilistic, mirroring TestAIFactionCanRaidAnotherAIFactionRarely's
-// pattern for a low-probability-per-call behavior.
 func TestGrowAICivilizationsCanListSurplusOnExchange(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -175,8 +157,6 @@ func TestGrowAICivilizationsCanListSurplusOnExchange(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		// Replenish crystal so later iterations still have a surplus to
-		// list even after an earlier iteration already listed some.
 		if _, err := db.Exec("UPDATE resources SET crystal = 100 WHERE encampment_id = $1", faction); err != nil {
 			t.Fatalf("replenishing crystal: %v", err)
 		}
@@ -184,19 +164,12 @@ func TestGrowAICivilizationsCanListSurplusOnExchange(t *testing.T) {
 		var listingCount int
 		_ = db.QueryRow("SELECT COUNT(*) FROM market_exchange WHERE seller_id = $1 AND item_type = 'crystal'", faction).Scan(&listingCount)
 		if listingCount > 0 {
-			return // success - no need to keep looping
+			return
 		}
 	}
 	t.Error("expected the AI faction to list crystal on the exchange at least once across 200 ticks at a 3% chance per tick")
 }
 
-// TestGrowAICivilizationsCanBuyAvailableListing verifies an AI faction
-// with enough dollars eventually buys a listing posted by someone else
-// (a human, in this test), mirroring HandleBuyListingCallback's exact
-// mechanics - dollars debited from the buyer, credited to the seller
-// (respecting the seller's storage cap), the item transferred, and the
-// listing marked sold. Project owner follow-up direction 2026-08-01:
-// "buy and sell" both, not selling alone.
 func TestGrowAICivilizationsCanBuyAvailableListing(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -248,10 +221,6 @@ func TestGrowAICivilizationsCanBuyAvailableListing(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontBuyItsOwnListing verifies the seller_id !=
-// faction.id filter: an AI faction's own listing is never a candidate
-// for its own purchase roll, exactly like HandleBuyListingCallback's
-// "You can't buy your own listing" guard for humans.
 func TestGrowAICivilizationsWontBuyItsOwnListing(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -290,13 +259,6 @@ func TestGrowAICivilizationsWontBuyItsOwnListing(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanFoundOrJoinAClan verifies both clan-related
-// paths: an AI faction with no clan eventually either founds its own
-// (a real clans + user_clans 'Leader' row) or applies to an existing
-// recruiting human clan (a pending clan_applications row plus a
-// notification to the human leader - not an automatic join, matching
-// HandleApplyToClanCallback's behavior for humans). Project owner
-// follow-up direction 2026-08-01: "create a clan and join one."
 func TestGrowAICivilizationsCanFoundOrJoinAClan(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -309,8 +271,6 @@ func TestGrowAICivilizationsCanFoundOrJoinAClan(t *testing.T) {
 		t.Fatalf("looking up faction user_id: %v", err)
 	}
 
-	// A recruiting human clan for the "apply" path to have something to
-	// target - without this, the faction can only ever found its own.
 	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES (5001) ON CONFLICT DO NOTHING"); err != nil {
 		t.Fatalf("seeding human leader: %v", err)
 	}
@@ -347,9 +307,6 @@ func TestGrowAICivilizationsCanFoundOrJoinAClan(t *testing.T) {
 	if ownClanCount == 0 && appCount == 0 {
 		t.Error("expected either a founded clan (as leader) or a pending application, got neither")
 	}
-	// Whichever path fired, the faction must not have force-joined the
-	// human clan without an application being reviewed - HandleApply-
-	// ToClanCallback never auto-joins, and neither should this.
 	var inHumanClan bool
 	_ = db.QueryRow("SELECT EXISTS(SELECT 1 FROM user_clans uc JOIN clans c ON c.id = uc.clan_id WHERE uc.user_id = $1 AND c.leader_id = 5001)", factionUserID).Scan(&inHumanClan)
 	if inHumanClan {

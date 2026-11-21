@@ -9,29 +9,8 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/storagecap"
 )
 
-// RARE_WORLD_FEATURES_PLAN.md Phase 5: Constellation Alliances.
-//
-// The handler side (formation, accept/reject) lives in
-// internal/bot/handlers/constellation.go. This file is the tick.Engine
-// side: the joint dividend payout and automatic expiry for active
-// Constellations.
-
-// constellationDividendDollars is the flat "Alignment Dividend" every
-// member Clan's encampments each receive once per day while their
-// Constellation is active - deliberately a flat administrative bonus
-// rather than a percentage-of-resource-generation change, so this
-// phase never has to touch the resource-tick formulas Phase 2's Bloom
-// bonus already extended (see the plan doc's section 5.4 - keeps the
-// two features' code paths fully independent).
 const constellationDividendDollars = 500.0
 
-// constellationDividend is the "constellation_dividend" tick phase.
-// For every active Constellation whose last_dividend_at is more than
-// 24 hours ago (or never set), every member Clan's encampments each
-// receive constellationDividendDollars, storage-cap clamped like every
-// other resource-gain path, with a direct notification per recipient.
-// Tracked via last_dividend_at rather than assuming the tick cadence
-// lines up with a calendar day - see plan doc 5.4.
 func (e *Engine) constellationDividend(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, name, banner_emoji FROM constellations
@@ -61,9 +40,6 @@ func (e *Engine) constellationDividend(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// payConstellationDividend credits constellationDividendDollars to
-// every member Clan's encampments and notifies each recipient
-// directly.
 func (e *Engine) payConstellationDividend(ctx context.Context, tx *sql.Tx, constellationID, name, bannerEmoji string) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT enc.id, enc.user_id
@@ -105,11 +81,6 @@ func (e *Engine) payConstellationDividend(ctx context.Context, tx *sql.Tx, const
 	return nil
 }
 
-// constellationExpire is the "constellation_expire" tick phase -
-// active Constellations past their expires_at become 'dissolved' with
-// a "the Constellation has ended" broadcast to every member Clan,
-// matching every other expiry phase in this feature set (Phase
-// 1.4/2/4.5's precedent).
 func (e *Engine) constellationExpire(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, name, banner_emoji FROM constellations

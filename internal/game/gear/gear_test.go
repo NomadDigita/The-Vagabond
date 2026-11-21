@@ -56,10 +56,6 @@ func seedGearPlayer(t *testing.T, db *sql.DB, userID int64) string {
 	return campID
 }
 
-// TestStartCraft_DeductsCostAndQueues is the direct test for
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: starting a craft deducts
-// its CraftCost immediately and queues a crafting_queue row - the item
-// itself isn't granted yet (see the next test).
 func TestStartCraft_DeductsCostAndQueues(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -73,7 +69,7 @@ func TestStartCraft_DeductsCostAndQueues(t *testing.T) {
 	if err := db.QueryRow("SELECT scrap FROM resources WHERE encampment_id = $1", campID).Scan(&scrap); err != nil {
 		t.Fatalf("reading resources: %v", err)
 	}
-	if scrap != 4500 { // 5000 - 500 (scrap_blade's cost)
+	if scrap != 4500 {
 		t.Errorf("expected 4500 scrap remaining, got %v", scrap)
 	}
 
@@ -92,8 +88,6 @@ func TestStartCraft_DeductsCostAndQueues(t *testing.T) {
 	}
 }
 
-// TestStartCraft_InsufficientResourcesFails confirms crafting fails
-// cleanly (no partial deduction) when the player can't afford it.
 func TestStartCraft_InsufficientResourcesFails(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -113,8 +107,6 @@ func TestStartCraft_InsufficientResourcesFails(t *testing.T) {
 	}
 }
 
-// TestStartCraft_RejectsNonCraftableGear confirms Epic/Legendary
-// (drop-only) items can't be crafted even with unlimited resources.
 func TestStartCraft_RejectsNonCraftableGear(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -125,9 +117,6 @@ func TestStartCraft_RejectsNonCraftableGear(t *testing.T) {
 	}
 }
 
-// TestResolveCraftingQueue_GrantsItemOnceComplete is the direct test
-// for the crafting_resolve tick phase: a queued craft past its
-// completes_at is credited into player_gear.
 func TestResolveCraftingQueue_GrantsItemOnceComplete(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -168,8 +157,6 @@ func TestResolveCraftingQueue_GrantsItemOnceComplete(t *testing.T) {
 	}
 }
 
-// TestResolveCraftingQueue_LeavesStillPendingCraftsAlone confirms a
-// craft that hasn't reached its completes_at yet is left untouched.
 func TestResolveCraftingQueue_LeavesStillPendingCraftsAlone(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -200,9 +187,6 @@ func TestResolveCraftingQueue_LeavesStillPendingCraftsAlone(t *testing.T) {
 	}
 }
 
-// TestEquip_SwapsWithinSlotAndRequiresOwnership is the direct test for
-// the one-equipped-item-per-slot rule: equipping a second item in the
-// same slot unequips the first, and equipping an unowned item fails.
 func TestEquip_SwapsWithinSlotAndRequiresOwnership(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -237,8 +221,6 @@ func TestEquip_SwapsWithinSlotAndRequiresOwnership(t *testing.T) {
 	}
 }
 
-// TestGrantRandomDrop_CreditsAnItemOfTheRequestedRarity covers the
-// World Boss / Relic Convoy drop path.
 func TestGrantRandomDrop_CreditsAnItemOfTheRequestedRarity(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -261,9 +243,6 @@ func TestGrantRandomDrop_CreditsAnItemOfTheRequestedRarity(t *testing.T) {
 	}
 }
 
-// TestResourceBonusPctFor_SumsOnlyEquippedGear confirms the resource-
-// tick integration point sums exactly the equipped items' bonuses -
-// owned-but-unequipped gear contributes nothing.
 func TestResourceBonusPctFor_SumsOnlyEquippedGear(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -276,8 +255,6 @@ func TestResourceBonusPctFor_SumsOnlyEquippedGear(t *testing.T) {
 	}
 
 	bonus := ResourceBonusPctFor(ctx, db, campID)
-	// scrap_blade (2) + patched_vest (2) = 4; signal_booster (5, but
-	// unequipped) must NOT count.
 	if bonus != 4 {
 		t.Errorf("expected 4%% total bonus from equipped-only gear, got %v", bonus)
 	}

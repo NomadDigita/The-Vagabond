@@ -6,12 +6,6 @@ import (
 	"time"
 )
 
-// TestPayoutWorldBossLoot_GauntletGuaranteesDropAndIncrementsKills is
-// the direct test for NEXT_GENERATION_FEATURES_PLAN.md Phase 8: a
-// Gauntlet kill guarantees a gear drop for every contributor (vs the
-// normal mostly-nothing chance-based roll), and total_kills increments
-// on every kill regardless of Gauntlet status - the counter the tier-
-// gating logic in boss.go's tierUnlocked reads.
 func TestPayoutWorldBossLoot_GauntletGuaranteesDropAndIncrementsKills(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -58,9 +52,6 @@ func TestPayoutWorldBossLoot_GauntletGuaranteesDropAndIncrementsKills(t *testing
 	var rarity string
 	if err := db.QueryRow(`
 		SELECT gear_key FROM player_gear WHERE encampment_id = $1 LIMIT 1`, campID).Scan(&rarity); err == nil {
-		// Just confirm it's a recognized key from the catalog - the
-		// exact rarity (Epic vs Legendary) is randomized, both are
-		// acceptable outcomes for a guaranteed drop.
 		if rarity == "" {
 			t.Error("expected a real gear_key to be granted")
 		}
@@ -83,11 +74,6 @@ func TestPayoutWorldBossLoot_GauntletGuaranteesDropAndIncrementsKills(t *testing
 	}
 }
 
-// TestPayoutWorldBossLoot_NonGauntletDoesNotGuaranteeDrop is a
-// statistical sanity check: a non-Gauntlet kill should NOT guarantee a
-// drop the way a Gauntlet kill does - run enough independent kills
-// that at least one produces no drop at all (the 90% no-drop case at
-// the existing 2%/8% roll rates).
 func TestPayoutWorldBossLoot_NonGauntletDoesNotGuaranteeDrop(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

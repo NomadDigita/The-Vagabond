@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// seedAIClanLeader creates a clan led by the given AI faction's user_id,
-// returning the clan id - a small helper shared by the clan-war and
-// federation tests below, both of which require the faction to already
-// lead a clan (mirrors user_clans.role = 'Leader', the same gate
-// HandleDeclareClanWarCallback and HandleFoundFederation/HandleJoinFederation
-// use for humans).
 func seedAIClanLeader(t *testing.T, db *sql.DB, factionUserID int64, clanName string) string {
 	t.Helper()
 	var clanID string
@@ -25,18 +19,11 @@ func seedAIClanLeader(t *testing.T, db *sql.DB, factionUserID int64, clanName st
 	return clanID
 }
 
-// TestGrowAICivilizationsCanDeclareClanWar verifies a Leader-role AI
-// faction eventually declares war on an available rival clan, mirroring
-// HandleDeclareClanWarCallback's exact mechanics.
 func TestGrowAICivilizationsCanDeclareClanWar(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	// This test needs its tracked clan to survive the whole 300-tick
-	// loop below; zero out the independent leave/disband roll so it
-	// can't randomly disband the clan out from under the war-declare
-	// check being tested here (see aiClanLeaveChance's own doc comment).
 	oldLeaveChance := aiClanLeaveChance
 	aiClanLeaveChance = 0
 	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
@@ -76,21 +63,11 @@ func TestGrowAICivilizationsCanDeclareClanWar(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontDeclareWarWhenNotLeader verifies a
-// rank-and-file AI clan member (not the Leader) never declares a war -
-// mirrors HandleDeclareClanWarCallback's "Leaders only" guard.
 func TestGrowAICivilizationsWontDeclareWarWhenNotLeader(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	// Zero out the independent leave/disband roll - without this, the
-	// AI member can leave "Human-Led Clan" partway through the loop
-	// and later found or join an entirely different clan as Leader,
-	// whose own legitimate war declaration could then involve the
-	// still-existing (but now AI-vacated) original clan as the
-	// opponent, which the warCount check below can't distinguish from
-	// the actual behavior under test. See aiClanLeaveChance's comment.
 	oldLeaveChance := aiClanLeaveChance
 	aiClanLeaveChance = 0
 	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
@@ -134,10 +111,6 @@ func TestGrowAICivilizationsWontDeclareWarWhenNotLeader(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanFoundOrJoinFederation verifies a Leader-role
-// AI faction with enough Crystal eventually gets its clan into a
-// federation - either by founding one (HandleFoundFederation's mechanics)
-// or joining an existing one (HandleJoinFederation's mechanics).
 func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -158,13 +131,6 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 	}
 	myClanID := seedAIClanLeader(t, db, factionUserID, "AI Clan Sigma")
 
-	// 500 iterations turned out to be statistically marginal: only the
-	// "found" branch of the 1%-chance/tick roll can ever succeed in this
-	// test (there's no other federation for the 50% "join" branch to
-	// find), so the real per-tick success probability is ~0.5%, giving
-	// 500 tries roughly an 8% false-failure rate - caught by a shuffled,
-	// repeated-count test run, not a rare fluke worth ignoring. 3000
-	// iterations brings the false-failure rate below one in a million.
 	joined := false
 	for i := 0; i < 3000 && !joined; i++ {
 		tx, err := db.BeginTx(ctx, nil)
@@ -178,8 +144,6 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		// Replenish crystal each round so the founding path stays
-		// available even after a listing/buying roll spent some.
 		if _, err := db.Exec("UPDATE resources SET crystal = 10000 WHERE encampment_id = $1", faction); err != nil {
 			t.Fatalf("replenishing crystal: %v", err)
 		}
@@ -192,9 +156,6 @@ func TestGrowAICivilizationsCanFoundOrJoinFederation(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanQueueForArena verifies a funded AI faction
-// eventually joins the arena queue, mirroring HandleJoinQueueCallback's
-// exact mechanics (entry fee debited, arena_queue row inserted).
 func TestGrowAICivilizationsCanQueueForArena(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -236,11 +197,6 @@ func TestGrowAICivilizationsCanQueueForArena(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanDisbandClanAsLeader is the direct test for
-// the AI clan leave/disband gap the project owner flagged 2026-08-09:
-// a Leader-role AI faction must eventually disband a clan it leads
-// (DELETE FROM clans, cascading to user_clans) rather than being
-// permanently stuck leading it forever.
 func TestGrowAICivilizationsCanDisbandClanAsLeader(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -282,10 +238,6 @@ func TestGrowAICivilizationsCanDisbandClanAsLeader(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers
-// confirms a real human member of an AI-led clan is notified when
-// their AI Leader disbands it - the clan disappearing out from under
-// them should never be silent.
 func TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -335,10 +287,6 @@ func TestGrowAICivilizationsCanDisbandClanAsLeader_NotifiesRealMembers(t *testin
 	}
 }
 
-// TestGrowAICivilizationsCanLeaveClanAsMember confirms a rank-and-file
-// (non-Leader) AI clan member eventually leaves without touching the
-// clan itself - the clan should survive with the human Leader still in
-// charge.
 func TestGrowAICivilizationsCanLeaveClanAsMember(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -390,20 +338,11 @@ func TestGrowAICivilizationsCanLeaveClanAsMember(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsReviewsApplicationsToLedClan is the direct
-// test for the related "applications to an AI-led clan sit pending
-// forever" gap found alongside the leave/disband fix: an AI Leader
-// must eventually accept a pending real-player application to its
-// clan, rather than nothing ever reviewing it.
 func TestGrowAICivilizationsReviewsApplicationsToLedClan(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 	ctx := context.Background()
 
-	// Same fragility as the declare-war/federation tests above: zero
-	// out the independent leave/disband roll so the Leader's clan
-	// can't be randomly disbanded before it gets a chance to review
-	// the pending application this test is actually checking.
 	oldLeaveChance := aiClanLeaveChance
 	aiClanLeaveChance = 0
 	t.Cleanup(func() { aiClanLeaveChance = oldLeaveChance })
@@ -456,11 +395,6 @@ func TestGrowAICivilizationsReviewsApplicationsToLedClan(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCraftsAndEquipsGear is the direct test for
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 3's AI-parity crafting
-// heuristic: an AI faction with enough resources eventually crafts and
-// equips a Common/Rare gear item on its own, without ever visiting a
-// /gear panel.
 func TestGrowAICivilizationsCraftsAndEquipsGear(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

@@ -44,20 +44,10 @@ type Engine struct {
 	lastTickDone time.Time
 }
 
-// defaultTickInterval mirrors cmd/bot/main.go's own fallback so the two
-// stay in sync; duplicated here (rather than imported) to keep this
-// package free of a cmd/bot dependency.
 const defaultTickInterval = 60 * time.Second
 
 func NewEngine(db *sql.DB, interval time.Duration) *Engine {
 	if interval <= 0 {
-		// Guards against a startup crash: time.NewTicker panics on a
-		// non-positive duration, which previously meant a typo'd or
-		// accidentally-zeroed GAME_TICK_SECONDS (e.g. "0") would take
-		// down the entire bot process at boot instead of degrading
-		// gracefully. Confirmed bug (2026-08-02): nothing validated
-		// this value between os.Getenv/strconv.Atoi in cmd/bot/main.go
-		// and the NewTicker call in Start() below.
 		log.Printf("Tick Engine: invalid interval %v (GAME_TICK_SECONDS must be a positive integer number of seconds) — falling back to %v", interval, defaultTickInterval)
 		interval = defaultTickInterval
 	}
@@ -79,12 +69,6 @@ func (e *Engine) Start() {
 	ticker := time.NewTicker(e.TickInterval)
 
 	go func() {
-		// Third layer of defense-in-depth (runPhase and ProcessTick each
-		// have their own recover() too): if a panic ever still reaches
-		// here, log it and keep the loop alive for the *next* tick
-		// instead of letting the goroutine die and silently stopping the
-		// game clock forever. Wrapped per-iteration (not once for the
-		// whole loop) so recovering doesn't exit the for/select loop.
 		for {
 			select {
 			case <-ticker.C:
@@ -109,45 +93,18 @@ func (e *Engine) Stop() {
 	close(e.stopChan)
 }
 
-// LastTickStatus reports when the most recent tick pass started and
-// finished, so admin-facing panels (see internal/bot/handlers/admin.go's
-// "server_metrics" action) can show at a glance whether the background
-// tick engine - and therefore the weather/world-event system, which
-// runs as its first phase - is actually alive in the current
-// deployment, instead of players having to infer it indirectly from
-// whether events have ever fired.
 func (e *Engine) LastTickStatus() (startedAt, finishedAt time.Time) {
 	e.lastTickMu.RLock()
 	defer e.lastTickMu.RUnlock()
 	return e.lastTickAt, e.lastTickDone
 }
 
-// tickPhase describes one isolated unit of tick work. Each phase gets its
-// own transaction so that a failure in one subsystem (e.g. arena matchmaking)
-// can never block or roll back unrelated subsystems (e.g. espionage,
-// mining, combat resolution) in the same tick.
 type tickPhase struct {
 	name string
 	run  func(ctx context.Context, tx *sql.Tx) error
 }
 
-// runPhase executes a single phase in its own transaction. It always
-// returns (never aborts the caller's loop) so subsequent phases still run
-// even if this one fails. Errors are logged with the phase name attached
-// for easier diagnosis.
 func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
-	// Panic recovery here is critical: previously an unrecovered panic in
-	// any single phase (e.g. a nil pointer deref while resolving one bad
-	// raid row) would propagate all the way up through ProcessTick and
-	// out of the tick engine's background goroutine in Start(), silently
-	// killing that goroutine forever. Since nothing restarts it, every
-	// subsequent tick simply never ran again - which is why players saw
-	// raids permanently stuck showing "(0s remaining)": the countdown
-	// target time had passed, but the tick pass that resolves/advances
-	// raids had stopped running entirely, so nothing ever cleared the
-	// stale state. Confirmed root cause 2026-08-03. Recovering here keeps
-	// one bad phase from taking down the whole engine, matching the
-	// isolation runPhase already provides via per-phase transactions.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Tick phase [%s] PANIC (recovered): %v\n%s", p.name, r, debug.Stack())
@@ -171,10 +128,6 @@ func (e *Engine) runPhase(ctx context.Context, p tickPhase) {
 	}
 }
 
-// collectDailyTax implements SpaceHunt's Daily Tax Law: once every 24
-// hours, every player pays tax_rate_percent of their banked Dollars into a
-// shared pool, which is then paid out evenly to the top 3 ranked
-// survivors (by the canonical scoring.ScoreExpr).
 func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	var lastCollected time.Time
 	var taxRate int
@@ -184,7 +137,7 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	if time.Now().UTC().Sub(lastCollected) < 24*time.Hour {
-		return nil // Not due yet.
+		return nil
 	}
 
 	if taxRate > 0 {
@@ -261,8 +214,6 @@ func (e *Engine) collectDailyTax(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-// resolveExplorationDispatches credits the reward and marks the site
-// claimed for every expedition whose resolve_time has passed.
 func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT d.id, d.site_id, d.encampment_id, d.user_id, s.site_name, s.reward_type, s.reward_amount, s.continent
@@ -296,7 +247,7 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 		storageCap := storagecap.CapFor(ctx, tx, d.encampmentID)
 
 		var current float64
-		column := d.rewardType // "metal", "crystal", "ether", or "dollars" - all valid column names on resources.
+		column := d.rewardType
 		_ = tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s FROM resources WHERE encampment_id = $1 FOR UPDATE", column), d.encampmentID).Scan(&current)
 		newAmount, _ := storagecap.Clamp(current, d.rewardAmount, storageCap)
 		_, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE resources SET %s = $1 WHERE encampment_id = $2", column), newAmount, d.encampmentID)
@@ -323,10 +274,6 @@ func (e *Engine) resolveExplorationDispatches(ctx context.Context, tx *sql.Tx) e
 	return nil
 }
 
-// resolveExplorationDiscovery turns a completed site expedition into a
-// possible first-contact event. It deliberately selects only a target the
-// explorer does not already know, so retrying a tick cannot manufacture
-// duplicate notifications or reset intelligence timestamps.
 func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, observerCampID string, continent string) (string, error) {
 	var scouts int
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(scouts, 0) FROM workshop_inventory WHERE encampment_id = $1", observerCampID).Scan(&scouts); err != nil && err != sql.ErrNoRows {
@@ -360,13 +307,6 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 			return "", fmt.Errorf("recording discovered encampment: %w", err)
 		}
 		if affected, _ := result.RowsAffected(); affected > 0 {
-			// RARE_WORLD_FEATURES_PLAN.md Phase 3.5: stumbling onto a
-			// permanently-defeated AI faction's old territory is its
-			// own small narrative moment - the epitaph generated when
-			// it fell (see factiondefeat.go's checkForFactionDefeat)
-			// gets appended here instead of the ordinary "now
-			// available in the Tactical Target Matrix" framing, since
-			// there's no target left to raid.
 			if targetIsDefeated {
 				epitaphText := "Nothing more is known of its fall."
 				if targetEpitaph.Valid && targetEpitaph.String != "" {
@@ -382,9 +322,6 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 		return "", fmt.Errorf("selecting undiscovered encampment: %w", err)
 	}
 
-	// A new world can have no other player outpost in its sector. In that
-	// case an expedition may instead triangulate the existing Rogue Nest;
-	// it is still hidden until this explicit discovery occurs.
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO encampment_discoveries (observer_encampment_id, target_key, discovery_method)
 		VALUES ($1, $2, 'exploration') ON CONFLICT DO NOTHING`, observerCampID, worldintel.RogueDroneNestKey)
@@ -397,9 +334,6 @@ func (e *Engine) resolveExplorationDiscovery(ctx context.Context, tx *sql.Tx, ob
 	return "", nil
 }
 
-// autoScanSweep refreshes intelligence on one already-discovered rival.
-// Automatic scanning must never reveal an undiscovered player: exploration
-// and route sightings remain the only ways to create first contact.
 func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.user_id
@@ -439,7 +373,7 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 			ORDER BY RANDOM()
 			LIMIT 1`, s.campID).Scan(&targetName, &targetOwnerName, &targetX, &targetY, &targetScrap)
 		if err != nil {
-			continue // No other outposts to scan yet, or a transient error - skip silently.
+			continue
 		}
 
 		reportMsg := fmt.Sprintf(
@@ -454,14 +388,7 @@ func (e *Engine) autoScanSweep(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// resolveWorldBossAttacks handles both stages of a real World Boss
-// engagement: marching parties arriving deal damage AND take real
-// retaliation casualties (the boss fights back), then survivors begin an
-// actual return march instead of the old instant-resolve model. On a
-// killing blow, loot is split by cumulative damage share exactly as
-// before, just deferred until the engagement actually happens.
 func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error {
-	// --- Stage 1: marching -> engage (retaliation happens here) ---
 	marchingRows, err := tx.QueryContext(ctx, `
 		SELECT a.id, a.boss_id, a.user_id, a.encampment_id, a.soldiers_committed, a.mechs_committed, a.march_minutes,
 		       b.name, b.emoji, b.current_hp, b.max_hp, b.loot_pool_dollars, b.retaliation_rating, b.is_gauntlet, b.enrage_threshold_pct
@@ -495,8 +422,6 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 
 	for _, m := range marching {
 		if m.bossCurHP <= 0 {
-			// Someone else already killed it between launch and arrival -
-			// no fight happens, survivors just turn back immediately.
 			_, _ = tx.ExecContext(ctx, "UPDATE world_boss_attacks SET state = 'returning', resolve_time = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 minute') WHERE id = $2", m.marchMinutes, m.id)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", m.userID,
 				fmt.Sprintf("🏳️ %s was already defeated by another survivor before your forces arrived. Turning back - no fight, no losses.", htmlBoldTick(m.bossName)))
@@ -516,18 +441,6 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 			ON CONFLICT (boss_id, user_id) DO UPDATE SET damage_dealt = world_boss_contributions.damage_dealt + $4`,
 			m.bossID, m.userID, m.encampmentID, damage)
 
-		// Real retaliation: the boss hits back. Danger scales per boss
-		// (retaliation_rating), and mechs are tankier than soldiers in the
-		// losses split (mirroring the standard 70/30 raid pattern).
-		//
-		// NEXT_GENERATION_FEATURES_PLAN.md Phase 8: a Gauntlet boss
-		// that's already below its enrage_threshold_pct BEFORE this
-		// engagement's damage lands (checked against m.bossCurHP, the
-		// HP it had on arrival - not newHP, so an attack that itself
-		// crosses the threshold doesn't retroactively enrage against
-		// the attacker who caused it) hits back at double retaliation -
-		// the real risk that makes Gauntlet's guaranteed Epic/Legendary
-		// drop (see payoutWorldBossLoot) feel earned rather than free.
 		effectiveRetaliation := m.retaliation
 		if m.isGauntlet && m.enrageThresholdPct > 0 && m.bossMaxHP > 0 && (m.bossCurHP/m.bossMaxHP*100.0) <= m.enrageThresholdPct {
 			effectiveRetaliation *= 2.0
@@ -585,8 +498,6 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 			}
 		}
 
-		// Survivors begin the real return march - same duration as the
-		// trip out, exactly like a real raid, not an instant reset.
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE world_boss_attacks 
 			SET state = 'returning', soldiers_committed = $1, mechs_committed = $2, 
@@ -595,7 +506,6 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 			survivingSoldiers, survivingMechs, m.marchMinutes, m.id)
 	}
 
-	// --- Stage 2: returning -> home (restock survivors) ---
 	returningRows, err := tx.QueryContext(ctx, `
 		SELECT id, user_id, encampment_id, soldiers_committed, mechs_committed 
 		FROM world_boss_attacks 
@@ -635,9 +545,6 @@ func (e *Engine) resolveWorldBossAttacks(ctx context.Context, tx *sql.Tx) error 
 	return nil
 }
 
-// payoutWorldBossLoot splits a defeated boss's loot pool proportional to
-// each contributor's total damage dealt, then resets the boss to full HP
-// with a 10% larger pool for long-term grinding incentive.
 func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bossName string, lootPool float64, isGauntlet bool) error {
 	rows, err := tx.QueryContext(ctx, "SELECT user_id, encampment_id, damage_dealt FROM world_boss_contributions WHERE boss_id = $1", bossID)
 	if err != nil {
@@ -671,22 +578,6 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 			alertMsg := fmt.Sprintf("☠️🎉 <b>BOSS SLAIN: %s</b>\n\nYour cumulative <code>%.0f damage</code> earned you 💵 <code>$%.2f</code> from the loot pool.", htmlEscapeTick(bossName), ct.damage, share)
 			_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent, effect_id) VALUES ($1, $2, FALSE, $3)", ct.userID, alertMsg, notifications.EffectCelebration)
 
-			// NEXT_GENERATION_FEATURES_PLAN.md Phase 3: World Bosses are
-			// one of Epic/Legendary gear's only two sources (the other
-			// is Relic Convoy claims - relicconvoy.go). Every
-			// contributor gets an independent roll, not just the top
-			// damage dealer, since the loot pool itself already
-			// rewards top damage proportionally - gear drops are a
-			// separate, flatter "you showed up and fought" bonus. Epic
-			// is meaningfully more common than Legendary (8% vs 2%),
-			// matching this project's established "rare means rare"
-			// principle for its best rewards.
-			//
-			// NEXT_GENERATION_FEATURES_PLAN.md Phase 8: a Gauntlet
-			// kill instead GUARANTEES a drop for every contributor
-			// (70% Epic / 30% Legendary) rather than the normal
-			// mostly-nothing roll - the real, felt payoff for having
-			// survived that boss's doubled enrage retaliation above.
 			if isGauntlet {
 				dropRoll := rand.Float64()
 				if dropRoll < 0.30 {
@@ -715,11 +606,6 @@ func (e *Engine) payoutWorldBossLoot(ctx context.Context, tx *sql.Tx, bossID, bo
 	return nil
 }
 
-// applyClanWarScore checks whether the attacker and defender encampments
-// belong to two clans currently at war with each other, and if so, adds
-// the raid's loot value to the attacker's clan war score. This is what
-// makes Clan Wars a real, live-scored mechanic instead of a one-time
-// notification with no lasting effect.
 func (e *Engine) applyClanWarScore(ctx context.Context, tx *sql.Tx, attackerCampID, defenderCampID string, lootValue float64) {
 	var attackerClanID, defenderClanID sql.NullString
 	_ = tx.QueryRowContext(ctx, "SELECT uc.clan_id FROM user_clans uc JOIN encampments e ON e.user_id = uc.user_id WHERE e.id = $1", attackerCampID).Scan(&attackerClanID)
@@ -738,7 +624,7 @@ func (e *Engine) applyClanWarScore(ctx context.Context, tx *sql.Tx, attackerCamp
 		AND ((clan_a_id = $1 AND clan_b_id = $2) OR (clan_a_id = $2 AND clan_b_id = $1))`,
 		attackerClanID.String, defenderClanID.String).Scan(&warID, &isClanA)
 	if err != nil {
-		return // Not at war with each other - no war score change.
+		return
 	}
 
 	if isClanA {
@@ -748,9 +634,6 @@ func (e *Engine) applyClanWarScore(ctx context.Context, tx *sql.Tx, attackerCamp
 	}
 }
 
-// resolveClanWars closes out wars whose 48h window has expired, declares
-// the higher-scoring clan the winner, and pays a shared Dollars spoils
-// reward split evenly among the winning clan's members.
 func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, clan_a_id, clan_b_id, score_a, score_b
@@ -773,7 +656,7 @@ func (e *Engine) resolveClanWars(ctx context.Context, tx *sql.Tx) error {
 	}
 	rows.Close()
 
-	const spoilsPool = 10000.0 // Dollars, split evenly among the winning clan's members
+	const spoilsPool = 10000.0
 
 	for _, w := range wars {
 		_, _ = tx.ExecContext(ctx, "UPDATE clan_wars SET status = 'completed' WHERE id = $1", w.id)
@@ -861,12 +744,6 @@ func (e *Engine) notifyClanMembers(ctx context.Context, tx *sql.Tx, clanID, mess
 }
 
 func (e *Engine) ProcessTick() {
-	// Outer safety net in addition to runPhase's own per-phase recover().
-	// Anything in ProcessTick that runs outside a phase (e.g. the idle/
-	// auto-scan cadence checks below, or a future addition) is still
-	// inside the same background goroutine started in Start(); an
-	// unrecovered panic there would permanently stop all future ticks
-	// the same way an unrecovered per-phase panic used to.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Tick Engine: ProcessTick PANIC (recovered): %v\n%s", r, debug.Stack())
@@ -933,8 +810,6 @@ func (e *Engine) ProcessTick() {
 		e.runPhase(ctx, p)
 	}
 
-	// 20-Minute Idle Miner Sweeper Check. Kept isolated from the main phase
-	// list since it's on its own cadence rather than every tick.
 	if time.Now().UTC().Sub(e.lastIdleCheck) >= 20*time.Minute {
 		e.runPhase(ctx, tickPhase{"idle_miner_sweep", e.notifyIdleMiners})
 		e.lastIdleCheck = time.Now().UTC()
@@ -952,7 +827,6 @@ func (e *Engine) ProcessTick() {
 	log.Printf("Tick pass complete. Duration: %s", time.Since(start))
 }
 
-// autoLaunchExpiredStagedRaids transitions staged co-op lobbies into active marching campaigns at timeout
 func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) error {
 	queryExpiredStaged := `
 		SELECT r.id, r.attacker_id, r.defender_id, r.resolve_time
@@ -990,7 +864,6 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 			var sols, mechs int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers_mobilized, 0), COALESCE(mechs_mobilized, 0) FROM raid_forces WHERE raid_id = $1", r.id).Scan(&sols, &mechs)
 
-			// Refund locked lobby creator forces
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers + $1, mechs = mechs + $2 WHERE encampment_id = $3", sols, mechs, r.attackerID)
 			_, _ = tx.ExecContext(ctx, "DELETE FROM raids WHERE id = $1", r.id)
 
@@ -999,7 +872,6 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 			continue
 		}
 
-		// Force-complete any partial rallying transits into lead base
 		_, _ = tx.ExecContext(ctx, "UPDATE raid_coop_members SET state = 'stationed' WHERE raid_id = $1", r.id)
 
 		var myX, myY int
@@ -1022,13 +894,6 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 		arrival := time.Now().UTC().Add(time.Duration(marchingMinutes) * time.Minute)
 		legStartedAt := time.Now().UTC()
 
-		// Populate the same origin/destination/region/leg-clock columns
-		// HandleConfirmHangarLaunchCallback sets on solo launches - without
-		// these, evaluateRoadEncounters/evaluateRoadBaseEncounters (which
-		// both filter on origin_x IS NOT NULL) can never see a co-op raid
-		// launched through this staged-lobby path, so it silently skips
-		// Phase 3/4/5's road-encounter/weather system entirely. See
-		// BUGS_AND_INCONSISTENCIES.md for the full writeup.
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE raids SET state = 'marching', resolve_time = $1,
 			                 origin_x = $2, origin_y = $3, destination_x = $4, destination_y = $5,
@@ -1043,7 +908,6 @@ func (e *Engine) autoLaunchExpiredStagedRaids(ctx context.Context, tx *sql.Tx) e
 	return nil
 }
 
-// notifyIdleMiners sends a real-time warning notification to opted-in users who have idle workers
 func (e *Engine) notifyIdleMiners(ctx context.Context, tx *sql.Tx) error {
 	query := `
 		SELECT u.telegram_id, e.name, COALESCE(w.miners, 1) as owned,
@@ -1167,7 +1031,6 @@ func (e *Engine) resolveCompletedMiningQueues(ctx context.Context, tx *sql.Tx) e
 }
 
 func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx) error {
-	// Step 1: Process Outbound Spy Satellites reaching target (resolved = FALSE)
 	queryOutbound := `
 		SELECT s.id, s.spy_id, s.target_id, ea.name as spy_name, ed.name as target_name, ed.user_id as target_user_id, s.resolve_time
 		FROM spy_missions s
@@ -1204,8 +1067,7 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 			continue
 		}
 
-		// Scanning complete. Transition into the return leg.
-		returnDuration := 2 * time.Minute // Simulated return flight time
+		returnDuration := 2 * time.Minute
 		returnResolveTime := time.Now().UTC().Add(returnDuration)
 
 		_, _ = tx.ExecContext(ctx, "UPDATE spy_missions SET resolved = TRUE, resolve_time = $1 WHERE id = $2", returnResolveTime, s.id)
@@ -1220,7 +1082,6 @@ func (e *Engine) resolvePendingEspionageMissions(ctx context.Context, tx *sql.Tx
 		}
 	}
 
-	// Step 2: Process Returning Spy Satellites landing back at base (resolved = TRUE)
 	queryReturning := `
 		SELECT s.id, s.spy_id, s.target_id, s.is_intercepted, ea.user_id as spy_user_id, s.resolve_time
 		FROM spy_missions s
@@ -1331,31 +1192,9 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 
 	for _, ex := range exps {
 		if ex.movementState != "moving" {
-			// Frozen by a road encounter, a weather camp, or already
-			// awaiting reinforcement - the column has halted, so it isn't
-			// burning marching supplies (or re-triggering this same
-			// depletion check) until it resumes.
 			continue
 		}
 
-		// AI factions can never manage either of the two consumption
-		// pools below - HandleDispatchConvoy and the "abort" branch of
-		// HandleExpeditionActions both require a real Telegram sender
-		// whose encampment matches raids.attacker_id (see combat.go /
-		// combat_road_encounters.go), and nothing in aidecisions.go ever
-		// tops off an AI faction's home Metal or orders it a retreat.
-		// Previously this meant EVERY AI-attacker column that outran
-		// either pool was doomed one of two ways: halted forever at
-		// movement_state = 'awaiting_reinforcement' (now mitigated by
-		// resolveStalledColumns, but still a slow multi-cycle crawl), or
-		// - worse, and untouched by that watchdog since movement_state
-		// never changes - its resolve_time getting pushed 3 minutes
-		// further into the future on every ~10s tick once home Metal hit
-		// zero, a runaway loop where "arrival" recedes faster than real
-		// time passes and the raid provably never completes. Real
-		// players get a genuine logistics minigame (that's the point);
-		// AI factions were just never eligible to play it, so exempt
-		// them entirely instead of leaving a fight they can't win.
 		if ex.isAIFaction {
 			continue
 		}
@@ -1376,44 +1215,11 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 		newMetalFuel := math.Max(metalFuel-deductMetalFuel, 0.0)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET rations = $1, metal = $2 WHERE encampment_id = $3", newHomeRations, newMetalFuel, ex.attackerID)
 
-		// Bugfix: this used to check newMetalFuel <= 0 (current state),
-		// which re-fired every single tick for as long as home Metal
-		// stayed at zero - stacking another 3-minute delay on top of the
-		// last one every ~10s. That's a runaway loop: resolve_time gets
-		// pushed into the future faster than real time elapses, so a
-		// column whose home base ran out of Metal and stayed there
-		// (trivially easy - Metal has plenty of other draws) could never
-		// arrive, full stop, with nothing on the radar or Expedition
-		// Control panel explaining why. Checking the old->new transition
-		// instead means the one-time "fuel shortage" penalty applies
-		// once per shortage, not once per tick of an ongoing shortage.
 		if metalFuel > 0 && newMetalFuel <= 0 {
 			delayedResolve := ex.resolveTime.UTC().Add(3 * time.Minute)
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET resolve_time = $1 WHERE id = $2", delayedResolve, ex.id)
 		}
 
-		// Raid-scoped supply pools (attacker_rations/attacker_ammo on the
-		// raid itself, distinct from the home base's stockpile above) -
-		// this is what actually reflects "the army in the field is running
-		// out of what it packed for the march", and previously ammo was a
-		// dead stub that never moved off its 100.0 default.
-		//
-		// Bugfix: this used to be a flat -4/-4/-3/-2 per tick regardless
-		// of how long the march actually takes. At the ~10s real-world
-		// tick interval this game actually runs at, rations/ammo hit
-		// zero in ~4 minutes no matter what - so any march longer than
-		// that (the overwhelming majority: raids routinely quote 15m to
-		// multi-day arrivals) was *guaranteed* to halt at
-		// awaiting_reinforcement long before arriving, not as an
-		// occasional consequence of a long campaign but as the default
-		// outcome of marching at all. Scaling the drain to the column's
-		// own base_march_minutes means a normal, uninterrupted march
-		// keeps a real safety margin (supplies theoretically stretch to
-		// ~140-220% of the march's expected duration) instead of
-		// draining on a clock that has nothing to do with the trip's
-		// actual length - while a march that gets meaningfully slowed
-		// down by road encounters or weather can still genuinely run dry,
-		// which is the intended risk, not a guaranteed one.
 		tickSeconds := e.TickInterval.Seconds()
 		if tickSeconds <= 0 {
 			tickSeconds = float64(defaultTickInterval / time.Second)
@@ -1435,9 +1241,6 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1, attacker_ammo = $2, attacker_electricity = $4, attacker_logistics = $5 WHERE id = $3", newRations, newAmmo, ex.id, newElectricity, newLogistics)
 
-		// Threshold-crossing notifications only (not every tick), so the
-		// player gets one heads-up at 25% and one at empty per resource,
-		// instead of spam every 3 seconds.
 		if oldRations > 25.0 && newRations <= 25.0 {
 			if isRealPlayer(ex.userID) {
 				_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", ex.userID,
@@ -1483,17 +1286,6 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 			}
 		}
 
-		// Phase 5 milestone 4: the two failure modes are NOT the same.
-		// Rations/ammo depletion means the column has nothing to fight or
-		// march with - it halts outright, same as before. Electricity/
-		// logistics depletion is softer: "high tech" (mech bonuses,
-		// capital-unit tech multipliers - see roadcombat.Power's
-		// HighTechOffline handling and the matching check in
-		// resolveRaidCombats below) goes offline immediately, but the
-		// column keeps moving on muscle and diesel alone. Only if power
-		// stays out for a sustained period (grace window) does it
-		// escalate to a full halt, matching "disables high-tech
-		// contributions before it can force a pause."
 		const powerOutageGraceTicks = 5
 
 		foodAmmoOut := newRations <= 0 && newAmmo <= 0
@@ -1521,9 +1313,6 @@ func (e *Engine) applyActiveLogisticsConsumption(ctx context.Context, tx *sql.Tx
 				}
 			}
 		} else if ex.state == "marching" {
-			// Power recovered (e.g. after a convoy delivery ticked
-			// electricity/logistics back above zero) - clear the grace
-			// counter and restore high-tech capability.
 			_, _ = tx.ExecContext(ctx, "UPDATE raids SET high_tech_offline = FALSE, power_outage_ticks = 0 WHERE id = $1 AND (high_tech_offline = TRUE OR power_outage_ticks > 0)", ex.id)
 		}
 	}
@@ -1561,14 +1350,6 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			var qu queuedUser
 			var soldiers, mechs int
 			if err := rows.Scan(&qu.userID, &qu.enteredAt, &qu.username, &soldiers, &mechs); err == nil {
-				// BUGFIX: powerRating was declared but never computed or
-				// used anywhere in this function - every arena match
-				// was actually being decided by pure queue order (first
-				// half of the FIFO-matched group always "won", the rest
-				// always "lost"), completely ignoring the soldiers/mechs
-				// this query goes to the trouble of fetching. Weighting
-				// mirrors the wider game's general soldier:mech power
-				// ratio (mechs are the far more expensive, stronger unit).
 				qu.powerRating = soldiers + mechs*5
 				participants = append(participants, qu)
 			}
@@ -1579,15 +1360,6 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 			requiredCount := e.requiredMatchCount(b)
 			matched := participants[:requiredCount]
 
-			// BUGFIX: this used to be `winners := matched[:requiredCount/2]`
-			// / `losers := matched[requiredCount/2:]` - i.e. whoever queued
-			// first always won, every single match, regardless of army
-			// strength. Now: shuffle into two random (not queue-order)
-			// teams of equal size, total each team's powerRating, and
-			// roll a power-weighted coin flip - stronger teams are more
-			// likely to win, but it's not a guaranteed stomp, matching
-			// the RNG-with-a-thumb-on-the-scale pattern used by the main
-			// raid combat resolution elsewhere in this file.
 			shuffled := make([]queuedUser, len(matched))
 			copy(shuffled, matched)
 			rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
@@ -1603,9 +1375,6 @@ func (e *Engine) processArenaMatchmaking(ctx context.Context, tx *sql.Tx) error 
 				powerB += p.powerRating
 			}
 
-			// Both teams get a small combat-power floor so a 0-army team
-			// (e.g. a fresh outpost with no troops yet) doesn't create a
-			// division-by-zero and always has *some* chance, however slim.
 			if powerA <= 0 {
 				powerA = 1
 			}
@@ -1774,9 +1543,6 @@ func clampRouteProgress(progress float64) float64 {
 	return math.Min(1, math.Max(0, progress))
 }
 
-// routeProgressAt uses a frozen progress snapshot plus elapsed active travel
-// time.  Pauses never alter the snapshot, so adding time for an encounter,
-// weather, or recovery cannot move a column backwards on the map.
 func routeProgressAt(state string, progress float64, progressAt sql.NullTime, legMinutes float64, resolveTime, now time.Time) float64 {
 	if legMinutes <= 0 {
 		return clampRouteProgress(progress)
@@ -1790,8 +1556,6 @@ func routeProgressAt(state string, progress float64, progressAt sql.NullTime, le
 		return clampRouteProgress(progress + delta)
 	}
 
-	// Pre-migration campaigns have no snapshot. Preserve their previous ETA
-	// interpretation until their next route transition writes one.
 	remaining := math.Min(1, math.Max(0, now.UTC().Sub(resolveTime.UTC()).Minutes()/-legMinutes))
 	if state == "returning" {
 		return remaining
@@ -1820,9 +1584,6 @@ func (e *Engine) resumeRouteRecoveries(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// resumeRoadRaids recalculates ETA from the route snapshot on a mutually
-// continued or expired encounter. It is deliberately conditional so a stale
-// resolver cannot resume a force claimed by another active encounter.
 func resumeRoadRaids(ctx context.Context, tx *sql.Tx, primaryRaidID, secondaryRaidID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE raids
@@ -1840,9 +1601,6 @@ func resumeRoadRaids(ctx context.Context, tx *sql.Tx, primaryRaidID, secondaryRa
 	return err
 }
 
-// discoverRouteContacts reveals nearby outposts as an expedition passes them.
-// This phase establishes knowledge only; Phase 4 will layer response-window
-// road encounters and field combat on the same route snapshots.
 func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.attacker_id, ea.user_id, COALESCE(r.defender_id::text, ''), r.state,
@@ -1942,8 +1700,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 				fmt.Sprintf("📡 %s: Your expedition passed close enough to discover Outpost %s. It is now visible in the Tactical Target Matrix.", htmlBoldTick("ROUTE CONTACT"), htmlCodeTick(htmlEscapeTick(contactName))))
 		}
 
-		// Being seen is reciprocal knowledge. The contact has not been
-		// attacked yet, but knows a foreign force crossed its road.
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method)
 			VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, contactID, raid.attackerID)
@@ -1958,10 +1714,6 @@ func (e *Engine) discoverRouteContacts(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// roadMover is a marching/returning expedition eligible for a road
-// encounter roll: it has a route snapshot, is not already frozen by a
-// pending encounter, and its current position is derived from the stable
-// leg clock rather than a resolve_time estimate.
 type roadMover struct {
 	raidID         string
 	attackerID     string
@@ -1969,16 +1721,9 @@ type roadMover struct {
 	attackerName   string
 	state          string
 	pos            roadcombat.Position
-	region         string // current region (origin before the leg's midpoint, destination after)
+	region         string
 }
 
-// evaluateRoadEncounters implements MMO_WORLD_EVOLUTION_PLAN.md Phase 4:
-// two moving expeditions that converge in world space have a chance to
-// notice each other. Detection always establishes reciprocal discovery
-// (matches the request: "while crossing countries Player A encounters
-// Player C... notifications should immediately be sent to both"); an actual
-// encounter roll then decides whether it becomes a live Attack/Continue
-// decision window. Only one encounter per raid may be active at a time.
 func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.attacker_id, ea.user_id, ea.name, r.state,
@@ -2020,7 +1765,7 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 		for j := i + 1; j < len(movers); j++ {
 			a, b := movers[i], movers[j]
 			if a.attackerID == b.attackerID {
-				continue // same commander can't ambush their own second column
+				continue
 			}
 			if !roadcombat.InEncounterRange(a.pos, b.pos) {
 				continue
@@ -2032,9 +1777,6 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 				raidA, raidB = raidB, raidA
 			}
 
-			// Cooldown: skip a pair that just resolved an encounter with
-			// each other recently, so a "Continue" choice isn't
-			// immediately re-asked next tick.
 			var recentCount int
 			_ = tx.QueryRowContext(ctx, `
 				SELECT COUNT(*) FROM road_encounters
@@ -2061,23 +1803,15 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 				RETURNING id`, raidA, raidB, locX, locY, deadline).Scan(&encounterID)
 			if err != nil {
 				if err == sql.ErrNoRows {
-					continue // another tick worker already created this pending pair
+					continue
 				}
 				return fmt.Errorf("creating road encounter: %w", err)
 			}
 
-			// Freeze both columns: no arrival/engage/return processing and
-			// no route-progress advance until the encounter resolves.
-			// paused_at anchors the effective "now" used by every route
-			// position calculation so a frozen army does not silently
-			// keep advancing while its commander is deciding.
 			_, _ = tx.ExecContext(ctx, `
 				UPDATE raids SET movement_state = 'encounter_pending', active_encounter_id = $1, paused_at = CURRENT_TIMESTAMP
 				WHERE id IN ($2, $3)`, encounterID, raidA, raidB)
 
-			// The encounter itself is a discovery event even if nobody
-			// chooses to fight - matches the request's Nigeria/Ghana/
-			// America example directly.
 			_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, a.attackerID, b.attackerID)
 			_, _ = tx.ExecContext(ctx, `INSERT INTO encampment_discoveries (observer_encampment_id, target_encampment_id, discovery_method) VALUES ($1, $2, 'route') ON CONFLICT DO NOTHING`, b.attackerID, a.attackerID)
 
@@ -2102,9 +1836,6 @@ func (e *Engine) evaluateRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 	return e.expireRoadEncounters(ctx, tx)
 }
 
-// expireRoadEncounters resolves any pending encounter whose response window
-// has lapsed as a peaceful pass (no attack decision was made in time), and
-// unfreezes both columns from exactly the position they paused at.
 func (e *Engine) expireRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, raid_a_id, raid_b_id FROM road_encounters
@@ -2129,12 +1860,6 @@ func (e *Engine) expireRoadEncounters(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// resolveEncounterAsContinue is the shared "both sides pass" resolution
-// used by both an explicit mutual Continue and a response-window timeout.
-// It unfreezes each raid by shifting its leg_started_at forward by exactly
-// the pause duration, so route progress resumes from where it paused
-// instead of jumping ahead (the pause never counted as travel time) or
-// snapping back (the position itself never moved while paused).
 func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, encounterID, raidAID, raidBID, outcome string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE road_encounters SET status = 'resolved', outcome = $1, resolved_at = CURRENT_TIMESTAMP
@@ -2169,14 +1894,6 @@ func (e *Engine) resolveEncounterAsContinue(ctx context.Context, tx *sql.Tx, enc
 	return nil
 }
 
-// evaluateRouteWeatherIncidents implements MMO_WORLD_EVOLUTION_PLAN.md
-// Phase 5's local weather layer: a marching/returning column can be forced
-// into a temporary camp by a flood, storm, or heatwave. This deliberately
-// reads the EXISTING continent-wide world_events table (internal/engine/
-// world.WeatherEngine) as an input signal rather than rolling a second,
-// disconnected weather system - an active acid_rain/radiation_storm/emp/
-// sandstorm event over the continent a column is currently crossing raises
-// the odds of a matching local incident there.
 func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, ea.user_id, r.state,
@@ -2215,12 +1932,6 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 	}
 	rows.Close()
 
-	// All six local incident types the request asked for. flood/storm/
-	// heatwave existed from the first Phase 5 pass; sandstorm/emp/
-	// radiation are the direct-mapped counterparts of the matching
-	// continent-wide world_events, each with its own onset effect below
-	// (routeIncidentOnsetEffect) rather than just a different label on the
-	// same generic pause.
 	incidentTypes := []string{"flood", "storm", "heatwave", "sandstorm", "emp", "radiation"}
 
 	for _, c := range candidates {
@@ -2240,11 +1951,6 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 		incidentType := incidentTypes[rand.Intn(len(incidentTypes))]
 		rollChance := roadcombat.IncidentBaseRollChance
 		if activeEventType != "" {
-			// directLocalName covers the continent-wide events whose
-			// local incident counterpart isn't just the same string
-			// (radiation_storm -> "radiation"); everything else that has
-			// a direct local incident of the same name (sandstorm, emp)
-			// is handled by the identity check below.
 			directLocalName := ""
 			switch activeEventType {
 			case "radiation_storm":
@@ -2284,7 +1990,7 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 			RETURNING id`, c.raidID, incidentType, severity, locX, locY, clearedAt).Scan(&incidentID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				continue // already has an active incident (race with another tick worker)
+				continue
 			}
 			return fmt.Errorf("creating route incident: %w", err)
 		}
@@ -2310,11 +2016,6 @@ func (e *Engine) evaluateRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) 
 	return e.clearRouteWeatherIncidents(ctx, tx)
 }
 
-// applyRouteIncidentOnsetEffect gives each of the six local incident types
-// real mechanical teeth instead of an identical pause with a different
-// label, and directly implements the original request's "units may die,
-// starvation may occur" for weather (as opposed to combat). Effects fire
-// once, at the moment the incident begins camping the column.
 func (e *Engine) applyRouteIncidentOnsetEffect(ctx context.Context, tx *sql.Tx, raidID, incidentType string) string {
 	clampFloor := func(v, delta float64) float64 {
 		v -= delta
@@ -2326,45 +2027,36 @@ func (e *Engine) applyRouteIncidentOnsetEffect(ctx context.Context, tx *sql.Tx, 
 
 	switch incidentType {
 	case "flood":
-		// Standing water spoils dry stores.
 		var rations float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_rations,0) FROM raids WHERE id = $1", raidID).Scan(&rations)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1 WHERE id = $2", clampFloor(rations, 10), raidID)
 		return "🍞 Rising water spoiled some dry rations (-10 supply)."
 
 	case "storm":
-		// Lightning/downed lines damage the column's field generators.
 		var electricity float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_electricity,0) FROM raids WHERE id = $1", raidID).Scan(&electricity)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_electricity = $1 WHERE id = $2", clampFloor(electricity, 10), raidID)
 		return "⚡ Storm damage knocked out field generators (-10 electricity)."
 
 	case "heatwave":
-		// Heat and dehydration burn through rations faster than planned.
 		var rations float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_rations,0) FROM raids WHERE id = $1", raidID).Scan(&rations)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_rations = $1 WHERE id = $2", clampFloor(rations, 15), raidID)
 		return "🥵 Heat and dehydration burned through extra rations (-15 supply)."
 
 	case "sandstorm":
-		// Fine particulates foul engines and logistics equipment.
 		var logistics float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_logistics,0) FROM raids WHERE id = $1", raidID).Scan(&logistics)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_logistics = $1 WHERE id = $2", clampFloor(logistics, 10), raidID)
 		return "🏜️ Fine sand fouled logistics equipment (-10 logistics)."
 
 	case "emp":
-		// A surge knocks out a large share of remaining electrical/
-		// logistics capacity outright - the signature EMP effect.
 		var electricity, logistics float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(attacker_electricity,0), COALESCE(attacker_logistics,0) FROM raids WHERE id = $1", raidID).Scan(&electricity, &logistics)
 		_, _ = tx.ExecContext(ctx, "UPDATE raids SET attacker_electricity = $1, attacker_logistics = $2 WHERE id = $3", electricity*0.4, logistics*0.4, raidID)
 		return "💥 An electromagnetic surge knocked out 60% of remaining electrical/logistics capacity."
 
 	case "radiation":
-		// Exposure causes real casualties - "units may die" from weather,
-		// not just combat. Reuses the same roadcombat casualty machinery
-		// as a road battle, at a much lower fraction.
 		force, err := e.loadRoadFieldForceForIncident(ctx, tx, raidID)
 		if err != nil {
 			return ""
@@ -2386,11 +2078,6 @@ func (e *Engine) applyRouteIncidentOnsetEffect(ctx context.Context, tx *sql.Tx, 
 	return ""
 }
 
-// loadRoadFieldForceForIncident is the tick-engine-side twin of
-// internal/bot/handlers/combat.go's loadRoadFieldForce - duplicated at
-// this small size because the two live in different packages with
-// different transaction/handler contexts, exactly like
-// resolveEncounterAsContinue/resolveRoadEncounterContinue above.
 func (e *Engine) loadRoadFieldForceForIncident(ctx context.Context, tx *sql.Tx, raidID string) (roadcombat.FieldForce, error) {
 	var f roadcombat.FieldForce
 	err := tx.QueryRowContext(ctx, `
@@ -2402,10 +2089,6 @@ func (e *Engine) loadRoadFieldForceForIncident(ctx context.Context, tx *sql.Tx, 
 	return f, err
 }
 
-// routeIncidentPresentation gives each local incident type a matching
-// emoji/headline, distinct from the continent-wide event headlines in
-// internal/engine/world/weather.go (these are personal to one column, not
-// a regional news broadcast).
 func routeIncidentPresentation(incidentType string) (string, string) {
 	switch incidentType {
 	case "flood":
@@ -2425,11 +2108,6 @@ func routeIncidentPresentation(incidentType string) (string, string) {
 	}
 }
 
-// clearRouteWeatherIncidents resolves any route incident whose cleared_at
-// has passed, resuming the column from exactly where it paused - the same
-// leg_started_at/resolve_time shift used to resume from a road encounter,
-// since both are the same underlying "something external paused this
-// column" mechanism.
 func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, raid_id FROM route_incidents
@@ -2466,13 +2144,6 @@ func (e *Engine) clearRouteWeatherIncidents(ctx context.Context, tx *sql.Tx) err
 	return nil
 }
 
-// processSupplyConvoys resolves any dispatched resupply convoy whose
-// travel time has elapsed: if its target column is still marching and
-// still awaiting reinforcement, the carried supplies are delivered (capped
-// at the 0-100 field-supply scale) and the column resumes; otherwise the
-// convoy's delivery fails outright (the resources and transports it
-// carried are NOT refunded - a real logistics run that missed its column
-// is a real loss, not an instant undo).
 func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, home_encampment_id, target_raid_id, rations_carried, ammo_carried, electricity_carried, logistics_carried
@@ -2496,10 +2167,6 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 	}
 	rows.Close()
 
-	// convoyAmbushChance: a convoy "has its own route and exposure" per
-	// the plan - it isn't a guaranteed delivery. With no escort mechanic
-	// yet (documented as a follow-up), every unescorted convoy carries a
-	// flat real risk of being lost outright on the road.
 	const convoyAmbushChance = 0.08
 
 	for _, c := range convoys {
@@ -2513,9 +2180,6 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 
 		delivered := err == nil && movementState == "awaiting_reinforcement" && (state == "marching" || state == "returning")
 		if !delivered {
-			// Target moved on before the convoy arrived - the cargo and
-			// crews still make it back home safely, only the delivery
-			// itself failed.
 			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'failed' WHERE id = $1", c.id)
 			_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET haulers = haulers + $1, tankers = tankers + $2 WHERE encampment_id = $3", c.haulersCommitted, c.tankersCommitted, c.homeID)
 			var userID int64
@@ -2528,10 +2192,6 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 		}
 
 		if rand.Float64() < convoyAmbushChance {
-			// The convoy itself was ambushed en route - its own
-			// unmodeled "exposure." Unlike a missed-contact failure,
-			// this is a real loss: cargo AND the committed Hauler/Tanker
-			// crews are gone, and the stranded column is still stranded.
 			_, _ = tx.ExecContext(ctx, "UPDATE supply_convoys SET state = 'ambushed' WHERE id = $1", c.id)
 			var homeUserID int64
 			_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", c.homeID).Scan(&homeUserID)
@@ -2576,45 +2236,11 @@ func (e *Engine) processSupplyConvoys(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// stalledColumnGraceAIFaction / stalledColumnGraceRealPlayer bound how long
-// a column may sit halted at movement_state = 'awaiting_reinforcement'
-// before resolveStalledColumns steps in. AI factions can NEVER dispatch a
-// convoy or order a retreat themselves (HandleDispatchConvoy and
-// HandleExpeditionActions both require a real Telegram sender whose
-// encampment matches raids.attacker_id - see combat.go / combat_road_
-// encounters.go), so without this watchdog any AI-attacker column that
-// outruns its own supplies halts permanently: resolveRaidCombats only
-// picks up rows with movement_state = 'moving', so the raid's resolve_time
-// - and therefore its "INBOUND INVASION WARNING ... (0s remaining)" radar
-// entry on the defender's side - never advances or expires again. A real
-// player's own column can ALSO be stranded indefinitely if they lack the
-// Hauler+Tanker or Scrap/Metal a convoy costs and don't notice the alert,
-// so the same watchdog applies there too, just with a much longer grace
-// window that respects the player's intended choice between "pay for a
-// convoy" and "eat the 20% scrap penalty and retreat" before acting for
-// them. This was a genuinely separate bug from the tick-engine panic fixed
-// in ADR "Fix raids stuck at (0s remaining)" - that fix stopped a dead
-// background goroutine from freezing ALL ticks; this fixes columns that
-// are correctly excluded, tick after tick, by design, with nothing ever
-// changing their excluded state. See BUGS_AND_INCONSISTENCIES.md.
 const stalledColumnGraceAIFaction = 15 * time.Minute
 const stalledColumnGraceRealPlayer = 3 * time.Hour
 
-// stalledColumnMinResupplyPct is the (partial, "just enough to move")
-// emergency resupply granted when the watchdog fires - deliberately far
-// below the 100% a real dispatched convoy delivers, so this reads as a
-// last-resort bridge rather than a free substitute for the real mechanic.
 const stalledColumnMinResupplyPct = 20.0
 
-// resolveStalledColumns is the watchdog described above: it finds every
-// column that has been sitting at movement_state = 'awaiting_reinforcement'
-// longer than its grace window, tops its field supplies up to a bare
-// minimum (mirroring the "delivered" branch of processSupplyConvoys - same
-// clock-shift approach, so leg progress and resolve_time stay coherent),
-// and lets it resume marching or returning on its own. A column with an
-// active resupply convoy already en route is left alone; that convoy will
-// resolve it first (delivered, ambushed, or missed contact) well within
-// either grace window under normal travel times.
 func (e *Engine) resolveStalledColumns(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.attacker_id, r.state, ea.user_id, r.paused_at,
@@ -2696,33 +2322,17 @@ func (e *Engine) resolveStalledColumns(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// aiCivilizationMaxSoldiersPerLevel / aiCivilizationMaxMechsPerLevel cap how
-// large an AI faction's garrison can grow relative to its level, so an
-// undisturbed AI base becomes a genuinely tougher (and more rewarding)
-// target over time without growing without bound.
 const aiCivilizationMaxSoldiersPerLevel = 25
 const aiCivilizationMaxMechsPerLevel = 4
 
-// aiResearchTechColumns duplicates the seven research_states column names
-// from researchTree in internal/bot/handlers/research.go (key/emoji/title
-// text isn't needed here, just the columns an AI faction can advance) -
-// the tick engine deliberately doesn't import bot/handlers, same reasoning
-// as every other duplicated literal in growAICivilizations.
 var aiResearchTechColumns = []string{
 	"econ_tech_lvl", "production_tech_lvl", "integrity_tech_lvl",
 	"defense_tech_lvl", "intel_tech_lvl", "speed_tech_lvl", "military_tech_lvl",
 }
 
-// aiResearchMaxLevel and aiResearchCostPerLevel duplicate MaxResearchLevel
-// and researchCost from internal/bot/handlers/research.go.
 const aiResearchMaxLevel = 20
 const aiResearchCostPerLevel = 8
 
-// aiUpgradeableModules duplicates the non-core module type strings from
-// camp.go's structural/defense-grid/infrastructure panels (tent/heap/
-// generator plus defenseGridModules and infrastructureModules) -
-// deliberately excludes "camp_core", since that already grows via the
-// garrison section below once a faction maxes its soldier/mech caps.
 var aiUpgradeableModules = []string{
 	"tent", "scrap_heap", "generator",
 	"light_laser", "heavy_laser", "gauss_cannon", "ion_cannon", "plasma_turret", "anti_missile", "warehouse",
@@ -2730,24 +2340,13 @@ var aiUpgradeableModules = []string{
 	"small_shield", "large_shield", "engineering_bay", "metal_mine", "crystal_mine",
 }
 
-// aiModuleUpgradeCostPerLevel duplicates the Scrap cost-per-level used by
-// HandleStructuralUpgrades/HandleDefenseGridPanel/HandleInfrastructureGridPanel
-// (currentLvl*150) in internal/bot/handlers/camp.go.
 const aiModuleUpgradeCostPerLevel = 150
 
-// aiExplorationDispatchRationsCost/aiExplorationDispatchMetalCost and
-// aiExplorationMinTravelMinutes/aiExplorationMaxTravelMinutes duplicate the
-// same-named constants in internal/bot/handlers/exploration.go.
 const aiExplorationDispatchRationsCost = 30.0
 const aiExplorationDispatchMetalCost = 15.0
 const aiExplorationMinTravelMinutes = 20
 const aiExplorationMaxTravelMinutes = 45
 
-// aiExplorationSiteTemplate and aiExplorationTemplates duplicate
-// explorationSiteTemplate/explorationTemplates from
-// internal/bot/handlers/exploration.go - same weighted reward pool a
-// human's personal expedition rolls from, so an AI faction's exploration
-// haul feels like the same game, not a simplified AI-only version.
 type aiExplorationSiteTemplate struct {
 	siteType   string
 	namePrefix string
@@ -2769,8 +2368,6 @@ var aiExplorationTemplates = []aiExplorationSiteTemplate{
 	{"Vein", "Crystal Vein", "crystal", 5, 15, 2},
 }
 
-// aiRollExplorationTemplate duplicates rollExplorationTemplate's exact
-// weighted-pick logic from internal/bot/handlers/exploration.go.
 func aiRollExplorationTemplate() aiExplorationSiteTemplate {
 	total := 0
 	for _, t := range aiExplorationTemplates {
@@ -2786,34 +2383,10 @@ func aiRollExplorationTemplate() aiExplorationSiteTemplate {
 	return aiExplorationTemplates[0]
 }
 
-// economicCollapseWarningThreshold gates the "ECONOMIC COLLAPSE" warning
-// added per AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5 - a
-// combined post-raid resource total (Scrap+Metal+Crystal+Rations+
-// Electricity+Dollars) below this is treated as "critically depleted."
-// Deliberately a small absolute number rather than a fraction of some
-// baseline: a genuinely new player's starting stockpile is itself only in
-// the low hundreds, so this needs to stay well below that to mean
-// anything. Tunable starting constant, not a precisely-right number - the
-// project owner should revisit alongside the raid loot percentages
-// themselves if new-player balance ever gets tuned.
 const economicCollapseWarningThreshold = 50.0
 
-// aiClanLeaveChance is the per-tick probability (per AI faction
-// currently in a clan) of leaving it - a Leader disbands the whole
-// clan, a rank-and-file member just leaves. See growAICivilizations's
-// own comment at the roll site for the full rationale. A var, not a
-// const, so aigovernance_test.go's pre-existing clan-war and
-// federation tests (which need their tracked clan to survive their
-// full tick loop) can zero it out for their duration rather than
-// risking the clan being randomly disbanded out from under them
-// mid-test.
 var aiClanLeaveChance = 0.005
 
-// economicCollapseWarning returns the appended report text when a
-// defeated defender's post-raid resource total is critically low, or ""
-// otherwise. Pulled out as its own pure function specifically so this
-// section 1.5 addition has a unit-testable seam, independent of standing
-// up a full resolveRaidCombats integration test.
 func economicCollapseWarning(remainingTotal float64) string {
 	if remainingTotal >= economicCollapseWarningThreshold {
 		return ""
@@ -2821,33 +2394,10 @@ func economicCollapseWarning(remainingTotal float64) string {
 	return "\n\n💀 " + htmlBoldTick("ECONOMIC COLLAPSE") + ": Sustained raiding has left this outpost's stockpiles critically depleted."
 }
 
-// isRealPlayer reports whether a user_id belongs to an actual Telegram
-// account rather than one of the synthetic negative-telegram_id rows
-// seedAICivilizations creates for AI factions (see cmd/bot/main.go). Real
-// Telegram user IDs are always positive, so this is a cheap, reliable
-// check. Needed as of the Phase 6 AI decision loop
-// (internal/engine/tick/aidecisions.go): AI factions can now be a raid's
-// attacker_id for the first time (previously only ever a defender/
-// target), and every attacker-facing notification insert below - written
-// back when "attacker" always meant a real player - would otherwise queue
-// a notification for an unreachable synthetic user_id. The notifications
-// dispatcher (internal/engine/notifications) has no such guard itself and
-// silently `continue`s past a failed send without marking the row sent,
-// so an unguarded call site here doesn't just fail once - it permanently
-// wastes one of the dispatcher's `LIMIT 10` drain slots every 3s poll,
-// forever. Guarding at the point of insertion is cheaper and clearer than
-// teaching the generic dispatcher about AI factions.
 func isRealPlayer(userID int64) bool {
 	return userID > 0
 }
 
-// growAICivilizations implements MMO_WORLD_EVOLUTION_PLAN.md Phase 6's
-// "gather resources, build units, expand" requirement for persistent AI
-// factions (seeded by seedAICivilizations in cmd/bot/main.go). Growth is
-// deliberately modest and capped per tick - an AI faction left alone for a
-// long time becomes a meaningfully richer, better-defended target, but a
-// player who raids it periodically can keep it suppressed, which is the
-// intended emergent dynamic rather than an ever-escalating unkillable base.
 func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id, level, user_id, name FROM encampments WHERE is_ai_faction = TRUE AND is_defeated = FALSE")
 	if err != nil {
@@ -2888,53 +2438,20 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			_, _ = tx.ExecContext(ctx, updateQuery, newAmount, f.id)
 		}
 
-		// A trickle of Crystal too, at a much lower rate - it's the
-		// rarest resource in the world, an AI faction shouldn't
-		// accumulate it quickly either.
 		var currentCrystal float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentCrystal)
 		newCrystal, _ := storagecap.Clamp(currentCrystal, float64(f.level)*0.02, storageCapacity)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET crystal = $1 WHERE encampment_id = $2", newCrystal, f.id)
 
-		// A trickle of Neuro Cores too - humans earn these mainly via
-		// Ether conversion (internal/bot/handlers/ether.go) or
-		// exploration finds, neither of which an AI faction does today,
-		// so without this the research block below would never have
-		// anything to spend. Rate deliberately sits between the Scrap
-		// and Crystal trickles above: research costs (aiResearchCost)
-		// are modest at low levels, so a faction can afford its first
-		// couple of upgrades in a reasonable number of ticks without
-		// Neuro Cores becoming trivially abundant.
 		var currentNeuroCores float64
 		_ = tx.QueryRowContext(ctx, "SELECT COALESCE(neuro_cores,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&currentNeuroCores)
 		newNeuroCores, _ := storagecap.Clamp(currentNeuroCores, float64(f.level)*0.1, storageCapacity)
 		_, _ = tx.ExecContext(ctx, "UPDATE resources SET neuro_cores = $1 WHERE encampment_id = $2", newNeuroCores, f.id)
 
-		// Occasionally buy an available listing that isn't its own,
-		// exactly like a human would via /exchange's Buy button -
-		// project owner follow-up direction 2026-08-01: selling alone
-		// wasn't the full ask, "buy and sell" both. Mirrors
-		// HandleBuyListingCallback's exact mechanics (dollar transfer,
-		// resource transfer with storage-cap clamp, is_sold flag, a
-		// seller notification for real human sellers) rather than a
-		// simplified AI-only path, so a purchase behaves identically
-		// regardless of who made it - same principle the listing code
-		// below and launchAIRaid already follow. Re-checks is_sold
-		// under a row lock immediately before committing the purchase,
-		// same race-safety HandleBuyListingCallback's own FOR UPDATE
-		// provides against a human buying the same listing at the same
-		// moment.
 		if rand.Float64() < 0.03 {
 			var listingID, itemType, sellerID string
 			var qty int
 			var price float64
-			// Restricted to ask_type = 'dollars' - a barter listing
-			// (see FEEDBACK_CHANGELOG_NLP_PLAN.md's market exchange
-			// extension) needs a resource-balance check on this AI's
-			// own reserves before it can buy, same as a human would;
-			// out of scope for this pass, so AI factions simply don't
-			// participate in barter listings yet rather than risk
-			// mishandling one.
 			err := tx.QueryRowContext(ctx, `
 				SELECT id, item_type, quantity, price_dollars, seller_id FROM market_exchange
 				WHERE is_sold = FALSE AND seller_id != $1 AND ask_type = 'dollars'
@@ -2954,12 +2471,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 						newSellerDollars, _ := storagecap.Clamp(sellerDollars, price, sellerCap)
 						_, _ = tx.ExecContext(ctx, "UPDATE resources SET dollars = $1 WHERE encampment_id = $2", newSellerDollars, sellerID)
 
-						// Every column the exchange can ever list -
-						// see validMarketResources in exchange.go -
-						// falls back to "metal" only for legacy rows
-						// that predate an item_type this map doesn't
-						// recognize, which shouldn't happen going
-						// forward.
 						columnName := "metal"
 						switch itemType {
 						case "crystal", "scrap":
@@ -2975,7 +2486,7 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 
 						var sellerUserID int64
 						_ = tx.QueryRowContext(ctx, "SELECT user_id FROM encampments WHERE id = $1", sellerID).Scan(&sellerUserID)
-						if sellerUserID > 0 { // only notify real human sellers - other AI factions have negative telegram_id and no one reads their notifications
+						if sellerUserID > 0 {
 							alertMsg := fmt.Sprintf("💱 <b>MARKET SALE</b>: An AI faction has purchased your public listing for <code>%d</code> %s. +<code>$%.0f</code> transferred instantly to reserves.",
 								qty, htmlEscapeTick(itemType), price)
 							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", sellerUserID, alertMsg)
@@ -2985,43 +2496,16 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally create or apply to join a clan, exactly like a
-		// human would via /clan_create or the "Apply" button on
-		// /clans - project owner follow-up direction 2026-08-01:
-		// "create a clan and join one" was named explicitly alongside
-		// buying/selling. Mirrors HandleCreateClanCommand (free, just a
-		// clans row + a Leader row in user_clans) and
-		// HandleApplyToClanCallback (a pending clan_applications row
-		// plus a notification - does NOT auto-join; a human clan
-		// leader still has to accept it via the normal applications
-		// inbox, exactly as if a human had applied) rather than
-		// special-casing either path for AI. An AI faction's own
-		// user_id (from seedAICivilizations/spawnNewAIFactions, always
-		// negative) is what user_clans/clans key off, so no schema
-		// change was needed - it's just another user_id as far as the
-		// clan system is concerned.
 		if rand.Float64() < 0.02 {
 			var alreadyInClan bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM user_clans WHERE user_id = $1)", f.userID).Scan(&alreadyInClan)
 			if !alreadyInClan {
 				if rand.Float64() < 0.5 {
-					// Found a new clan, named after the faction itself
-					// so it reads naturally on /clans - ON CONFLICT
-					// DO NOTHING via the name UNIQUE constraint simply
-					// skips this cycle if that name's already taken,
-					// same as a human hitting "Name Taken" and trying
-					// again another time.
 					var clanID string
 					if err := tx.QueryRowContext(ctx, "INSERT INTO clans (name, leader_id) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING id", f.name+" Alliance", f.userID).Scan(&clanID); err == nil && clanID != "" {
 						_, _ = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Leader')", f.userID, clanID)
 					}
 				} else {
-					// Apply to an existing recruiting clan that isn't
-					// already led by another AI faction (an AI applying
-					// to another AI's clan is a strange edge case this
-					// pass deliberately avoids, not a fairness rule
-					// like Item 2's - just keeps clan applications
-					// meaningful for the human leaders reviewing them).
 					var clanID, clanName string
 					err := tx.QueryRowContext(ctx, `
 						SELECT c.id, c.name FROM clans c
@@ -3039,39 +2523,10 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally leave (or, as Leader, disband) a clan, exactly
-		// like a human via HandleLeaveClanCallback's "🚪 Leave
-		// Alliance" button - the missing half of the create/join
-		// behavior above. Without this, an AI faction that ever
-		// created or joined a clan (via the block just above) stayed
-		// there permanently for the rest of the world's life: it could
-		// never re-roll into a different clan, never dissolve a clan
-		// it founded that stopped making sense, and the "AI never
-		// leaves/disbands/rejoins" gap the project owner flagged
-		// 2026-08-09 was exactly this - the join-side existed, the
-		// leave-side never did. Mirrors HandleLeaveClanCallback's own
-		// role-based branch precisely: a Leader leaving disbands the
-		// whole clan (DELETE FROM clans CASCADEs to user_clans,
-		// clan_applications, clan_diplomacy, clan_wars, and
-		// constellation_members - the same cascade a human-triggered
-		// disband already relies on), a rank-and-file member leaving
-		// only removes their own membership row. Rolled independently
-		// and considerably rarer than the 2% join roll (0.5%) so a
-		// faction that just joined doesn't churn back out too quickly -
-		// clan membership should still feel like a real, if not
-		// permanent, commitment.
 		if rand.Float64() < aiClanLeaveChance {
 			var myClanID, myRole string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id, role FROM user_clans WHERE user_id = $1", f.userID).Scan(&myClanID, &myRole); err == nil {
 				if myRole == "Leader" {
-					// Notify real human members before the cascade wipes
-					// their user_clans row out from under them - an AI
-					// Leader can preside over human members too (the
-					// human /clans "Apply" flow doesn't filter out
-					// AI-led clans the way this faction's own join-roll
-					// above filters out AI-led ones for itself), so
-					// losing their clan without warning would otherwise
-					// be a silent, confusing loss for a real player.
 					var clanName string
 					_ = tx.QueryRowContext(ctx, "SELECT name FROM clans WHERE id = $1", myClanID).Scan(&clanName)
 					memberRows, memErr := tx.QueryContext(ctx, "SELECT user_id FROM user_clans WHERE clan_id = $1 AND user_id != $2", myClanID, f.userID)
@@ -3079,7 +2534,7 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 					if memErr == nil {
 						for memberRows.Next() {
 							var uid int64
-							if scanErr := memberRows.Scan(&uid); scanErr == nil && uid > 0 { // only real humans have positive telegram_id
+							if scanErr := memberRows.Scan(&uid); scanErr == nil && uid > 0 {
 								realMemberIDs = append(realMemberIDs, uid)
 							}
 						}
@@ -3097,22 +2552,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally review pending applications to a clan this
-		// faction leads, exactly like a human Leader via the
-		// Applications Inbox (HandleApplicationDecisionCallback).
-		// Related gap found alongside the leave/disband fix above: a
-		// real player CAN apply to an AI-led clan (the human /clans
-		// "Apply" flow doesn't filter by leader_id the way this
-		// faction's own join-roll filters out AI-led clans for
-		// itself), but with nothing ever reviewing clan_applications
-		// for an AI Leader, that application just sat pending forever
-		// - the applicant was never accepted, never rejected, and
-		// never told. Accepts every pending applicant that still fits
-		// within the 15-member cap (a simple, welcoming default - an
-		// AI Leader has no reason to be selective the way a human
-		// might be), exactly mirroring HandleApplicationDecisionCallback's
-		// own capacity check and re-check for an applicant who joined
-		// elsewhere in the meantime.
 		if rand.Float64() < 0.05 {
 			var myLedClanID string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myLedClanID); err == nil {
@@ -3141,7 +2580,7 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 						}
 						_, _ = tx.ExecContext(ctx, "INSERT INTO user_clans (user_id, clan_id, role) VALUES ($1, $2, 'Soldier')", applicantID, myLedClanID)
 						_, _ = tx.ExecContext(ctx, "DELETE FROM clan_applications WHERE clan_id = $1 AND user_id = $2", myLedClanID, applicantID)
-						if applicantID > 0 { // only notify real humans - another AI applicant has nothing reading its notifications
+						if applicantID > 0 {
 							_, _ = tx.ExecContext(ctx, "INSERT INTO notifications (user_id, message, is_sent) VALUES ($1, $2, FALSE)", applicantID, "✅ <b>APPLICATION ACCEPTED</b>: Welcome to your new Clan! 🎉")
 						}
 					}
@@ -3149,22 +2588,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// NEXT_GENERATION_FEATURES_PLAN.md Phase 3 AI-parity: a much
-		// simpler crafting heuristic than the full player /gear UX -
-		// an AI faction doesn't fight World Bosses or claim Relic
-		// Convoys today (both real-player-only content), so its gear
-		// ceiling is intentionally Common/Rare only. A small roll
-		// crafts whatever Common/Rare item the faction can currently
-		// afford in its best-value (highest ResourceBonusPct) affordable
-		// slot and equips it immediately - AI factions don't have a
-		// panel to visit later, so there's no separate "collect the
-		// finished craft" step the way a real player's crafting queue
-		// has; this rolls, crafts, and equips synchronously in one
-		// tick rather than waiting out CraftMinutes, since an AI
-		// faction gaining a small resource-generation edge a few
-		// minutes later than a real player would is not a meaningful
-		// balance concern the way skipping the wait for a *player*
-		// would be.
 		if rand.Float64() < 0.01 {
 			var bestAffordable *gear.Definition
 			for i := range gear.Catalog {
@@ -3192,21 +2615,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally declare a clan war, exactly like a human Leader
-		// would via the clan panel - project owner direction
-		// 2026-08-01: "every single thing a human can do." Mirrors
-		// HandleDeclareClanWarCallback's exact mechanics (random enemy
-		// clan not already at war, 48h duration, notifies all members
-		// of both clans - real humans only, an AI member's negative
-		// telegram_id has nothing reading its notifications). Only
-		// fires if this faction actually leads a clan (role = 'Leader'
-		// in user_clans - a rank-and-file AI member declaring a war
-		// isn't a thing a human member could do either) and that clan
-		// isn't already at war. War *scoring* itself needed no new
-		// code at all - it's computed from the raids table by whoever
-		// already resolves clan_wars, and an AI-launched raid via
-		// launchAIRaid is already an ordinary raids row, so it already
-		// counts once a member's clan is at war.
 		if rand.Float64() < 0.02 {
 			var myClanID string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
@@ -3248,17 +2656,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally found or join a federation, exactly like a
-		// Clan Leader would via /fed_found or /fed_join. Mirrors
-		// HandleFoundFederation (aiFederationFoundCost Crystal, same
-		// figure as federationFoundCost in
-		// internal/bot/handlers/federation.go - duplicated as a literal
-		// rather than imported, since the tick engine deliberately
-		// doesn't depend on the bot/handlers package, same reasoning
-		// the exchange lot prices above were duplicated for) and
-		// HandleJoinFederation (free, just points the clan at an
-		// existing federation). Only fires for a Clan Leader whose clan
-		// isn't already in a federation.
 		if rand.Float64() < 0.01 {
 			var myClanID string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
@@ -3288,19 +2685,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally engage in clan diplomacy, exactly like a human
-		// Clan Leader would via /ally, /nap, or the Accept/Reject
-		// buttons on /diplomacy - project owner direction 2026-08-01:
-		// "every single thing a human can do." Only fires for a
-		// Leader-role AI faction, mirroring proposePact's and
-		// HandleDiplomacyRespondCallback's "Leaders only" gate. Checks
-		// for a pending proposal addressed to this faction's clan
-		// first (an active Leader wouldn't leave one hanging forever),
-		// then falls back to proposing a new pact to an unrelated clan.
-		// aidecisions.go's pickFairAIRaidTarget/pickOverdueRaidTarget
-		// already respect whatever pact results from this - the same
-		// rule HasActivePact enforces for human-launched raids - so an
-		// AI faction can't form a truce here and then ignore it there.
 		if rand.Float64() < 0.02 {
 			var myClanID string
 			if err := tx.QueryRowContext(ctx, "SELECT clan_id FROM user_clans WHERE user_id = $1 AND role = 'Leader'", f.userID).Scan(&myClanID); err == nil {
@@ -3310,8 +2694,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 					WHERE (clan_a_id = $1 OR clan_b_id = $1) AND status = 'pending' AND proposed_by != $2
 					ORDER BY random() LIMIT 1`, myClanID, f.userID).Scan(&pactID)
 				if err == nil {
-					// Accept most of the time - an AI Leader isn't
-					// adversarial toward diplomacy by default.
 					newStatus := "rejected"
 					if rand.Float64() < 0.8 {
 						newStatus = "active"
@@ -3350,12 +2732,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally queue for the arena, exactly like a human would
-		// via /arena. Mirrors HandleJoinQueueCallback's exact mechanics
-		// (entry fee debited, an arena_queue row inserted) using the
-		// cheapest ('solo') bracket - whatever tick pass matches queued
-		// players needs no AI-specific handling, since this is just
-		// another user_id sitting in the same queue.
 		if rand.Float64() < 0.02 {
 			var alreadyQueued bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM arena_queue WHERE user_id = $1)", f.userID).Scan(&alreadyQueued)
@@ -3370,21 +2746,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally advance a research tech node, exactly like a
-		// human would via /research's "Upgrade" buttons - part of the
-		// Item 4 inventory's "research/building upgrades" entry, which
-		// was left as an open question ("does 'unit upgrades' mean the
-		// existing garrison-building roll, or the human
-		// research/building-upgrade tree?") in this plan doc. Answer:
-		// both are real, distinct systems, so both get built - this is
-		// the tech-tree half. Mirrors HandleUpgradeTechCallback's exact
-		// mechanics (FOR UPDATE row lock, Neuro Core cost of
-		// currentLvl*8, MaxResearchLevel of 20) with the seven tech
-		// columns duplicated as literals rather than importing
-		// researchTree from internal/bot/handlers, since the tick
-		// engine deliberately doesn't depend on the bot/handlers package
-		// (same reasoning the exchange lot prices and federation cost
-		// above were duplicated for).
 		if rand.Float64() < 0.04 {
 			_, _ = tx.ExecContext(ctx, "INSERT INTO research_states (encampment_id) VALUES ($1) ON CONFLICT (encampment_id) DO NOTHING", f.id)
 
@@ -3405,24 +2766,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally queue a facility upgrade, exactly like a human
-		// would via /camp's Structural/Defense Grid/Infrastructure
-		// panels - the building-upgrade half of the same Item 4 entry
-		// research handles above. Mirrors HandleUpgradeCallback's exact
-		// mechanics for non-core modules: one upgrade in flight at a
-		// time per Outpost (is_upgrading gate), a module's level can't
-		// exceed the Outpost's own level (same "Prerequisite Block" rule
-		// humans hit), cost of currentLvl*150 Scrap, and a 20-second
-		// build timer. Deliberately reuses resolveCompletedUpgrades
-		// unchanged - it already resolves any modules row with
-		// is_upgrading = TRUE regardless of who owns it, so an
-		// AI-queued upgrade completes and even notifies (to the
-		// faction's own negative user_id, read by no one, same as every
-		// other AI notification) with zero changes needed there.
-		// Doesn't touch camp_core - that already grows via the garrison
-		// section below once a faction maxes out its soldier/mech caps,
-		// so gating this list on faction level (not campLvl+1) avoids
-		// double-counting the same growth two different ways.
 		if rand.Float64() < 0.04 {
 			var alreadyUpgrading bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM modules WHERE encampment_id = $1 AND is_upgrading = TRUE)", f.id).Scan(&alreadyUpgrading)
@@ -3451,23 +2794,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally dispatch a personal exploration expedition, exactly
-		// like a human would via /explore's "Launch Expedition" button -
-		// the last self-contained, single-faction item from Item 4's
-		// inventory (`exploration_sites`/`exploration_dispatches`,
-		// distinct from the `scout_missions` Item 3 already covers -
-		// scouting finds raid targets, exploration finds resource hauls
-		// and first contacts). Mirrors HandleDispatchExpeditionCallback's
-		// exact mechanics: one dispatch in flight at a time per Outpost,
-		// cost of 30 Rations + 15 Metal, a weighted reward-site roll
-		// (duplicated as aiExplorationTemplates literals rather than
-		// imported from internal/bot/handlers/exploration.go, same
-		// reasoning as every other duplicated literal in this function),
-		// and a 20-45 minute travel window. resolveExplorationDispatches
-		// further down engine.go needed zero changes to pick this up and
-		// resolve it later - it already credits whichever encampment_id
-		// dispatched, AI or human, and even rolls the same first-contact
-		// discovery chance off that Outpost's Scout Walker count.
 		if rand.Float64() < 0.04 {
 			var alreadyDispatched bool
 			_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM exploration_dispatches WHERE encampment_id = $1)", f.id).Scan(&alreadyDispatched)
@@ -3501,25 +2827,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Ensure a Hero Commander exists, then occasionally train or heal
-		// them, exactly like a human would via /hero - the last item
-		// from Item 4's inventory. Reading the real handler
-		// (internal/bot/handlers/hero.go) turned up a genuine surprise:
-		// there's no separate "recruitment" or "equipping" system at
-		// all - every Outpost lazily gets exactly one Hero on first
-		// panel view (HandleHeroPanel), flavor-named off the player's
-		// faction, and the only actions are Train (Scrap -> XP, levels
-		// at 100 XP) and Heal (Rations -> clears injuries). The
-		// "equipping" half of the open question in this plan doc was
-		// simply wrong - there's no items/inventory system for heroes
-		// to equip. (Manual Defense Garrison lives in the same handler
-		// file but is a distinct, resource-free reservation mechanic
-		// already fully expressed by aiCivilizationMaxSoldiersPerLevel/
-		// aiCivilizationMaxMechsPerLevel capping how many units an AI
-		// faction ever has to garrison in the first place - adding a
-		// garrison split on top would just move numbers between two
-		// AI-only bookkeeping columns with no gameplay effect, since
-		// nothing ever drafts *from* an AI faction's own garrison.)
 		var heroInjuries string
 		var heroExists bool
 		_ = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM heroes WHERE encampment_id = $1)", f.id).Scan(&heroExists)
@@ -3556,13 +2863,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Heal only when actually injured - unlike Train (which a human
-		// might click repeatedly for XP with no real "waste" concept),
-		// clicking Heal on an already-'Perfect Health' Hero produces the
-		// exact same state for a real Rations cost, which is the kind
-		// of pointless spend the AI-vs-human parity goal never asked
-		// for; every prior resource-spending block in this function
-		// checks for an actual need first, same reasoning here.
 		if rand.Float64() < 0.03 && heroInjuries != "" && heroInjuries != "Perfect Health" {
 			var rations float64
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(rations,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&rations)
@@ -3573,20 +2873,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally list surplus resources on the exchange, exactly
-		// like a human would via /exchange - project owner direction
-		// 2026-08-01: AI factions should "literally do every single
-		// thing in the game," with market listings given as the
-		// explicit example. Reuses the exact fixed lot sizes/prices
-		// HandlePostListingCallback uses (50 metal for 150 dollars, 20
-		// crystal for 300 dollars) rather than inventing AI-specific
-		// pricing, so a listing on the shared exchange looks and
-		// behaves identically regardless of who posted it - a buyer
-		// can't tell the difference, the same principle launchAIRaid
-		// already follows for raids. Only lists once there's a real
-		// buffer left over afterward (not down to the last unit), and
-		// crystal is preferred when available since it's the rarer,
-		// more valuable resource.
 		if rand.Float64() < 0.03 {
 			var metal, crystal float64
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(metal,0), COALESCE(crystal,0) FROM resources WHERE encampment_id = $1", f.id).Scan(&metal, &crystal)
@@ -3600,7 +2886,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			}
 		}
 
-		// Occasionally build garrison units, capped per level.
 		if rand.Float64() < 0.05 {
 			var soldiers, mechs int
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(soldiers,0), COALESCE(mechs,0) FROM workshop_inventory WHERE encampment_id = $1", f.id).Scan(&soldiers, &mechs)
@@ -3611,10 +2896,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 			} else if mechs < maxMechs {
 				_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET mechs = mechs + 1 WHERE encampment_id = $1", f.id)
 			} else if f.level < 15 {
-				// Garrison is maxed for this level - expand instead,
-				// raising the ceiling for future growth. Capped at 15 so
-				// a truly ignored AI faction doesn't become an
-				// unraidable superpower.
 				_, _ = tx.ExecContext(ctx, "UPDATE encampments SET level = level + 1 WHERE id = $1", f.id)
 			}
 		}
@@ -3622,9 +2903,6 @@ func (e *Engine) growAICivilizations(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// emitRaidRadarWarnings issues one proximity warning, not a warning per game
-// tick. The threshold is evaluated against the defender's actual radar and
-// garrisoned recon capability, so attackers are not announced at launch.
 func (e *Engine) emitRaidRadarWarnings(ctx context.Context, tx *sql.Tx) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.resolve_time, COALESCE(r.base_march_minutes, 15.0),
@@ -3676,9 +2954,6 @@ func (e *Engine) emitRaidRadarWarnings(ctx context.Context, tx *sql.Tx) error {
 			continue
 		}
 
-		// The conditional update is the idempotency guard: even if multiple
-		// bot processes overlap, only the process that marks the row sends
-		// the defender notification.
 		result, err := tx.ExecContext(ctx, `
 			UPDATE raids SET radar_alert_sent_at = CURRENT_TIMESTAMP
 			WHERE id = $1 AND radar_alert_sent_at IS NULL`, alert.raidID)
@@ -3806,17 +3081,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				_ = progression.RecordEvent(ctx, tx, r.attackerUserID, progression.TriggerRaidCompleted, 1)
 			}
 
-			// BUGFIX: co-op helper survivors were never credited home on
-			// a NATURAL raid completion - only the manual "abort" path
-			// in combat.go's HandleExpeditionActions did this. Every
-			// helper who joined a raid that simply ran its course (won
-			// or lost normally) had their surviving soldiers/mechs
-			// permanently vanish into an orphaned raid_coop_members row.
-			// raid_coop_members.soldiers_contributed/mechs_contributed
-			// already reflects post-casualty survivor counts by this
-			// point (updated during battle resolution above), so this
-			// is a straight credit-back, same shape as the primary
-			// attacker's just above.
 			rowsCoop, errCoop := tx.QueryContext(ctx, "SELECT encampment_id, soldiers_contributed, mechs_contributed FROM raid_coop_members WHERE raid_id = $1", r.id)
 			if errCoop == nil {
 				type coopSurvivor struct {
@@ -3926,10 +3190,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			totMechs += h.mechs
 		}
 
-		// Destroyers, Bombers, Liberators and Wraiths aren't yet draftable
-		// into co-op lobbies (only the raid creator's primary force can
-		// bring them), so no helper contribution to add here - just the
-		// primary force.
 		totDestroyers := primaryDestroyers
 		totBombers := primaryBombers
 		totBC := primaryBC
@@ -3980,12 +3240,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			jetsDefender = nest.Jets
 			defLevel = attackerCoreLvl
 
-			// Phase 7 AI scaling: the Nest now feeds the exact same
-			// per-subsystem fields a real defender does (Defense Grid,
-			// Guardians/Observers, research, shields, hero superpower)
-			// instead of a single flat fallback bonus, so it resolves
-			// through the identical combat code path below as any
-			// player base.
 			defenderTurretLevels = int(nest.TurretBonus / 0.08)
 			defenderLightLaserLvl = nest.LightLaserLvl
 			defenderHeavyLaserLvl = nest.HeavyLaserLvl
@@ -4010,25 +3264,16 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(bio_lvl, 1) FROM mutation_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderBioLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(integrity_tech_lvl, 1) FROM research_states WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderIntegrityTechLvl)
 
-			// Defense Grid: sum all turret levels (Light/Heavy Laser, Gauss
-			// Cannon, Ion Cannon, Plasma Turret) into a single bonus. Each
-			// level of any turret adds a flat slice of defense rating.
 			_ = tx.QueryRowContext(ctx,
 				"SELECT COALESCE(SUM(level), 0) FROM modules WHERE encampment_id = $1 AND type IN ('light_laser', 'heavy_laser', 'gauss_cannon', 'ion_cannon', 'plasma_turret')",
 				r.defenderID.String).Scan(&defenderTurretLevels)
 
-			// Phase 6 "engage-weapon" mechanics: pull each turret type's
-			// level individually so each one can apply its own situational
-			// bonus below, instead of contributing to just one flat sum.
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'light_laser'", r.defenderID.String).Scan(&defenderLightLaserLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'heavy_laser'", r.defenderID.String).Scan(&defenderHeavyLaserLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'gauss_cannon'", r.defenderID.String).Scan(&defenderGaussCannonLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'ion_cannon'", r.defenderID.String).Scan(&defenderIonCannonLvl)
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(level, 0) FROM modules WHERE encampment_id = $1 AND type = 'plasma_turret'", r.defenderID.String).Scan(&defenderPlasmaTurretLvl)
 
-			// Guardian/Observer: garrison-only units that never leave the
-			// base, so they're read straight from workshop_inventory rather
-			// than mobilized like Liberators/Wraiths.
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(guardians, 0), COALESCE(observers, 0) FROM workshop_inventory WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderGuardians, &defenderObservers)
 
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(superpower, '') FROM heroes WHERE encampment_id = $1", r.defenderID.String).Scan(&defenderHeroSuperpower)
@@ -4037,49 +3282,28 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		defenseForce := soldiersDefender + dronesDefender + jetsDefender + mechsDefender
 
-		// Phase 7 (item 12): world events are now per-continent. Scope
-		// this to the attacker's own region - always present (unlike
-		// defenderID, which is null for AI/rogue-nest raids) and it's
-		// the attacking fleet's own systems (targeting, mech corrosion)
-		// executing the operation.
 		var attackerRegion string
 		_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", r.attackerID).Scan(&attackerRegion)
 		activeWeather := world.ActiveEventFor(ctx, tx, attackerRegion)
 
 		orbitalBonus := 0.0
 		if defenderOrbitalBuffActive {
-			orbitalBonus = 0.30 // Orbital Maneuver: +30% defense rating while active
+			orbitalBonus = 0.30
 		}
 
 		offenseRatingModifier := 1.0
 
-		// Phase 6 "engage-weapon" mechanics: each of the 6 turret types now
-		// contributes its own differentiated slice of defense rating
-		// instead of one flat sum, and each situationally scales up
-		// against the attacker composition it's meant to counter. Rogue
-		// AI nests (no real defenderID) don't have individually-typed
-		// turrets, so they fall back to the original flat aggregate.
-		// Phase 7: the Rogue Nest now carries individually-typed turret
-		// levels of its own (content.RogueNestComposition), so it runs
-		// through the exact same per-turret-type formula as a real
-		// player defender - no more flat-sum fallback branch.
-		lightLaserBonus := float64(defenderLightLaserLvl) * 0.02 // cheap, flat anti-infantry baseline
+		lightLaserBonus := float64(defenderLightLaserLvl) * 0.02
 		heavyLaserBonus := float64(defenderHeavyLaserLvl) * 0.03 * (1.0 + math.Min(float64(totSoldiers)*0.005, 0.5))
 		gaussCannonBonus := float64(defenderGaussCannonLvl) * 0.05 * (1.0 + math.Min(float64(totMechs+totLiberators)*0.02, 1.0))
 		ionCannonBonus := float64(defenderIonCannonLvl) * 0.05 * (1.0 + math.Min(float64(totDestroyers+totWraiths)*0.03, 1.0))
-		plasmaTurretBonus := float64(defenderPlasmaTurretLvl) * 0.08 // top-tier, no counter needed
+		plasmaTurretBonus := float64(defenderPlasmaTurretLvl) * 0.08
 		turretDefenseBonus := lightLaserBonus + heavyLaserBonus + gaussCannonBonus + ionCannonBonus + plasmaTurretBonus
 
-		// Wraith: stealth strike fighter. Its cloaking field partially
-		// blinds the target's Defense Grid before the engagement,
-		// shaving a chunk off the combined turret bonus.
 		if totWraiths > 0 {
 			turretDefenseBonus *= 1.0 - math.Min(float64(totWraiths)*0.03, 0.40)
 		}
 
-		// Guardian: garrison-only heavy defense walker, adds directly to
-		// defense rating. Observer: garrison-only recon satellite, a
-		// smaller early-warning-flavored defense bonus (mirrors Scouts).
 		guardianBonus := math.Min(float64(defenderGuardians)*0.03, 1.0)
 		observerBonus := math.Min(float64(defenderObservers)*0.01, 0.15)
 
@@ -4094,46 +3318,23 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defenseRatingModifier *= 1.30
 		}
 
-		// mechOffenseCount is the mech count used ONLY for the attack
-		// rating below; it defaults to the true totMechs and is reduced
-		// only by acid_rain, so totMechs itself always stays accurate
-		// for casualties, reports, and split ratios (see the bug-fix
-		// comment on the acid_rain case below).
 		mechOffenseCount := totMechs
 
-		// Dynamic weather combat rating calculations
 		var weatherNotice string = ""
 		switch activeWeather {
 		case "solar_flare":
-			// Solar Flare introduces accuracy/electronic target variance (scrambles telemetry)
 			offenseRatingModifier *= (0.80 + rand.Float64()*0.40)
 			weatherNotice = "\n⚠️ SOLAR FLARE ACTIVE: Scrambling electronic communication and target locks! Offensive variance fluctuated."
 		case "radiation_storm":
 			offenseRatingModifier *= 0.75
 			weatherNotice = "\n⚠️ RADIATION STORM ACTIVE: Fallout morale penalty applied! Base offense rating reduced by 25%."
 		case "acid_rain":
-			// BUG FIX (2026-07-26): this used to mutate the shared
-			// totMechs variable directly ("totMechs = totMechs / 2"),
-			// which silently corrupted every downstream use of totMechs
-			// for the rest of this raid's resolution - casualty-pool
-			// distribution (soldierMechShare), the reported attacker
-			// casualty count, the Mechs count shown in the battle
-			// report, and the co-op raid split ratio all read totMechs
-			// AFTER this line ran, so an acid-rain battle would show
-			// half as many mechs as were actually committed and would
-			// misallocate casualties between the soldier/mech pool and
-			// the specialist pool. The corrosion penalty is now applied
-			// only to a dedicated mechOffenseCount used solely in the
-			// attack-rating formula below; totMechs itself (and every
-			// report/ratio that depends on it) stays accurate.
 			mechOffenseCount = totMechs / 2
 			weatherNotice = "\n⚠️ ACID RAIN ACTIVE: Corrosive rain detected! Armored Mech defensive structures degraded by 50%."
 		case "emp":
-			// EMP hits electronics-dependent systems hard - a flat, non-random offense penalty.
 			offenseRatingModifier *= 0.60
 			weatherNotice = "\n⚠️ EMP ACTIVE: Electromagnetic pulse degraded fleet targeting systems! Offense rating reduced by 40%."
 		case "sandstorm":
-			// Sandstorm degrades visibility/targeting - similar shape to Solar Flare's variance, but a straight reduction rather than a swing.
 			offenseRatingModifier *= 0.85
 			weatherNotice = "\n⚠️ SANDSTORM ACTIVE: Reduced visibility hampered target acquisition! Offense rating reduced by 15%."
 		}
@@ -4144,11 +3345,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		mechOffenseMultiplier := 1.50 * (1.0 + float64(attackerMilitaryTechLvl-1)*0.25)
 
-		// Phase 5 milestone 4: sustained electricity/logistics failure
-		// disables high-tech contributions (mech multiplier, in this
-		// formula) without applying the full rations/ammo-depletion
-		// offense penalty above - matches roadcombat.Power's identical
-		// treatment for road battles.
 		var attackerHighTechOffline bool
 		_ = tx.QueryRowContext(ctx, "SELECT high_tech_offline FROM raids WHERE id = $1", r.id).Scan(&attackerHighTechOffline)
 		if attackerHighTechOffline {
@@ -4157,36 +3353,23 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		attRating := (float64(attackForce) * 15.0 * offenseRatingModifier) * (1.0 + (float64(attackerTanks) * 0.50) + (float64(mechOffenseCount) * mechOffenseMultiplier))
 
-		// Destroyer: anti-drone/anti-air specialist. Rating scales up the
-		// more drones/jets the defender is fielding - a hard counter unit.
 		if totDestroyers > 0 {
 			destroyerTargets := dronesDefender + jetsDefender
 			destroyerBonus := 1.0 + math.Min(float64(destroyerTargets)*0.02, 1.0)
 			attRating += float64(totDestroyers) * 20.0 * offenseRatingModifier * destroyerBonus
 		}
 
-		// Bomber: siege specialist. Rating scales up the more fortified the
-		// defender's Defense Grid is - a hard counter to turtled bases.
-		// Guardian is Bomber's own hard counter: the more Guardians a
-		// defender fields, the less a Bomber-heavy raid gains from this.
 		if totBombers > 0 {
 			bomberBonus := 1.0 + math.Min(float64(defenderTurretLevels)*0.05, 1.5)
 			guardianCounter := 1.0 - math.Min(float64(defenderGuardians)*0.03, 0.60)
 			attRating += float64(totBombers) * 18.0 * offenseRatingModifier * bomberBonus * guardianCounter
 		}
 
-		// Liberator: mid-tier capital gunship, flat attack rating with no
-		// situational bonus - the accessible stepping stone between
-		// Bombers and the Battlecruiser.
 		if totLiberators > 0 {
 			libUnit := content.MustFindUnit("liberator")
 			attRating += float64(totLiberators) * libUnit.AttackRating * offenseRatingModifier
 		}
 
-		// Wraith: stealth anti-air fighter. Rating scales up the more
-		// drones/jets the defender is fielding, same hard-counter shape
-		// as Destroyer, on top of the Defense-Grid-blinding effect it
-		// already applied to turretDefenseBonus above.
 		if totWraiths > 0 {
 			wrUnit := content.MustFindUnit("wraith")
 			wraithTargets := dronesDefender + jetsDefender
@@ -4194,17 +3377,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			attRating += float64(totWraiths) * wrUnit.AttackRating * offenseRatingModifier * wraithBonus
 		}
 
-		// Battlecruiser: top-tier capital ship, flat massive attack rating
-		// with no situational counter-bonus - the expensive, always-strong
-		// "flex" unit. Attack value sourced from the canonical content
-		// registry rather than hardcoded here.
 		if totBC > 0 {
 			bcUnit := content.MustFindUnit("battlecruiser")
 			attRating += float64(totBC) * bcUnit.AttackRating * offenseRatingModifier
 		}
 
-		// Deathstar: the ultimate superweapon. Flat, enormous attack rating -
-		// a single Doomsday Rig can single-handedly decide a battle.
 		if totDS > 0 {
 			dsUnit := content.MustFindUnit("deathstar")
 			attRating += float64(totDS) * dsUnit.AttackRating * offenseRatingModifier
@@ -4244,9 +3421,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			defCas = int(float64(defCas) * (1.0 - reduction))
 		}
 
-		// SpaceHunt-style "Exploding Units": each destroyed unit has a chance
-		// to blow up and take a unit from the opposing side down with it.
-		// This keeps lopsided wins from being entirely free for the winner.
 		const explodeChance = 0.15
 		bonusAttCasFromDefLosses := 0
 		for i := 0; i < defCas; i++ {
@@ -4263,11 +3437,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		attCas += bonusAttCasFromDefLosses
 		defCas += bonusDefCasFromAttLosses
 
-		// Casualty split: preserve the original 70/30 soldier/mech ratio for
-		// that pool, and split whatever share of casualties falls on the
-		// Destroyer/Bomber pool proportional to their relative counts. When
-		// no destroyers/bombers are drafted this reduces to exactly the old
-		// behavior (soldierMechShare = 1.0).
 		soldierMechShare := 0.0
 		if attackForce > 0 {
 			soldierMechShare = float64(totSoldiers+totMechs) / float64(attackForce)
@@ -4284,20 +3453,11 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			lostAttMechs = primaryMechs
 		}
 
-		// Toughness-weighted specialist casualties. The OLD model split
-		// dbCas purely by headcount, which meant a lone Deathstar (the
-		// only specialist unit in the fleet) absorbed 100% of ANY
-		// specialist-pool casualty - i.e. even a single stray loss killed
-		// it outright, making the most expensive unit in the game the
-		// easiest to lose. Toughness now scales down how many of those
-		// casualties actually translate into a destroyed unit at all
-		// (representing armor/hull soaking hits), before splitting
-		// whatever's left by headcount among the pool.
 		const (
 			destroyerToughness = 4.0
 			bomberToughness    = 4.0
 			bcToughness        = 20.0
-			dsToughness        = 200.0 // bumped alongside the Phase 7 attack rating rebalance (was 150.0)
+			dsToughness        = 200.0
 			liberatorToughness = 8.0
 			wraithToughness    = 3.0
 		)
@@ -4314,18 +3474,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 			effectiveDbCas := int(float64(dbCas) / weightedToughness)
 
-			// 2026-08-05 fix: effectiveDbCas above is sized correctly
-			// (a pool-wide average toughness, unchanged), but it used
-			// to be split among types by raw headcount share alone,
-			// which meant a type's own toughness never protected that
-			// type's individual survival odds beyond its small
-			// contribution to the shared average - a Doomsday Rig
-			// (200x a Destroyer's toughness) died at essentially the
-			// same rate as everything else in a mixed fleet. See
-			// combatmath.AllocateSpecialistLosses' doc comment for the
-			// full reasoning; this now splits by (count/toughness)
-			// hazard share instead, so a tougher type genuinely dies
-			// less often per unit, not just on average.
 			specialistLosses := combatmath.AllocateSpecialistLosses(
 				effectiveDbCas,
 				combatmath.SpecialistCounts{
@@ -4476,7 +3624,7 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		lootPercentage *= (1.0 - shieldReduction)
 		stolenScrap := defenderScrap * lootPercentage
 		stolenMetal := defenderMetal * lootPercentage
-		stolenCrystal := defenderCrystal * lootPercentage * 0.35 // Crystal is deliberately the rarest/most valuable raid resource.
+		stolenCrystal := defenderCrystal * lootPercentage * 0.35
 		stolenRations := defenderRations * lootPercentage
 		stolenElectricity := defenderElectricity * lootPercentage
 		stolenHydrogen := defenderHydrogen * lootPercentage * 0.75
@@ -4491,15 +3639,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		primaryNeuroCoresShare := stolenNeuroCores
 		primaryDollarsShare := stolenDollars
 
-		// Build the SpaceHunt-style battle report. Composition reflects
-		// forces standing AT THE START of this round (before losses); loss
-		// tallies are what fell THIS round specifically.
-		// Surface what recon already promised - Defense Grid, Guardians/
-		// Observers, Nuclear Shields, and a Hero/Warlord's superpower -
-		// in the actual battle outcome, not just the pre-attack preview.
-		// These already silently factor into the combat math above
-		// (turretDefenseBonus/guardianBonus/observerBonus/defenderShields);
-		// this just makes that visible to the player reading the report.
 		var defenderNotes []string
 		if defenderTurretLevels > 0 {
 			defenderNotes = append(defenderNotes, fmt.Sprintf("🛡️ Defense Grid: %d turret level(s) engaged.", defenderTurretLevels))
@@ -4522,13 +3661,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if attackerHeroSuperpower != "" {
 			attackerNotes = append(attackerNotes, fmt.Sprintf("🎖️ Commander's Superpower: %s.", attackerHeroSuperpower))
 		}
-		// "Why don't Buggies/Ships/Jets ever show up as losses?" - they're
-		// travel-only transports (Clipper Ships cross oceans, Cargo Jets
-		// cut travel to a flat 2h, Buggies enable ground crossing +
-		// salvage), zero attack rating by design (content/units.go), not
-		// combatants that were forgotten. Surfacing them here as a plain
-		// count answers that question directly in the report itself
-		// instead of leaving their absence unexplained.
 		if primaryBuggies+primaryShips+primaryJets > 0 {
 			attackerNotes = append(attackerNotes, fmt.Sprintf("🚚 Escort: %d Buggy(s), %d Ship(s), %d Jet(s) along for transport only - non-combat, unaffected by this fight.", primaryBuggies, primaryShips, primaryJets))
 		}
@@ -4599,14 +3731,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 		if weatherNotice != "" {
 			reportText += "\n\n" + strings.TrimSpace(weatherNotice)
 		}
-		// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.5: the game
-		// already allows "lose everything" through sustained, repeated
-		// raiding (0.6^n of resources survive after n full-loot raids -
-		// under 8% by the 5th), but nothing ever told the defender that's
-		// what's happening to them. This is purely a communication
-		// addition - no new mechanic, no floor added or removed, just
-		// naming what the existing math already does once someone's down
-		// to near-nothing.
 		if !defenderStillStanding && r.defenderID.Valid {
 			remainingTotal := math.Max(defenderScrap-primaryShare, 0) + math.Max(defenderMetal-primaryMetalShare, 0) +
 				math.Max(defenderCrystal-primaryCrystalShare, 0) + math.Max(defenderRations-primaryRationsShare, 0) +
@@ -4614,14 +3738,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			reportText += economicCollapseWarning(remainingTotal)
 		}
 
-		// Attacker and defender see the identical report text, but
-		// should feel opposite things about it - 2026-08-06: give each
-		// recipient their own message-effect animation based on which
-		// side of report.Outcome they're on, rather than either no
-		// effect or (worse) the same one for the winner and the loser.
-		// Multi-round battles still ongoing (OutcomeOngoing/OutcomeDraw)
-		// deliberately get no effect - the fight isn't over, so neither
-		// "win" nor "lose" framing is warranted yet.
 		var attackerEffect, defenderEffect string
 		switch report.Outcome {
 		case battlereport.OutcomeAttackerWon:
@@ -4639,12 +3755,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 
 		if !attackerStillStanding {
 			if primaryBuggies > 0 {
-				// Total wipeout of combat units, but Buggies aren't part of
-				// the combat casualty pool - if any were committed, they
-				// survive the rout and can still scavenge a little before
-				// retreating. Nowhere near a real win's take, but not
-				// nothing either - matches how transport crews would
-				// realistically grab whatever's within reach and flee.
 				const salvagePercent = 0.08
 				salvageScrap := defenderScrap * salvagePercent
 				salvageMetal := defenderMetal * salvagePercent
@@ -4712,8 +3822,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if haulers > 0 {
 				weightFactor *= 0.50
 			}
-			// Cargo Ship tiers stack on top of a Hauler's base reduction,
-			// each tier cutting further into the return-march loot penalty.
 			if cargoMk1 > 0 {
 				weightFactor *= 0.90
 			}
@@ -4724,11 +3832,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 				weightFactor *= 0.65
 			}
 
-			// The return trip is anchored to the SAME distance as the
-			// outbound march (r.baseMarchMinutes), not some disconnected
-			// flat number - carrying looted resources back only ever adds
-			// time on top of that, it never makes the trip home shorter
-			// than the trip out.
 			returnMinutes := r.baseMarchMinutes * (1.0 + weightFactor)
 			returnDuration := time.Duration(returnMinutes) * time.Minute
 			resolveTime := time.Now().UTC().Add(returnDuration)
@@ -4750,10 +3853,6 @@ func (e *Engine) resolveRaidCombats(ctx context.Context, tx *sql.Tx) error {
 			if r.defenderID.Valid {
 				_, _ = tx.ExecContext(ctx, "UPDATE resources SET scrap = GREATEST(scrap - $1, 0), metal = GREATEST(metal - $2, 0), crystal = GREATEST(crystal - $3, 0), rations = GREATEST(rations - $5, 0), electricity = GREATEST(electricity - $6, 0), hydrogen = GREATEST(hydrogen - $7, 0), neuro_cores = GREATEST(neuro_cores - $8, 0), dollars = GREATEST(dollars - $9, 0) WHERE encampment_id = $4", stolenScrap, stolenMetal, stolenCrystal, r.defenderID.String, stolenRations, stolenElectricity, stolenHydrogen, stolenNeuroCores, stolenDollars)
 
-				// Clan War score: if the attacker and defender belong to
-				// two clans with an active war between them, this victory
-				// counts toward the attacker's clan war score - real
-				// combat outcomes drive the war, not a one-time stub.
 				e.applyClanWarScore(ctx, tx, r.attackerID, r.defenderID.String, primaryShare+primaryMetalShare+primaryCrystalShare)
 			}
 

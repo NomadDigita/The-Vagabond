@@ -19,7 +19,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-# The repository is work/The-Vagabond, so toolcache is its direct sibling.
 WORK = ROOT.parent
 DEFAULT_LOTTIE = WORK / "toolcache" / "tgs-node" / "node_modules" / "lottie-web" / "build" / "player" / "lottie.js"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
@@ -66,9 +65,6 @@ animation.addEventListener('DOMLoaded',()=>{{animation.goToAndStop({args.frame},
             "--window-size=512,512", "--virtual-time-budget=1500",
             f"--screenshot={output}", page.as_uri(),
         ]
-        # Chrome's Windows launcher can return before its screenshot child has
-        # written the file, so wait on the output rather than assuming the
-        # launcher process lifetime matches the renderer lifetime.
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         deadline = time.monotonic() + 20
         while not output.is_file() and time.monotonic() < deadline:

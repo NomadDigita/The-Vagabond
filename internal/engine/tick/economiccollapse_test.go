@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// TestEconomicCollapseWarning verifies AI_PARITY_AND_WORLD_NOTIFICATIONS_
-// PLAN.md section 1.5's "communicate this is possible" addition: a
-// defeated defender left with a critically low resource total gets an
-// explicit warning appended to their battle report, while one still
-// holding a meaningful amount doesn't.
 func TestEconomicCollapseWarning(t *testing.T) {
 	cases := []struct {
 		name           string

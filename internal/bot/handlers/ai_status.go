@@ -13,10 +13,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// AIStatusHandler exposes the Phase A AI Foundation to players and
-// admins. It intentionally uses new, previously-unused command names
-// (/ai_status, /ai_settings) so it cannot collide with any command
-// registered by the parallel SpaceHunt phases 1-6 roadmap.
 type AIStatusHandler struct {
 	Service  *ai.Service
 	AdminIDs []int64
@@ -42,10 +38,6 @@ func (h *AIStatusHandler) isAdmin(id int64) bool {
 	return false
 }
 
-// ── /ai_status (admin only) ────────────────────────────────────────
-//
-// Shows provider availability, global feature flags, and today's
-// global AI spend against the configured budget. Read-only.
 func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -91,30 +83,11 @@ func (h *AIStatusHandler) HandleAIStatus(c telebot.Context) error {
 	b.WriteString(fmt.Sprintf("\nMaster switch: %v | Per-user daily cap: $%.2f | Cache TTL: %s",
 		h.Service.Config.Enabled, h.Service.Config.MaxUserCostPerDayUSD, formatDuration(time.Duration(h.Service.Config.CacheTTLSeconds)*time.Second)))
 
-	// The list above only shows whether a key is *configured*, not
-	// whether the provider actually works — a provider with a bad
-	// key, an exhausted quota, or an unpurchased model still shows up
-	// here as "available ✅" (Available() only checks for a non-empty
-	// key) and silently falls through to mock at request time. Point
-	// straight at the live diagnostic rather than let another session
-	// re-derive that gap from scratch.
 	b.WriteString("\n\nRun /ai_probe for a live test call to each provider above — it will show the exact error (quota, auth, model access, etc.) if one is silently falling back to mock.")
 
 	return c.Send(b.String(), keyboards.AdvisorsNavigation())
 }
 
-// ── /ai_probe (admin only) ──────────────────────────────────────────
-//
-// Live-tests every registered, non-mock provider with one minimal
-// real completion call each and reports the exact success/failure
-// result, including the provider's own error text on failure. Unlike
-// /ai_status's "Providers" list (which only ever shows whether a key
-// is *configured*, not whether it actually works), this answers "is
-// this provider genuinely reachable and usable right now" directly
-// from Telegram — no Render dashboard/log access required. Costs
-// count against the normal daily budget; each call is capped at 16
-// output tokens, so the cost per run is negligible relative to a real
-// advisor request.
 func (h *AIStatusHandler) HandleAIProbe(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -146,10 +119,6 @@ func (h *AIStatusHandler) HandleAIProbe(c telebot.Context) error {
 	return c.Send(b.String(), keyboards.AdvisorsNavigation())
 }
 
-// ── /ai_status_toggle (admin only, callback-free simple command) ───
-//
-// Usage: /ai_status_toggle <feature> <on|off>
-// Flips a global feature flag without requiring a redeploy.
 func (h *AIStatusHandler) HandleAIStatusToggle(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -175,12 +144,6 @@ func (h *AIStatusHandler) HandleAIStatusToggle(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("✅ %s is now %s globally.", feature, map[bool]string{true: "ENABLED", false: "DISABLED"}[enabled]), keyboards.AdvisorsNavigation())
 }
 
-// ── /ai_settings (any player) ───────────────────────────────────────
-//
-// Usage:
-//
-//	/ai_settings                       — list your current preferences
-//	/ai_settings <feature> <on|off>    — opt yourself in/out of a feature
 func (h *AIStatusHandler) HandleAISettings(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

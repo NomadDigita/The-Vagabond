@@ -45,7 +45,7 @@ def validate_static(path: Path) -> None:
         from PIL import Image
         with Image.open(path) as image:
             width, height = image.size
-    except Exception as error:  # Pillow gives useful parser errors for malformed images.
+    except Exception as error:
         fail(f"cannot read image dimensions: {error}")
     if max(width, height) != 512 or min(width, height) > 512:
         fail(f"static sticker must have one side exactly 512px and the other no greater than 512px; got {width}x{height}.")
@@ -75,7 +75,7 @@ def validate_video(path: Path, ffprobe: str) -> None:
         duration = float(probe["format"]["duration"])
     except (KeyError, TypeError, ValueError):
         fail("video sticker has no readable duration.")
-    if duration > 3.05:  # Container rounding allowance; encoder target remains <=3 seconds.
+    if duration > 3.05:
         fail(f"video sticker duration {duration:.3f}s exceeds three seconds.")
 
 

@@ -10,22 +10,11 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// crystalConversionRate is how much of a resource 1 Crystal converts into.
-// Crystal is the rarest and most valuable resource in the game (see
-// MMO_WORLD_EVOLUTION_PLAN.md), so every rate here is deliberately large -
-// this is meant to be a genuine "cash out my rarest resource for a big
-// stockpile of whatever I'm actually short on" lever, not a rounding-error
-// trade. Rates scale with how commonly needed the target resource is:
-// resources every player burns constantly (Scrap, Metal, Rations) convert
-// generously; resources that are already scarce or high-value in their own
-// right (Neuro Cores, Ether) convert conservatively, since they don't need
-// the help and a generous rate there would just let Crystal launder into
-// a second rare currency for free.
 type crystalConversion struct {
 	resourceKey string
 	label       string
 	emoji       string
-	rate        float64 // amount of resourceKey per 1 Crystal
+	rate        float64
 }
 
 var crystalConversionTable = []crystalConversion{
@@ -39,9 +28,6 @@ var crystalConversionTable = []crystalConversion{
 	{"ether", "Ether", "✨", 100},
 }
 
-// HandleCrystalExchangePanel shows the player's Crystal balance and one
-// button per convertible resource, offering fixed 1/5/25-Crystal presets so
-// the conversion amount never needs free-text input.
 func (h *EconomyHandler) HandleCrystalExchangePanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -82,7 +68,6 @@ func (h *EconomyHandler) HandleCrystalExchangePanel(c telebot.Context) error {
 	return c.Send(text, telebot.ModeHTML, selector)
 }
 
-// HandleCrystalExchangeCallback performs the conversion: resourceKey|amount.
 func (h *EconomyHandler) HandleCrystalExchangeCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -129,9 +114,6 @@ func (h *EconomyHandler) HandleCrystalExchangeCallback(c telebot.Context) error 
 	storageCap := storagecap.CapFor(ctx, tx, campID)
 
 	var current float64
-	// resourceKey is only ever one of the fixed literals in
-	// crystalConversionTable above (never taken verbatim from outside
-	// that table), so it is safe to interpolate into the column list.
 	query := fmt.Sprintf("SELECT COALESCE(%s,0) FROM resources WHERE encampment_id = $1 FOR UPDATE", conv.resourceKey)
 	_ = tx.QueryRowContext(ctx, query, campID).Scan(&current)
 

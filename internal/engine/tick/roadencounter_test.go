@@ -12,11 +12,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/db/schema"
 )
 
-// testDB applies the full real schema to a throwaway Postgres. Phase 7
-// milestone 5 asks for tests covering "all policy boundaries" - the road-
-// encounter tick passes are exactly the code that broke twice this session
-// from parallel-branch merge collisions, so they're the highest-value
-// target for real (not just gofmt/vet) test coverage.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("SCHEMA_TEST_DATABASE_URL")
@@ -33,36 +28,14 @@ func testDB(t *testing.T) *sql.DB {
 			t.Fatalf("applying schema: %v\n%s", err, stmt)
 		}
 	}
-	// Every test in this file shares one database (spinning up a fresh
-	// Postgres per test would be far slower), so each test must start
-	// from a clean slate - otherwise a leftover row from an earlier test
-	// (or an earlier test's caught bug) can silently satisfy another
-	// test's "did an encounter appear" check without that test's own
-	// tick call having done anything at all.
 	_, err = db.Exec(`TRUNCATE road_encounters, road_base_encounters, raids, encampment_discoveries,
 		resources, encampments, coordinates, users RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncating tables: %v", err)
 	}
-	// world_state (a singleton row, id=1) and world_news (append-only,
-	// no FK to anything the truncate above cascades from) both survive
-	// the truncate untouched, so they'd otherwise leak state across
-	// every test in this shared-DB test binary - e.g. aispawning_test.go
-	// needs world_state.last_ai_spawn_at to start NULL every time, not
-	// carry over whatever the previous test in the run left behind.
 	if _, err := db.Exec("TRUNCATE world_news"); err != nil {
 		t.Fatalf("truncating world_news: %v", err)
 	}
-	// world_bosses (NEXT_GENERATION_FEATURES_PLAN.md Phase 8) has no FK
-	// to encampments/users/coordinates either, so it survives the
-	// CASCADE truncate above untouched too - world_boss_attacks/
-	// world_boss_contributions/player_gear/crafting_queue DO cascade
-	// (they all reference encampments), but world_bosses itself needs
-	// its own reset: delete any extra rows a test inserted, and put
-	// the fixed launch set's mutable state (current_hp, total_kills)
-	// back to its defaults so tier-gating and boss-kill tests start
-	// from a clean slate instead of accumulating kills across the
-	// whole shared-DB test binary run.
 	if _, err := db.Exec(`DELETE FROM world_bosses WHERE name NOT IN ('The Rustlord', 'Scrap Titan', 'Apex Wraith', 'The Ravager')`); err != nil {
 		t.Fatalf("clearing extra world_bosses rows: %v", err)
 	}
@@ -75,8 +48,6 @@ func testDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedEncampment creates a user + encampment + coordinate at (x, y) in
-// region and returns the encampment id.
 func seedEncampment(t *testing.T, db *sql.DB, telegramID int64, name string, x, y int, region string, isAIFaction bool) string {
 	t.Helper()
 	_, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", telegramID)
@@ -103,13 +74,10 @@ func seedEncampment(t *testing.T, db *sql.DB, telegramID int64, name string, x, 
 	return campID
 }
 
-// seedMarchingRaid creates a raid currently halfway between (ox,oy) and
-// (dx,dy) - i.e. it will be found at the midpoint - eligible for both
-// evaluateRoadEncounters and evaluateRoadBaseEncounters.
 func seedMarchingRaid(t *testing.T, db *sql.DB, attackerID string, ox, oy, dx, dy int, region string) string {
 	t.Helper()
 	legMinutes := 20.0
-	legStarted := time.Now().UTC().Add(-time.Duration(legMinutes/2) * time.Minute) // exactly 50% through
+	legStarted := time.Now().UTC().Add(-time.Duration(legMinutes/2) * time.Minute)
 	var raidID string
 	err := db.QueryRow(`
 		INSERT INTO raids (attacker_id, state, resolve_time, movement_state,
@@ -125,14 +93,6 @@ func seedMarchingRaid(t *testing.T, db *sql.DB, attackerID string, ox, oy, dx, d
 	return raidID
 }
 
-// runUntilCondition repeatedly calls fn (each in its own transaction)
-// until done() reports true or the retry budget is exhausted. Necessary
-// because the actual encounter roll is probabilistic
-// (roadcombat.EncounterRollChance = 0.35, not 1.0) - the production code
-// has no injectable RNG, so a bounded retry loop is the honest way to test
-// it without either flaking or weakening the real per-tick odds just to
-// make a test deterministic. 40 attempts makes the chance of a false
-// failure (every attempt missing) about 0.65^40 ≈ 4e-8.
 func runUntilCondition(t *testing.T, db *sql.DB, tick func(tx *sql.Tx) error, done func() bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -161,8 +121,8 @@ func TestEvaluateRoadEncountersFreezesConvergingExpeditions(t *testing.T) {
 
 	campA := seedEncampment(t, db, 1001, "Camp Alpha", 0, 0, "TestRegion", false)
 	campB := seedEncampment(t, db, 1002, "Camp Beta", 10, 0, "TestRegion", false)
-	raidA := seedMarchingRaid(t, db, campA, 0, 0, 10, 0, "TestRegion") // midpoint (5,0)
-	raidB := seedMarchingRaid(t, db, campB, 10, 0, 0, 0, "TestRegion") // midpoint (5,0), converging
+	raidA := seedMarchingRaid(t, db, campA, 0, 0, 10, 0, "TestRegion")
+	raidB := seedMarchingRaid(t, db, campB, 10, 0, 0, 0, "TestRegion")
 
 	runUntilCondition(t, db,
 		func(tx *sql.Tx) error { return e.evaluateRoadEncounters(context.Background(), tx) },
@@ -172,8 +132,6 @@ func TestEvaluateRoadEncountersFreezesConvergingExpeditions(t *testing.T) {
 			return count > 0
 		})
 
-	// Both raids must be frozen, not just one - this was exactly the kind
-	// of asymmetric-freeze bug that a scrambled merge could reintroduce.
 	for _, raidID := range []string{raidA, raidB} {
 		var movementState string
 		var activeEncounterID sql.NullString
@@ -194,8 +152,6 @@ func TestEvaluateRoadEncountersDoesNotPairACommanderWithThemselves(t *testing.T)
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 
-	// Two expeditions from the SAME commander, converging on each other -
-	// must never generate a road_encounters row against themselves.
 	camp := seedEncampment(t, db, 1003, "Camp Solo", 0, 0, "TestRegion", false)
 	seedMarchingRaid(t, db, camp, 0, 0, 10, 0, "TestRegion")
 	seedMarchingRaid(t, db, camp, 10, 0, 0, 0, "TestRegion")
@@ -222,17 +178,11 @@ func TestEvaluateRoadEncountersDoesNotPairACommanderWithThemselves(t *testing.T)
 	}
 }
 
-// TestEvaluateRoadBaseEncountersCanTargetAIFactionBases verifies the
-// AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4 fix: an AI
-// faction's base is no longer excluded from road-base encounters. A
-// human column marching past one can now be forced into the same
-// Attack/Continue decision it would face against another human's base.
 func TestEvaluateRoadBaseEncountersCanTargetAIFactionBases(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
 
 	attacker := seedEncampment(t, db, 1004, "Camp Raider", 0, 0, "TestRegion", false)
-	// An AI-owned base sitting exactly at the raid's midpoint.
 	seedEncampment(t, db, 1005, "Rogue Outpost", 5, 0, "TestRegion", true)
 	seedMarchingRaid(t, db, attacker, 0, 0, 10, 0, "TestRegion")
 
@@ -253,7 +203,7 @@ func TestEvaluateRoadBaseEncountersCanTargetAIFactionBases(t *testing.T) {
 		var count int
 		_ = db.QueryRow("SELECT COUNT(*) FROM road_base_encounters").Scan(&count)
 		if count > 0 {
-			return // success - an encounter against the AI-faction base fired
+			return
 		}
 	}
 	t.Error("expected a road_base_encounter against the AI-faction base within 40 attempts at EncounterRollChance")
@@ -288,8 +238,6 @@ func TestEvaluateRoadBaseEncountersFreezesTheColumnAndRecordsMutualDiscovery(t *
 		t.Error("expected active_base_encounter_id to be set")
 	}
 
-	// Discovery must be reciprocal even when nobody has decided to fight
-	// yet - matches discoverRouteContacts' existing behavior.
 	var attackerDiscoveredBase, baseDiscoveredAttacker int
 	_ = db.QueryRow("SELECT COUNT(*) FROM encampment_discoveries WHERE observer_encampment_id = $1 AND target_encampment_id = $2", attacker, base).Scan(&attackerDiscoveredBase)
 	_ = db.QueryRow("SELECT COUNT(*) FROM encampment_discoveries WHERE observer_encampment_id = $1 AND target_encampment_id = $2", base, attacker).Scan(&baseDiscoveredAttacker)
@@ -318,9 +266,6 @@ func TestExpireRoadBaseEncountersResumesTheColumnFromWhereItPaused(t *testing.T)
 			return count > 0
 		})
 
-	// Force the response window to have already lapsed, then run the
-	// expiry pass directly - this is the "nobody tapped a button in time"
-	// path, distinct from the explicit-Continue path in the bot handler.
 	_, err := db.Exec("UPDATE road_base_encounters SET response_deadline = $1 WHERE raid_id = $2 AND status = 'pending'",
 		time.Now().UTC().Add(-time.Minute), raidID)
 	if err != nil {

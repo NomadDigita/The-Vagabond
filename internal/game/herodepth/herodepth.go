@@ -1,15 +1,3 @@
-// Package herodepth is NEXT_GENERATION_FEATURES_PLAN.md Phase 6: Hero
-// System Depth - a skill tree, a hero-specific gear slot distinct from
-// Phase 3's camp-level gear equip, and a level-gated story arc.
-// Definitions (skill nodes, story beats) are static Go data, matching
-// every other definition catalog in this codebase.
-//
-// Scope note on skill effects, mirroring gear.go's own scope note:
-// skill nodes grant safe, non-combat bonuses (training cost reduction,
-// healing cost reduction, resource-generation bonus) rather than raid-
-// combat-power modifiers, for the same reason gear's bonus stayed out
-// of resolveRaidCombats - see gear.go's package doc for the full
-// rationale.
 package herodepth
 
 import (
@@ -20,84 +8,63 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 )
 
-// Querier is satisfied by both *sql.DB and *sql.Tx, matching the same
-// convention gear.Querier/progression.Querier already establish.
 type Querier interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
-// Branch is one of a faction's three skill-tree branches.
 type Branch string
 
 const (
-	BranchFortification Branch = "fortification" // Steel Vanguard
-	BranchOffense       Branch = "offense"       // Steel Vanguard
-	BranchCommand       Branch = "command"       // Steel Vanguard
-	BranchScavenging    Branch = "scavenging"    // Waste Phantom
-	BranchInfiltration  Branch = "infiltration"  // Waste Phantom
-	BranchSurvival      Branch = "survival"      // Waste Phantom
+	BranchFortification Branch = "fortification"
+	BranchOffense       Branch = "offense"
+	BranchCommand       Branch = "command"
+	BranchScavenging    Branch = "scavenging"
+	BranchInfiltration  Branch = "infiltration"
+	BranchSurvival      Branch = "survival"
 )
 
-// EffectType names which of a hero's actions a skill node discounts or
-// boosts - kept as a small closed enum (not a raw string) so
-// ApplyTrainingDiscount/ApplyHealDiscount/ResourceBonusPctFor below
-// can't silently miss a typo'd effect key.
 type EffectType string
 
 const (
-	EffectTrainingCostPct EffectType = "training_cost_pct" // negative = discount
-	EffectHealCostPct     EffectType = "heal_cost_pct"     // negative = discount
-	EffectResourceGenPct  EffectType = "resource_gen_pct"  // positive = bonus
+	EffectTrainingCostPct EffectType = "training_cost_pct"
+	EffectHealCostPct     EffectType = "heal_cost_pct"
+	EffectResourceGenPct  EffectType = "resource_gen_pct"
 )
 
-// SkillNode is one purchasable skill-tree node - independent (no
-// prerequisite chain, kept deliberately simple for this build), costs
-// 1 SkillPoint, and belongs to exactly one Faction + Branch.
 type SkillNode struct {
 	Key         string
 	Name        string
 	Description string
-	Faction     string // "steel_vanguard" or "rust_nomads", matches users.faction
+	Faction     string
 	Branch      Branch
 	Effect      EffectType
 	Value       float64
 }
 
-// SkillTree is the full launch catalog - 3 branches x 3 nodes per
-// faction, 18 nodes total. Growing this catalog later needs no new
-// code, the same property every other definition catalog in this
-// codebase is built around.
 var SkillTree = []SkillNode{
-	// --- Steel Vanguard: Fortification ---
 	{Key: "sv_fort_1", Name: "Reinforced Bunkers", Description: "-10% Hero training cost.", Faction: "steel_vanguard", Branch: BranchFortification, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "sv_fort_2", Name: "Hardened Perimeter", Description: "-15% Hero healing cost.", Faction: "steel_vanguard", Branch: BranchFortification, Effect: EffectHealCostPct, Value: -15},
 	{Key: "sv_fort_3", Name: "Bastion Doctrine", Description: "+3% passive resource generation.", Faction: "steel_vanguard", Branch: BranchFortification, Effect: EffectResourceGenPct, Value: 3},
-	// --- Steel Vanguard: Offense ---
 	{Key: "sv_off_1", Name: "Forward Momentum", Description: "-10% Hero training cost.", Faction: "steel_vanguard", Branch: BranchOffense, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "sv_off_2", Name: "Battlefield Medicine", Description: "-15% Hero healing cost.", Faction: "steel_vanguard", Branch: BranchOffense, Effect: EffectHealCostPct, Value: -15},
 	{Key: "sv_off_3", Name: "Spoils of War", Description: "+3% passive resource generation.", Faction: "steel_vanguard", Branch: BranchOffense, Effect: EffectResourceGenPct, Value: 3},
-	// --- Steel Vanguard: Command ---
 	{Key: "sv_cmd_1", Name: "Officer Corps", Description: "-10% Hero training cost.", Faction: "steel_vanguard", Branch: BranchCommand, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "sv_cmd_2", Name: "Field Hospitals", Description: "-15% Hero healing cost.", Faction: "steel_vanguard", Branch: BranchCommand, Effect: EffectHealCostPct, Value: -15},
 	{Key: "sv_cmd_3", Name: "Logistics Mastery", Description: "+3% passive resource generation.", Faction: "steel_vanguard", Branch: BranchCommand, Effect: EffectResourceGenPct, Value: 3},
 
-	// --- Rust Nomads: Scavenging ---
 	{Key: "rn_scv_1", Name: "Efficient Salvage", Description: "-10% Hero training cost.", Faction: "rust_nomads", Branch: BranchScavenging, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "rn_scv_2", Name: "Junkyard Remedies", Description: "-15% Hero healing cost.", Faction: "rust_nomads", Branch: BranchScavenging, Effect: EffectHealCostPct, Value: -15},
 	{Key: "rn_scv_3", Name: "Waste Not", Description: "+3% passive resource generation.", Faction: "rust_nomads", Branch: BranchScavenging, Effect: EffectResourceGenPct, Value: 3},
-	// --- Rust Nomads: Infiltration ---
 	{Key: "rn_inf_1", Name: "Silent Approach", Description: "-10% Hero training cost.", Faction: "rust_nomads", Branch: BranchInfiltration, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "rn_inf_2", Name: "Shadow Medic", Description: "-15% Hero healing cost.", Faction: "rust_nomads", Branch: BranchInfiltration, Effect: EffectHealCostPct, Value: -15},
 	{Key: "rn_inf_3", Name: "Ghost Economy", Description: "+3% passive resource generation.", Faction: "rust_nomads", Branch: BranchInfiltration, Effect: EffectResourceGenPct, Value: 3},
-	// --- Rust Nomads: Survival ---
 	{Key: "rn_sur_1", Name: "Hardened Nomad", Description: "-10% Hero training cost.", Faction: "rust_nomads", Branch: BranchSurvival, Effect: EffectTrainingCostPct, Value: -10},
 	{Key: "rn_sur_2", Name: "Wasteland Remedies", Description: "-15% Hero healing cost.", Faction: "rust_nomads", Branch: BranchSurvival, Effect: EffectHealCostPct, Value: -15},
 	{Key: "rn_sur_3", Name: "Nomad Resourcefulness", Description: "+3% passive resource generation.", Faction: "rust_nomads", Branch: BranchSurvival, Effect: EffectResourceGenPct, Value: 3},
 }
 
-// NodeByKey looks up a SkillTree node.
 func NodeByKey(key string) (SkillNode, bool) {
 	for _, n := range SkillTree {
 		if n.Key == key {
@@ -107,8 +74,6 @@ func NodeByKey(key string) (SkillNode, bool) {
 	return SkillNode{}, false
 }
 
-// NodesForFaction returns every SkillTree node belonging to faction
-// ("steel_vanguard" or "rust_nomads"), in catalog order.
 func NodesForFaction(faction string) []SkillNode {
 	var out []SkillNode
 	for _, n := range SkillTree {
@@ -119,18 +84,12 @@ func NodesForFaction(faction string) []SkillNode {
 	return out
 }
 
-// StoryBeat is one narrative moment delivered as a notification the
-// instant a hero reaches Level. Faction-flavored, matching the two
-// hero archetypes hero.go's own fallback flavor text already
-// establishes (Steel Vanguard / Waste Phantom).
 type StoryBeat struct {
 	Level   int
 	Faction string
 	Text    string
 }
 
-// StoryArc is the full 5-beat launch arc per faction (levels
-// 5/10/15/20/25, matching the plan doc's own design).
 var StoryArc = []StoryBeat{
 	{Level: 5, Faction: "steel_vanguard", Text: "📖 Your commander speaks less now. The scars from the early days have taught them that survivors who talk too much don't survive long."},
 	{Level: 10, Faction: "steel_vanguard", Text: "📖 A defector from a rival Clan asked to serve under your commander today. They said the name carries weight in the wasteland now."},
@@ -145,11 +104,6 @@ var StoryArc = []StoryBeat{
 	{Level: 25, Faction: "rust_nomads", Text: "📖 Your commander doesn't call it survival anymore. They call it home."},
 }
 
-// DeliverStoryBeats checks heroID's current level/faction/story_arc_stage
-// and delivers (as a direct notification) every StoryBeat whose Level
-// has now been reached but not yet sent, advancing story_arc_stage so
-// none is ever repeated. Called from hero.go's HandleHeroCallback right
-// after a level-up, the same site skill points are awarded.
 func DeliverStoryBeats(ctx context.Context, q Querier, userID int64, heroID string, faction string, newLevel int) error {
 	var stage int
 	if err := q.QueryRowContext(ctx, "SELECT story_arc_stage FROM heroes WHERE id = $1", heroID).Scan(&stage); err != nil {
@@ -162,7 +116,7 @@ func DeliverStoryBeats(ctx context.Context, q Querier, userID int64, heroID stri
 			continue
 		}
 		if beat.Level <= stage {
-			continue // already delivered in an earlier call
+			continue
 		}
 		if userID > 0 {
 			_ = notifications.Queue(ctx, q, userID, beat.Text, "general")
@@ -179,9 +133,6 @@ func DeliverStoryBeats(ctx context.Context, q Querier, userID int64, heroID stri
 	return nil
 }
 
-// UnlockSkill spends 1 of heroID's skill_points on skillKey - fails if
-// the hero doesn't have a free point, the node doesn't exist, doesn't
-// match the hero's own faction, or is already unlocked.
 func UnlockSkill(ctx context.Context, q Querier, heroID, faction, skillKey string) error {
 	node, ok := NodeByKey(skillKey)
 	if !ok || node.Faction != faction {
@@ -209,11 +160,6 @@ func UnlockSkill(ctx context.Context, q Querier, heroID, faction, skillKey strin
 	return err
 }
 
-// TrainingCostMultiplier and HealCostMultiplier sum every unlocked
-// skill's percentage effect of the matching EffectType into a single
-// multiplier (e.g. two -10% nodes unlocked = 0.80, with a 20% cost
-// floor so stacking discounts can't reach zero or negative) - hero.go's
-// "train"/"heal" actions call these before charging their resource cost.
 func TrainingCostMultiplier(ctx context.Context, q Querier, heroID string) float64 {
 	return costMultiplier(ctx, q, heroID, EffectTrainingCostPct)
 }
@@ -225,16 +171,12 @@ func HealCostMultiplier(ctx context.Context, q Querier, heroID string) float64 {
 func costMultiplier(ctx context.Context, q Querier, heroID string, effect EffectType) float64 {
 	total := sumUnlockedEffect(ctx, q, heroID, effect)
 	multiplier := 1.0 + total/100.0
-	if multiplier < 0.2 { // never let stacked discounts drop below a 20% floor
+	if multiplier < 0.2 {
 		multiplier = 0.2
 	}
 	return multiplier
 }
 
-// ResourceBonusPctFor sums every unlocked skill's EffectResourceGenPct
-// for campID's hero - resource.go reads this at the exact same call
-// site gear.ResourceBonusPctFor and Phase 2's Bloom multiplier already
-// use, stacking with (not replacing) either.
 func ResourceBonusPctFor(ctx context.Context, q Querier, campID string) float64 {
 	var heroID string
 	if err := q.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID); err != nil {
@@ -261,14 +203,6 @@ func sumUnlockedEffect(ctx context.Context, q Querier, heroID string, effect Eff
 	return total
 }
 
-// EquipToHero marks a player_gear row as the hero's equipped item -
-// like gear.Equip, but on the separate equipped_by_hero column, so the
-// same physical item can be equipped at the camp level (gear.Equip)
-// and to the hero (this function) independently, or neither, or both.
-// A hero has exactly one hero-equipped item total (not per-slot -
-// simpler than the camp's 3-slot model, since a hero is one
-// combatant, not a squad), so equipping a new item here unequips
-// whatever the hero had before.
 func EquipToHero(ctx context.Context, q Querier, campID, gearKey string) error {
 	var quantity int
 	if err := q.QueryRowContext(ctx, "SELECT quantity FROM player_gear WHERE encampment_id = $1 AND gear_key = $2", campID, gearKey).Scan(&quantity); err != nil || quantity <= 0 {
@@ -281,13 +215,6 @@ func EquipToHero(ctx context.Context, q Querier, campID, gearKey string) error {
 	return err
 }
 
-// HeroXPBonusPct returns the hero-equipped item's XP-gain bonus for
-// campID (0 if nothing is hero-equipped) - hero.go's "train" action
-// applies this to the +20 XP a training action grants. defByKey lets
-// the caller supply gear.ByKey without this package importing gear
-// directly (avoids a two-way dependency between the two packages;
-// hero.go, which already imports both, is the natural place to wire
-// them together).
 func HeroXPBonusPct(ctx context.Context, q Querier, campID string, defByKey func(string) (float64, bool)) float64 {
 	var gearKey string
 	if err := q.QueryRowContext(ctx, "SELECT gear_key FROM player_gear WHERE encampment_id = $1 AND equipped_by_hero = TRUE", campID).Scan(&gearKey); err != nil {

@@ -11,9 +11,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// MerchantHandler is the panel/purchase side of
-// RARE_WORLD_FEATURES_PLAN.md Phase 4 - the tick.Engine side
-// (spawn/expire) lives in internal/engine/tick/wanderingmerchant.go.
 type MerchantHandler struct {
 	DB *sql.DB
 }
@@ -22,9 +19,6 @@ func NewMerchantHandler(db *sql.DB) *MerchantHandler {
 	return &MerchantHandler{DB: db}
 }
 
-// HandleMerchantPanel (/merchant) shows the Wandering Merchant's
-// current live offers, if any, as a Rich Message table with a Buy
-// button per offer, or a "not in range right now" state.
 func (h *MerchantHandler) HandleMerchantPanel(c telebot.Context) error {
 	_ = c.Notify(telebot.Typing)
 	ctx := context.Background()
@@ -78,13 +72,6 @@ func (h *MerchantHandler) HandleMerchantPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// doBuyMerchantOffer is the testable core behind HandleMerchantBuyCallback.
-// Transactional, FOR UPDATE-locked exactly like doBuyListingQty in
-// exchange.go: checks purchased_by IS NULL AND not expired, checks/
-// deducts the buyer's dollars, credits the resource (storage-cap
-// clamped), marks purchased_by/purchased_at. No counterparty payout -
-// there's no seller, so unlike the player market this only ever
-// touches the buyer's own resources.
 func (h *MerchantHandler) doBuyMerchantOffer(ctx context.Context, myCampID, offerID string) (string, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -143,8 +130,6 @@ func (h *MerchantHandler) doBuyMerchantOffer(ctx context.Context, myCampID, offe
 		htmlBold("BARGAIN SECURED!"), htmlCode(fmt.Sprintf("%d", qty)), itemType, htmlCode(fmt.Sprintf("$%.0f", price))), nil
 }
 
-// HandleMerchantBuyCallback fires when a player taps a Buy button on
-// HandleMerchantPanel.
 func (h *MerchantHandler) HandleMerchantBuyCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

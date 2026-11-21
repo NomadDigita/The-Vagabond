@@ -11,11 +11,6 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// GovernorHandler exposes Phase B (AI Planet Governor) to players.
-// Command names (/governor, /governor_autopilot) are new and cannot
-// collide with any SpaceHunt phase 1-6 command. Callback unique names
-// (gov_refresh, gov_toggle_autopilot) follow the same convention as
-// existing inline buttons in internal/bot/handlers/combat.go.
 type GovernorHandler struct {
 	Governor *governor.Governor
 }
@@ -24,12 +19,9 @@ func NewGovernorHandler(g *governor.Governor) *GovernorHandler {
 	return &GovernorHandler{Governor: g}
 }
 
-// buildGovernorKeyboard renders the inline keyboard attached to every
-// Governor report: a refresh button, and an autopilot toggle whose
-// label reflects the player's current stored preference.
 func (h *GovernorHandler) buildGovernorKeyboard(ctx context.Context, userID int64) *telebot.ReplyMarkup {
 	selector := &telebot.ReplyMarkup{}
-	autopilotOn, _ := h.Governor.AutopilotSetting(ctx, userID) // best-effort; defaults to OFF-label on error
+	autopilotOn, _ := h.Governor.AutopilotSetting(ctx, userID)
 
 	toggleLabel := "🛠️ Autopilot: OFF (tap to enable preference)"
 	if autopilotOn {
@@ -42,9 +34,6 @@ func (h *GovernorHandler) buildGovernorKeyboard(ctx context.Context, userID int6
 	return selector
 }
 
-// renderGovernorReport runs a fresh recommendation and returns the
-// formatted text plus its attached keyboard, shared by the /governor
-// command and the refresh callback so the two can never drift apart.
 func (h *GovernorHandler) renderGovernorReport(ctx context.Context, userID int64) (string, *telebot.ReplyMarkup, error) {
 	rec, err := h.Governor.Recommend(ctx, userID)
 	if err != nil {
@@ -53,12 +42,6 @@ func (h *GovernorHandler) renderGovernorReport(ctx context.Context, userID int64
 	return governor.FormatForTelegram(rec), h.buildGovernorKeyboard(ctx, userID), nil
 }
 
-// ── /governor ────────────────────────────────────────────────────────
-//
-// Fetches the player's current base state, asks the AI Foundation for
-// a recommendation, and shows it with a refresh + autopilot-preference
-// keyboard. Read-only: never builds, upgrades, or queues anything on
-// the player's behalf.
 func (h *GovernorHandler) HandleGovernor(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -78,12 +61,6 @@ func (h *GovernorHandler) HandleGovernor(c telebot.Context) error {
 	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdvisorsNavigation())
 }
 
-// ── callback: gov_refresh ────────────────────────────────────────────
-//
-// Re-runs the same analysis on demand and posts a fresh report. This
-// makes a new AI Foundation call each tap (subject to the same
-// cost/cache/budget rules as any other call — see internal/ai.Service),
-// so it is a real re-analysis, not a cached replay of the same text.
 func (h *GovernorHandler) HandleGovernorRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -103,13 +80,6 @@ func (h *GovernorHandler) HandleGovernorRefreshCallback(c telebot.Context) error
 	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
-// ── callback: gov_toggle_autopilot ──────────────────────────────────
-//
-// Flips the player's stored autopilot preference and re-sends the
-// keyboard with an updated label. Per governor.SetAutopilot's doc
-// comment, this preference is not currently acted upon by any code
-// path — the callback response says so explicitly so the tap can
-// never be mistaken for enabling real automation.
 func (h *GovernorHandler) HandleGovernorToggleCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -140,11 +110,6 @@ func (h *GovernorHandler) HandleGovernorToggleCallback(c telebot.Context) error 
 	), h.buildGovernorKeyboard(ctx, sender.ID))
 }
 
-// ── /governor_autopilot <on|off> ─────────────────────────────────────
-//
-// Text-command equivalent of the toggle button, for players who prefer
-// typing a command over tapping. Intentionally does NOT cause any
-// autonomous action yet (see PROJECT_MASTER_PLAN.md §4).
 func (h *GovernorHandler) HandleGovernorAutopilot(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

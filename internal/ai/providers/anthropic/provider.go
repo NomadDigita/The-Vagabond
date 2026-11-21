@@ -1,6 +1,3 @@
-// Package anthropic implements ai.Provider against Anthropic's public
-// Messages API (https://api.anthropic.com/v1/messages). It has zero
-// dependency on internal/bot or internal/engine.
 package anthropic
 
 import (
@@ -18,16 +15,12 @@ import (
 const apiURL = "https://api.anthropic.com/v1/messages"
 const apiVersion = "2023-06-01"
 
-// Provider implements ai.Provider against Anthropic's Messages API.
 type Provider struct {
 	APIKey       string
 	DefaultModel string
 	HTTPClient   *http.Client
 }
 
-// New builds an Anthropic provider. apiKey may be empty (e.g. read
-// from an unset environment variable); Available() will correctly
-// report false in that case rather than the caller needing to check.
 func New(apiKey, defaultModel string) *Provider {
 	if defaultModel == "" {
 		defaultModel = "claude-sonnet-4-6"
@@ -41,8 +34,6 @@ func New(apiKey, defaultModel string) *Provider {
 
 func (p *Provider) Name() string    { return "anthropic" }
 func (p *Provider) Available() bool { return p.APIKey != "" }
-
-// wire types mirror the Anthropic Messages API request/response shape.
 
 type wireMessage struct {
 	Role    string `json:"role"`
@@ -114,14 +105,10 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 	for _, m := range req.Messages {
 		role := string(m.Role)
 		if role == string(ai.RoleTool) {
-			// Anthropic has no bare "tool" role at this layer; encode
-			// tool results as a user turn labelled by name so context
-			// is preserved without requiring full tool_result blocks
-			// for this foundational version.
 			role = "user"
 		}
 		if role != "user" && role != "assistant" {
-			continue // system is sent via the top-level System field
+			continue
 		}
 		wr.Messages = append(wr.Messages, wireMessage{Role: role, Content: m.Content})
 	}

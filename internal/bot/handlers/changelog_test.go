@@ -7,12 +7,6 @@ import (
 	"testing"
 )
 
-// changelogTestDB wraps rankingTestDB with an extra truncate for the
-// two changelog tables, which aren't covered by rankingTestDB's own
-// TRUNCATE list (no FK to users/encampments to cascade from) - needed
-// here specifically because these tests depend on exact ordering and
-// counts, unlike most other tests in this package which just filter by
-// a known seeded ID and don't care what else is in the table.
 func changelogTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := rankingTestDB(t)
@@ -31,8 +25,6 @@ func seedChangelogEntry(t *testing.T, db *sql.DB, category, title, body string) 
 	return id
 }
 
-// TestDoPublishChangelog_StoresAndBroadcastsToEveryPlayer is the direct
-// test for the "dispatch it to users" half of the milestone 2 ask.
 func TestDoPublishChangelog_StoresAndBroadcastsToEveryPlayer(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -61,9 +53,6 @@ func TestDoPublishChangelog_StoresAndBroadcastsToEveryPlayer(t *testing.T) {
 	}
 }
 
-// TestDoPublishChangelog_RejectsInvalidCategory verifies the category
-// allow-list (feature/fix/balance) is enforced before anything is
-// stored or broadcast.
 func TestDoPublishChangelog_RejectsInvalidCategory(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -80,8 +69,6 @@ func TestDoPublishChangelog_RejectsInvalidCategory(t *testing.T) {
 	}
 }
 
-// TestDoPublishChangelog_RejectsEmptyTitleOrBody verifies both required
-// fields are checked.
 func TestDoPublishChangelog_RejectsEmptyTitleOrBody(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -95,9 +82,6 @@ func TestDoPublishChangelog_RejectsEmptyTitleOrBody(t *testing.T) {
 	}
 }
 
-// TestFetchChangelogPage_ReturnsOldestUnreadFirst is the direct test
-// for the plan doc's core design choice: a player with a backlog sees
-// the oldest entries first, catching up in chronological order.
 func TestFetchChangelogPage_ReturnsOldestUnreadFirst(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -126,9 +110,6 @@ func TestFetchChangelogPage_ReturnsOldestUnreadFirst(t *testing.T) {
 	}
 }
 
-// TestFetchChangelogPage_FallsBackToMostRecentWhenCaughtUp verifies the
-// one deliberate deviation from the plan's literal "oldest" instruction:
-// once nothing is unread, show the most recent entries instead.
 func TestFetchChangelogPage_FallsBackToMostRecentWhenCaughtUp(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -138,7 +119,6 @@ func TestFetchChangelogPage_FallsBackToMostRecentWhenCaughtUp(t *testing.T) {
 	newest := seedChangelogEntry(t, db, "fix", "Fresh News", "Also already read.")
 
 	h := &ChangelogHandler{DB: db}
-	// Mark everything read first, simulating a player who's caught up.
 	if _, err := db.Exec("INSERT INTO changelog_reads (user_id, entry_id) SELECT 9904, id FROM changelog_entries"); err != nil {
 		t.Fatalf("seeding reads: %v", err)
 	}
@@ -158,9 +138,6 @@ func TestFetchChangelogPage_FallsBackToMostRecentWhenCaughtUp(t *testing.T) {
 	}
 }
 
-// TestHandleChangelogPanel_MarksEntriesReadOnView verifies the
-// mark-as-read-on-view behavior end to end: viewing a page of unread
-// entries clears them from the next page's unread query.
 func TestHandleChangelogPanel_MarksEntriesReadOnView(t *testing.T) {
 	db := changelogTestDB(t)
 	ctx := context.Background()
@@ -188,8 +165,6 @@ func TestHandleChangelogPanel_MarksEntriesReadOnView(t *testing.T) {
 	}
 }
 
-// TestRenderChangelogText_ShowsCatchUpNoticeWhenAppropriate is a small
-// unit test for the pure rendering function.
 func TestRenderChangelogText_ShowsCatchUpNoticeWhenAppropriate(t *testing.T) {
 	entries := []changelogEntry{{id: "1", category: "feature", title: "Something New"}}
 
@@ -204,8 +179,6 @@ func TestRenderChangelogText_ShowsCatchUpNoticeWhenAppropriate(t *testing.T) {
 	}
 }
 
-// TestHandlePublishChangelogPendingInput_RequiresThreeLines verifies
-// the guided-input format parsing used by the admin panel's flow.
 func TestHandlePublishChangelogPendingInput_ParsesThreeLineFormat(t *testing.T) {
 	lines := strings.SplitN("feature\nMy Title\nMy body text here.", "\n", 3)
 	if len(lines) != 3 {

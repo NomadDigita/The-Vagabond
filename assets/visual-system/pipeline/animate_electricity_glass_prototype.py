@@ -122,9 +122,6 @@ for i in range(N_FRAMES):
     star2_op = max(0, math.sin(2*math.pi*(t*1.0 + 0.4)))**3
     star3_op = max(0, math.sin(2*math.pi*(t*1.0 + 0.75)))**3
 
-    # Refraction band: sweeps diagonally across the bolt once per loop.
-    # Travels well outside the 0-100 viewbox on either side so it enters/
-    # exits cleanly rather than popping in/out abruptly.
     band_offset = -60 + t * 160
 
     body = f'''

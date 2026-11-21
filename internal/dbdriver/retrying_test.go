@@ -9,9 +9,6 @@ import (
 	"github.com/lib/pq"
 )
 
-// fakeConn is a minimal driver.Conn + QueryerContext/ExecerContext
-// stub standing in for lib/pq's real *pq.conn, so these tests don't
-// need a live Postgres/PgBouncer to prove the translation logic.
 type fakeConn struct {
 	queryErr error
 	execErr  error
@@ -63,10 +60,6 @@ func TestExecContext_TranslatesPoolerArtifactToErrBadConn(t *testing.T) {
 	}
 }
 
-// A genuinely different Postgres error (e.g. a unique constraint
-// violation) must reach the caller unchanged — retrying it would just
-// reproduce the same failure and, worse, would mask a real bug behind
-// a silent retry.
 func TestQueryContext_PassesThroughUnrelatedPqErrors(t *testing.T) {
 	original := &pq.Error{Code: "23505", Message: "duplicate key value violates unique constraint"}
 	underlying := &fakeConn{queryErr: original}
@@ -81,8 +74,6 @@ func TestQueryContext_PassesThroughUnrelatedPqErrors(t *testing.T) {
 	}
 }
 
-// A non-pq error (e.g. a context deadline) is not a pooler artifact
-// either and must also pass through untouched.
 func TestQueryContext_PassesThroughNonPqErrors(t *testing.T) {
 	original := context.DeadlineExceeded
 	underlying := &fakeConn{queryErr: original}

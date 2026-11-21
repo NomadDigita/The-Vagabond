@@ -1,11 +1,3 @@
--- ==============================================================================
--- THE VAGABOND - MMO LOGISTICS HARDENING: STAGED TRANSPORTS + FORCE RECOVERY
--- (029_mmo_transport_staging_and_force_recovery.sql)
--- DB Engine: PostgreSQL (Supabase)
---
--- Transport vehicles must be in a campaign column, not merely owned at home.
--- Matching idempotent statements are in cmd/bot/main.go.
--- ==============================================================================
 
 ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS haulers INT DEFAULT 0;
 ALTER TABLE campaign_drafts ADD COLUMN IF NOT EXISTS tankers INT DEFAULT 0;

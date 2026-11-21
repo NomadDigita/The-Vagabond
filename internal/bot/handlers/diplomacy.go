@@ -18,9 +18,6 @@ func NewDiplomacyHandler(db *sql.DB) *DiplomacyHandler {
 	return &DiplomacyHandler{DB: db}
 }
 
-// getMyClanForDiplomacy mirrors federation.go's private getMyClan helper
-// (can't call that one directly - it's a method on *FederationHandler,
-// a different receiver type).
 func (h *DiplomacyHandler) getMyClanForDiplomacy(ctx context.Context, userID int64) (clanID string, clanName string, isLeader bool, err error) {
 	var leaderID int64
 	err = h.DB.QueryRowContext(ctx, `
@@ -41,8 +38,6 @@ func pactLabel(pactType string) string {
 	return "🕊️ Non-Aggression Pact"
 }
 
-// HandleDiplomacyPanel (/diplomacy) lists this Clan's active pacts and
-// any pending proposals awaiting a response.
 func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -73,11 +68,6 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 
 	selector := &telebot.ReplyMarkup{}
 	var buttons []telebot.Row
-	// Same pattern as combat.go's Road Contact prompts: a pact response
-	// is a real accept-vs-reject decision, so it gets pulled out of the
-	// shared panel keyboard and sent as its own colored message below
-	// (see keyboards/styled.go) instead of an unstyled button mixed into
-	// the panel.
 	type pactPrompt struct {
 		text   string
 		accept keyboards.StyledBtn
@@ -98,7 +88,6 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 			hasActive = true
 			activeText += fmt.Sprintf("%s with %s\n", pactLabel(pactType), safeOtherName)
 		} else {
-			// Pending: only the RECEIVING Clan Leader (not the proposer) gets accept/reject buttons.
 			isRecipient := (clanAID == clanID && proposedBy != sender.ID) || (clanBID == clanID && proposedBy != sender.ID)
 			pendingText += fmt.Sprintf("%s proposed by %s\n", pactLabel(pactType), safeOtherName)
 			if isRecipient && isLeader {
@@ -140,8 +129,6 @@ func (h *DiplomacyHandler) HandleDiplomacyPanel(c telebot.Context) error {
 	return nil
 }
 
-// proposePact handles both /ally and /nap - they differ only in
-// pactType, so the actual proposal logic is shared.
 func (h *DiplomacyHandler) proposePact(c telebot.Context, pactType string) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -193,18 +180,14 @@ func (h *DiplomacyHandler) proposePact(c telebot.Context, pactType string) error
 		htmlEscape(myClanName), pactLabel(pactType), htmlEscape(targetName), htmlCode("/diplomacy")), telebot.ModeHTML)
 }
 
-// HandleProposeAlliance (/ally [clan_name])
 func (h *DiplomacyHandler) HandleProposeAlliance(c telebot.Context) error {
 	return h.proposePact(c, "alliance")
 }
 
-// HandleProposeNAP (/nap [clan_name])
 func (h *DiplomacyHandler) HandleProposeNAP(c telebot.Context) error {
 	return h.proposePact(c, "nap")
 }
 
-// HandleDiplomacyRespondCallback fires when the receiving Clan Leader taps
-// Accept/Reject on a pending proposal from /diplomacy.
 func (h *DiplomacyHandler) HandleDiplomacyRespondCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -250,8 +233,6 @@ func (h *DiplomacyHandler) HandleDiplomacyRespondCallback(c telebot.Context) err
 	return h.HandleDiplomacyPanel(c)
 }
 
-// HandleBreakPact (/break_pact [clan_name]) lets either Clan Leader end an
-// active pact unilaterally - diplomacy shouldn't be a permanent trap.
 func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -292,16 +273,10 @@ func (h *DiplomacyHandler) HandleBreakPact(c telebot.Context) error {
 	return c.Send(fmt.Sprintf("🕊️💔 Diplomatic pact with %s has been broken. Raids between your Clans are no longer blocked.", htmlEscape(targetName)), telebot.ModeHTML, keyboards.EconomyNavigation())
 }
 
-// pactQueryer is satisfied by both *sql.DB and *sql.Tx, so combat.go's
-// raid-launch check (already inside a transaction) and any future
-// caller outside one can both use HasActivePact.
 type pactQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// HasActivePact reports whether two Clans currently have an active
-// alliance or non-aggression pact - used by combat.go's raid launch to
-// block attacks between diplomatically protected Clans.
 func HasActivePact(ctx context.Context, q pactQueryer, clanAID, clanBID string) bool {
 	if clanAID == "" || clanBID == "" || clanAID == clanBID {
 		return false

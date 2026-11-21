@@ -5,14 +5,6 @@ import (
 	"testing"
 )
 
-// TestRecordFailedAttempt_GivesUpAfterMaxAttempts is a regression test
-// for a real, reported bug: a permanently-undeliverable notification
-// (blocked bot, malformed HTML, oversized message, stale chat) used to
-// retry forever with no limit. Since drainQueue polls a fixed LIMIT 10
-// oldest-first batch, enough such stuck rows would occupy every slot in
-// every future batch and starve every genuinely new notification behind
-// them - for any player, any feature, not just the one that can't
-// receive messages. This verifies the give-up-after-N-attempts fix.
 func TestRecordFailedAttempt_GivesUpAfterMaxAttempts(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -40,7 +32,6 @@ func TestRecordFailedAttempt_GivesUpAfterMaxAttempts(t *testing.T) {
 		}
 	}
 
-	// The maxNotificationAttempts-th failure should trigger give-up.
 	gaveUp, err := recordFailedAttempt(ctx, db, id)
 	if err != nil {
 		t.Fatalf("recordFailedAttempt (final attempt): %v", err)
@@ -62,11 +53,6 @@ func TestRecordFailedAttempt_GivesUpAfterMaxAttempts(t *testing.T) {
 	}
 }
 
-// TestRecordFailedAttempt_DoesNotAffectOtherNotifications proves the fix
-// is scoped to the specific failing row: a healthy, still-pending
-// notification for a different message must be untouched by another
-// notification's failures - this is what stops one poison message from
-// blocking everything else once the give-up logic is in place.
 func TestRecordFailedAttempt_DoesNotAffectOtherNotifications(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

@@ -1,16 +1,3 @@
-// This file implements balance-suggestion tooling: real unit
-// usage/outcome statistics from completed raids, with AI commentary
-// on what they might imply for game balance.
-//
-// Honesty boundary, stated up front because it matters: these are
-// CORRELATIONAL statistics from real games, not a controlled
-// experiment. A unit showing a high "win rate when used" could mean
-// the unit is strong, or could just mean stronger/more experienced
-// players happen to favor it — the data alone can't tell those apart.
-// SystemPrompt instructs the model to flag this explicitly rather than
-// hand admins a false sense of causal certainty. This mirrors the
-// project's existing discipline (ADR-017/018/019) of never presenting
-// a proxy or a correlation as more certain than it actually is.
 package devconsole
 
 import (
@@ -22,62 +9,43 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// mobilizableUnitColumns are raid_forces' own mobilized-count columns
-// — a fixed, hardcoded list (never derived from user or model input),
-// so building a column name into SQL here carries no injection risk.
 var mobilizableUnitColumns = []string{
 	"soldiers_mobilized", "mechs_mobilized", "buggies_mobilized",
 	"destroyers_mobilized", "bombers_mobilized", "battlecruisers_mobilized",
 	"deathstars_mobilized", "liberators_mobilized", "wraiths_mobilized",
 }
 
-// UnitUsageStat is one unit type's real usage/outcome correlation
-// across completed raids in the reporting window.
 type UnitUsageStat struct {
 	Unit                    string
 	TotalCompletedRaids     int
 	RaidsUsedIn             int
 	UsageRatePercent        float64
-	ApparentWinRateWhenUsed float64 // 0 if RaidsUsedIn is 0 — see BuildBalanceSnapshot
+	ApparentWinRateWhenUsed float64
 }
 
-// BalanceSnapshot is everything fed to the model for one balance
-// commentary pass.
 type BalanceSnapshot struct {
 	WindowDays int
 	Units      []UnitUsageStat
 }
 
-// UnitNote is the model's per-unit commentary.
 type UnitNote struct {
 	Unit        string `json:"unit"`
 	Observation string `json:"observation"`
 	Caution     string `json:"caution"`
 }
 
-// BalanceRecommendation is the Developer Console's structured output
-// for a balance-commentary pass.
 type BalanceRecommendation struct {
 	Summary          string     `json:"summary"`
 	UnitNotes        []UnitNote `json:"unit_notes"`
 	RecommendedFocus string     `json:"recommended_focus"`
 	Notes            string     `json:"notes"`
 
-	// Snapshot is the real, deterministic usage/outcome data this
-	// pass was built from - not model output, so it's set by
-	// RecommendBalance after parsing rather than unmarshaled from
-	// JSON. FormatBalanceForTelegram uses it to render an actual
-	// numeric table (real percentages) with the model's UnitNotes
-	// shown as commentary alongside it, rather than asking the model
-	// to reproduce numbers it was only ever supposed to reason about.
 	Snapshot *BalanceSnapshot `json:"-"`
 
 	FellBackToRawText bool
 	Truncated         bool
 }
 
-// BalanceSystemPrompt is the fixed instruction for the balance-
-// commentary call.
 const BalanceSystemPrompt = `You are the AI Developer Console for The Vagabond, giving admins balance commentary based on real unit usage/outcome statistics from completed raids. You NEVER take any action yourself — you only observe and suggest what's worth investigating.
 
 Critical epistemic rule: this data is CORRELATIONAL, not a controlled experiment. A unit with a high apparent win rate when used could mean the unit is strong, OR could simply mean stronger/more experienced players happen to favor it — you cannot tell these apart from this data alone. NEVER state a unit is "overpowered" or "underpowered" as a fact. Always frame observations as "worth investigating" or "a pattern worth a closer look," never as a verdict.
@@ -123,23 +91,6 @@ func ParseBalanceRecommendation(text string, stopReason string) *BalanceRecommen
 	return &BalanceRecommendation{Summary: text, FellBackToRawText: true, Truncated: ai.WasTruncated(text) || ai.IsTruncatedStopReason(stopReason)}
 }
 
-// FormatBalanceForTelegram renders a BalanceRecommendation as a
-// Telegram HTML-mode message. This was plain, unformatted text until
-// the 2026-08-01 UI pass below - it's the one AI Developer Console
-// report the original HTML polish campaign (see
-// BUGS_AND_INCONSISTENCIES.md waves 1-11) never reached, which is why
-// it still looked like a flat wall of text next to every other panel
-// in the game. All model-generated fields are escaped via
-// ai.HTMLEscape before being wrapped in a tag.
-//
-// Design choice worth stating explicitly: the unit table below is
-// built from rec.Snapshot's real UnitUsageStat numbers, not from the
-// model's UnitNotes text. The model was only ever asked to comment on
-// the data, not to reproduce it - rendering the real percentages
-// ourselves and showing the model's commentary as clearly-labeled
-// prose alongside it keeps the ground-truth numbers and the AI's
-// interpretation of them visually distinct, rather than trusting an
-// LLM to transcribe a number correctly into a table cell.
 func FormatBalanceForTelegram(rec *BalanceRecommendation) string {
 	var b strings.Builder
 	b.WriteString("⚖️ " + ai.HTMLBold("AI DEVELOPER CONSOLE — BALANCE COMMENTARY") + "\n\n")
@@ -162,7 +113,7 @@ func FormatBalanceForTelegram(rec *BalanceRecommendation) string {
 		for _, u := range rec.Snapshot.Units {
 			winCell := fmt.Sprintf("%.0f", u.ApparentWinRateWhenUsed)
 			if u.RaidsUsedIn == 0 {
-				winCell = "—" // no deployments this window - a real 0% win rate would be misleading here
+				winCell = "—"
 			}
 			rows = append(rows, []string{u.Unit, fmt.Sprintf("%.0f", u.UsageRatePercent), winCell})
 		}
@@ -192,13 +143,6 @@ func FormatBalanceForTelegram(rec *BalanceRecommendation) string {
 	return b.String()
 }
 
-// BuildBalanceSnapshot computes real usage/outcome correlations for
-// every mobilizable unit type across completed raids in the last
-// windowDays days. "Apparent win" reuses the same stolen-resources
-// heuristic already established for the attacker side in
-// fleetcommander.BuildCombatHistory and battleanalyst — see those
-// packages' own doc comments for why it's a proxy, not an
-// authoritative outcome column.
 func (co *Console) BuildBalanceSnapshot(ctx context.Context, windowDays int) (*BalanceSnapshot, error) {
 	since := windowSince(windowDays)
 	s := &BalanceSnapshot{WindowDays: windowDays}
@@ -235,12 +179,6 @@ func (co *Console) BuildBalanceSnapshot(ctx context.Context, windowDays int) (*B
 	return s, nil
 }
 
-// RecommendBalance produces a fresh AI balance-commentary pass for the
-// last windowDays days. It stores both turns in ai_memory under its
-// own scope, distinct from the weekly-report and NL-query scopes.
-//
-// Read-only: nothing in this method changes any unit, cost, or game
-// setting — it only reads and comments.
 func (co *Console) RecommendBalance(ctx context.Context, callerUserID int64, windowDays int) (*BalanceRecommendation, error) {
 	snapshot, err := co.BuildBalanceSnapshot(ctx, windowDays)
 	if err != nil {

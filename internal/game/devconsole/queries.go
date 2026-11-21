@@ -9,24 +9,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/game/scoring"
 )
 
-// ── Safety model for natural-language admin queries ──────────────────
-//
-// The model NEVER writes or sees raw SQL, and nothing it outputs is
-// ever concatenated into a query. Instead: the model picks one name
-// from queryIntents (a fixed whitelist) plus a small number of
-// bounded, validated integer parameters (see clampDays/clampLimit in
-// nlquery.go); this file maps that choice to one specific, already-
-// written parameterized query and executes it. An admin asking "drop
-// all users" or "run this SQL: ..." has no path to actually doing
-// that — the worst a malicious or confused free-text question can do
-// is select an intent from this list, which are all read-only by
-// construction (every query below is a SELECT). This mirrors the
-// discipline used throughout the AI Systems Roadmap of never letting
-// model output become a code/query path — see ADR-019 and this
-// package's own doc comment for why Phase J stayed deliberately
-// narrow, and this file's addition is the one place that narrowness
-// gets safely widened: more READ-ONLY intents, never open-ended
-// execution.
 var queryIntents = map[string]string{
 	"new_players":      "Recent player signups: name, username, join time, home continent.",
 	"top_players":      "Top players by the same score formula the Global Ranking panel uses.",
@@ -38,10 +20,6 @@ var queryIntents = map[string]string{
 	"world_state":      "Current world event (if any) on each of the four continents.",
 	"recent_news":      "Most recent sector news headlines.",
 
-	// Phase 7 milestone 3: "Add admin/dev-console metrics for discovery
-	// rate, travel delays, stranded armies, convoy outcomes, field-battle
-	// frequency, AI growth, loot mix, Crystal flow, and speed-up
-	// expenditure." All nine, added together since they're one milestone.
 	"discovery_rate":         "How many bases/expeditions were discovered in a window, broken down by discovery method (route contact vs. exploration vs. recon).",
 	"travel_delays":          "Snapshot of how many currently-marching columns are halted right now and why (weather camp, road encounter, out of supplies).",
 	"stranded_armies":        "Count and list of columns currently out of supplies and awaiting a resupply convoy or retreat order.",
@@ -53,9 +31,6 @@ var queryIntents = map[string]string{
 	"speedup_expenditure":    "Count and total resource cost of emergency speed-ups and early camp-breaks used in a window (logging started with this feature - no data before it shipped).",
 }
 
-// IntentDescriptions renders the whitelist for the classification
-// prompt (see nlquery.go's SystemPrompt) — keeping the human-readable
-// description next to the map above means they can't drift apart.
 func IntentDescriptions() string {
 	var out string
 	for _, name := range []string{"new_players", "top_players", "active_users", "totals", "economy_snapshot", "combat_stats", "clan_stats", "world_state", "recent_news",
@@ -65,19 +40,11 @@ func IntentDescriptions() string {
 	return out
 }
 
-// IsKnownIntent reports whether name is in the whitelist. Any name the
-// model returns that isn't in this list is rejected outright by
-// nlquery.go, never executed as a fallback guess.
 func IsKnownIntent(name string) bool {
 	_, ok := queryIntents[name]
 	return ok
 }
 
-// RunIntent executes exactly one whitelisted, already-parameterized
-// query and renders the result as a plain-text data block for the
-// model's second (answer) call. days and limit are pre-validated by
-// the caller (see clampDays/clampLimit in nlquery.go) before reaching
-// here.
 func (co *Console) RunIntent(ctx context.Context, intent string, days, limit int) (string, error) {
 	switch intent {
 	case "new_players":
@@ -131,7 +98,7 @@ func (co *Console) RunIntent(ctx context.Context, intent string, days, limit int
 		if err := co.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM encampments`).Scan(&camps); err != nil {
 			return "", fmt.Errorf("devconsole: run totals (encampments): %w", err)
 		}
-		_ = co.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM clans`).Scan(&clans) // clans table may not exist on older schemas; ignore error
+		_ = co.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM clans`).Scan(&clans)
 		return fmt.Sprintf("All-time totals: %d users, %d encampments, %d clans\n", users, camps, clans), nil
 
 	case "economy_snapshot":
@@ -363,17 +330,10 @@ func (co *Console) RunIntent(ctx context.Context, intent string, days, limit int
 			days, count, scrap, dollars, crystal), nil
 
 	default:
-		// Unreachable in practice — nlquery.go rejects unknown
-		// intents before calling RunIntent — but fail closed rather
-		// than execute anything if it ever is.
 		return "", fmt.Errorf("devconsole: unknown intent %q", intent)
 	}
 }
 
-// buildTopPlayersN and buildRecentNewsN are limit-parameterized
-// variants of BuildSnapshot's fixed-count helpers, added for
-// RunIntent's use without changing the weekly-report path's existing
-// behavior.
 func (co *Console) buildTopPlayersN(ctx context.Context, limit int) ([]TopPlayer, error) {
 	query := fmt.Sprintf(`
 		SELECT e.name, e.level, %s AS score

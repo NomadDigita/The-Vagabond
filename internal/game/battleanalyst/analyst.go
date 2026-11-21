@@ -9,15 +9,10 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from every other Phase B+ scope.
 const MemoryScope = "battle_analyst"
 
-// ErrNoEncampment is returned when the calling player has no
-// registered base yet.
 var ErrNoEncampment = errors.New("battleanalyst: player has no encampment")
 
-// Analyst is the Phase F entry point.
 type Analyst struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -27,9 +22,6 @@ func New(db *sql.DB, service *ai.Service) *Analyst {
 	return &Analyst{DB: db, AI: service}
 }
 
-// BuildSnapshot loads a player's full combat record: completed raids
-// as attacker, completed raids as defender, and arena battles matched
-// by their current username.
 func (a *Analyst) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, error) {
 	var s Snapshot
 	var username string
@@ -66,12 +58,6 @@ func (a *Analyst) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, e
 	return &s, nil
 }
 
-// buildAttackerStats mirrors fleetcommander.BuildCombatHistory's exact
-// query and "apparent win" heuristic (stolen resources > 0), extended
-// here to also total the stolen value itself. Kept as an independent
-// query rather than calling into fleetcommander — this package has no
-// dependency on fleetcommander per the usual per-package isolation
-// trade-off already documented in researchplanner's doc comment.
 func (a *Analyst) buildAttackerStats(ctx context.Context, encampmentID string) (RaidStats, error) {
 	rows, err := a.DB.QueryContext(ctx, `
 		SELECT attacker_losses, (stolen_scrap + stolen_metal + stolen_crystal) AS stolen_value
@@ -105,9 +91,6 @@ func (a *Analyst) buildAttackerStats(ctx context.Context, encampmentID string) (
 	return stats, nil
 }
 
-// buildDefenderStats reads the same raids table from the opposite
-// side. "Apparent win" for a defender is the inverse heuristic: the
-// attacker walked away with nothing stolen, meaning the defense held.
 func (a *Analyst) buildDefenderStats(ctx context.Context, encampmentID string) (RaidStats, error) {
 	rows, err := a.DB.QueryContext(ctx, `
 		SELECT defender_losses, (stolen_scrap + stolen_metal + stolen_crystal) AS stolen_value
@@ -140,15 +123,6 @@ func (a *Analyst) buildDefenderStats(ctx context.Context, encampmentID string) (
 	return stats, nil
 }
 
-// buildArenaStats matches arena_battles by the player's *current*
-// username, since that table stores usernames as plain strings rather
-// than a user_id foreign key (see cmd/bot/main.go's CREATE TABLE). A
-// player who changed their Telegram username after a past arena
-// battle will have that older battle silently excluded here — a real,
-// known limitation of the underlying schema, not something this
-// package can work around, and flagged as such in
-// PROJECT_MASTER_PLAN.md's Known Issues (§4) alongside the similar
-// win/loss heuristic already documented for raids.
 func (a *Analyst) buildArenaStats(ctx context.Context, username string) (ArenaStats, error) {
 	var stats ArenaStats
 	if username == "" {
@@ -163,11 +137,6 @@ func (a *Analyst) buildArenaStats(ctx context.Context, username string) (ArenaSt
 	return stats, nil
 }
 
-// Recommend produces a fresh AI analysis of the given player's combat
-// record. It stores both turns in ai_memory under MemoryScope.
-//
-// Read-only: nothing in this method changes any raid, arena battle, or
-// unit — it only reads and summarizes what already happened.
 func (a *Analyst) Recommend(ctx context.Context, userID int64) (*Recommendation, error) {
 	snapshot, err := a.BuildSnapshot(ctx, userID)
 	if err != nil {

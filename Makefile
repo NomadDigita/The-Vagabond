@@ -1,4 +1,4 @@
-.PHONY: all run build test vet fmt fmt-check tidy check clean
+.PHONY: all run build test vet fmt fmt-check tidy comments check clean
 
 all: build
 
@@ -23,10 +23,13 @@ fmt-check:
 		echo "Go files need formatting; run 'make fmt'."; exit 1; \
 	}
 
+comments:
+	go run ./tools/commentlint
+
 tidy:
 	go mod tidy
 
-check: fmt-check test vet
+check: fmt-check comments test vet
 
 clean:
 	rm -rf bin coverage.out

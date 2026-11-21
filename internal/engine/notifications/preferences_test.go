@@ -11,10 +11,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/db/schema"
 )
 
-// testDB applies the full real schema (not a hand-rolled subset) to a
-// throwaway Postgres, so these tests exercise notification_preferences
-// exactly as it's actually defined, not a copy that could quietly drift
-// from the real migration.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("SCHEMA_TEST_DATABASE_URL")
@@ -42,12 +38,6 @@ func seedUser(t *testing.T, db *sql.DB, telegramID int64) {
 	}
 }
 
-// TestMutableCategoriesIsTheOnlyGate is the core safety property Phase 7
-// milestone 2 requires: "without suppressing combat, discovery, or
-// supply-loss alerts". This doesn't touch a database at all - it checks
-// the actual policy object every other test and every call site relies on,
-// so a careless future edit that adds "combat" to the map gets caught
-// here specifically, not just incidentally by some other test failing.
 func TestMutableCategoriesIsTheOnlyGate(t *testing.T) {
 	neverMutable := []string{"general", "combat", "discovery", "supply_loss", "raid", ""}
 	for _, cat := range neverMutable {
@@ -66,10 +56,6 @@ func TestIsCategoryMutedIgnoresNonMutableCategoriesEvenIfPreferenceRowSaysOtherw
 	const uid int64 = 9001
 	seedUser(t, db, uid)
 
-	// Even if some future bug wrote a preference row that a non-mutable
-	// category should be muted, IsCategoryMuted must not honor it - the
-	// MutableCategories check has to happen before any row is even
-	// consulted, per the doc comment on IsCategoryMuted.
 	if _, err := db.Exec("INSERT INTO notification_preferences (user_id, mute_route_status) VALUES ($1, TRUE)", uid); err != nil {
 		t.Fatalf("seeding preference: %v", err)
 	}
@@ -166,8 +152,6 @@ func TestQueueIgnoresMuteForNonMutableCategory(t *testing.T) {
 	ctx := context.Background()
 	const uid int64 = 9006
 	seedUser(t, db, uid)
-	// mute_route_status is irrelevant here - "general" isn't in
-	// MutableCategories at all, so it must always be delivered.
 	if _, err := db.Exec("INSERT INTO notification_preferences (user_id, mute_route_status) VALUES ($1, TRUE)", uid); err != nil {
 		t.Fatalf("muting: %v", err)
 	}

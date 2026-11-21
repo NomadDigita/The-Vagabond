@@ -62,10 +62,6 @@ func TestParseRecommendation_FallsBackOnGarbage(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// (hit MaxTokens) is now distinguished from one that never contained
-// JSON at all, so the player sees a more specific message.
-
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "the target's garrison is`
 	rec := fleetcommander.ParseRecommendation(raw, "")
@@ -88,10 +84,6 @@ func TestFormatForTelegram_TruncatedPath(t *testing.T) {
 		t.Errorf("expected truncation-specific message, got: %s", out)
 	}
 }
-
-// See PROJECT_MASTER_PLAN.md ADR-015 / §1.8 — reproduces a real
-// production failure where prose or a raw newline around/inside an
-// otherwise-valid JSON object made json.Unmarshal fail outright.
 
 func TestParseRecommendation_TrailingProseAroundJSON(t *testing.T) {
 	raw := `{"recommendation": "attack", "confidence": "high", "reasoning": "you outnumber them"}` +
@@ -145,11 +137,6 @@ func TestBuildRogueNestTarget_MatchesContentPackage(t *testing.T) {
 }
 
 func TestBuildRogueNestTarget_IncludesEnrichedDefenseData(t *testing.T) {
-	// Level 20 crosses every enrichment threshold confirmed in
-	// content.RogueNestComposition (turrets, guardians, observers,
-	// integrity tech, shields, and the hero-superpower threshold at
-	// level 20), so this exercises the full enriched path, not just
-	// the legacy Soldiers/Mechs/Drones/Jets fields.
 	target := fleetcommander.BuildRogueNestTarget(20)
 
 	if target.IntegrityTechLvl <= 0 {
@@ -168,8 +155,6 @@ func TestBuildRogueNestTarget_IncludesEnrichedDefenseData(t *testing.T) {
 		t.Errorf("expected a hero superpower to be present at level 20 (the documented threshold), got empty string")
 	}
 
-	// The enriched data must actually reach the rendered prompt, not
-	// just live unused on the struct.
 	prompt := fleetcommander.BuildUserPrompt(fleetcommander.FleetComposition{"soldiers": 100}, target, fleetcommander.CombatHistorySummary{})
 	for _, want := range []string{"Defense Grid", "Integrity Tech level", target.HeroSuperpower} {
 		if !strings.Contains(prompt, want) {

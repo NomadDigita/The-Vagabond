@@ -22,11 +22,6 @@ func TestProvider_Available(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_HappyPath spins up a local HTTP server that
-// mimics the OpenAI Chat Completions response shape and verifies the
-// provider both sends a well-formed request and correctly parses the
-// response — this is a real end-to-end exercise of the wire format,
-// not an assumption that the JSON shapes line up.
 func TestProvider_Complete_HappyPath(t *testing.T) {
 	var capturedBody map[string]any
 
@@ -67,7 +62,6 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 		t.Errorf("unexpected usage: %+v", resp.Usage)
 	}
 
-	// Verify the request we actually sent had the right shape.
 	msgs, ok := capturedBody["messages"].([]any)
 	if !ok || len(msgs) != 2 {
 		t.Fatalf("expected 2 messages (system + user) in request body, got: %+v", capturedBody["messages"])
@@ -78,10 +72,6 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_JSONModeWithoutSystemPrompt verifies the
-// JSON-mode instruction still gets attached even when the caller
-// passed no System prompt at all — this exercises a real edge case
-// (not just the common path where System is always set).
 func TestProvider_Complete_JSONModeWithoutSystemPrompt(t *testing.T) {
 	var capturedBody map[string]any
 
@@ -107,21 +97,11 @@ func TestProvider_Complete_JSONModeWithoutSystemPrompt(t *testing.T) {
 		t.Fatalf("expected at least one message in request body")
 	}
 	firstMsg := msgs[0].(map[string]any)
-	// With no System prompt supplied, the JSON-mode instruction should
-	// still have been added as its own system message rather than
-	// silently dropped.
 	if firstMsg["role"] != "system" {
 		t.Errorf("expected a system message to carry the JSON-mode instruction even with empty System, got first message role %v (body: %+v)", firstMsg["role"], capturedBody)
 	}
 }
 
-// TestProvider_Complete_QwenDisablesThinking guards against the bug
-// where DashScope/Qwen3's default enable_thinking=true silently ate
-// into MaxTokens with hidden reasoning tokens, truncating visible
-// JSON-mode output (e.g. Dev Console balance/weekly reports) well
-// before MaxTokens should have been exhausted. Qwen must always send
-// enable_thinking:false; every other OpenAI-compatible provider must
-// never send the field at all, since they don't recognize it.
 func TestProvider_Complete_QwenDisablesThinking(t *testing.T) {
 	var capturedBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -33,12 +33,6 @@ func testDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedProgressionPlayer seeds a user + encampment + resources row
-// (needed since RecordEvent's reward crediting looks up the
-// encampment by user_id) with plenty of storage headroom so reward
-// crediting isn't accidentally clamped in a way that would make a test
-// assertion ambiguous between "reward wasn't paid" and "reward was
-// paid but clamped."
 func seedProgressionPlayer(t *testing.T, db *sql.DB, userID int64) string {
 	t.Helper()
 	if _, err := db.Exec("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT DO NOTHING", userID); err != nil {
@@ -62,16 +56,12 @@ func seedProgressionPlayer(t *testing.T, db *sql.DB, userID int64) string {
 	return campID
 }
 
-// TestRecordEvent_UnlocksAchievementAtThreshold is the direct test for
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 1: reaching an achievement's
-// threshold unlocks it exactly once and credits its reward.
 func TestRecordEvent_UnlocksAchievementAtThreshold(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	const userID = 90001
 	seedProgressionPlayer(t, db, userID)
 
-	// "first_raid" unlocks at TriggerRaidCompleted threshold 1.
 	if err := RecordEvent(ctx, db, userID, TriggerRaidCompleted, 1); err != nil {
 		t.Fatalf("RecordEvent: unexpected error: %v", err)
 	}
@@ -89,23 +79,17 @@ func TestRecordEvent_UnlocksAchievementAtThreshold(t *testing.T) {
 		SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars); err != nil {
 		t.Fatalf("reading resources: %v", err)
 	}
-	if dollars != 250 { // first_raid's RewardDollars
+	if dollars != 250 {
 		t.Errorf("expected 250 dollars credited for first_raid, got %v", dollars)
 	}
 }
 
-// TestRecordEvent_UnlocksTieredAchievementsAsCounterClimbs confirms
-// multiple achievements sharing a trigger unlock independently as the
-// lifetime counter crosses each of their thresholds, and that an
-// already-unlocked achievement is never re-unlocked (no duplicate
-// reward) on a later call.
 func TestRecordEvent_UnlocksTieredAchievementsAsCounterClimbs(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	const userID = 90002
 	seedProgressionPlayer(t, db, userID)
 
-	// first_raid (1), raider_10 (10) both share TriggerRaidCompleted.
 	for i := 0; i < 10; i++ {
 		if err := RecordEvent(ctx, db, userID, TriggerRaidCompleted, 1); err != nil {
 			t.Fatalf("RecordEvent iteration %d: unexpected error: %v", i, err)
@@ -128,8 +112,6 @@ func TestRecordEvent_UnlocksTieredAchievementsAsCounterClimbs(t *testing.T) {
 		t.Errorf("expected lifetime counter to be 10, got %d", eventCount)
 	}
 
-	// Reward should be first_raid (250) + raider_10 (1000) = 1250, not
-	// paid twice for first_raid despite 10 RecordEvent calls.
 	var dollars float64
 	if err := db.QueryRow(`
 		SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars); err != nil {
@@ -140,18 +122,12 @@ func TestRecordEvent_UnlocksTieredAchievementsAsCounterClimbs(t *testing.T) {
 	}
 }
 
-// TestRecordEvent_AdvancesQuestProgressAndMarksComplete is the direct
-// test for Phase 2: progress accumulates toward a quest's goal and
-// completed_at is set once the goal is reached, but the reward is NOT
-// auto-credited for a real player - it stays unclaimed until
-// ClaimQuest is called (see the next test).
 func TestRecordEvent_AdvancesQuestProgressAndMarksComplete(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	const userID = 90003
 	seedProgressionPlayer(t, db, userID)
 
-	// daily_market needs 2 TriggerMarketPurchase events.
 	if err := RecordEvent(ctx, db, userID, TriggerMarketPurchase, 1); err != nil {
 		t.Fatalf("RecordEvent: unexpected error: %v", err)
 	}
@@ -182,13 +158,6 @@ func TestRecordEvent_AdvancesQuestProgressAndMarksComplete(t *testing.T) {
 		t.Error("expected daily_market to be complete after 2 of 2 purchases")
 	}
 
-	// Reward should NOT be auto-credited for the QUEST specifically
-	// before claiming - but note first_purchase (an achievement
-	// sharing TriggerMarketPurchase, threshold 1) DOES auto-unlock and
-	// pay its own 250 reward from the very first RecordEvent call
-	// above, since achievement rewards are always auto-granted
-	// (unlike quest rewards). 250 here is entirely first_purchase's
-	// achievement payout, not any quest payout.
 	var dollars float64
 	_ = db.QueryRow(`SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars)
 	if dollars != 250 {
@@ -196,8 +165,6 @@ func TestRecordEvent_AdvancesQuestProgressAndMarksComplete(t *testing.T) {
 	}
 }
 
-// TestClaimQuest_PaysRewardOnceAndRejectsDoubleClaim covers the actual
-// claim flow a real player uses from the /quests panel.
 func TestClaimQuest_PaysRewardOnceAndRejectsDoubleClaim(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -212,9 +179,6 @@ func TestClaimQuest_PaysRewardOnceAndRejectsDoubleClaim(t *testing.T) {
 		t.Fatalf("ClaimQuest: unexpected error: %v", err)
 	}
 
-	// Expected total: first_scout achievement (250, auto-unlocked by
-	// the RecordEvent call above, threshold 1 on the same trigger) +
-	// daily_scout quest reward (200, just claimed) = 450.
 	var dollars float64
 	if err := db.QueryRow(`SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars); err != nil {
 		t.Fatalf("reading resources: %v", err)
@@ -227,22 +191,18 @@ func TestClaimQuest_PaysRewardOnceAndRejectsDoubleClaim(t *testing.T) {
 		t.Error("expected a second claim of the same completed quest to fail")
 	}
 
-	// Confirm no double-pay from the rejected second claim.
 	_ = db.QueryRow(`SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, userID).Scan(&dollars)
 	if dollars != 450 {
 		t.Errorf("expected dollars to remain 450 after a rejected double-claim, got %v", dollars)
 	}
 }
 
-// TestClaimQuest_RejectsClaimBeforeCompletion confirms an incomplete
-// quest can't be claimed.
 func TestClaimQuest_RejectsClaimBeforeCompletion(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	const userID = 90005
 	seedProgressionPlayer(t, db, userID)
 
-	// daily_market needs 2 purchases; only record 1.
 	if err := RecordEvent(ctx, db, userID, TriggerMarketPurchase, 1); err != nil {
 		t.Fatalf("RecordEvent: unexpected error: %v", err)
 	}
@@ -252,11 +212,6 @@ func TestClaimQuest_RejectsClaimBeforeCompletion(t *testing.T) {
 	}
 }
 
-// TestRecordEvent_AIFactionAutoClaims is the direct test for the
-// AI-parity design in NEXT_GENERATION_FEATURES_PLAN.md Phase 2: an AI
-// faction (negative user_id) has no /quests panel to visit, so
-// completing a quest auto-claims and credits the reward immediately
-// rather than leaving it permanently stranded.
 func TestRecordEvent_AIFactionAutoClaims(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -279,17 +234,11 @@ func TestRecordEvent_AIFactionAutoClaims(t *testing.T) {
 	if err := db.QueryRow(`SELECT r.dollars FROM resources r JOIN encampments e ON e.id = r.encampment_id WHERE e.user_id = $1`, aiUserID).Scan(&dollars); err != nil {
 		t.Fatalf("reading resources: %v", err)
 	}
-	// first_scout achievement (250, same-trigger threshold 1) +
-	// daily_scout quest auto-claim (200) = 450.
 	if dollars != 450 {
 		t.Errorf("expected 450 dollars (250 first_scout achievement + 200 daily_scout auto-claim), got %v", dollars)
 	}
 }
 
-// TestRecordEvent_UnknownTriggerIsANoOp confirms a trigger key with no
-// matching achievement or quest definition doesn't error - a safe
-// no-op, so future call sites can pass a trigger that isn't yet used
-// by any definition without breaking anything.
 func TestRecordEvent_UnknownTriggerIsANoOp(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -308,29 +257,14 @@ func TestRecordEvent_UnknownTriggerIsANoOp(t *testing.T) {
 	}
 }
 
-// TestRecordEvent_OnboardingQuestNeverResets is the direct test for
-// NEXT_GENERATION_FEATURES_PLAN.md Phase 17's "Getting Started"
-// checklist: a PeriodOnce quest's period_start must be identical
-// across calls separated by real time (not just within the same test
-// run) - it's a permanent, one-time chain, not a daily/weekly one.
 func TestRecordEvent_OnboardingQuestNeverResets(t *testing.T) {
 	first := PeriodStart(PeriodOnce)
-	// A daily/weekly period's boundary depends on time.Now(), so
-	// compute a second call after a small real delay and confirm
-	// PeriodOnce's boundary didn't move - unlike PeriodDaily/PeriodWeekly,
-	// which legitimately could (if this test happened to straddle
-	// midnight/Monday UTC, an extremely rare flake risk those periods
-	// already accept elsewhere in this file).
 	second := PeriodStart(PeriodOnce)
 	if !first.Equal(second) {
 		t.Errorf("expected PeriodOnce's boundary to be fixed, got %v then %v", first, second)
 	}
 }
 
-// TestRecordEvent_OnboardingChecklistCompletesAndClaims is an
-// end-to-end test of the onboarding checklist: completing
-// "onboarding_research" via a research-upgrade event, then claiming it
-// through the normal ClaimQuest path real players use from /quests.
 func TestRecordEvent_OnboardingChecklistCompletesAndClaims(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

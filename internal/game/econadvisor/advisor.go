@@ -9,23 +9,14 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from every other Phase B+ scope.
 const MemoryScope = "economy_advisor"
 
-// ErrNoEncampment is returned when the calling player has no
-// registered base yet.
 var ErrNoEncampment = errors.New("econadvisor: player has no encampment")
 
-// resourceColumns lists every resources-table column this package
-// knows about, explicitly, so a schema change is a deliberate one-line
-// addition rather than a silent behavior change (same pattern as
-// fleetcommander.unitColumns).
 var resourceColumns = []string{
 	"scrap", "rations", "electricity", "neuro_cores", "metal", "crystal", "hydrogen", "dollars", "ether",
 }
 
-// Advisor is the Phase D entry point.
 type Advisor struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -35,7 +26,6 @@ func New(db *sql.DB, service *ai.Service) *Advisor {
 	return &Advisor{DB: db, AI: service}
 }
 
-// BuildSnapshot loads the current economic state of a player's base.
 func (a *Advisor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, error) {
 	var s Snapshot
 	if err := a.DB.QueryRowContext(ctx, `SELECT id, name, level FROM encampments WHERE user_id = $1`, userID).
@@ -76,8 +66,6 @@ func (a *Advisor) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, e
 		return nil, err
 	}
 
-	// bank_accounts may not have a row yet for a brand-new player —
-	// that's a valid all-zero state, not an error.
 	err = a.DB.QueryRowContext(ctx, `
 		SELECT balance, balance_cash, loan_amount, loan_cash
 		FROM bank_accounts WHERE encampment_id = $1`, s.EncampmentID,
@@ -138,11 +126,6 @@ func joinColumns(cols []string) string {
 	return out
 }
 
-// Recommend produces a fresh AI recommendation for the given player's
-// economy. It stores both turns in ai_memory under MemoryScope.
-//
-// Advisory-only: nothing in this method buys, sells, upgrades, or
-// otherwise mutates any game table.
 func (a *Advisor) Recommend(ctx context.Context, userID int64) (*Recommendation, error) {
 	snapshot, err := a.BuildSnapshot(ctx, userID)
 	if err != nil {

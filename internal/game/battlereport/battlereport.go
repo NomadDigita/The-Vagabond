@@ -1,10 +1,3 @@
-// Package battlereport renders combat results in SpaceHunt's exact visual
-// style: an "⚔️ X VS 🛡️ Y" header, per-round unit composition lines,
-// losses shown as repeated unit emoji (not just numbers), and a final
-// "Battle debris" + winner announcement. This package is pure
-// presentation - it has no DB or telebot dependency and does not decide
-// any combat outcome; the tick engine computes all math and casualties,
-// then hands the results here purely for rendering.
 package battlereport
 
 import (
@@ -12,31 +5,19 @@ import (
 	"strings"
 )
 
-// htmlEscape makes a string safe to place inside a Telegram HTML-mode
-// message. Duplicated locally (rather than imported from bot/handlers)
-// so this package stays dependency-free, per the repo's package-per-
-// feature convention. AttackerName/DefenderName ultimately come from
-// player-set encampment names, so this MUST run on them before they're
-// interpolated into the report.
 func htmlEscape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	return r.Replace(s)
 }
 
-// UnitTally is one line item in a composition or loss listing.
 type UnitTally struct {
 	Emoji string
 	Label string
 	Count int
 }
 
-// maxLossGlyphs caps how many repeated unit emoji get rendered per side per
-// round, so a battle with thousands of casualties doesn't produce an
-// unreadable (or Telegram-length-limit-breaking) wall of emoji.
 const maxLossGlyphs = 40
 
-// renderComposition renders a side's standing forces, SpaceHunt-style:
-// "37🚁 Bomber. 14💥 Destroyer." Units with a zero count are omitted.
 func renderComposition(units []UnitTally) string {
 	var b strings.Builder
 	any := false
@@ -53,9 +34,6 @@ func renderComposition(units []UnitTally) string {
 	return strings.TrimSpace(b.String())
 }
 
-// renderLossEmojis renders losses as repeated emoji glyphs (matching
-// SpaceHunt's visual casualty report) rather than plain numbers, capped at
-// maxLossGlyphs with an overflow counter.
 func renderLossEmojis(units []UnitTally) string {
 	var b strings.Builder
 	shown := 0
@@ -80,7 +58,6 @@ func renderLossEmojis(units []UnitTally) string {
 	return b.String()
 }
 
-// Outcome describes how a final round resolved.
 type Outcome int
 
 const (
@@ -90,44 +67,25 @@ const (
 	OutcomeDraw
 )
 
-// Round holds everything needed to render one combat round report.
 type Round struct {
 	Number       int
 	AttackerName string
 	DefenderName string
 
-	// Standing forces BEFORE this round's losses are applied - i.e. what
-	// marched into the fight.
 	AttackerComposition []UnitTally
 	DefenderComposition []UnitTally
 
-	// Units lost THIS round only.
 	AttackerLosses []UnitTally
 	DefenderLosses []UnitTally
 
-	// Final-round-only fields:
 	Outcome       Outcome
-	LootLines     []string // e.g. []string{"♻️ 396000 Scrap"}
-	LootCollector string   // who collected the battle debris (winner's name)
+	LootLines     []string
+	LootCollector string
 
-	// Context notes shown right after each side's composition line -
-	// Defense Grid turret levels, Guardians/Observers, Nuclear Shields,
-	// and a Hero/Warlord's active superpower. These already factor into
-	// the actual combat math the tick engine computes (see engine.go's
-	// turretDefenseBonus/guardianBonus/observerBonus/defenderShields),
-	// but before this field existed, none of it ever reached the
-	// player-facing report - recon would show a detailed Defense Grid
-	// and a Warlord, then the actual battle outcome read like a bare
-	// soldiers-vs-soldiers skirmish with no trace of either. Optional:
-	// an empty slice renders nothing extra.
 	AttackerNotes []string
 	DefenderNotes []string
 }
 
-// Render produces the full SpaceHunt-style report text for one round,
-// using Telegram HTML formatting: bold for names/headers, monospace for
-// unit tallies so columns line up, and an expandable blockquote for the
-// final loot line so a long battle report doesn't crowd out the verdict.
 func Render(r Round) string {
 	attacker := htmlEscape(r.AttackerName)
 	defender := htmlEscape(r.DefenderName)

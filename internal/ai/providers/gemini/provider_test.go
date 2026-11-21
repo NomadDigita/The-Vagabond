@@ -26,10 +26,6 @@ func TestProvider_Available(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_HappyPath exercises the real Gemini wire
-// format end-to-end against a local server standing in for
-// generativelanguage.googleapis.com, using the provider's overridable
-// BaseURL field.
 func TestProvider_Complete_HappyPath(t *testing.T) {
 	var capturedBody map[string]any
 	var capturedPath string
@@ -71,9 +67,6 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 		t.Errorf("expected request path to reference the model name, got %q", capturedPath)
 	}
 
-	// Verify Gemini-specific role mapping: RoleAssistant must become
-	// "model", not "assistant" — this is the whole reason Gemini has
-	// its own provider instead of reusing openaicompat.
 	contents, ok := capturedBody["contents"].([]any)
 	if !ok || len(contents) != 2 {
 		t.Fatalf("expected 2 content entries, got: %+v", capturedBody["contents"])
@@ -83,8 +76,6 @@ func TestProvider_Complete_HappyPath(t *testing.T) {
 		t.Errorf("expected assistant role to map to 'model', got %v", secondContent["role"])
 	}
 
-	// Verify systemInstruction was set as its own top-level field
-	// (not folded into contents), per Gemini's actual API shape.
 	sysInstr, ok := capturedBody["systemInstruction"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected systemInstruction field in request body, got: %+v", capturedBody)
@@ -156,19 +147,10 @@ func TestProvider_Complete_APIError(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_RetriesOnQuotaExhaustedToNextModel confirms the
-// 2026-08-02 fix: a RESOURCE_EXHAUSTED response for the primary model
-// (Google's quota-hit status, confirmed live via Render logs) should
-// make Complete retry against the next entry in ModelFallbacks instead
-// of failing the whole provider outright - free-tier quota is tracked
-// per model, not per account, so a different model is frequently still
-// usable.
 func TestProvider_Complete_RetriesOnQuotaExhaustedToNextModel(t *testing.T) {
 	var requestedModels []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Path shape is "/{model}:generateContent" per completeWithModel's
-		// endpoint format.
 		model := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), ":generateContent")
 		requestedModels = append(requestedModels, model)
 
@@ -210,13 +192,6 @@ func TestProvider_Complete_RetriesOnQuotaExhaustedToNextModel(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_NonRetryableErrorSkipsFallbackModels confirms
-// the other half of the same fix: an error that isn't quota/overload
-// specific (e.g. a malformed request, or a bad API key) should fail
-// immediately rather than burning a request against every fallback
-// model too - that error will just as surely repeat on every model, so
-// internal/ai.Service's provider-level fallback (moving on to the next
-// *provider* entirely) should get the chance sooner, not later.
 func TestProvider_Complete_NonRetryableErrorSkipsFallbackModels(t *testing.T) {
 	var requestCount int
 
@@ -242,16 +217,6 @@ func TestProvider_Complete_NonRetryableErrorSkipsFallbackModels(t *testing.T) {
 	}
 }
 
-// TestProvider_Complete_RetriesOnModelNotFoundToNextModel is a direct
-// regression test for the confirmed live bug (2026-08-05, via
-// /ai_probe): gemini-2.5-flash-lite, a previous default fallback
-// model, was retired by Google and started returning NOT_FOUND ("model
-// ... is no longer available to new users"). Before this fix, a
-// retired model anywhere in ModelFallbacks permanently blocked every
-// model listed after it, since NOT_FOUND wasn't treated as
-// retryable-to-next-model. A stale/retired fallback entry should be
-// skipped over, not treated the same as a genuine bad-key/malformed-
-// request failure.
 func TestProvider_Complete_RetriesOnModelNotFoundToNextModel(t *testing.T) {
 	var requestedModels []string
 

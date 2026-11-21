@@ -31,9 +31,6 @@ func seedScoutDispatchCamp(t *testing.T, telegramID int64, x, y int, availableSc
 	return campID
 }
 
-// TestDoDispatchScoutMission_CommitsScoutsAndCreatesMission verifies the
-// core dispatch path: scouts are debited from workshop_inventory and a
-// new scout_missions row is created in the 'searching' phase.
 func TestDoDispatchScoutMission_CommitsScoutsAndCreatesMission(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -66,8 +63,6 @@ func TestDoDispatchScoutMission_CommitsScoutsAndCreatesMission(t *testing.T) {
 	}
 }
 
-// TestDoDispatchScoutMission_RejectsInsufficientScouts verifies the
-// validation path when the outpost doesn't have enough available scouts.
 func TestDoDispatchScoutMission_RejectsInsufficientScouts(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -85,10 +80,6 @@ func TestDoDispatchScoutMission_RejectsInsufficientScouts(t *testing.T) {
 	}
 }
 
-// TestDoDispatchScoutMission_AllowsUpToCapThenRejects verifies the
-// multi-mission cap: up to maxConcurrentScoutMissions (3) concurrent
-// dispatches succeed, and the next one is rejected while all 3 slots are
-// still active.
 func TestDoDispatchScoutMission_AllowsUpToCapThenRejects(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -113,16 +104,12 @@ func TestDoDispatchScoutMission_AllowsUpToCapThenRejects(t *testing.T) {
 	}
 }
 
-// TestRenderScoutStatus_ReflectsEachPhase verifies the beautified status
-// text correctly reports each phase, and the active-mission count the
-// panel uses to decide whether a dispatch slot is still free.
 func TestRenderScoutStatus_ReflectsEachPhase(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
 	camp := seedScoutDispatchCamp(t, 9604, 603, 603, 10)
 	h := &ScoutMissionsHandler{DB: db}
 
-	// No mission yet.
 	text, active, err := h.renderScoutStatus(ctx, camp)
 	if err != nil {
 		t.Fatalf("renderScoutStatus: %v", err)
@@ -134,7 +121,6 @@ func TestRenderScoutStatus_ReflectsEachPhase(t *testing.T) {
 		t.Errorf("expected a 'no scout party' message, got %q", text)
 	}
 
-	// Searching phase.
 	if _, err := h.doDispatchScoutMission(ctx, camp, 3); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -152,7 +138,6 @@ func TestRenderScoutStatus_ReflectsEachPhase(t *testing.T) {
 		t.Errorf("expected the first mission to be labeled 'Party 1/3', got %q", text)
 	}
 
-	// Returning phase.
 	if _, err := db.Exec("UPDATE scout_missions SET phase = 'returning' WHERE encampment_id = $1", camp); err != nil {
 		t.Fatalf("forcing returning phase: %v", err)
 	}
@@ -168,10 +153,6 @@ func TestRenderScoutStatus_ReflectsEachPhase(t *testing.T) {
 	}
 }
 
-// TestRenderScoutStatus_ListsMultipleConcurrentMissionsIndependently
-// verifies the core of the multi-scouting feature: three missions dispatched
-// to the same encampment are all listed, each with its own Party N/3 label
-// and its own phase, rather than only the most recently dispatched one.
 func TestRenderScoutStatus_ListsMultipleConcurrentMissionsIndependently(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -184,10 +165,6 @@ func TestRenderScoutStatus_ListsMultipleConcurrentMissionsIndependently(t *testi
 		}
 	}
 
-	// Put the first-dispatched mission into 'returning' so the two phases
-	// are both represented, and confirm both survive independently in the
-	// listing (i.e. neither overwrites the other, which an ORDER BY...
-	// LIMIT 1 query would have done before this feature).
 	if _, err := db.Exec(`
 		UPDATE scout_missions SET phase = 'returning'
 		WHERE id = (SELECT id FROM scout_missions WHERE encampment_id = $1 ORDER BY started_at ASC LIMIT 1)`, camp); err != nil {
@@ -218,10 +195,6 @@ func TestRenderScoutStatus_ListsMultipleConcurrentMissionsIndependently(t *testi
 	}
 }
 
-// TestScoutMissionsHandler_Construction is a minimal smoke test - the
-// handler's telebot.Context-dependent paths are covered end-to-end in
-// internal/engine/tick/scoutmissions_test.go and via the pure functions
-// above instead.
 func TestScoutMissionsHandler_Construction(t *testing.T) {
 	db := rankingTestDB(t)
 	h := NewScoutMissionsHandler(db)
@@ -230,11 +203,6 @@ func TestScoutMissionsHandler_Construction(t *testing.T) {
 	}
 }
 
-// TestScoutMissionSchema_CountBasedCapRecognizesMultipleActiveMissions
-// verifies the COUNT-based query the dispatch gate now uses correctly
-// tallies multiple simultaneously active scout_missions rows for the same
-// encampment, and that the cap comparison behaves as doDispatchScoutMission
-// expects at each step up to and including the cap.
 func TestScoutMissionSchema_CountBasedCapRecognizesMultipleActiveMissions(t *testing.T) {
 	db := rankingTestDB(t)
 

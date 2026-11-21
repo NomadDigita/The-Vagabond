@@ -19,23 +19,6 @@ func seedScoutMission(t *testing.T, db *sql.DB, encampmentID string, phase strin
 	return id
 }
 
-// TestScoutMissionFindsTarget_LocksLocationAndTransitionsToReturning
-// verifies the core discovery mechanic from section 3.1-3.3: an
-// undiscovered target gets a permanent encampment_discoveries row AND a
-// known_locations coordinate snapshot, the mission transitions to
-// 'returning' with a computed ETA, and both parties are notified
-// appropriately (the scout's owner gets a non-mutable "general" contact
-// alert - not "route_status": a discovery event must never be
-// mutable/muteable, per notifications/preferences.go's own contract -
-// the found party gets a non-mutable "general" heads-up too).
-// TestScoutMissionFindsTarget_ContactAlertSurvivesRouteStatusMute is a
-// regression test for a real reported bug: the CONTACT!/discovery
-// notification was originally (incorrectly) tagged "route_status", a
-// mutable category. A player who'd muted routine route pings (the
-// "still searching" chatter) would then also silently lose the one
-// notification that actually mattered - their scout finding a base.
-// Discovery alerts must never be mutable, per notifications/
-// preferences.go's own MutableCategories contract.
 func TestScoutMissionFindsTarget_ContactAlertSurvivesRouteStatusMute(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -114,7 +97,7 @@ func TestScoutMissionFindsTarget_LocksLocationAndTransitionsToReturning(t *testi
 	if phase != "returning" {
 		t.Errorf("expected phase 'returning', got %q", phase)
 	}
-	if returnMinutes != 500 { // Manhattan distance 50 * 10 minutes/tile
+	if returnMinutes != 500 {
 		t.Errorf("expected a 500-minute return leg (50 tiles * 10 min), got %v", returnMinutes)
 	}
 
@@ -129,9 +112,6 @@ func TestScoutMissionFindsTarget_LocksLocationAndTransitionsToReturning(t *testi
 	}
 }
 
-// TestScoutMissionFindsTarget_NoTargetsLeftStaysSearching covers the
-// edge case where an observer has already discovered everyone in the
-// world - it should keep searching rather than error.
 func TestScoutMissionFindsTarget_NoTargetsLeftStaysSearching(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -159,10 +139,6 @@ func TestScoutMissionFindsTarget_NoTargetsLeftStaysSearching(t *testing.T) {
 	}
 }
 
-// TestCompleteReturnedScoutMissions_PaysResourcesAndReturnsScouts verifies
-// section 3.6/3.7: resources are credited proportional to scouts and
-// mission duration, the committed scouts return to workshop_inventory,
-// and the mission is marked complete.
 func TestCompleteReturnedScoutMissions_PaysResourcesAndReturnsScouts(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -176,7 +152,7 @@ func TestCompleteReturnedScoutMissions_PaysResourcesAndReturnsScouts(t *testing.
 		t.Fatalf("zeroing resources: %v", err)
 	}
 
-	startedAt := time.Now().UTC().Add(-2 * time.Hour) // a 2-hour mission
+	startedAt := time.Now().UTC().Add(-2 * time.Hour)
 	var missionID string
 	err := db.QueryRow(`
 		INSERT INTO scout_missions (encampment_id, scouts_committed, phase, started_at, return_eta)
@@ -201,7 +177,6 @@ func TestCompleteReturnedScoutMissions_PaysResourcesAndReturnsScouts(t *testing.
 	if err := db.QueryRow("SELECT scrap, metal FROM resources WHERE encampment_id = $1", scout).Scan(&scrap, &metal); err != nil {
 		t.Fatalf("reading resources: %v", err)
 	}
-	// 50/hour/scout * 2 hours * 5 scouts = 500 total value, 60/40 split.
 	if scrap < 250 || scrap > 350 {
 		t.Errorf("expected roughly 300 scrap credited (60%% of ~500 total value), got %v", scrap)
 	}
@@ -228,8 +203,6 @@ func TestCompleteReturnedScoutMissions_PaysResourcesAndReturnsScouts(t *testing.
 	}
 }
 
-// TestPingInTransitScoutMissions_SendsETAAndRespectsGate verifies the
-// periodic en-route ping only fires when the cadence gate is open.
 func TestPingInTransitScoutMissions_SendsETAAndRespectsGate(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -238,7 +211,6 @@ func TestPingInTransitScoutMissions_SendsETAAndRespectsGate(t *testing.T) {
 	scout := seedEncampment(t, db, 4005, "En Route Scout Camp", 0, 0, "TestRegion", false)
 	target := seedEncampment(t, db, 4006, "Found Target Camp", 10, 0, "TestRegion", false)
 
-	// Gate open (never notified) - should ping.
 	_, err := db.Exec(`
 		INSERT INTO scout_missions (encampment_id, scouts_committed, phase, found_target_encampment_id,
 			found_x, found_y, found_region, origin_x, origin_y, return_leg_started_at, return_leg_total_minutes, return_eta)
@@ -265,8 +237,6 @@ func TestPingInTransitScoutMissions_SendsETAAndRespectsGate(t *testing.T) {
 		t.Error("expected an en-route ping when the cadence gate was open")
 	}
 
-	// Gate now closed (just notified) - a second immediate call must not
-	// double-ping.
 	tx, err = db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)

@@ -4,18 +4,16 @@ import (
 	"time"
 )
 
-// User represents a Telegram account registered in the system.
 type User struct {
 	TelegramID   int64     `json:"telegram_id"`
 	Username     string    `json:"username"`
 	FirstName    string    `json:"first_name"`
-	State        string    `json:"state"`   // "onboarding", "active", "dead"
-	Faction      string    `json:"faction"` // "steel_vanguard", "rust_nomads"
+	State        string    `json:"state"`
+	Faction      string    `json:"faction"`
 	RegisteredAt time.Time `json:"registered_at"`
 	LastActive   time.Time `json:"last_active"`
 }
 
-// Coordinate represents a structural map grid location.
 type Coordinate struct {
 	ID                string  `json:"id"`
 	X                 int     `json:"x"`
@@ -27,7 +25,6 @@ type Coordinate struct {
 	EnergyMultiplier  float64 `json:"energy_multiplier"`
 }
 
-// Encampment represents a player's physical home base settlement.
 type Encampment struct {
 	ID            string    `json:"id"`
 	UserID        int64     `json:"user_id"`
@@ -37,7 +34,6 @@ type Encampment struct {
 	EstablishedAt time.Time `json:"established_at"`
 }
 
-// Resources represent the running currency balances of an Encampment.
 type Resources struct {
 	EncampmentID string    `json:"encampment_id"`
 	Scrap        float64   `json:"scrap"`
@@ -51,18 +47,16 @@ type Resources struct {
 	LastTickedAt time.Time `json:"last_ticked_at"`
 }
 
-// Hero represents a legendary commander tracking survived encounters, traits, and scars.
 type Hero struct {
 	ID              string `json:"id"`
 	EncampmentID    string `json:"encampment_id"`
 	Name            string `json:"name"`
-	Trait           string `json:"trait"`    // e.g. "Never Retreat", "Resource Finder"
-	Injuries        string `json:"injuries"` // e.g. "Cybernetic Leg", "Scarred Eye"
+	Trait           string `json:"trait"`
+	Injuries        string `json:"injuries"`
 	BattlesSurvived int    `json:"battles_survived"`
-	Superpower      string `json:"superpower"` // e.g. "Electricity Shielding", "Scrap Recovery"
+	Superpower      string `json:"superpower"`
 }
 
-// WorkshopInventory tracks constructed high-tech military assets
 type WorkshopInventory struct {
 	EncampmentID   string `json:"encampment_id"`
 	FusionTanks    int    `json:"fusion_tanks"`
@@ -79,7 +73,6 @@ type WorkshopInventory struct {
 	Rigs           int    `json:"rigs"`
 }
 
-// RaidCoopMember tracks helper contributions inside cooperative campaigns
 type RaidCoopMember struct {
 	RaidID              string `json:"raid_id"`
 	EncampmentID        string `json:"encampment_id"`
@@ -87,7 +80,6 @@ type RaidCoopMember struct {
 	MechsContributed    int    `json:"mechs_contributed"`
 }
 
-// ArenaBattle stores finished automated matched parameters
 type ArenaBattle struct {
 	ID             string    `json:"id"`
 	Bracket        string    `json:"bracket"`

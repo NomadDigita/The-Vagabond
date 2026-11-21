@@ -90,8 +90,6 @@ func (h *EconomyHandler) HandleEconPanel(c telebot.Context) error {
 	return sendPanelWithNav(c, navCaptionEconomy, keyboards.EconomyNavigation(), panelText, selector)
 }
 
-// buttons directly into the Vault or Market sub-panels, so players don't
-// have to hunt through the bottom reply-keyboard menu to get there.
 func (h *EconomyHandler) HandleTradeHubNavCallback(c telebot.Context) error {
 	dest := c.Args()[0]
 	if dest == "vault" {
@@ -230,8 +228,6 @@ func (h *EconomyHandler) HandleBankCallback(c telebot.Context) error {
 	var balance, balanceCash, loanAmount, loanCash float64
 	_ = tx.QueryRowContext(ctx, "SELECT balance, balance_cash, loan_amount, loan_cash FROM bank_accounts WHERE encampment_id = $1 FOR UPDATE", campID).Scan(&balance, &balanceCash, &loanAmount, &loanCash)
 
-	// Loan draws land in the same resources table as everything else,
-	// so they're subject to the same outpost storage cap as any other gain.
 	storageCap := storagecap.CapFor(ctx, tx, campID)
 
 	switch action {
@@ -327,9 +323,6 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 
 	storageCap := storagecap.CapFor(ctx, tx, campID)
 
-	// Phase 7 (item 12): Supply Crisis depresses sale payouts and raises
-	// purchase costs for camps in the affected continent - logistics
-	// networks in disarray on both sides of the transaction.
 	var campRegion string
 	_ = tx.QueryRowContext(ctx, "SELECT c.region FROM encampments e JOIN coordinates c ON c.id = e.coordinate_id WHERE e.id = $1", campID).Scan(&campRegion)
 	inSupplyCrisis := world.ActiveEventFor(ctx, tx, campRegion) == "supply_crisis"
@@ -337,8 +330,8 @@ func (h *EconomyHandler) HandleMarketCallback(c telebot.Context) error {
 	sellMultiplier := 1.0
 	buyMultiplier := 1.0
 	if inSupplyCrisis {
-		sellMultiplier = 0.75 // -25% payout
-		buyMultiplier = 1.25  // +25% cost
+		sellMultiplier = 0.75
+		buyMultiplier = 1.25
 	}
 
 	switch item {

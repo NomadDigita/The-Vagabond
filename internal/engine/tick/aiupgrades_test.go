@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-// TestGrowAICivilizationsCanAdvanceResearch verifies an AI faction with
-// ample Neuro Cores eventually advances at least one of the seven
-// research_states tech columns, mirroring HandleUpgradeTechCallback's
-// exact mechanics (cost = currentLvl*8, applied to whichever column is
-// rolled).
 func TestGrowAICivilizationsCanAdvanceResearch(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -49,10 +44,6 @@ func TestGrowAICivilizationsCanAdvanceResearch(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontAdvanceResearchPastMaxLevel verifies every
-// tech column stays capped at aiResearchMaxLevel (20) even with unlimited
-// Neuro Cores available, mirroring HandleUpgradeTechCallback's own
-// MaxResearchLevel guard.
 func TestGrowAICivilizationsWontAdvanceResearchPastMaxLevel(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -94,10 +85,6 @@ func TestGrowAICivilizationsWontAdvanceResearchPastMaxLevel(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsCanUpgradeAModule verifies a high-level AI
-// faction with ample Scrap eventually queues a facility upgrade (a
-// modules row transitioning to is_upgrading = TRUE), mirroring
-// HandleUpgradeCallback's exact mechanics for non-core modules.
 func TestGrowAICivilizationsCanUpgradeAModule(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -129,10 +116,6 @@ func TestGrowAICivilizationsCanUpgradeAModule(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently verifies
-// an AI faction with one module already mid-upgrade never starts a second
-// one at the same time, mirroring HandleUpgradeCallback's "Construction
-// Queue Busy" guard.
 func TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -143,7 +126,7 @@ func TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently(t *testing.
 	if _, err := db.Exec("UPDATE resources SET scrap = 100000 WHERE encampment_id = $1", faction); err != nil {
 		t.Fatalf("seeding scrap: %v", err)
 	}
-	readyAt := time.Now().UTC().Add(time.Hour) // far in the future, so it never completes mid-test
+	readyAt := time.Now().UTC().Add(time.Hour)
 	if _, err := db.Exec("INSERT INTO modules (encampment_id, type, level, is_upgrading, upgrade_ready_at) VALUES ($1, 'tent', 1, TRUE, $2)", faction, readyAt); err != nil {
 		t.Fatalf("seeding in-flight upgrade: %v", err)
 	}
@@ -171,12 +154,6 @@ func TestGrowAICivilizationsWontQueueSecondModuleUpgradeConcurrently(t *testing.
 	}
 }
 
-// TestGrowAICivilizationsWontUpgradeModuleAboveFactionLevel verifies a
-// low-level AI faction (level 1) never queues a module upgrade even with
-// unlimited Scrap, since every module starts at level 1 and 1 is not
-// less than a faction level of 1 - mirrors HandleUpgradeCallback's
-// "Prerequisite Block: Module levels cannot exceed your Outpost Core
-// level" rule.
 func TestGrowAICivilizationsWontUpgradeModuleAboveFactionLevel(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)
@@ -211,10 +188,6 @@ func TestGrowAICivilizationsWontUpgradeModuleAboveFactionLevel(t *testing.T) {
 	}
 }
 
-// TestGrowAICivilizationsNeuroCoreTrickleRespectsStorageCap verifies the
-// Neuro Core trickle added alongside the research block clamps to the
-// faction's storage cap rather than growing unbounded, same as every
-// other resource trickle in growAICivilizations.
 func TestGrowAICivilizationsNeuroCoreTrickleRespectsStorageCap(t *testing.T) {
 	db := testDB(t)
 	e := NewEngine(db, time.Minute)

@@ -55,12 +55,6 @@ def main() -> None:
         raise SystemExit("--crf must be between 1 and 63.")
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    # The 108px work canvas prevents transparent corners from being cropped
-    # while the source gently rocks.  `black@0` is deliberate: it preserves
-    # alpha outside the original still instead of baking a dark background.
-    # sin() starts and ends at zero over the two-second default, so Telegram's
-    # loop point has no rotational jump.
-    angle = f"0.0523598776*sin(2*PI*t/{args.seconds})"  # +/- 3 degrees
     video_filter = (
         "format=rgba,"
         "scale=108:108:flags=lanczos,"

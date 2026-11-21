@@ -56,9 +56,6 @@ func TestBuildUserPrompt_EmptyHistoryPaths(t *testing.T) {
 }
 
 func TestBuildUserPrompt_DefenderStatsOmitStolenValueLine(t *testing.T) {
-	// Defender-side stats have no meaningful "stolen value" concept
-	// (that's an attacker-only figure) — confirm the prompt doesn't
-	// fabricate one for the defender section.
 	s := sampleSnapshot()
 	p := battleanalyst.BuildUserPrompt(s)
 	attackerIdx := strings.Index(p, "RAIDS AS ATTACKER")
@@ -126,8 +123,6 @@ func TestParseRecommendation_RawNewlineInsideStringValue(t *testing.T) {
 	}
 }
 
-// See ADR-016 in PROJECT_MASTER_PLAN.md: a response cut off mid-object
-// is distinguished from one that never contained JSON at all.
 func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	raw := `{"summary": "This player's defense is weak because their garrison`
 	rec := battleanalyst.ParseRecommendation(raw, "")
@@ -139,12 +134,6 @@ func TestParseRecommendation_FallsBackOnTruncatedJSON(t *testing.T) {
 	}
 }
 
-// The brace-balance heuristic alone can't see truncation in prose cut
-// off before any '{' was written at all (TestParseRecommendation_
-// FallsBackOnGarbage above asserts exactly that blind spot). A
-// provider's real stop/finish reason doesn't have that limitation —
-// see ai.IsTruncatedStopReason — so passing it through should catch
-// what the text-only scan misses.
 func TestParseRecommendation_StopReasonCatchesTruncationTextScanMisses(t *testing.T) {
 	raw := "Based on the raid history, this player tends to"
 	rec := battleanalyst.ParseRecommendation(raw, "length")

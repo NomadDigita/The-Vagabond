@@ -1,14 +1,3 @@
-// Package ollama implements ai.Provider against a self-hosted Ollama
-// instance's native API (POST {base_url}/api/chat). This is the path
-// toward running open-weight models under your own infrastructure
-// instead of paying a per-token API — see PROJECT_MASTER_PLAN.md for
-// an honest note on the compute requirements that implies (a capable
-// model needs real RAM/GPU; this provider does not change that).
-//
-// Unlike every other provider in this codebase, Ollama needs no API
-// key — Available() only checks that a base URL is configured. Set
-// OLLAMA_BASE_URL (e.g. "http://localhost:11434" or the address of a
-// dedicated inference host) to enable it.
 package ollama
 
 import (
@@ -24,15 +13,12 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// Provider implements ai.Provider against Ollama's native chat API.
 type Provider struct {
-	BaseURL      string // no trailing slash, e.g. "http://localhost:11434"
+	BaseURL      string
 	DefaultModel string
 	HTTPClient   *http.Client
 }
 
-// New builds an Ollama provider. baseURL may be empty; Available()
-// will correctly report false in that case (no key is ever required).
 func New(baseURL, defaultModel string) *Provider {
 	if defaultModel == "" {
 		defaultModel = "llama3.1"
@@ -40,20 +26,15 @@ func New(baseURL, defaultModel string) *Provider {
 	return &Provider{
 		BaseURL:      strings.TrimSuffix(baseURL, "/"),
 		DefaultModel: defaultModel,
-		// Local/self-hosted inference, especially on CPU, can be far
-		// slower than a hosted API — a longer timeout avoids treating
-		// a slow-but-working reply as a hard failure.
-		HTTPClient: &http.Client{Timeout: 180 * time.Second},
+		HTTPClient:   &http.Client{Timeout: 180 * time.Second},
 	}
 }
 
 func (p *Provider) Name() string    { return "ollama" }
 func (p *Provider) Available() bool { return p.BaseURL != "" }
 
-// wire types mirror Ollama's /api/chat request/response shape.
-
 type wireTool struct {
-	Type     string `json:"type"` // always "function"
+	Type     string `json:"type"`
 	Function struct {
 		Name        string         `json:"name"`
 		Description string         `json:"description,omitempty"`
@@ -64,7 +45,7 @@ type wireTool struct {
 type wireToolCall struct {
 	Function struct {
 		Name      string         `json:"name"`
-		Arguments map[string]any `json:"arguments"` // object, not a JSON string (unlike OpenAI)
+		Arguments map[string]any `json:"arguments"`
 	} `json:"function"`
 }
 
@@ -76,7 +57,7 @@ type wireMessage struct {
 
 type wireOptions struct {
 	Temperature float64 `json:"temperature,omitempty"`
-	NumPredict  int     `json:"num_predict,omitempty"` // Ollama's equivalent of max_tokens
+	NumPredict  int     `json:"num_predict,omitempty"`
 }
 
 type wireRequest struct {
@@ -84,7 +65,7 @@ type wireRequest struct {
 	Messages []wireMessage `json:"messages"`
 	Tools    []wireTool    `json:"tools,omitempty"`
 	Stream   bool          `json:"stream"`
-	Format   string        `json:"format,omitempty"` // "json" for JSON mode
+	Format   string        `json:"format,omitempty"`
 	Options  *wireOptions  `json:"options,omitempty"`
 }
 
@@ -128,7 +109,7 @@ func (p *Provider) Complete(ctx context.Context, req ai.CompletionRequest) (*ai.
 	for _, m := range req.Messages {
 		role := string(m.Role)
 		if role == string(ai.RoleTool) {
-			role = "user" // same simplification as every other provider — see ADR-006
+			role = "user"
 		}
 		wr.Messages = append(wr.Messages, wireMessage{Role: role, Content: m.Content})
 	}

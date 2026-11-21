@@ -98,7 +98,6 @@ func TestExtractJSONObject_NoJSONAtAll(t *testing.T) {
 }
 
 func TestExtractJSONObject_TruncatedNeverCloses(t *testing.T) {
-	// Simulates a response cut off by MaxTokens mid-object.
 	_, found := ExtractJSONObject(`{"summary": "partial output that just stops`)
 	if found {
 		t.Fatal("expected truncated/never-closed object to report not found")
@@ -130,8 +129,6 @@ func TestWasTruncated_NoJSONAtAll(t *testing.T) {
 }
 
 func TestWasTruncated_UnclosedStringInsideObject(t *testing.T) {
-	// The opening brace exists, and the object never closes because
-	// the string itself is still open when the text stops.
 	if !WasTruncated(`{"summary": "cut off mid senten`) {
 		t.Fatal("expected object left open via an unterminated string to be reported as truncated")
 	}
@@ -173,10 +170,10 @@ func TestSanitizeJSONControlChars_DoesNotDoubleEscapeAlreadyEscaped(t *testing.T
 
 func TestIsTruncatedStopReason_RecognizesEachProviderConvention(t *testing.T) {
 	for _, reason := range []string{
-		"length",     // OpenAI-compatible (Qwen/DeepSeek/Grok) and Ollama
-		"max_tokens", // Anthropic
-		"MAX_TOKENS", // Gemini
-		"Length",     // case-insensitive
+		"length",
+		"max_tokens",
+		"MAX_TOKENS",
+		"Length",
 	} {
 		if !IsTruncatedStopReason(reason) {
 			t.Errorf("expected %q to be recognized as a truncation stop reason", reason)

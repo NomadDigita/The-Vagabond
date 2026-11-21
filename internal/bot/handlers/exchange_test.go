@@ -31,12 +31,6 @@ func seedExchangeCamp(t *testing.T, db *sql.DB, telegramID int64, name string, m
 	return campID
 }
 
-// TestDoPostListing_MetalCrystalScrapAllTradeable is the direct test
-// for Milestone 3's extension of the market: unlike the old
-// HandlePostListingCallback (which only ever offered two fixed
-// buttons), doPostListing must accept an arbitrary quantity/price for
-// any of the three real tradeable resources - including Scrap, since
-// the plan doc's own literal example is "list 300k scrap for sale".
 func TestDoPostListing_MetalCrystalScrapAllTradeable(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -148,10 +142,6 @@ func TestDoPostListing_NonPositiveQuantityOrPriceRejected(t *testing.T) {
 	}
 }
 
-// TestDoPostListing_BarterAskType covers the market's extension beyond
-// cash-only listings: a seller can ask for another resource instead
-// of dollars, and the row's ask_type/ask_quantity (not price_dollars,
-// which stays 0 for barter rows) is what a buyer must actually pay.
 func TestDoPostListing_BarterAskType(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -215,11 +205,6 @@ func TestFormatAsk(t *testing.T) {
 	}
 }
 
-// TestDoBuyListingQty_PartialFillLeavesRemainder is the direct test for
-// the "buy 500 out of an 800 listing" feature request: buying less
-// than a listing's full quantity should only take exactly what was
-// asked for, pro-rate the price, and leave the rest of the listing
-// live (not sold) for the next buyer.
 func TestDoBuyListingQty_PartialFillLeavesRemainder(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -231,7 +216,6 @@ func TestDoBuyListingQty_PartialFillLeavesRemainder(t *testing.T) {
 		t.Fatalf("seeding buyer dollars: %v", err)
 	}
 
-	// 800 metal listed for $1600 total -> $2/unit.
 	if _, err := h.doPostListing(ctx, sellerID, "metal", 800, "dollars", 1600); err != nil {
 		t.Fatalf("doPostListing: unexpected error: %v", err)
 	}
@@ -251,7 +235,7 @@ func TestDoBuyListingQty_PartialFillLeavesRemainder(t *testing.T) {
 	if buyerMetal != 500 {
 		t.Errorf("expected buyer to receive exactly 500 metal, got %v", buyerMetal)
 	}
-	if buyerDollars != 9000 { // 10000 - (500 * $2/unit)
+	if buyerDollars != 9000 {
 		t.Errorf("expected buyer to pay $1000 for 500 units at $2/unit (9000 remaining), got %v", buyerDollars)
 	}
 
@@ -267,15 +251,11 @@ func TestDoBuyListingQty_PartialFillLeavesRemainder(t *testing.T) {
 	if remQty != 300 {
 		t.Errorf("expected 800-500=300 metal remaining on the listing, got %v", remQty)
 	}
-	if remAsk != 600 { // 1600 - 1000
+	if remAsk != 600 {
 		t.Errorf("expected $600 asking remaining on the listing, got %v", remAsk)
 	}
 }
 
-// TestDoBuyListingQty_FullFillStillMarksSold covers the existing
-// whole-listing behavior: requesting at least the full quantity (or 0,
-// via doBuyListing) still buys everything and marks the listing sold,
-// exactly as before partial fills were introduced.
 func TestDoBuyListingQty_FullFillStillMarksSold(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -295,7 +275,6 @@ func TestDoBuyListingQty_FullFillStillMarksSold(t *testing.T) {
 		t.Fatalf("reading listing id: %v", err)
 	}
 
-	// Requesting more than what's listed (300 > 200) clamps to a full buy.
 	if _, err := h.doBuyListingQty(ctx, buyerID, listingID, 300); err != nil {
 		t.Fatalf("doBuyListingQty: unexpected error: %v", err)
 	}
@@ -320,13 +299,6 @@ func TestDoBuyListingQty_FullFillStillMarksSold(t *testing.T) {
 	}
 }
 
-// TestDoBuyMarketItem_PartialFillFromLargerListing is doBuyMarketItem's
-// (the natural-language "buy X" search path) counterpart to
-// TestDoBuyListingQty_PartialFillLeavesRemainder: wanting 500 metal
-// should succeed and only take 500 even when the only matching listing
-// has 800, and the per-unit price filter should admit a listing whose
-// FULL price exceeds the budget but whose price for just the requested
-// quantity does not.
 func TestDoBuyMarketItem_PartialFillFromLargerListing(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -338,9 +310,6 @@ func TestDoBuyMarketItem_PartialFillFromLargerListing(t *testing.T) {
 		t.Fatalf("seeding buyer dollars: %v", err)
 	}
 
-	// 800 metal for $2400 total ($3/unit) - the whole lot costs more
-	// than the buyer's $2000 budget, but 500 units at $3/unit ($1500)
-	// fits comfortably.
 	if _, err := h.doPostListing(ctx, sellerID, "metal", 800, "dollars", 2400); err != nil {
 		t.Fatalf("doPostListing: unexpected error: %v", err)
 	}
@@ -357,7 +326,7 @@ func TestDoBuyMarketItem_PartialFillFromLargerListing(t *testing.T) {
 	if buyerMetal != 500 {
 		t.Errorf("expected exactly 500 metal bought, got %v", buyerMetal)
 	}
-	if buyerDollars != 500 { // 2000 - 1500
+	if buyerDollars != 500 {
 		t.Errorf("expected $1500 spent (500 remaining), got %v remaining", buyerDollars)
 	}
 
@@ -383,13 +352,6 @@ func TestMarketResourceColumn(t *testing.T) {
 	}
 }
 
-// TestDoBuyListingQty_RecordsMarketPurchaseProgressionEvent is the
-// integration test confirming the real call site actually wires up to
-// internal/game/progression - not just that RecordEvent itself works
-// in isolation (see progression_test.go), but that a real market
-// purchase through this handler triggers it, unlocking
-// progression.Achievements' "first_purchase" (threshold 1) and paying
-// its reward.
 func TestDoBuyListingQty_RecordsMarketPurchaseProgressionEvent(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

@@ -1,0 +1,7 @@
+# Comment allowlist. The count may only shrink. Run: go run ./tools/commentlint --write
+internal/dbdriver/retrying.go	nolint:staticcheck
+internal/dbdriver/retrying.go	nolint:staticcheck
+internal/dbdriver/retrying.go	nolint:staticcheck
+internal/dbdriver/retrying.go	nolint:staticcheck
+internal/dbdriver/retrying.go	nolint:staticcheck
+internal/dbdriver/retrying_test.go	nolint:staticcheck

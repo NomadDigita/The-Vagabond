@@ -1,11 +1,3 @@
--- ==============================================================================
--- THE VAGABOND — SPACEHUNT REVIVAL: WORLD BOSSES
--- (005_spacehunt_slice3_world_bosses.sql)
--- DB Engine: PostgreSQL (Supabase)
---
--- NOTE: main.go already runs every statement below automatically on every
--- bot startup. This file is a readable reference only.
--- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS world_bosses (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

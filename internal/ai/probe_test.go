@@ -5,13 +5,6 @@ import (
 	"testing"
 )
 
-// TestProbeAllProviders_ReportsRealErrorText is the core regression
-// this file exists to guard: a provider that IS configured
-// (Available()==true) but fails on the actual call must surface its
-// exact error text through ProbeResult, not just "unavailable" — this
-// is precisely the distinction /ai_status's old Providers list could
-// never make, which is why an account-side quota/access error looked
-// identical to a code bug across several past investigation sessions.
 func TestProbeAllProviders_ReportsRealErrorText(t *testing.T) {
 	broken := &fakeProvider{name: "gemini", available: true, fail: true}
 	svc, _ := newTestService(t, broken)
@@ -29,8 +22,6 @@ func TestProbeAllProviders_ReportsRealErrorText(t *testing.T) {
 	}
 }
 
-// TestProbeAllProviders_ReportsSuccess confirms a genuinely working
-// provider is reported OK with its model name.
 func TestProbeAllProviders_ReportsSuccess(t *testing.T) {
 	working := &fakeProvider{name: "openai", available: true}
 	svc, _ := newTestService(t, working)
@@ -44,10 +35,6 @@ func TestProbeAllProviders_ReportsSuccess(t *testing.T) {
 	}
 }
 
-// TestProbeAllProviders_UnavailableProviderNotCalled confirms a
-// provider with no key configured is reported as "not configured"
-// without ever invoking Complete (which would likely panic/error on
-// most real provider implementations given no credentials).
 func TestProbeAllProviders_UnavailableProviderNotCalled(t *testing.T) {
 	noKey := &fakeProvider{name: "grok", available: false}
 	svc, _ := newTestService(t, noKey)
@@ -61,9 +48,6 @@ func TestProbeAllProviders_UnavailableProviderNotCalled(t *testing.T) {
 	}
 }
 
-// TestProbeAllProviders_SkipsMock confirms the mock provider (never a
-// real integration to diagnose) is excluded from probe results even
-// when registered alongside real providers.
 func TestProbeAllProviders_SkipsMock(t *testing.T) {
 	mock := &fakeProvider{name: "mock", available: true}
 	real := &fakeProvider{name: "anthropic", available: true}
@@ -75,9 +59,6 @@ func TestProbeAllProviders_SkipsMock(t *testing.T) {
 	}
 }
 
-// TestProbeAllProviders_RecordsCostOnSuccess confirms a successful
-// probe still records its (tiny) cost against the global budget, so
-// repeated /ai_probe runs can't bypass daily spend tracking.
 func TestProbeAllProviders_RecordsCostOnSuccess(t *testing.T) {
 	working := &fakeProvider{name: "deepseek", available: true}
 	svc, _ := newTestService(t, working)
@@ -93,15 +74,12 @@ func TestProbeAllProviders_RecordsCostOnSuccess(t *testing.T) {
 	}
 }
 
-// TestProbeAllProviders_SkipsWhenGlobalBudgetExhausted confirms the
-// probe respects the same daily budget Service.Complete does, rather
-// than being a way to spend past the cap.
 func TestProbeAllProviders_SkipsWhenGlobalBudgetExhausted(t *testing.T) {
 	working := &fakeProvider{name: "openai", available: true}
 	svc, _ := newTestService(t, working)
 	svc.Config.MaxGlobalCostPerDayUSD = 0.0001
 	fc := svc.Cost.(*fakeCost)
-	fc.globalSpend = 1000 // already over budget
+	fc.globalSpend = 1000
 
 	results := svc.ProbeAllProviders(context.Background())
 	if len(results) != 1 || results[0].OK {

@@ -21,7 +21,7 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/bot/handlers"
 	"github.com/NomadDigita/The-Vagabond/internal/db/schema"
 	"github.com/NomadDigita/The-Vagabond/internal/dbdriver"
-	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications" // Added missing package import
+	"github.com/NomadDigita/The-Vagabond/internal/engine/notifications"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/realtime"
 	"github.com/NomadDigita/The-Vagabond/internal/engine/tick"
 	"github.com/NomadDigita/The-Vagabond/internal/game/battleanalyst"
@@ -39,12 +39,6 @@ import (
 	"gopkg.in/telebot.v3/middleware"
 )
 
-// handleRecoveredPanic is wired into middleware.Recover (see main()) to
-// stop a single panicking handler from crashing the entire bot process
-// for every connected player. A named function instead of an inline
-// closure specifically so it's unit-testable (see main_test.go) -
-// nothing here should ever itself be able to panic, since a panic inside
-// the panic recoverer has nothing left to catch it.
 func handleRecoveredPanic(err error, c telebot.Context) {
 	var senderID int64
 	if sender := c.Sender(); sender != nil {
@@ -146,12 +140,6 @@ func relocateZeroCoordinates(db *sql.DB) {
 	}
 }
 
-// aiFactionSeed describes one persistent AI civilization to seed at
-// startup (Phase 6, MMO_WORLD_EVOLUTION_PLAN.md). Deliberately modeled as
-// a real encampments row (see migrations/032_mmo_ai_civilizations.sql for
-// why) rather than a special-cased entity, so the entire existing
-// discovery/targeting/raiding/looting pipeline handles it with zero
-// changes.
 type aiFactionSeed struct {
 	telegramID int64
 	key        string
@@ -160,15 +148,6 @@ type aiFactionSeed struct {
 	level      int
 }
 
-// seedAICivilizations creates the persistent AI factions described in
-// MMO_WORLD_EVOLUTION_PLAN.md's Phase 6 if they don't already exist
-// (idempotent via ai_faction_key). Two per continent, at distinct starting
-// levels, so the world has real discoverable, raidable, growing AI-run
-// outposts instead of the single difficulty-matched "Rogue Drone Nest"
-// dummy target Phase 0-5 relied on. The Rogue Drone Nest itself is left
-// completely untouched as a fallback for a continent with no other
-// outpost at all (see resolveExplorationDiscovery in internal/engine/tick
-// /engine.go).
 func seedAICivilizations(db *sql.DB) {
 	ctx := context.Background()
 
@@ -189,7 +168,7 @@ func seedAICivilizations(db *sql.DB) {
 		var existing string
 		err := db.QueryRowContext(ctx, "SELECT id FROM encampments WHERE ai_faction_key = $1", s.key).Scan(&existing)
 		if err == nil {
-			continue // already seeded
+			continue
 		}
 		if err != sql.ErrNoRows {
 			log.Printf("AI civilization seed check failed for %s: %v", s.key, err)
@@ -295,13 +274,6 @@ func main() {
 	}
 
 	log.Println("Connecting to Supabase Database...")
-	// Registered once at startup rather than via lib/pq's package-level
-	// init(), because it wraps lib/pq's own "postgres" driver — see
-	// internal/dbdriver for why (Supabase's PgBouncer transaction-mode
-	// pooler occasionally hands the second half of a parameterized
-	// query to a different backend than the one that parsed it; this
-	// driver retries transparently instead of surfacing that as a
-	// player-facing "temporarily unavailable" error).
 	const dbDriverName = "postgres-retry"
 	dbdriver.Register(dbDriverName)
 	db, err := sql.Open(dbDriverName, dbURL)
@@ -334,19 +306,6 @@ func main() {
 	}
 	log.Printf("Telegram credentials accepted. Bot logged in as: @%s", bot.Me.Username)
 
-	// Global panic recovery. Without this, any single unhandled panic in
-	// any handler - an index-out-of-range on c.Args() (many call sites
-	// across this codebase index into it without a preceding length
-	// check, relying on the button that triggers them always supplying
-	// enough args - true for normal play, but not a guarantee telebot's
-	// dispatch loop itself enforces), a nil pointer dereference, etc. -
-	// crashes the ENTIRE bot process, disconnecting every player, not
-	// just failing the one interaction that triggered it. telebot has no
-	// built-in recovery of its own; this wraps every handler invocation.
-	// The custom callback both logs with real context (not just the bare
-	// error middleware.Recover's default OnError would produce) and
-	// tries to leave the player with a clear response instead of a
-	// button that spins forever or a message that silently never arrives.
 	bot.Use(middleware.Recover(handleRecoveredPanic))
 
 	tickEngine := tick.NewEngine(db, time.Duration(tickSeconds)*time.Second)
@@ -355,7 +314,6 @@ func main() {
 	realtimeListener := realtime.NewListener(dbURL, db, bot)
 	realtimeListener.Start()
 
-	// INSTANTIATE AND START THE BACKUP NOTIFICATION DISPATCHER
 	notificationDispatcher := notifications.NewDispatcher(db, bot)
 	notificationDispatcher.Start()
 
@@ -394,12 +352,6 @@ func main() {
 	gearHandler := handlers.NewGearHandler(db)
 	prestigeHandler := handlers.NewPrestigeHandler(db)
 
-	// --- AI Foundation wiring (Phase A, independent AI roadmap branch) ---
-	// Provider-agnostic by design: register additional providers here
-	// (OpenAI, Gemini, Qwen, Grok, DeepSeek, Ollama, ...) without
-	// touching internal/ai itself. Mock is always registered last so
-	// the bot degrades gracefully instead of failing when no real
-	// provider key is configured.
 	aiConfig := ai.LoadConfig()
 	aiRegistry := ai.NewRegistry()
 	aiRegistry.Register(anthropic.New(aiConfig.AnthropicAPIKey, aiConfig.AnthropicModel))
@@ -418,51 +370,34 @@ func main() {
 	log.Printf("AI Foundation initialized. Default provider: %s | Fallback order: %v | Enabled: %v",
 		aiConfig.DefaultProvider, aiConfig.FallbackOrder, aiConfig.Enabled)
 
-	// --- AI Planet Governor wiring (Phase B, independent AI roadmap branch) ---
 	aiGovernor := governor.New(db, aiService)
 	governorHandler := handlers.NewGovernorHandler(aiGovernor)
 
-	// --- AI Fleet Commander wiring (Phase C, independent AI roadmap branch) ---
 	aiFleetCommander := fleetcommander.New(db, aiService)
 	fleetCommanderHandler := handlers.NewFleetCommanderHandler(aiFleetCommander)
 
-	// --- AI Economy Advisor wiring (Phase D, independent AI roadmap branch) ---
 	aiEconAdvisor := econadvisor.New(db, aiService)
 	econAdvisorHandler := handlers.NewEconomyAdvisorHandler(aiEconAdvisor)
 
-	// --- AI Research Planner wiring (Phase E, independent AI roadmap branch) ---
 	aiResearchPlanner := researchplanner.New(db, aiService)
 	researchPlannerHandler := handlers.NewResearchPlannerHandler(aiResearchPlanner)
 
-	// --- AI Battle Analyst wiring (Phase F, independent AI roadmap branch) ---
 	aiBattleAnalyst := battleanalyst.New(db, aiService)
 	battleAnalystHandler := handlers.NewBattleAnalystHandler(aiBattleAnalyst)
 
-	// --- AI Guild Assistant wiring (Phase G, independent AI roadmap branch) ---
 	aiGuildAssistant := guildassistant.New(db, aiService)
 	guildAssistantHandler := handlers.NewGuildAssistantHandler(aiGuildAssistant)
 
-	// --- AI Dynamic Galaxy wiring (Phase H, independent AI roadmap branch) ---
 	aiGalaxyAdvisor := galaxyadvisor.New(db, aiService)
 	galaxyAdvisorHandler := handlers.NewGalaxyAdvisorHandler(aiGalaxyAdvisor)
 
-	// --- AI NPC Intelligence wiring (Phase I, independent AI roadmap branch) ---
 	aiNPCIntel := npcintel.New(db, aiService)
 	npcIntelHandler := handlers.NewNPCIntelHandler(aiNPCIntel)
 	advisorsHandler := handlers.NewAdvisorsHandler(db)
 
-	// --- AI Developer Console wiring (Phase J, independent AI roadmap branch) ---
-	// Reuses admin.AdminIDs (already parsed above) rather than re-parsing
-	// ADMIN_IDS a second time.
 	aiDevConsole := devconsole.New(db, aiService)
 	devConsoleHandler := handlers.NewDevConsoleHandler(aiDevConsole, admin.AdminIDs)
 
-	// --- AI Command Interpreter wiring (Milestone 3, FEEDBACK_CHANGELOG_NLP_PLAN.md) ---
-	// Constructed after aiService (unlike every handler above, nlp
-	// used to be built before the AI Foundation section existed) so
-	// it can be handed a real interpreter. See internal/game/nlpcommand
-	// for the safety design - this is the only AI feature in the
-	// codebase whose parsed output can directly trigger a game action.
 	aiCommandInterpreter := nlpcommand.New(aiService)
 	nlp := handlers.NewNLPHandler(onboarding, camp, combat, econ, clan, hero, agentH, factory, silo, research, exchange, world, scoutMissions, aiCommandInterpreter)
 
@@ -577,10 +512,6 @@ func main() {
 	bot.Handle("/newjobadvancedscan", jobs.HandleAdvancedScanAlias)
 	bot.Handle("/newjobpublishtrade", jobs.HandlePublishTradeAlias)
 
-	// Jobs section buttons (mother/child keyboard pair, see
-	// internal/bot/keyboards/navigation.go's JobsNavigation doc comment -
-	// this is purely additive discoverability on top of the slash
-	// commands above, which keep working unchanged).
 	bot.Handle("🛠️ Odd Jobs", jobs.HandleJobsPanel)
 	bot.Handle("🚀 HyperSpeed Mission", jobs.HandleHyperSpeed)
 	bot.Handle("🌍 Extend Planet", jobs.HandleExtendPlanet)
@@ -591,10 +522,6 @@ func main() {
 	bot.Handle("🏚️ Repair Buildings", jobs.HandleRepairBuildings)
 	bot.Handle("☀️ Gather Sunlight", jobs.HandleGatherSunlight)
 
-	// AI Advisors section buttons (mother/child keyboard pair, matching
-	// the Jobs pattern above) - purely additive discoverability on top of
-	// the slash commands already registered elsewhere for these same
-	// handlers, which keep working unchanged.
 	bot.Handle("🎓 AI Advisors", advisorsHandler.HandleAdvisorsPanel)
 	bot.Handle("⚔️ Battle Analyst", battleAnalystHandler.HandleBattleAnalyst)
 	bot.Handle("💹 Economy Advisor", econAdvisorHandler.HandleEconomyAdvisor)
@@ -605,9 +532,6 @@ func main() {
 	bot.Handle("🛰️ NPC Intel", npcIntelHandler.HandleNPCIntel)
 	bot.Handle("🏛️ Governor", governorHandler.HandleGovernor)
 
-	// Player Profile section buttons (mother/child keyboard pair) -
-	// notably gives /settings its first button access ever, despite it
-	// being where the route_status notification mute toggle actually lives.
 	bot.Handle("📊 Player Profile", profile.HandleProfilePanel)
 	bot.Handle("📈 Server Stats", profile.HandleStats)
 	bot.Handle("🪖 My Units", profile.HandleUnits)
@@ -715,13 +639,6 @@ func main() {
 	bot.Handle("🏗️ Infrastructure Grid", camp.HandleInfrastructureGridPanel)
 	bot.Handle("⬅️ Back to HQ", onboarding.HandleStart)
 
-	// Phase 7 (item 13): admin panel consolidation's guided-input flow.
-	// If the sender is an admin mid-flow on a button that needs a
-	// free-text argument (e.g. "Gift Premium"), consume this message as
-	// that argument instead of falling through to normal NLP parsing.
-	// Everyone else (and any admin with no pending action) is completely
-	// unaffected - HandleAdminPendingInput returns handled=false
-	// immediately for them.
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
 		if handled, err := onboarding.HandleOnboardingPendingInput(c); handled {
 			return err
@@ -742,9 +659,6 @@ func main() {
 	bot.Handle("\fset_agent_mode", agentH.HandleSetModeCallback)
 	bot.Handle("\fjoin_faction", onboarding.HandleFactionCallback)
 
-	// New-survivor welcome message quick-action buttons. view_warehouse
-	// and view_manual are already registered further down (pre-existing
-	// dashboard buttons); only open_agent/open_refer are new here.
 	bot.Handle("\fopen_agent", func(c telebot.Context) error {
 		_ = c.Respond(&telebot.CallbackResponse{})
 		return agentH.HandleAgent(c)
@@ -757,12 +671,6 @@ func main() {
 	bot.Handle("\fbank_action", econ.HandleBankCallback)
 	bot.Handle("\fmarket_buy", econ.HandleMarketCallback)
 	bot.Handle("\fbrowse_clans", clan.HandleBrowseClans)
-	// BUGFIX: these two dashboard buttons (onboarding.go's returning-user
-	// panel) had no registered handler at all - tapping them did
-	// nothing, since telebot silently drops a callback with no matching
-	// bot.Handle. Reusing the existing HandleWarehouseReserves/HandleHelp
-	// panels, same "registered as both a command and a callback, no
-	// c.Respond needed" pattern browse_clans above already uses.
 	bot.Handle("\fview_warehouse", econ.HandleWarehouseReserves)
 	bot.Handle("\fview_manual", onboarding.HandleHelp)
 	bot.Handle("\fexplore_dispatch", exploration.HandleDispatchExpeditionCallback)
@@ -874,7 +782,7 @@ func main() {
 
 	tickEngine.Stop()
 	realtimeListener.Stop()
-	notificationDispatcher.Stop() // Terminate dispatcher cleanly on shutdown
+	notificationDispatcher.Stop()
 	db.Close()
 
 	log.Println("System components cleanly dismantled. Server offline.")

@@ -102,7 +102,7 @@ func TestProvider_Complete_NoBaseURLReturnsError(t *testing.T) {
 }
 
 func TestProvider_Complete_ServerUnreachable(t *testing.T) {
-	p := ollama.New("http://127.0.0.1:1", "llama3.1") // port 1 should reliably refuse connections
+	p := ollama.New("http://127.0.0.1:1", "llama3.1")
 	_, err := p.Complete(context.Background(), ai.CompletionRequest{
 		Feature:  "ai_planet_governor",
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},

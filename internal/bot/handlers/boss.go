@@ -20,7 +20,6 @@ func NewBossHandler(db *sql.DB) *BossHandler {
 	return &BossHandler{DB: db}
 }
 
-// hpBar renders a simple 10-segment visual HP bar, SpaceHunt-style.
 func hpBar(current, max float64) string {
 	if max <= 0 {
 		return "▱▱▱▱▱▱▱▱▱▱"
@@ -41,23 +40,11 @@ func hpBar(current, max float64) string {
 	return bar
 }
 
-// tier2KillRequirement/tier3KillRequirement gate a higher tier's
-// Attack button until enough lower-tier kills have happened server-
-// wide - see schema.go's own Phase 8 comment for why "tiering" means
-// gating an always-live boss's attackability rather than gating a
-// spawn roll (world_bosses has no spawn mechanic; it's a small, fixed
-// set that respawns to full HP after each kill).
 const (
 	tier2KillRequirement = 5
 	tier3KillRequirement = 3
 )
 
-// tierUnlocked reports whether tier is currently attackable: tier 1 is
-// always unlocked; tier 2 requires tier2KillRequirement combined kills
-// across every tier-1 boss; tier 3 requires tier3KillRequirement
-// combined kills across every tier-2 boss (which includes The
-// Ravager, since Gauntlet bosses still count as their own tier for
-// this gate).
 func (h *BossHandler) tierUnlocked(ctx context.Context, tier int) (unlocked bool, lowerTierKills, required int) {
 	if tier <= 1 {
 		return true, 0, 0
@@ -136,10 +123,6 @@ func (h *BossHandler) HandleBossPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionMain, keyboards.MainNavigation(), panelText, selector)
 }
 
-// HandleAttackBossCallback commits the caller's ENTIRE current standing
-// soldiers+mechs garrison as an instant strike against a world boss (no
-// travel time, no casualties - bosses are a cooperative PvE sink, not a
-// PvP raid). Damage dealt is tracked per-player for the eventual loot split.
 func (h *BossHandler) HandleAttackBossCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -182,9 +165,6 @@ func (h *BossHandler) HandleAttackBossCallback(c telebot.Context) error {
 		return c.Respond(&telebot.CallbackResponse{Text: "💀 This boss has already been defeated and is respawning!"})
 	}
 
-	// Committed troops are actually at risk now - deduct them from the
-	// garrison immediately, exactly like drafting into a real raid. The
-	// boss retaliates on arrival, and only survivors march home.
 	_, _ = tx.ExecContext(ctx, "UPDATE workshop_inventory SET soldiers = soldiers - $1, mechs = mechs - $2 WHERE encampment_id = $3", soldiers, mechs, campID)
 
 	const marchMinutes = 8.0

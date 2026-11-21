@@ -11,15 +11,8 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// defaultReportWindowDays is used when /weekly_report is called with
-// no argument.
 const defaultReportWindowDays = 7
 
-// DevConsoleHandler exposes Phase J (AI Developer Console). New
-// command (/weekly_report). Admin-only, using the exact same
-// AdminIDs/IsAdmin gate every other admin-only action in
-// internal/bot/handlers/admin.go already uses — this reports on the
-// whole game's player activity, not any one player's own data.
 type DevConsoleHandler struct {
 	Console  *devconsole.Console
 	AdminIDs []int64
@@ -29,9 +22,6 @@ func NewDevConsoleHandler(console *devconsole.Console, adminIDs []int64) *DevCon
 	return &DevConsoleHandler{Console: console, AdminIDs: adminIDs}
 }
 
-// IsAdmin mirrors AdminHandler.IsAdmin exactly (see admin.go) — kept
-// as its own small copy rather than a cross-package call, consistent
-// with every other Phase B-I package's independence from one another.
 func (h *DevConsoleHandler) IsAdmin(senderID int64) bool {
 	for _, id := range h.AdminIDs {
 		if id == senderID {
@@ -63,11 +53,6 @@ func (h *DevConsoleHandler) renderReport(ctx context.Context, adminID int64, win
 	return devconsole.FormatForTelegram(rec), buildDevConsoleKeyboard(windowDays), nil
 }
 
-// ── /weekly_report [days] ────────────────────────────────────────────
-//
-// Admin-only. Summarizes new player signups, top players, active
-// users, and recent world news over the given window (default 7
-// days). Read-only: never changes any player, setting, or game data.
 func (h *DevConsoleHandler) HandleWeeklyReport(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -94,10 +79,6 @@ func (h *DevConsoleHandler) HandleWeeklyReport(c telebot.Context) error {
 	return c.Send(text, telebot.ModeHTML, keyboard, keyboards.AdminNavigation())
 }
 
-// ── callback: dev_console_refresh ────────────────────────────────────
-//
-// Re-runs the report for the same window on demand (a real new AI
-// Foundation call, subject to the usual cost/cache/budget rules).
 func (h *DevConsoleHandler) HandleDevConsoleRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -124,13 +105,6 @@ func (h *DevConsoleHandler) HandleDevConsoleRefreshCallback(c telebot.Context) e
 	return c.Send(text, telebot.ModeHTML, keyboard)
 }
 
-// ── /admin_ask <question> ────────────────────────────────────────────
-//
-// Admin-only. Natural-language question about game state, answered
-// via the classify → execute → answer flow in devconsole.Ask. See
-// devconsole/queries.go's doc comment for the safety model: the model
-// never writes or executes SQL, only picks from a fixed whitelist of
-// read-only queries.
 func (h *DevConsoleHandler) HandleAdminAsk(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -156,11 +130,6 @@ func (h *DevConsoleHandler) HandleAdminAsk(c telebot.Context) error {
 	return c.Send(devconsole.FormatAnswerForTelegram(rec), keyboards.AdminNavigation())
 }
 
-// ── /balance_report [days] ───────────────────────────────────────────
-//
-// Admin-only. Real unit usage/outcome correlations from completed
-// raids, with AI commentary. See devconsole/balance.go's doc comment
-// for the correlational-not-causal framing this is built around.
 func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {
@@ -187,7 +156,6 @@ func (h *DevConsoleHandler) HandleBalanceReport(c telebot.Context) error {
 	return c.Send(devconsole.FormatBalanceForTelegram(rec), telebot.ModeHTML, buildBalanceKeyboard(windowDays), keyboards.AdminNavigation())
 }
 
-// ── callback: balance_report_refresh ─────────────────────────────────
 func (h *DevConsoleHandler) HandleBalanceReportRefreshCallback(c telebot.Context) error {
 	sender := c.Sender()
 	if sender == nil {

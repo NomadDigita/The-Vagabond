@@ -43,7 +43,6 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	var heroID, heroName, heroTrait, heroInjuries, heroSuperpower string
 	var battlesSurvived, lvl, xp int
 
-	// Added robust COALESCE filters to safely handle nullable DB fields
 	queryHero := `
 		SELECT id, name, trait, injuries, battles_survived, COALESCE(superpower, ''), COALESCE(level, 1), COALESCE(xp, 0) 
 		FROM heroes 
@@ -120,13 +119,6 @@ func (h *HeroHandler) HandleHeroPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), dashboard, selector)
 }
 
-// HandleGarrisonPanel shows the player's current garrison reservation
-// (how many Soldiers/Mechs are locked at home vs. free to draft into a
-// campaign) and lets them adjust it. This is the "player manually assigns
-// defensive units" / "withdraw defenders anytime" half of the Hero
-// Commander system - garrisoned units always still count for defense
-// (nothing is subtracted from combat), they're simply protected from
-// being pulled into an outgoing raid draft.
 func (h *HeroHandler) HandleGarrisonPanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -174,10 +166,6 @@ func (h *HeroHandler) HandleGarrisonPanel(c telebot.Context) error {
 	return c.Send(panelText, selector)
 }
 
-// HandleGarrisonAdjustCallback moves units between the general draftable
-// pool and the locked garrison reserve. "inc" reserves more units at home
-// (soldiers in steps of 10, mechs in steps of 5); "dec" withdraws them
-// back to the general pool, freeing them up to draft into a raid again.
 func (h *HeroHandler) HandleGarrisonAdjustCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -270,11 +258,6 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 		_ = tx.QueryRowContext(ctx, "SELECT id FROM heroes WHERE encampment_id = $1", campID).Scan(&heroID)
 		_ = tx.QueryRowContext(ctx, "SELECT faction FROM users WHERE telegram_id = $1", sender.ID).Scan(&faction)
 
-		// NEXT_GENERATION_FEATURES_PLAN.md Phase 6: unlocked skill
-		// nodes discount the Scrap cost of training (EffectTrainingCostPct)
-		// and a hero-equipped gear item (see herodepth.HeroXPBonusPct)
-		// boosts the XP earned - two independent Phase 6 systems this
-		// one action exercises together.
 		trainCost := 50.0 * herodepth.TrainingCostMultiplier(ctx, tx, heroID)
 		if scrap < trainCost {
 			return c.Respond(&telebot.CallbackResponse{Text: fmt.Sprintf("❌ Insufficient Scrap! Need %.0f.", trainCost)})
@@ -320,10 +303,6 @@ func (h *HeroHandler) HandleHeroCallback(c telebot.Context) error {
 	return h.HandleHeroPanel(c)
 }
 
-// HandleHeroSkillsPanel (🌳 Skill Tree button) shows the three branches
-// for the player's own faction, with a node's status
-// (locked/unlocked/affordable) and an Unlock button on anything the
-// hero can currently afford with a free skill point.
 func (h *HeroHandler) HandleHeroSkillsPanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -391,8 +370,6 @@ func (h *HeroHandler) HandleHeroSkillsPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
-// HandleHeroSkillUnlockCallback fires when a player taps an Unlock
-// button on HandleHeroSkillsPanel.
 func (h *HeroHandler) HandleHeroSkillUnlockCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -418,11 +395,6 @@ func (h *HeroHandler) HandleHeroSkillUnlockCallback(c telebot.Context) error {
 	return h.HandleHeroSkillsPanel(c)
 }
 
-// HandleHeroGearPanel (⚙️ Hero Gear button) shows every owned item
-// with a "hero-equip" button - distinct from Phase 3's camp-level
-// /gear equip, since a hero can independently carry one item for its
-// own XP-gain bonus (see herodepth.HeroXPBonusPct) while the camp
-// separately benefits from whatever's equipped at the camp level.
 func (h *HeroHandler) HandleHeroGearPanel(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()
@@ -475,8 +447,6 @@ func (h *HeroHandler) HandleHeroGearPanel(c telebot.Context) error {
 	return sendPanelWithNavHTML(c, navCaptionCamp, keyboards.CampNavigation(), panelText, selector)
 }
 
-// HandleHeroGearEquipCallback fires when a player taps a Carry button
-// on HandleHeroGearPanel.
 func (h *HeroHandler) HandleHeroGearEquipCallback(c telebot.Context) error {
 	ctx := context.Background()
 	sender := c.Sender()

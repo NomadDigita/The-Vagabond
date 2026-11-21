@@ -9,33 +9,17 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/ai"
 )
 
-// MemoryScope namespaces this feature's conversational history inside
-// ai_memory, distinct from every other Phase B+ scope.
 const MemoryScope = "guild_assistant"
 
-// memberCap mirrors the hard-coded 15-member cap enforced in
-// HandleApplicationDecisionCallback (internal/bot/handlers/clan.go).
-// There's no config row for this today; if that ever becomes
-// data-driven, this constant needs to move with it.
 const memberCap = 15
 
-// inactivityLookbackDays flags a member as "inactive" for roster-health
-// purposes if users.last_active is older than this many days. Chosen
-// as a reasonable "hasn't logged in in over a week" signal — not tied
-// to any existing game rule, since none exists yet for guild activity
-// requirements.
 const inactivityLookbackDays = 7
 
 var (
-	// ErrNoClan is returned when the calling user isn't in a clan.
-	ErrNoClan = errors.New("guildassistant: user is not in a clan")
-	// ErrNotLeader is returned when the calling user is in a clan but
-	// isn't its Leader. Guild Assistant is Leader-only — see prompt.go's
-	// doc comment for why.
+	ErrNoClan    = errors.New("guildassistant: user is not in a clan")
 	ErrNotLeader = errors.New("guildassistant: user is not the clan leader")
 )
 
-// Assistant is the Phase G entry point.
 type Assistant struct {
 	DB *sql.DB
 	AI *ai.Service
@@ -45,9 +29,6 @@ func New(db *sql.DB, service *ai.Service) *Assistant {
 	return &Assistant{DB: db, AI: service}
 }
 
-// BuildSnapshot loads the calling user's clan roster, pending
-// applications, and war record. Returns ErrNoClan / ErrNotLeader if the
-// caller isn't positioned to use this feature.
 func (a *Assistant) BuildSnapshot(ctx context.Context, userID int64) (*Snapshot, error) {
 	var s Snapshot
 	var role string
@@ -120,11 +101,6 @@ func (a *Assistant) buildApplicants(ctx context.Context, clanID string) ([]Appli
 	return applicants, rows.Err()
 }
 
-// buildWarRecord mirrors the exact active-war query already used by
-// HandleClanPanel, plus a durable win/loss tally from clan_wars rows
-// with status='completed' (never deleted — confirmed by grepping for
-// DELETE FROM clan_wars before writing this, the same audit discipline
-// Phase F used for its own tables).
 func (a *Assistant) buildWarRecord(ctx context.Context, clanID string) (WarRecord, error) {
 	var w WarRecord
 
@@ -172,12 +148,6 @@ func (a *Assistant) buildWarRecord(ctx context.Context, clanID string) (WarRecor
 	return w, nil
 }
 
-// Recommend produces a fresh AI analysis for the given Leader's clan.
-// It stores both turns in ai_memory under MemoryScope.
-//
-// Read-only: nothing in this method accepts/rejects any applicant,
-// declares any war, or changes clan membership — it only reads and
-// recommends.
 func (a *Assistant) Recommend(ctx context.Context, userID int64) (*Recommendation, error) {
 	snapshot, err := a.BuildSnapshot(ctx, userID)
 	if err != nil {

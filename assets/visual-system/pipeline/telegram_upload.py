@@ -82,36 +82,26 @@ HERE = pathlib.Path(__file__).resolve().parent
 PNG_DIR = HERE.parent / "png"
 MAPPING_PATH = HERE.parent / "mapping.json"
 
-# icon_name -> one or more standard emoji Telegram uses for search/suggestion
-# (required by the API even for a fully custom set — pick the closest
-# real emoji so the icon still surfaces when someone searches for it)
 ICONS = {
-    "warning":     "\u26A0",   # ⚠
-    "failure":     "\u274C",   # ❌
-    "shield":      "\U0001F6E1",  # 🛡
-    "transport":   "\U0001F69A",  # 🚚
-    "ai_mech":     "\U0001F916",  # 🤖
-    "gear":        "\u2699",   # ⚙
-    "satellite":   "\U0001F6F0",  # 🛰
-    "combat":      "\u2694",   # ⚔
-    "electricity": "\u26A1",   # ⚡
-    "scrap":       "\U0001F529",  # 🔩
-    "oracle":      "\U0001F52E",  # 🔮 (original design, not a copy — see animate_oracle.py's header)
+    "warning":     "\u26A0",
+    "failure":     "\u274C",
+    "shield":      "\U0001F6E1",
+    "transport":   "\U0001F69A",
+    "ai_mech":     "\U0001F916",
+    "gear":        "\u2699",
+    "satellite":   "\U0001F6F0",
+    "combat":      "\u2694",
+    "electricity": "\u26A1",
+    "scrap":       "\U0001F529",
+    "oracle":      "\U0001F52E",
 }
 
-# Icons that have an animated WEBM (VP9, alpha, 100x100, <3s, looped) in
-# assets/visual-system/animated/<name>/<name>.webm. Everything else in
-# ICONS still falls back to the static PNG in png/. See
-# VAGABOND_VISUAL_SYSTEM_LOG.md §10 for why WEBM was chosen over TGS/Lottie,
-# and for the plan to animate the rest.
 ANIMATED_DIR = HERE.parent / "animated"
 ANIMATED_ICONS = {
     name for name in ICONS
     if (ANIMATED_DIR / name / f"{name}.webm").exists()
 }
 
-# Must end in _by_<bot_username> per Telegram's rules. Fetched dynamically
-# below via getMe so this script doesn't need the bot username hardcoded.
 
 
 def call(method, **kwargs):
@@ -139,11 +129,6 @@ def send_verification_message(mapping):
     text_parts = []
     cursor = 0
     for name, cid in mapping.items():
-        # Placeholder text under a custom_emoji entity should be the
-        # underlying standard emoji it's replacing (matches Telegram's
-        # own convention, and keeps this readable as plain text as a
-        # fallback on any client that doesn't render custom emoji).
-        piece = ICONS.get(name, "\u2753")  # fallback: question mark
         line = f"{piece} {name}\n"
         entities.append({
             "type": "custom_emoji",
@@ -199,18 +184,8 @@ def main():
     set_name = f"vagabond_pilot_by_{bot_username}"
     print(f"Bot: @{bot_username}  |  Sticker set short_name: {set_name}")
 
-    # Does the set already exist? If so, fetch it so we can replace
-    # (not duplicate) any icon that's already there — this is the fix
-    # for the "known mess" in VAGABOND_VISUAL_SYSTEM_LOG.md §10: an
-    # earlier double-run used addStickerToSet, which doesn't reject
-    # repeats the way createNewStickerSet rejects a repeat set name.
     try:
         existing_set = call("getStickerSet", name=set_name)
-        # Telegram's custom-emoji stickers don't carry our icon name back,
-        # so we rely on upload order matching ICONS order — same
-        # assumption mapping.json already makes. If mapping.json is
-        # stale/missing, fall back to treating the set as empty (adds
-        # only; won't dedupe, but also won't crash).
         existing_names = []
         if MAPPING_PATH.exists():
             with open(MAPPING_PATH) as f:
@@ -263,7 +238,6 @@ def main():
             except RuntimeError as e:
                 print(f"  WARNING: could not add {name}: {e}")
 
-    # Pull the finished set back to read the real custom_emoji_id per sticker.
     full_set = call("getStickerSet", name=set_name)
     for name, sticker in zip(ICONS.keys(), full_set["stickers"]):
         mapping[name] = sticker["custom_emoji_id"]

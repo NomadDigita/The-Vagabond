@@ -8,11 +8,6 @@ import (
 	"github.com/NomadDigita/The-Vagabond/internal/engine/world"
 )
 
-// TestContinentCoordinate_QuadrantMatchesConvention verifies each
-// continent's coordinates land in the correct sign quadrant, matching
-// the convention every per-continent system (world.Continents-keyed
-// weather, etc.) relies on: Africa +x+y, Europe -x+y, Asia +x-y,
-// Americas -x-y.
 func TestContinentCoordinate_QuadrantMatchesConvention(t *testing.T) {
 	r := rand.New(rand.NewSource(1))
 	cases := []struct {
@@ -38,11 +33,6 @@ func TestContinentCoordinate_QuadrantMatchesConvention(t *testing.T) {
 	}
 }
 
-// TestRandomContinent_AlwaysValid ensures randomContinent (used by
-// /newjobteleport and /ghostprotocol) only ever returns one of the four
-// canonical continents - the bug being fixed is the literal string
-// "Unknown Sector", which matched none of world.Continents and silently
-// excluded a relocated base from every per-continent system forever.
 func TestRandomContinent_AlwaysValid(t *testing.T) {
 	valid := make(map[string]bool, len(world.Continents))
 	for _, c := range world.Continents {
@@ -57,11 +47,6 @@ func TestRandomContinent_AlwaysValid(t *testing.T) {
 	}
 }
 
-// TestFlavorLocation_Deterministic verifies the same coordinate always
-// describes itself the same way - callers (onboarding, the returning-
-// player dashboard, teleport, Ghost Protocol) depend on this so a
-// player's location reads consistently across every screen without
-// needing to store it.
 func TestFlavorLocation_Deterministic(t *testing.T) {
 	town1, country1 := flavorLocation(123, 456, "Africa")
 	town2, country2 := flavorLocation(123, 456, "Africa")
@@ -70,9 +55,6 @@ func TestFlavorLocation_Deterministic(t *testing.T) {
 	}
 }
 
-// TestFlavorLocation_UnknownContinentFallback ensures an unrecognized
-// continent string degrades gracefully instead of returning an empty
-// country string or panicking on a missing map key.
 func TestFlavorLocation_UnknownContinentFallback(t *testing.T) {
 	town, country := flavorLocation(1, 1, "Nowhere")
 	if town == "" {
@@ -83,10 +65,6 @@ func TestFlavorLocation_UnknownContinentFallback(t *testing.T) {
 	}
 }
 
-// TestFlavorCountriesByContinent_CoversEveryContinent ensures every
-// continent in world.Continents has at least one flavor country
-// defined, so locationDescriptor never silently falls back to "an
-// uncharted territory" for a real, valid continent.
 func TestFlavorCountriesByContinent_CoversEveryContinent(t *testing.T) {
 	for _, c := range world.Continents {
 		if len(flavorCountriesByContinent[c]) == 0 {
@@ -95,11 +73,6 @@ func TestFlavorCountriesByContinent_CoversEveryContinent(t *testing.T) {
 	}
 }
 
-// TestOutpostNameRegex_ValidatesConsistentlyWithRename ensures the
-// naming rule shared between the mandatory first-naming prompt
-// (HandleOnboardingPendingInput) and the paid /name rename command
-// (HandleRenameOutpost) behaves as documented: letters, numbers,
-// spaces, and hyphens only.
 func TestOutpostNameRegex_ValidatesConsistentlyWithRename(t *testing.T) {
 	valid := []string{"Ashford", "Camp 7", "New-Haven", "Outpost123"}
 	invalid := []string{"Bad<Name>", "Emoji😀Camp", "Semi;colon", "Quote\"Mark"}
@@ -116,11 +89,6 @@ func TestOutpostNameRegex_ValidatesConsistentlyWithRename(t *testing.T) {
 	}
 }
 
-// TestLocationDescriptor_NoRawHTMLFromUserInput is a documentation-style
-// guard: locationDescriptor's inputs are always either a fixed continent
-// name or drawn from the fixed flavorTowns/flavorCountriesByContinent
-// pools, never player-authored text, so the rendered string should never
-// contain characters that would need htmlEscape.
 func TestLocationDescriptor_NoRawHTMLFromUserInput(t *testing.T) {
 	for _, continent := range world.Continents {
 		desc := locationDescriptor(1, 1, continent)

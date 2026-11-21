@@ -31,12 +31,6 @@ func seedGarrisonCamp(t *testing.T, telegramID int64, x, y int, isAIFaction bool
 	return campID
 }
 
-// TestLoadBaseGarrisonForce_AIFactionUsesSyntheticReserveFromLivePool
-// verifies AI_PARITY_AND_WORLD_NOTIFICATIONS_PLAN.md section 1.4's fix:
-// an AI faction's garrisoned_soldiers/garrisoned_mechs is never set by
-// anyone, so reading it directly (the old behavior) always returned a
-// free-win zero garrison. It should instead derive a reserve from the
-// faction's live soldiers/mechs pool.
 func TestLoadBaseGarrisonForce_AIFactionUsesSyntheticReserveFromLivePool(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -57,14 +51,11 @@ func TestLoadBaseGarrisonForce_AIFactionUsesSyntheticReserveFromLivePool(t *test
 	if err != nil {
 		t.Fatalf("loadBaseGarrisonForce: %v", err)
 	}
-	if force.Soldiers != 20 || force.Mechs != 10 { // 20% of 100/50
+	if force.Soldiers != 20 || force.Mechs != 10 {
 		t.Errorf("expected a synthetic 20%% reserve (20 soldiers, 10 mechs), got %d soldiers, %d mechs", force.Soldiers, force.Mechs)
 	}
 }
 
-// TestLoadBaseGarrisonForce_HumanReadsGarrisonedColumnUnchanged confirms
-// the human path is untouched: it still reads the manual, explicit
-// garrisoned_soldiers/garrisoned_mechs column, not the live pool.
 func TestLoadBaseGarrisonForce_HumanReadsGarrisonedColumnUnchanged(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -90,10 +81,6 @@ func TestLoadBaseGarrisonForce_HumanReadsGarrisonedColumnUnchanged(t *testing.T)
 	}
 }
 
-// TestApplyBaseGarrisonCasualties_AIFactionDebitsLivePoolNotWholeReserve
-// verifies the write-back side: only the casualties are subtracted from
-// the AI faction's live pool - the 80% that was never committed to this
-// skirmish must be untouched.
 func TestApplyBaseGarrisonCasualties_AIFactionDebitsLivePoolNotWholeReserve(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -110,8 +97,6 @@ func TestApplyBaseGarrisonCasualties_AIFactionDebitsLivePoolNotWholeReserve(t *t
 	}
 	defer tx.Rollback()
 
-	// Of the synthetic 20-soldier/10-mech reserve, say 12 soldiers and 6
-	// mechs were lost in the skirmish.
 	lost := roadcombat.FieldForce{Soldiers: 12, Mechs: 6}
 	if err := h.applyBaseGarrisonCasualties(ctx, tx, camp, lost, true); err != nil {
 		t.Fatalf("applyBaseGarrisonCasualties: %v", err)
@@ -124,13 +109,11 @@ func TestApplyBaseGarrisonCasualties_AIFactionDebitsLivePoolNotWholeReserve(t *t
 	if err := db.QueryRow("SELECT soldiers, mechs FROM workshop_inventory WHERE encampment_id = $1", camp).Scan(&soldiers, &mechs); err != nil {
 		t.Fatalf("reading post-battle pool: %v", err)
 	}
-	if soldiers != 88 || mechs != 44 { // 100-12, 50-6 - NOT reset to some "survivors of 20/10" figure
+	if soldiers != 88 || mechs != 44 {
 		t.Errorf("expected only the casualties (12 soldiers, 6 mechs) debited from the live pool (100, 50), got (%d, %d)", soldiers, mechs)
 	}
 }
 
-// TestApplyBaseGarrisonCasualties_HumanDebitsGarrisonedColumn confirms
-// the human path still writes back to garrisoned_soldiers/garrisoned_mechs.
 func TestApplyBaseGarrisonCasualties_HumanDebitsGarrisonedColumn(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

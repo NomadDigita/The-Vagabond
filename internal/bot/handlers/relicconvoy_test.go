@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// raiseStorageCap gives a test camp enough storage headroom
-// (extension_lvl 40 -> a 40,500 cap, see storagecap.Cap's formula) for
-// tests that credit reward amounts larger than a fresh level-1 camp's
-// default 500 cap would allow through un-clamped.
 func raiseStorageCap(t *testing.T, db *sql.DB, campID string) {
 	t.Helper()
 	if _, err := db.Exec("UPDATE encampments SET extension_lvl = 40 WHERE id = $1", campID); err != nil {
@@ -18,14 +14,8 @@ func raiseStorageCap(t *testing.T, db *sql.DB, campID string) {
 	}
 }
 
-// relicCoordCounter guarantees a unique (x, y) per seedRelicConvoy call
-// within a test run - coordinates.(x, y) is UNIQUE, and deriving x from
-// len(name) (an earlier draft of this helper) risked collisions between
-// same-length relic names.
 var relicCoordCounter int64 = 80000
 
-// seedRelicConvoy inserts a live (unclaimed, unexpired) relic convoy
-// anchored to a fresh test coordinate, returning its id.
 func seedRelicConvoy(t *testing.T, db *sql.DB, name string, reward float64) string {
 	t.Helper()
 	x := atomic.AddInt64(&relicCoordCounter, 1)
@@ -45,11 +35,6 @@ func seedRelicConvoy(t *testing.T, db *sql.DB, name string, reward float64) stri
 	return convoyID
 }
 
-// TestDoClaimRelicConvoy_FirstClaimSetsTitleAndPaysReward is the direct
-// test for RARE_WORLD_FEATURES_PLAN.md Phase 1.3: claiming a relic pays
-// the reward (storage-cap clamped like every other resource-gain path)
-// and, since this is the encampment's first relic, sets a permanent
-// relic_title.
 func TestDoClaimRelicConvoy_FirstClaimSetsTitleAndPaysReward(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -68,10 +53,6 @@ func TestDoClaimRelicConvoy_FirstClaimSetsTitleAndPaysReward(t *testing.T) {
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&dollars); err != nil {
 		t.Fatalf("reading buyer resources: %v", err)
 	}
-	// 15000 (the relic's own reward) + 3000 (the "relic_hunter"
-	// achievement, NEXT_GENERATION_FEATURES_PLAN.md Phase 1, unlocked
-	// by this same claim via progression.RecordEvent's
-	// TriggerRelicClaimed hook in doClaimRelicConvoy).
 	if dollars != 18000 {
 		t.Errorf("expected 18000 dollars credited (15000 relic reward + 3000 relic_hunter achievement), got %v", dollars)
 	}
@@ -93,10 +74,6 @@ func TestDoClaimRelicConvoy_FirstClaimSetsTitleAndPaysReward(t *testing.T) {
 	}
 }
 
-// TestDoClaimRelicConvoy_SecondClaimNeverOverwritesTitle covers the
-// plan doc's explicit "first relic keeps the title" rule: an
-// encampment that already has a relic_title from an earlier claim must
-// keep that exact title after claiming a second, different relic.
 func TestDoClaimRelicConvoy_SecondClaimNeverOverwritesTitle(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()
@@ -127,12 +104,6 @@ func TestDoClaimRelicConvoy_SecondClaimNeverOverwritesTitle(t *testing.T) {
 		t.Errorf("expected relic_title to stay %q after a second claim, got %q", firstTitle, secondTitle)
 	}
 
-	// Both claims should still have paid out though - the title rule
-	// only protects the title field, not the reward. 12000 + 18000 =
-	// 30000 in relic rewards, plus a one-time 3000 "relic_hunter"
-	// achievement bonus (NEXT_GENERATION_FEATURES_PLAN.md Phase 1)
-	// unlocked on the FIRST claim only (threshold 1, never re-fires on
-	// the second claim) = 33000.
 	var dollars float64
 	if err := db.QueryRow("SELECT dollars FROM resources WHERE encampment_id = $1", campID).Scan(&dollars); err != nil {
 		t.Fatalf("reading resources: %v", err)
@@ -142,9 +113,6 @@ func TestDoClaimRelicConvoy_SecondClaimNeverOverwritesTitle(t *testing.T) {
 	}
 }
 
-// TestDoClaimRelicConvoy_AlreadyClaimedFails covers the race-safety
-// requirement: a second claim attempt against an already-claimed
-// convoy must fail cleanly rather than double-pay.
 func TestDoClaimRelicConvoy_AlreadyClaimedFails(t *testing.T) {
 	db := rankingTestDB(t)
 	ctx := context.Background()

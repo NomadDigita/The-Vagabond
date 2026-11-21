@@ -32,9 +32,6 @@ func TestCurrentPositionMarchingAndReturning(t *testing.T) {
 		t.Fatalf("expected marching midpoint x=5, got %.2f", half.X)
 	}
 
-	// Returning at the same 0.5 progress should be symmetric (also midpoint),
-	// but returning progress=0 should sit AT the destination (just turned
-	// around) and progress=1 should be back at origin.
 	justTurned := CurrentPosition("returning", int(origin.X), int(origin.Y), int(dest.X), int(dest.Y), 0.0)
 	if justTurned.X != 10 {
 		t.Fatalf("expected returning start at destination x=10, got %.2f", justTurned.X)
@@ -117,7 +114,6 @@ func TestCasualtiesForAndSurvivors(t *testing.T) {
 		t.Fatalf("expected MilitaryTechLvl to carry through Survivors, got %d", survivors.MilitaryTechLvl)
 	}
 
-	// Casualties can never exceed what the force actually had.
 	tiny := FieldForce{Soldiers: 2}
 	lostTiny := CasualtiesFor(tiny, 1.0)
 	survTiny := Survivors(tiny, lostTiny)
